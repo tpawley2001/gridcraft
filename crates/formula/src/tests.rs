@@ -102,6 +102,18 @@ fn linked_workbook_sheet_ranges_round_trip() {
 }
 
 #[test]
+fn renaming_or_deleting_a_sheet_leaves_linked_spans_alone() {
+    // `[1]Jan:Dec` is a span of the linked workbook's sheets; this workbook's `Dec` isn't in it.
+    let order = ["Jan".to_string(), "Dec".to_string()];
+    for src in ["SUM([1]Jan:Dec!A1)+Dec!A1", "SUM('[1]Jan:Dec'!A1)+Dec!A1"] {
+        let renamed = print(&rename_sheet(parse(src).unwrap(), "Dec", "December"));
+        assert_eq!(renamed, "SUM([1]Jan:Dec!A1)+December!A1", "{src}");
+        let deleted = print(&crate::adjust::delete_sheet(parse(src).unwrap(), "Dec", &order));
+        assert_eq!(deleted, "SUM([1]Jan:Dec!A1)+#REF!", "{src}");
+    }
+}
+
+#[test]
 fn spill_operator() {
     for f in ["A1#", "Sheet1!$D$1#", "SUM(B2#)", "'My Sheet'!A1#*2", "ROWS(A1#)+1", "IF(A1,#N/A,#REF!)"] {
         assert_eq!(rt(f), f);

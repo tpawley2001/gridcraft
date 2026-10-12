@@ -116,7 +116,7 @@ fn references_into_linked_workbooks_read_the_saved_values() {
         ExternalName { name: "Span".into(), sheet: None, refers_to: "Rates:Failed!$A$1".into() },
         ExternalName { name: "Loose".into(), sheet: None, refers_to: "$E$9".into() },
     ];
-    t.wb.external_books = vec![ExternalBook::default(), ExternalBook { sheets: vec![prices, rates, failed], names }];
+    t.wb.external_books = vec![ExternalBook::default(), ExternalBook { sheets: vec![prices, rates, failed], names }].into();
     t.wb.names.push(gridcraft_model::DefinedName {
         name: "Price".into(),
         scope: None,
@@ -181,7 +181,8 @@ fn references_into_linked_workbooks_keep_their_position_and_size() {
         cells.push((CellRef::new(i as u32 + 1, 1), Value::Number(10.0 + i as f64)));
     }
     cells.sort_by_key(|(p, _)| *p);
-    t.wb.external_books = vec![ExternalBook { sheets: vec![ExternalSheet { name: "Data".into(), cells, refresh_error: false }], names: vec![] }];
+    t.wb.external_books =
+        vec![ExternalBook { sheets: vec![ExternalSheet { name: "Data".into(), cells, refresh_error: false }], names: vec![] }].into();
     // `@` takes the cell on the formula's row (or column), as for this workbook's references.
     for at in ["D2", "D3", "D4", "D5", "D6"] {
         t.set(at, "=@[1]Data!B:B");
@@ -206,6 +207,29 @@ fn references_into_linked_workbooks_keep_their_position_and_size() {
     // INDIRECT reads another workbook only while it is open.
     t.set("H1", "=INDIRECT(\"[1]Data!B2\")");
     assert_eq!(t.get("H1"), Value::Error(CellError::Ref));
+}
+
+#[test]
+fn offset_refuses_a_base_in_a_linked_workbook() {
+    use gridcraft_model::{ExternalBook, ExternalSheet};
+    let mut t = T::new();
+    // Curve!D8:D10 = 37 and Backup!D38 = 39: the saved link has every cell OFFSET would read,
+    // but Excel takes the ISERROR branch while the source workbook is closed (enron
+    // "West NatGas Prices 1031", PowerPrices!D9).
+    let curve = (8..=10).map(|r| (CellRef::new(r - 1, 3), Value::Number(37.0))).collect();
+    let backup = vec![(c("D38"), Value::Number(39.0))];
+    t.wb.external_books = vec![ExternalBook {
+        sheets: vec![
+            ExternalSheet { name: "Curve".into(), cells: curve, refresh_error: false },
+            ExternalSheet { name: "Backup".into(), cells: backup, refresh_error: false },
+        ],
+        names: vec![],
+    }]
+    .into();
+    t.set("A1", "=OFFSET([1]Curve!$D$6,2,0,3,1)");
+    t.set("A2", "=IF(ISERROR(AVERAGE(OFFSET([1]Curve!$D$6,2,0,3,1))),[1]Backup!$D$38,0)");
+    t.set("A3", "=SUM(OFFSET(B1,0,0,2,1))");
+    assert_eq!((t.get("A1"), t.num("A2"), t.num("A3")), (Value::Error(CellError::Value), 39.0, 0.0));
 }
 
 #[test]

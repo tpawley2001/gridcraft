@@ -186,9 +186,10 @@ pub struct Workbook {
     #[serde(skip)]
     pub source_dir: Option<std::path::PathBuf>,
     /// Linked workbooks' cached values, in `<externalReferences>` order (`[1]` is the first).
-    /// Read from the file; the link parts themselves are kept for saving in `preserved`.
+    /// Read from the file; the link parts themselves are kept for saving in `preserved`. Shared,
+    /// as sheets are: edits and undo history clone the workbook, never this cache.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub external_books: Vec<ExternalBook>,
+    pub external_books: Arc<Vec<ExternalBook>>,
 }
 
 impl Default for Workbook {
@@ -217,7 +218,7 @@ impl Workbook {
             csv_delimiter: None,
             preserved: None,
             source_dir: None,
-            external_books: vec![],
+            external_books: Arc::default(),
         }
     }
     pub fn sheet(&self, i: usize) -> Option<&Sheet> {

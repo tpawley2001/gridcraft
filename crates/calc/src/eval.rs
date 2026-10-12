@@ -1232,7 +1232,9 @@ impl<'h> Evaluator<'h> {
             return err(CellError::Value);
         }
         let base = match self.eval(&args[0]) {
-            Ev::R(a) if a.len() == 1 => a[0],
+            // OFFSET needs the source workbook open: a closed linked one hands it values, not a
+            // reference, which is `#VALUE!` as for the *IF(S) range parameters.
+            Ev::R(a) if a.len() == 1 && linked_parts(a[0].sheet).is_none() => a[0],
             Ev::V(Value::Error(e)) => return err(e),
             _ => return err(CellError::Value),
         };
