@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** trivial (XLSX chart sheets are kept on save (#727); previously minor: CSV save keeps the separator it was opened with) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-13 · **Change:** minor (formulas into linked workbooks calculate from the values saved with the link) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Every format Excel opens or saves, with GridCraft's read and write support, fidelity and tests.
 Part of [target-app-parity.md](target-app-parity.md). **File formats: ~50% ready, 80–120 h**
@@ -85,6 +85,7 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | XLSX: formulas into other workbooks (`[1]Prices!B2`, `'[2]P&L'!A1:B9`, `[1]!Rates`, names over them) calculate from the values saved with the link (`externalLink` `sheetDataSet` and `definedNames`), as Excel does while the source is closed; they were all `#REF!`. Sheets whose last refresh failed keep their saved cells (others `#REF!`); names inside a linked name are the linked workbook's; `[0]!Name` is the workbook's own name; the *IF(S) range arguments refuse linked-workbook values like Excel (`#VALUE!`); linked sheets print unquoted when the name allows. Over 4,224 real-world files: 37,639 fewer mismatching formulas (69,682 → 32,043), 77 fewer files mismatching |
 | 2026-10-12 | trivial | XLSX chart sheets are kept on save (#727) |
 | 2026-10-12 | trivial | CSV and TSV export is capped at 512 MiB and refuses a larger used range with an error (#528) |
 | 2026-10-12 | minor | `.xls` import reads the calculation settings (CalcMode, CalcIter, CalcCount, CalcDelta, CalcPrecision), so circular models calculate instead of showing `#CIRC!` (#724) |
