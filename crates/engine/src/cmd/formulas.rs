@@ -280,9 +280,8 @@ fn define_name(s: &mut Session, p: &Json) -> Result<Json> {
             format!("{}!{}", gridcraft_formula::quote_sheet(&sh.name), body)
         }
     };
-    if gridcraft_formula::parse(&refers).is_err() {
-        return Err(EngineError::Other("There's a problem with this formula.".into()));
-    }
+    let parsed = gridcraft_formula::parse(&refers).map_err(|_| EngineError::Other("There's a problem with this formula.".into()))?;
+    super::edit::check_linked_books(parsed, d.wb.external_books.len())?;
     let comment = str_param(p, "comment").unwrap_or("").to_string();
     // Editing an existing name (Name Manager › Edit…): it must exist, and its new name must not
     // collide with another name in the target scope.

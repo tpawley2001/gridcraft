@@ -227,7 +227,13 @@ impl Workbook {
     pub fn sheet_mut(&mut self, i: usize) -> Option<&mut Sheet> {
         self.sheets.get_mut(i).map(Arc::make_mut)
     }
+    /// The position of the sheet named `name`. `[0]Sheet1` is this workbook's `Sheet1`, as in Excel
+    /// (a sheet name can't contain `[`).
     pub fn sheet_index(&self, name: &str) -> Option<usize> {
+        let name = match name.strip_prefix('[').and_then(|s| s.split_once(']')) {
+            Some((book, sheet)) if !book.is_empty() && book.bytes().all(|b| b == b'0') => sheet,
+            _ => name,
+        };
         self.sheets.iter().position(|s| s.name.eq_ignore_ascii_case(name))
     }
     pub fn active(&self) -> Option<&Sheet> {

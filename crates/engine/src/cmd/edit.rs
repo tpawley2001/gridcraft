@@ -149,6 +149,7 @@ pub(crate) fn input_to_cell(input: &str, sheet: usize, at: CellRef, wb: &mut gri
             parsed = gridcraft_formula::parse(&text);
         }
         let expr = parsed.map_err(|e| EngineError::Other(format!("There's a problem with this formula: {e}")))?;
+        let expr = check_linked_books(expr, wb.external_books.len())?;
         let expr = wb.name_call_case(expr);
         check_arg_counts(&expr)?;
         let mut cell = Cell::formula(Formula::from_expr(expr));
@@ -189,6 +190,60 @@ pub(crate) fn input_to_cell(input: &str, sheet: usize, at: CellRef, wb: &mut gri
         style = wb.styles.derive(style, |s| s.align.wrap = true);
     }
     Ok(Some(Cell { value: parsed.value, formula: None, style }))
+}
+
+/// `[n]` at the start of a sheet or a sheet-qualified name (`[2]Prices`, `[2]!Rates`): the digits
+/// of the index and the rest.
+fn linked_book(s: &str) -> Option<(&str, &str)> {
+    let (book, rest) = s.strip_prefix('[')?.split_once(']')?;
+    (!book.is_empty() && book.bytes().all(|b| b.is_ascii_digit())).then_some((book, rest))
+}
+
+/// Typed references into other workbooks. `[n]` must name one of the workbook's `links` external
+/// links (`[1]` is the first): Excel refuses any other index on entry, and a file saved with one
+/// can't be opened. `[0]` is this workbook, as in Excel: `[0]Sheet1!A1` is entered as `Sheet1!A1`.
+pub(crate) fn check_linked_books(expr: gridcraft_formula::Expr, links: usize) -> Result<gridcraft_formula::Expr> {
+    use gridcraft_formula::{Expr, SheetSel};
+    let mut bad = None;
+    expr.walk(&mut |e| {
+        let name = match e {
+            Expr::Ref(r) => match &r.sheet {
+                SheetSel::Named(a) | SheetSel::Span(a, _) => a.as_str(),
+                SheetSel::Current => return,
+            },
+            Expr::Name(n) => n.as_str(),
+            _ => return,
+        };
+        if let Some((book, _)) = linked_book(name)
+            && bad.is_none()
+            && !book.parse::<usize>().is_ok_and(|b| b <= links)
+        {
+            bad = Some(book.to_string());
+        }
+    });
+    if let Some(book) = bad {
+        return Err(EngineError::Other(format!("There's a problem with this formula: [{book}] isn't a linked workbook.")));
+    }
+    let own = |s: &str| match linked_book(s) {
+        Some((book, rest)) if !rest.is_empty() && book.bytes().all(|b| b == b'0') => Some(rest.to_string()),
+        _ => None,
+    };
+    Ok(expr.map(&mut |e| match e {
+        Expr::Ref(mut r) => {
+            r.sheet = match r.sheet {
+                SheetSel::Named(a) => SheetSel::Named(own(&a).unwrap_or(a)),
+                SheetSel::Span(a, b) => SheetSel::Span(own(&a).unwrap_or(a), b),
+                s => s,
+            };
+            Expr::Ref(r)
+        }
+        // `[0]!Rates` is the workbook's `Rates`, `[0]Sheet1!Rates` its `Sheet1!Rates`.
+        Expr::Name(n) => match own(&n) {
+            Some(rest) => Expr::Name(rest.strip_prefix('!').map(str::to_string).unwrap_or(rest)),
+            None => Expr::Name(n),
+        },
+        e => e,
+    }))
 }
 
 /// Like Excel, a formula that calls a built-in function with too few or too many arguments is

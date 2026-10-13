@@ -242,6 +242,41 @@ fn formulas_with_the_wrong_argument_count_are_refused_on_entry() {
 }
 
 #[test]
+fn typed_references_to_workbooks_that_are_not_linked_are_refused_on_entry() {
+    // A file saved with `[2]Sheet1!A1` and only one external link (or `[1]…` and none) can't be
+    // opened by Excel 365, which refuses such an index on entry.
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "kept"})).unwrap();
+    let refused = |s: &mut Session, input: &str| {
+        let e = s.execute("cell.set", json!({"cell": "A1", "input": input})).unwrap_err().to_string();
+        assert!(e.contains("There's a problem with this formula"), "{input}: {e}");
+        assert_eq!(v(s, "A1"), Value::text("kept"), "{input} must not replace the cell");
+    };
+    for input in ["=[1]Sheet1!A1", "='[1]My Sheet'!A1:B2", "=SUM([1]Jan:Dec!A1)", "=[1]!Rates", "=[99999999999999999999]Sheet1!A1"] {
+        refused(&mut s, input);
+    }
+    assert!(s.execute("formulas.defineName", json!({"name": "Linked", "refersTo": "=[1]Sheet1!A1"})).is_err());
+    // One link: `[1]` enters, `[2]` doesn't.
+    let wb = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb);
+    wb.external_books = vec![gridcraft_model::ExternalBook::default()].into();
+    refused(&mut s, "=[2]Sheet1!A1");
+    s.execute("cell.set", json!({"cell": "B1", "input": "=[1]Sheet1!A1"})).unwrap();
+    s.execute("formulas.defineName", json!({"name": "Linked", "refersTo": "=[1]Sheet1!A1"})).unwrap();
+    // `[0]` is this workbook: entered as the plain reference, showing the local value.
+    s.execute("cell.set", json!({"cell": "C1", "input": "7"})).unwrap();
+    s.execute("formulas.defineName", json!({"name": "Seven", "refersTo": "=Sheet1!$C$1"})).unwrap();
+    for (cell, input, text) in
+        [("D1", "=[0]Sheet1!C1*2", "Sheet1!C1*2"), ("D2", "=SUM([0]Sheet1:Sheet1!C1)", "SUM(Sheet1:Sheet1!C1)"), ("D3", "=[0]!Seven*2", "Seven*2")]
+    {
+        s.execute("cell.set", json!({"cell": cell, "input": input})).unwrap();
+        let d = s.doc().unwrap();
+        let f = d.wb.active().unwrap().cell(CellRef::parse(cell).unwrap()).and_then(|c| c.formula.clone()).unwrap();
+        assert_eq!(f.text, text, "{input}");
+    }
+    assert_eq!((v(&s, "D1"), v(&s, "D2"), v(&s, "D3")), (Value::Number(14.0), Value::Number(7.0), Value::Number(14.0)));
+}
+
+#[test]
 fn undo_redo() {
     let mut s = s();
     s.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
