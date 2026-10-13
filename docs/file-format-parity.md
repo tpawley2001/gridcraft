@@ -85,7 +85,7 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-13 | trivial | Linked workbooks: a typed `[n]` that isn't one of the workbook's links is refused when a formula is entered in a cell or a defined name, as Excel does; a file saved with one doesn't open in Excel. `[0]` is this workbook: `=[0]Sheet1!A1` is entered as `=Sheet1!A1` |
+| 2026-10-13 | trivial | Linked workbooks: a typed `[n]` that isn't one of the workbook's links is refused when a formula is entered in a cell or a defined name, as Excel does (conditional formats and data validation refuse references to other workbooks; pasted into another workbook they become `#REF!`); a file saved with one doesn't open in Excel. `[0]` is this workbook: `=[0]Sheet1!A1` is entered as `=Sheet1!A1` |
 | 2026-10-13 | minor | XLSX: formulas into other workbooks (`[1]Prices!B2`, `'[2]P&L'!A1:B9`, `[1]!Rates`, names over them) calculate from the values saved with the link (`externalLink` `sheetDataSet` and `definedNames`), as Excel does while the source is closed; they were all `#REF!`. Sheets whose last refresh failed keep their saved cells (others `#REF!`); names inside a linked name are the linked workbook's; `[0]!Name` is the workbook's own name; the *IF(S) range arguments refuse linked-workbook values like Excel (`#VALUE!`); linked sheets print unquoted when the name allows. Over 4,224 real-world files: 37,639 fewer mismatching formulas (69,682 → 32,043), 77 fewer files mismatching |
 | 2026-10-12 | trivial | XLSX chart sheets are kept on save (#727) |
 | 2026-10-12 | trivial | CSV and TSV export is capped at 512 MiB and refuses a larger used range with an error (#528) |

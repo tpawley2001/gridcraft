@@ -252,14 +252,32 @@ fn typed_references_to_workbooks_that_are_not_linked_are_refused_on_entry() {
         assert!(e.contains("There's a problem with this formula"), "{input}: {e}");
         assert_eq!(v(s, "A1"), Value::text("kept"), "{input} must not replace the cell");
     };
-    for input in ["=[1]Sheet1!A1", "='[1]My Sheet'!A1:B2", "=SUM([1]Jan:Dec!A1)", "=[1]!Rates", "=[99999999999999999999]Sheet1!A1"] {
+    for input in [
+        "=[1]Sheet1!A1",
+        "='[1]My Sheet'!A1:B2",
+        "=SUM([1]Jan:Dec!A1)",
+        "=[1]!Rates",
+        "=[99999999999999999999]Sheet1!A1",
+        // Either end of a sheet range, and bracketed prefixes that aren't an index.
+        "='Sheet1:[5]Dec'!A1",
+        "='[-1]Sheet1'!A1",
+        "='[ 1]Sheet1'!A1",
+        "='[Book2.xlsx]Sheet1'!A1",
+    ] {
         refused(&mut s, input);
     }
     assert!(s.execute("formulas.defineName", json!({"name": "Linked", "refersTo": "=[1]Sheet1!A1"})).is_err());
+    // Conditional formats and data validation can't refer to other workbooks.
+    let cf = |f: &str| json!({"range": "A1:A3", "rule": {"type": "expression", "formula": f}});
+    assert!(s.execute("home.conditionalFormat", cf("=[3]Sheet1!A1>0")).is_err());
+    assert!(s.execute("data.validation", json!({"range": "A1", "type": "list", "formula1": "=[3]Sheet1!A1:A3"})).is_err());
+    assert!(s.execute("data.validation", json!({"range": "A1", "type": "custom", "formula1": "=[3]Sheet1!A1>0"})).is_err());
+    assert!(s.doc().unwrap().wb.active().unwrap().validations.is_empty() && s.doc().unwrap().wb.active().unwrap().cond_formats.is_empty());
     // One link: `[1]` enters, `[2]` doesn't.
     let wb = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb);
     wb.external_books = vec![gridcraft_model::ExternalBook::default()].into();
     refused(&mut s, "=[2]Sheet1!A1");
+    refused(&mut s, "='[1]Jan:[1]Dec'!A1");
     s.execute("cell.set", json!({"cell": "B1", "input": "=[1]Sheet1!A1"})).unwrap();
     s.execute("formulas.defineName", json!({"name": "Linked", "refersTo": "=[1]Sheet1!A1"})).unwrap();
     // `[0]` is this workbook: entered as the plain reference, showing the local value.
@@ -274,6 +292,19 @@ fn typed_references_to_workbooks_that_are_not_linked_are_refused_on_entry() {
         assert_eq!(f.text, text, "{input}");
     }
     assert_eq!((v(&s, "D1"), v(&s, "D2"), v(&s, "D3")), (Value::Number(14.0), Value::Number(7.0), Value::Number(14.0)));
+    // A `[0]` name is stored as the local reference, so it follows a sheet rename.
+    s.execute("formulas.defineName", json!({"name": "Zero", "refersTo": "=[0]Sheet1!$C$1"})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.names.iter().find(|n| n.name == "Zero").unwrap().formula, "Sheet1!$C$1");
+    s.execute("cell.set", json!({"cell": "D4", "input": "=Zero"})).unwrap();
+    s.execute("sheet.rename", json!({"sheet": 0, "name": "Data"})).unwrap();
+    assert_eq!(v(&s, "D4"), Value::Number(7.0));
+    // Pasted into another workbook, a reference into this one's link is `#REF!`: `[1]` there would
+    // be a link it doesn't have (or a different workbook).
+    s.execute("edit.copy", json!({"range": "B1"})).unwrap();
+    s.new_workbook();
+    s.execute("edit.paste", json!({"at": "E1"})).unwrap();
+    let f = s.execute("cell.get", json!({"cell": "E1"})).unwrap();
+    assert_eq!(f["formula"], "=#REF!");
 }
 
 #[test]
