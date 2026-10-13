@@ -274,11 +274,20 @@ fn typed_references_to_workbooks_that_are_not_linked_are_refused_on_entry() {
     assert!(s.execute("data.validation", json!({"range": "A1", "type": "custom", "formula1": "=[3]Sheet1!A1>0"})).is_err());
     assert!(s.doc().unwrap().wb.active().unwrap().validations.is_empty() && s.doc().unwrap().wb.active().unwrap().cond_formats.is_empty());
     // One link: `[1]` enters, `[2]` doesn't.
+    let link = gridcraft_model::ExternalBook {
+        sheets: vec![gridcraft_model::ExternalSheet {
+            name: "S".into(),
+            cells: vec![(CellRef::parse("A1").unwrap(), Value::Number(5.0))],
+            refresh_error: false,
+        }],
+        names: vec![],
+    };
     let wb = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb);
-    wb.external_books = vec![gridcraft_model::ExternalBook::default()].into();
+    wb.external_books = vec![link.clone()].into();
     refused(&mut s, "=[2]Sheet1!A1");
     refused(&mut s, "='[1]Jan:[1]Dec'!A1");
-    s.execute("cell.set", json!({"cell": "B1", "input": "=[1]Sheet1!A1"})).unwrap();
+    s.execute("cell.set", json!({"cell": "B1", "input": "=[1]S!$A$1"})).unwrap();
+    assert_eq!(v(&s, "B1"), Value::Number(5.0));
     s.execute("formulas.defineName", json!({"name": "Linked", "refersTo": "=[1]Sheet1!A1"})).unwrap();
     // `[0]` is this workbook: entered as the plain reference, showing the local value.
     s.execute("cell.set", json!({"cell": "C1", "input": "7"})).unwrap();
@@ -298,13 +307,22 @@ fn typed_references_to_workbooks_that_are_not_linked_are_refused_on_entry() {
     s.execute("cell.set", json!({"cell": "D4", "input": "=Zero"})).unwrap();
     s.execute("sheet.rename", json!({"sheet": 0, "name": "Data"})).unwrap();
     assert_eq!(v(&s, "D4"), Value::Number(7.0));
-    // Pasted into another workbook, a reference into this one's link is `#REF!`: `[1]` there would
-    // be a link it doesn't have (or a different workbook).
+    // Pasted into a New Window of the same workbook, `[1]` is the same link.
     s.execute("edit.copy", json!({"range": "B1"})).unwrap();
-    s.new_workbook();
+    s.execute("view.newWindow", json!({})).unwrap();
     s.execute("edit.paste", json!({"at": "E1"})).unwrap();
-    let f = s.execute("cell.get", json!({"cell": "E1"})).unwrap();
-    assert_eq!(f["formula"], "=#REF!");
+    assert_eq!(s.execute("cell.get", json!({"cell": "E1"})).unwrap()["formula"], "=[1]S!$A$1");
+    assert_eq!(v(&s, "E1"), Value::Number(5.0));
+    // In another workbook it's kept only where that workbook holds the same link at that index;
+    // otherwise `[1]` there would be a link it doesn't have (or a different workbook): `#REF!`.
+    let other =
+        gridcraft_model::ExternalBook { sheets: vec![gridcraft_model::ExternalSheet { name: "T".into(), ..Default::default() }], names: vec![] };
+    for (books, formula) in [(vec![], "=#REF!"), (vec![other], "=#REF!"), (vec![link], "=[1]S!$A$1")] {
+        s.new_workbook();
+        std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).external_books = books.into();
+        s.execute("edit.paste", json!({"at": "E1"})).unwrap();
+        assert_eq!(s.execute("cell.get", json!({"cell": "E1"})).unwrap()["formula"], formula);
+    }
 }
 
 #[test]

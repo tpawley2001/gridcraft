@@ -291,13 +291,30 @@ pub(crate) fn refuse_linked_books(text: &str) -> Result<()> {
     }
 }
 
-/// A formula pasted from another workbook: its references into that workbook's links are
-/// `#REF!`, since the links (and the values saved with them) aren't this workbook's.
-fn drop_linked_books(expr: gridcraft_formula::Expr) -> gridcraft_formula::Expr {
+/// Which of the source workbook's links (`[1]` first) the target holds at the same index: the same
+/// linked workbook with the same saved sheets and names. A New Window of the workbook shares them.
+fn shared_links(src: &gridcraft_model::Workbook, dst: &gridcraft_model::Workbook) -> Vec<bool> {
+    if std::sync::Arc::ptr_eq(&src.external_books, &dst.external_books) {
+        return vec![true; src.external_books.len()];
+    }
+    src.external_books.iter().enumerate().map(|(i, b)| dst.external_books.get(i) == Some(b)).collect()
+}
+
+/// A formula pasted from another workbook: its references into links the target doesn't share
+/// (`shared`, from [`shared_links`]) are `#REF!`. `[1]` there would be a link it doesn't have, or a
+/// different workbook.
+fn drop_linked_books(expr: gridcraft_formula::Expr, shared: &[bool]) -> gridcraft_formula::Expr {
     use gridcraft_formula::Expr;
+    if shared.iter().all(|&s| s) && first_bad_book(&expr, shared.len()).is_none() {
+        return expr;
+    }
     expr.map(&mut |e| {
-        let linked = sheets_named(&e).iter().any(|(s, _)| !matches!(sheet_book(s), Ok(None | Some(0))));
-        if linked { Expr::Error(gridcraft_core::CellError::Ref) } else { e }
+        let unshared = sheets_named(&e).iter().any(|(s, _)| match sheet_book(s) {
+            Ok(None | Some(0)) => false,
+            Ok(Some(n)) => !shared.get(n - 1).copied().unwrap_or(false),
+            Err(_) => true,
+        });
+        if unshared { Expr::Error(gridcraft_core::CellError::Ref) } else { e }
     })
 }
 
@@ -1046,6 +1063,7 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
     let src_wb = clip.wb.clone();
     let Some(src_sheet) = src_wb.sheet(clip.sheet) else { return Err(EngineError::Other("The copied sheet no longer exists.".into())) };
     let src_sheet_name = src_sheet.name.clone();
+    let shared = if same_doc { vec![] } else { shared_links(&src_wb, &s.doc()?.wb) };
     edit(s, |cx| {
         // Styles from another workbook must be re-interned.
         let mut style_map = std::collections::HashMap::new();
@@ -1091,8 +1109,8 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
                         let shift = |cell: &Cell| -> Option<std::sync::Arc<Formula>> {
                             let f = cell.formula.as_ref()?;
                             let e = f.expr()?;
-                            // `[1]…` is the source workbook's first link, not this one's.
-                            let e = if same_doc { e } else { drop_linked_books(e) };
+                            // `[1]…` is the source workbook's first link: kept where this one shares it.
+                            let e = if same_doc { e } else { drop_linked_books(e, &shared) };
                             if cut_move {
                                 // A moved formula still reads cells on its original sheet. Qualify
                                 // those references before the workbook-wide move adjustment below.
