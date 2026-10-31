@@ -17,7 +17,6 @@ eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "
 egui = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
-image = { workspace = true }
 chrono = { workspace = true }
 
 [build-dependencies]
@@ -28,10 +27,9 @@ winresource = "0.1"
 winit = { version = "0.30", default-features = false, features = ["x11"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# Same craft-libs revision as the workspace's craft-update and craft-window (see the root
+# Same craft-libs revision as the workspace's craft-window (see the root
 # Cargo.toml).
 craft-print = { git = "https://github.com/storytold/craft-libs", rev = "c5a1cbfb5f9049f9270955caffb5bee5997aebf7" }
-craft-update = { workspace = true }
 rfd = { workspace = true }
 arboard = { workspace = true }
 gridcraft-mcp = { workspace = true }

@@ -979,10 +979,10 @@ fn dropped_macro_warning_never_promises_to_keep_macros() {
         h.state_mut().show_open_warnings(&json!({"warnings": [w]}));
         let n = h.state().notice.clone().unwrap();
         assert_eq!(n.kind, gridcraft_ui_egui::NoticeKind::Warning);
-        assert!(n.text.contains("dropped") && !n.text.contains("keeps them"), "{}", n.text);
+        assert!(n.text.contains("dropped") && !n.text.contains("kept when you save"), "{}", n.text);
     }
     h.state_mut().show_open_warnings(&json!({"warnings": ["macros (VBA project) were kept but not executed"]}));
-    assert!(h.state().notice.clone().unwrap().text.contains("keeps them when you save as .xlsm"));
+    assert!(h.state().notice.clone().unwrap().text.contains("kept when you save as .xlsm"));
 }
 
 #[test]

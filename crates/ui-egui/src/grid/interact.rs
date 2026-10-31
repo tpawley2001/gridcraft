@@ -522,7 +522,7 @@ fn handle_cell_double_click(app: &mut SheetApp, input: &InteractionInput<'_>, c:
                 Ok(_) => return true,
                 Err(e) if e == not_a_value_cell => {}
                 Err(e) => {
-                    app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
+                    app.message = Some((crate::brand::APP_NAME.into(), crate::clean_error(&e)));
                     return true;
                 }
             }
@@ -722,7 +722,7 @@ fn handle_release(app: &mut SheetApp, input: &InteractionInput<'_>) {
                     let mode = if mods.command { "alternate" } else { "series" };
                     match app.run("edit.autoFill", json!({"source": src.a1(), "target": t.a1(), "mode": mode})) {
                         Ok(_) => set_fill_tag(app, src, t),
-                        Err(e) => app.message = Some(("GridCraft".into(), crate::clean_error(&e))),
+                        Err(e) => app.message = Some((crate::brand::APP_NAME.into(), crate::clean_error(&e))),
                     }
                 }
             }
@@ -743,7 +743,7 @@ fn handle_release(app: &mut SheetApp, input: &InteractionInput<'_>) {
             }
             Drag::MoveCols { source, before: Some(before) } => {
                 if let Err(e) = app.run("sheet.moveColumns", json!({"cols": source.a1(), "before": before})) {
-                    app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
+                    app.message = Some((crate::brand::APP_NAME.into(), crate::clean_error(&e)));
                 }
             }
             _ => {}
@@ -763,7 +763,7 @@ fn format_painter_apply(app: &mut SheetApp) {
         if let Some(dest) = dest
             && let Err(e) = app.run("edit.formatPainter", json!({"apply": dest}))
         {
-            app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
+            app.message = Some((crate::brand::APP_NAME.into(), crate::clean_error(&e)));
         }
     }
 }
@@ -931,7 +931,7 @@ pub(super) fn paint_freeze_handles(p: &Painter, geo: &Geo, sh: &Sheet, drag: &Dr
     p.rect_filled(Rect::from_center_size(cols.center(), vec2(3.0, cols.height())), 1.0, bar);
     p.rect_filled(Rect::from_center_size(rows.center(), vec2(rows.width(), 3.0)), 1.0, bar);
     if let Drag::Freeze { cols, to: Some(to) } = *drag {
-        let stroke = Stroke::new(2.0, t.accent);
+        let stroke = Stroke::new(2.0, t.sel_border);
         if cols {
             let x = geo.cells.left() + sh.col_left(to) as f32 * geo.z;
             p.line_segment([pos2(x, geo.head_top()), pos2(x, geo.cells.bottom())], stroke);

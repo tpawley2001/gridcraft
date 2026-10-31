@@ -2,7 +2,11 @@
 //!
 //! `cargo run --release -p gridcraft-ui-egui --example snapshot -- [--sample sales] [--in file.xlsx]
 //!  [--size 1440x900] [--scale 2] [--cmd 'id={json}']... [--tab Insert] [--dark] [--language en|es|zh|ja|ko|ru|pt|de|cs|fr|tr]
-//!  [--dialog 'name={json}'] [--hf-edit header|footer] out.png`
+//!  [--dialog 'name={json}'] [--hf-edit header|footer] [--backstage home|new|open|info|options|account…]
+//!  [--plain] out.png`
+//!
+//! `--backstage` opens the File view on that page (`home` is the start page); `--plain` turns
+//! pirate speak off.
 
 use gridcraft_engine::Session;
 use gridcraft_ui_egui::SheetApp;
@@ -22,6 +26,8 @@ fn main() {
     let mut dialog: Option<String> = None;
     let mut language: Option<String> = None;
     let mut hf_edit: Option<String> = None;
+    let mut backstage: Option<String> = None;
+    let mut plain = false;
     let mut out = "snapshot.png".to_string();
     let mut i = 0;
     while i < args.len() {
@@ -71,6 +77,11 @@ fn main() {
                 i += 1;
                 hf_edit = args.get(i).cloned();
             }
+            "--backstage" => {
+                i += 1;
+                backstage = args.get(i).cloned();
+            }
+            "--plain" => plain = true,
             "--language" => {
                 i += 1;
                 language = args.get(i).cloned();
@@ -106,6 +117,10 @@ fn main() {
             {
                 let mut app = SheetApp::new(session, Default::default());
                 app.ui.dark = dark;
+                app.ui.pirate_speak = !plain;
+                if let Some(page) = backstage.as_deref().and_then(gridcraft_ui_egui::backstage::Page::parse) {
+                    app.open_backstage(page);
+                }
                 if let Some(code) = &language
                     && let Some(l) = gridcraft_ui_egui::i18n::Language::parse(code)
                 {

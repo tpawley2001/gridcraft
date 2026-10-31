@@ -57,8 +57,12 @@ fn tip_text(ui: &Ui, tip: &str) -> String {
 
 /// A flat square icon button with hover highlight and tooltip.
 pub fn icon_button(ui: &mut Ui, icon: Icon, color: Color32, tip: &str, size: egui::Vec2) -> Response {
+    icon_button_on(ui, &Tokens::get(ui.ctx()), icon, color, tip, size)
+}
+
+/// [`icon_button`] on a surface with its own tokens (the ribbon band: [`Tokens::on_band`]).
+pub fn icon_button_on(ui: &mut Ui, t: &Tokens, icon: Icon, color: Color32, tip: &str, size: egui::Vec2) -> Response {
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    let t = Tokens::get(ui.ctx());
     if resp.is_pointer_button_down_on() {
         ui.painter().rect_filled(rect, 4.0, t.pressed);
     } else if resp.hovered() {
@@ -183,7 +187,11 @@ fn paint_big_label(ui: &Ui, rect: Rect, lines: &[std::sync::Arc<egui::Galley>], 
 
 /// Small ribbon button: 16px icon with optional label to the right.
 pub fn small_button(ui: &mut Ui, icon: Icon, label: &str, tip: &str, dropdown: bool) -> Response {
-    let t = Tokens::get(ui.ctx());
+    small_button_on(ui, &Tokens::get(ui.ctx()), icon, label, tip, dropdown)
+}
+
+/// [`small_button`] on a surface with its own tokens (the ribbon band: [`Tokens::on_band`]).
+pub fn small_button_on(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str, tip: &str, dropdown: bool) -> Response {
     let font = theme::ui_font(12.5);
     let label = tr(ui, label);
     let tw = if label.is_empty() { 0.0 } else { ui.painter().layout_no_wrap(label.to_string(), font.clone(), t.text).size().x + 6.0 };

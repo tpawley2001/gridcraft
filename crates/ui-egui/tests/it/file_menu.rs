@@ -160,7 +160,7 @@ fn file_account_shows_the_version_and_opens_about() {
     // The About dialog also shows the version; it must not be open yet.
     h.get_by_label(env!("CARGO_PKG_VERSION"));
     h.get_by_label(env!("CARGO_PKG_LICENSE"));
-    click(&mut h, "About GridCraft");
+    click(&mut h, &gridcraft_ui_egui::brand::about_title());
     assert_eq!(h.state().dialog.as_ref().map(|d| d.name()), Some("about"));
     assert_eq!(page(&h), Some("account"), "About opens over the File view, like Protect Workbook on Info");
 }
@@ -646,4 +646,31 @@ fn control_requests_route_to_a_window_and_list_windows() {
     assert_eq!(rows[1]["active"].as_bool(), Some(true));
     let r = call(&mut h, "engine.execute", serde_json::json!({"command": "cell.get", "params": {"cell": "A1"}, "window": 999}));
     assert_eq!(r["ok"], false, "{r}");
+}
+
+#[test]
+fn start_page_greets_in_pirate_speak_and_plainly_when_it_is_off() {
+    use gridcraft_ui_egui::brand;
+    let mut h = harness(Services::default());
+    assert!(h.state().ui.pirate_speak, "pirate speak is on by default");
+    h.state_mut().open_backstage(gridcraft_ui_egui::backstage::Page::Home);
+    h.run_steps(3);
+    h.get_by_label(brand::greeting(true));
+    h.get_by_label(brand::no_recent(true));
+    // The toggle only changes the flavour lines; the page and its New tiles stay.
+    h.state_mut().run("options.pirateSpeak", serde_json::json!({"on": false})).unwrap();
+    h.run_steps(3);
+    assert!(!h.state().ui.pirate_speak);
+    h.get_by_label(brand::greeting(false));
+    h.get_by_label("Blank workbook");
+    assert!(h.query_by_label(brand::greeting(true)).is_none());
+}
+
+#[test]
+fn about_shows_the_upstream_credit() {
+    let mut h = harness(Services::default());
+    h.state_mut().open_dialog("about", serde_json::json!({}));
+    h.run_steps(3);
+    h.get_by_label(gridcraft_ui_egui::brand::BASED_ON);
+    h.get_by_label(gridcraft_ui_egui::brand::APP_NAME);
 }

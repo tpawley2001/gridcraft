@@ -164,8 +164,7 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
     let t = Tokens::get(&ctx);
     let lang = app.ui.language;
     let mut out = Outcome::default();
-    let (nav_bg, nav_text, nav_sel) =
-        if t.dark { (t.accent_soft, t.text, Color32::from_white_alpha(30)) } else { (t.accent, Color32::WHITE, Color32::from_black_alpha(46)) };
+    let (nav_bg, nav_text, nav_sel) = (t.band, t.band_text, Color32::from_white_alpha(30));
     egui::Panel::left("backstage_nav")
         .exact_size(NAV_W)
         .resizable(false)
@@ -213,7 +212,11 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::NONE.inner_margin(egui::Margin { left: 44, right: 32, top: 26, bottom: 32 }).show(ui, |ui| {
                 ui.set_max_width(CONTENT_W);
-                ui.label(RichText::new(lang.tr(bs.page.label())).font(theme::ui_font(28.0)).color(t.text));
+                if bs.page == Page::Home {
+                    greeting(app, ui);
+                } else {
+                    ui.label(RichText::new(lang.tr(bs.page.label())).font(theme::ui_font(28.0)).color(t.text));
+                }
                 ui.add_space(18.0);
                 match bs.page {
                     Page::Home => home(app, ui, &mut bs, &mut out),
@@ -373,7 +376,7 @@ fn recent_list(app: &mut SheetApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Ou
     let t = Tokens::get(ui.ctx());
     let lang = app.ui.language;
     if app.ui.recent.is_empty() {
-        dim(ui, lang.tr("No recent workbooks yet."));
+        dim(ui, lang.tr(crate::brand::no_recent(app.ui.pirate_speak)));
         return;
     }
     let width = ui.available_width().min(CONTENT_W);
@@ -547,6 +550,23 @@ fn square_button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
 }
 
 // ---------------------------------------------------------------- pages
+
+/// The start page's heading: the app icon, the greeting and the line under it. Flavour text that
+/// follows `pirate_speak` (`brand`); the plain greeting stands in when it is off.
+fn greeting(app: &SheetApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let pirate = app.ui.pirate_speak;
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(vec2(56.0, 56.0), Sense::hover());
+        crate::brand::icon::paint(ui, rect);
+        ui.add_space(10.0);
+        ui.vertical(|ui| {
+            ui.add_space(2.0);
+            ui.label(RichText::new(crate::brand::greeting(pirate)).font(theme::ui_font(28.0)).color(t.text));
+            ui.label(RichText::new(crate::brand::greeting_sub(pirate)).font(theme::ui_font(13.5)).color(t.text_dim));
+        });
+    });
+}
 
 fn home(app: &mut SheetApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcome) {
     let lang = app.ui.language;
@@ -750,13 +770,13 @@ pub fn export_as(app: &mut SheetApp, fmt: &str) -> bool {
         return match app.run(id, json!({"path": path})) {
             Ok(_) => true,
             Err(e) => {
-                app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
+                app.message = Some((crate::brand::APP_NAME.into(), crate::clean_error(&e)));
                 false
             }
         };
     }
     if app.services.download.is_none() {
-        app.message = Some(("GridCraft".into(), "Exporting needs a file picker, which this window doesn't have.".into()));
+        app.message = Some((crate::brand::APP_NAME.into(), "Exporting needs a file picker, which this window doesn't have.".into()));
         return false;
     }
     if fmt == "pdf" {
@@ -764,7 +784,7 @@ pub fn export_as(app: &mut SheetApp, fmt: &str) -> bool {
         return match app.run(id, json!({})) {
             Ok(_) => true,
             Err(e) => {
-                app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
+                app.message = Some((crate::brand::APP_NAME.into(), crate::clean_error(&e)));
                 false
             }
         };
@@ -783,7 +803,7 @@ pub fn export_as(app: &mut SheetApp, fmt: &str) -> bool {
             }
         }
         Err(e) => {
-            app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
+            app.message = Some((crate::brand::APP_NAME.into(), crate::clean_error(&e)));
             false
         }
     }
@@ -794,7 +814,16 @@ fn account(app: &mut SheetApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let lang = app.ui.language;
     section(ui, lang, "Product Information");
-    ui.label(RichText::new("GridCraft").font(theme::ui_bold(16.0)).color(t.text));
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
+        crate::brand::icon::paint(ui, rect);
+        ui.vertical(|ui| {
+            ui.label(RichText::new(crate::brand::APP_NAME).font(theme::ui_bold(16.0)).color(t.text));
+            dim(ui, crate::brand::SUITE_NAME);
+        });
+    });
+    ui.add_space(4.0);
+    dim(ui, crate::brand::BASED_ON);
     ui.add_space(8.0);
     egui::Grid::new("backstage_account").num_columns(2).spacing(vec2(18.0, 8.0)).show(ui, |ui| {
         for (label, value) in
@@ -807,13 +836,13 @@ fn account(app: &mut SheetApp, ui: &mut Ui) {
     });
     ui.add_space(18.0);
     ui.horizontal(|ui| {
-        if square_button(ui, Icon::Info, lang.tr("About GridCraft")).clicked() {
+        if square_button(ui, Icon::Info, lang.tr(&crate::brand::about_title())).clicked() {
             app.open_dialog("about", json!({}));
         }
         ui.add_space(12.0);
         ui.vertical(|ui| {
             ui.add_space(14.0);
-            ui.label(RichText::new(lang.tr("About GridCraft")).font(theme::ui_bold(13.5)).color(t.text));
+            ui.label(RichText::new(lang.tr(&crate::brand::about_title())).font(theme::ui_bold(13.5)).color(t.text));
             dim(ui, lang.tr("Version, contributors and the AI models that helped"));
         });
     });

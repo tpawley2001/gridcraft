@@ -1,11 +1,11 @@
 {
   "id": "gridcraft",
-  "name": "GridCraft",
+  "name": "Plunder Ledger",
   "upgradeCode": "5511327B-F305-41BE-92D0-EB84944E7C4D",
   "sources": [
     "gridcraft.wxs"
   ],
-  "icon": "assets/app-icon/gridcraft.ico",
+  "icon": "assets/app-icon/plunder-ledger.ico",
   "localization": [],
   "extensions": [],
   "payloads": [
@@ -21,127 +21,127 @@
     ],
     [
       "-1",
-      "Software\\Classes\\GridCraft.Workbook",
+      "Software\\Classes\\PlunderLedger.Workbook",
       "",
-      "GridCraft Workbook"
+      "Plunder Ledger Workbook"
     ],
     [
       "-1",
-      "Software\\Classes\\GridCraft.Workbook\\DefaultIcon",
+      "Software\\Classes\\PlunderLedger.Workbook\\DefaultIcon",
       "",
       "\"[#GridcraftExe]\",0"
     ],
     [
       "-1",
-      "Software\\Classes\\GridCraft.Workbook\\shell\\open\\command",
+      "Software\\Classes\\PlunderLedger.Workbook\\shell\\open\\command",
       "",
       "\"[#GridcraftExe]\" \"%1\""
     ],
     [
       "-1",
-      "Software\\Classes\\GridCraft.TextData",
+      "Software\\Classes\\PlunderLedger.TextData",
       "",
-      "GridCraft Text Data"
+      "Plunder Ledger Text Data"
     ],
     [
       "-1",
-      "Software\\Classes\\GridCraft.TextData\\DefaultIcon",
+      "Software\\Classes\\PlunderLedger.TextData\\DefaultIcon",
       "",
       "\"[#GridcraftExe]\",0"
     ],
     [
       "-1",
-      "Software\\Classes\\GridCraft.TextData\\shell\\open\\command",
+      "Software\\Classes\\PlunderLedger.TextData\\shell\\open\\command",
       "",
       "\"[#GridcraftExe]\" \"%1\""
     ],
     [
       "-1",
       "Software\\Classes\\.xlsx\\OpenWithProgids",
-      "GridCraft.Workbook",
-      "GridCraft.Workbook"
+      "PlunderLedger.Workbook",
+      "PlunderLedger.Workbook"
     ],
     [
       "-1",
       "Software\\Classes\\.xlsm\\OpenWithProgids",
-      "GridCraft.Workbook",
-      "GridCraft.Workbook"
+      "PlunderLedger.Workbook",
+      "PlunderLedger.Workbook"
     ],
     [
       "-1",
       "Software\\Classes\\.xlsb\\OpenWithProgids",
-      "GridCraft.Workbook",
-      "GridCraft.Workbook"
+      "PlunderLedger.Workbook",
+      "PlunderLedger.Workbook"
     ],
     [
       "-1",
       "Software\\Classes\\.ods\\OpenWithProgids",
-      "GridCraft.Workbook",
-      "GridCraft.Workbook"
+      "PlunderLedger.Workbook",
+      "PlunderLedger.Workbook"
     ],
     [
       "-1",
       "Software\\Classes\\.csv\\OpenWithProgids",
-      "GridCraft.TextData",
-      "GridCraft.TextData"
+      "PlunderLedger.TextData",
+      "PlunderLedger.TextData"
     ],
     [
       "-1",
       "Software\\Classes\\.tsv\\OpenWithProgids",
-      "GridCraft.TextData",
-      "GridCraft.TextData"
+      "PlunderLedger.TextData",
+      "PlunderLedger.TextData"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Capabilities",
+      "Software\\PlunderLedger\\Capabilities",
       "ApplicationName",
-      "GridCraft"
+      "Plunder Ledger"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Capabilities",
+      "Software\\PlunderLedger\\Capabilities",
       "ApplicationDescription",
       "Open-source spreadsheet for .xlsx, CSV and TSV files"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Capabilities\\FileAssociations",
+      "Software\\PlunderLedger\\Capabilities\\FileAssociations",
       ".xlsx",
-      "GridCraft.Workbook"
+      "PlunderLedger.Workbook"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Capabilities\\FileAssociations",
+      "Software\\PlunderLedger\\Capabilities\\FileAssociations",
       ".xlsm",
-      "GridCraft.Workbook"
+      "PlunderLedger.Workbook"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Capabilities\\FileAssociations",
+      "Software\\PlunderLedger\\Capabilities\\FileAssociations",
       ".csv",
-      "GridCraft.TextData"
+      "PlunderLedger.TextData"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Capabilities\\FileAssociations",
+      "Software\\PlunderLedger\\Capabilities\\FileAssociations",
       ".tsv",
-      "GridCraft.TextData"
+      "PlunderLedger.TextData"
     ],
     [
       "-1",
       "Software\\RegisteredApplications",
-      "GridCraft",
-      "Software\\GridCraft\\Capabilities"
+      "Plunder Ledger",
+      "Software\\PlunderLedger\\Capabilities"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Installer",
+      "Software\\PlunderLedger\\Installer",
       "DesktopShortcut",
       "[DESKTOPSHORTCUT]"
     ],
     [
       "-1",
-      "Software\\GridCraft\\Installer",
+      "Software\\PlunderLedger\\Installer",
       "DesktopShortcutComponent",
       "#1"
     ]

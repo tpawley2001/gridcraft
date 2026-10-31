@@ -563,7 +563,7 @@ pub(crate) fn paint_headers(
                 let cr = Rect::from_min_size(pos2(x, top.top()), vec2(w, top.height()));
                 if col_sel(c) {
                     pc.rect_filled(cr, 0.0, if full_col(c) { t.header_all_bg } else { t.header_sel_bg });
-                    pc.line_segment([pos2(cr.left(), cr.bottom() - 1.0), pos2(cr.right(), cr.bottom() - 1.0)], Stroke::new(2.0, t.accent));
+                    pc.line_segment([pos2(cr.left(), cr.bottom() - 1.0), pos2(cr.right(), cr.bottom() - 1.0)], Stroke::new(2.0, t.sel_border));
                 }
                 pc.line_segment([pos2(cr.right() - 0.5, cr.top() + 3.0), pos2(cr.right() - 0.5, cr.bottom())], Stroke::new(1.0, t.header_line));
                 let (before, after) = hidden_around(c, |i| sh.col_width(i));
@@ -604,7 +604,7 @@ pub(crate) fn paint_headers(
                 let cr = Rect::from_min_size(pos2(left.left(), y), vec2(left.width(), h));
                 if row_sel(rr) {
                     pr.rect_filled(cr, 0.0, if full_row(rr) { t.header_all_bg } else { t.header_sel_bg });
-                    pr.line_segment([pos2(cr.right() - 1.0, cr.top()), pos2(cr.right() - 1.0, cr.bottom())], Stroke::new(2.0, t.accent));
+                    pr.line_segment([pos2(cr.right() - 1.0, cr.top()), pos2(cr.right() - 1.0, cr.bottom())], Stroke::new(2.0, t.sel_border));
                 }
                 pr.line_segment([pos2(cr.left() + 3.0, cr.bottom() - 0.5), pos2(cr.right(), cr.bottom() - 0.5)], Stroke::new(1.0, t.header_line));
                 let (before, after) = hidden_around(rr, |i| sh.row_height(i));

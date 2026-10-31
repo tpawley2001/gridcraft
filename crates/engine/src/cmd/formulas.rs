@@ -468,7 +468,7 @@ fn holds_gridcraft_data(wb: &Workbook, name: &str) -> bool {
 fn refuse_stash_name(wb: &Workbook, p: &Json, name: &str) -> Result<()> {
     if holds_gridcraft_data(wb, name) && !bool_param(p, "force").unwrap_or(false) {
         return Err(EngineError::Other(format!(
-            "'{name}' is a name GridCraft keeps its own data in (stored macros, scripts or views). Pass `force: true` to change it anyway."
+            "'{name}' is a name the app keeps its own data in (stored macros, scripts or views). Pass `force: true` to change it anyway."
         )));
     }
     Ok(())

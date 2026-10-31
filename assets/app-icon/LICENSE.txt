@@ -1,13 +1,12 @@
-GridCraft app icon (gridcraft.svg and every file derived from it in this directory:
-gridcraft-1024.png, gridcraft-macos-512.png, gridcraft.icns, gridcraft.ico, hicolor/).
+Plunder Ledger app icon (every file in this directory: plunder-ledger-1024.png,
+plunder-ledger-macos-512.png, plunder-ledger.icns, plunder-ledger.ico, hicolor/).
 
-PLACEHOLDER artwork: original work written for this project by GridCraft contributors (simple
-hand-written SVG geometry). No third-party material. Licensed like the rest of GridCraft, under
-either of
+Original artwork drawn in code for Plunder Ledger (crates/ui-egui/src/brand/icon.rs) and rendered
+by `cargo run -p gridcraft-ui-egui --example app_icon -- assets/app-icon`. No third-party material.
+
+Copyright (c) 2026 Hillyard Tech. Licensed, like the rest of this repository, under either of
 
   * Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
   * MIT license (https://opensource.org/licenses/MIT)
 
 at your option.
-
-Regenerate the derived files with packaging/icons.sh.

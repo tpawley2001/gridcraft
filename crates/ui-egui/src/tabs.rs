@@ -223,7 +223,7 @@ pub fn sheet_tabs(app: &mut SheetApp, ui: &mut Ui) {
                                         app.grid.renaming_tab = None;
                                     }
                                 } else {
-                                    ui.painter().text(r.center(), Align2::CENTER_CENTER, &name, font, if active { t.accent } else { t.text });
+                                    ui.painter().text(r.center(), Align2::CENTER_CENTER, &name, font, if active { t.accent_dark } else { t.text });
                                 }
                                 // A right-click activates the tab too, as in Excel, so the menu's sheet commands (Protect
                                 // Sheet, Select All Sheets) act on the sheet that was clicked rather than the one that was active.

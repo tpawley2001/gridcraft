@@ -1,4 +1,4 @@
-//! GridCraft's egui frontend: an Excel-style window (title bar with Quick Access Toolbar,
+//! Plunder Ledger's egui frontend (forked from GridCraft's): an Excel-style window (title bar with Quick Access Toolbar,
 //! ribbon, formula bar, grid, sheet tabs, status bar) over `gridcraft-engine`.
 //!
 //! The UI is thin: it reads engine state and acts through [`SheetApp::run`] (engine commands by
@@ -6,17 +6,9 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-/// GridCraft as craft-update knows it, with its 128 px icon and accent colour: the update
-/// prompt shows both, and an AppImage's menu entry gets the icon.
-#[cfg(not(target_arch = "wasm32"))]
-pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
-    icon_png: Some(include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.gridcraft.png")),
-    accent: Some([0x1f, 0x9d, 0x55]),
-    ..craft_update::suite::GRIDCRAFT
-};
-
 pub mod backstage;
 mod border_preview;
+pub mod brand;
 mod cell_pictures;
 pub mod chartview;
 pub mod code_editor;
@@ -94,6 +86,10 @@ pub struct UiState {
     /// AutoSave (the title-bar switch): save saved-to-file .xlsx workbooks shortly after every
     /// change. A preference like the rest of this struct — it stays on across restarts (#1901).
     pub autosave: bool,
+    /// Pirate flavour in the chrome (File ▸ Options ▸ General): the start-page greeting, empty
+    /// states and the About tagline. On by default; menus, commands, formulas, dialogs and
+    /// errors stay plain English either way (`brand`).
+    pub pirate_speak: bool,
     pub recent: Vec<String>,
     /// One-shot keytip request for a ribbon control: set when a keytip action resolves to
     /// [`keytips::Action::Control`], consumed (and cleared) by the control's render site.
@@ -138,6 +134,7 @@ impl Default for UiState {
             animations: true,
             autocomplete: true,
             autosave: false,
+            pirate_speak: true,
             recent: vec![],
             keytip_invoke: None,
             language: i18n::Language::En,
@@ -298,9 +295,6 @@ pub struct SheetApp {
     pub native_windows: bool,
     /// View › Arrange All's layout and windows, waiting for the native windows to move.
     pub arrange_windows: Option<(String, Vec<u64>)>,
-    /// The update check, the startup prompt and a running self-update (desktop only).
-    #[cfg(not(target_arch = "wasm32"))]
-    updates_rt: updates_ui::Runtime,
 }
 
 /// Strips the engine's error prefixes for message boxes.

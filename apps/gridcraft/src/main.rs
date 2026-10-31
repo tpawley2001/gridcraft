@@ -1,4 +1,4 @@
-//! GridCraft desktop app.
+//! Plunder Ledger desktop app (forked from the GridCraft desktop app).
 //!
 //! Usage: `gridcraft [--control <port> [--control-token <token>]] [--sample <name>] [files…]`
 //!
@@ -24,7 +24,7 @@ use std::rc::Rc;
 
 use gridcraft_engine::Session;
 use gridcraft_ui_egui::doc_windows::DocWindows;
-use gridcraft_ui_egui::{Services, SheetApp};
+use gridcraft_ui_egui::{Services, SheetApp, brand};
 use serde_json::json;
 
 /// The app, its native window per workbook window, and (macOS) the menu bar and Finder events.
@@ -79,14 +79,14 @@ impl eframe::App for App {
 
 fn config_dir() -> Option<std::path::PathBuf> {
     if cfg!(target_os = "macos") {
-        std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Library/Application Support/GridCraft"))
+        std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Library/Application Support").join(brand::CONFIG_DIR_TITLE))
     } else if cfg!(windows) {
-        std::env::var_os("APPDATA").map(|a| std::path::PathBuf::from(a).join("GridCraft"))
+        std::env::var_os("APPDATA").map(|a| std::path::PathBuf::from(a).join(brand::CONFIG_DIR_TITLE))
     } else {
         std::env::var_os("XDG_CONFIG_HOME")
             .map(std::path::PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
-            .map(|c| c.join("gridcraft"))
+            .map(|c| c.join(brand::CONFIG_DIR))
     }
 }
 
@@ -224,13 +224,26 @@ fn open_with_system(target: &str) {
     }
 }
 
+/// The window and Dock icon, drawn in code (`brand::icon`): the full tile, or on macOS the tile on
+/// Apple's grid (an 824/1024 body with a transparent margin).
 fn icon() -> Option<egui::IconData> {
-    #[cfg(target_os = "macos")]
-    let bytes = include_bytes!("../../../assets/app-icon/gridcraft-macos-512.png");
-    #[cfg(not(target_os = "macos"))]
-    let bytes = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.gridcraft.png");
-    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
-    Some(egui::IconData { width: img.width(), height: img.height(), rgba: img.into_raw() })
+    const SIZE: u32 = 256;
+    if cfg!(target_os = "macos") {
+        let body = SIZE * 824 / 1024;
+        let off = (SIZE - body) / 2;
+        let src = brand::icon::rgba(body);
+        let mut rgba = vec![0u8; (SIZE * SIZE * 4) as usize];
+        for y in 0..body {
+            let s = (y * body * 4) as usize;
+            let d = (((y + off) * SIZE + off) * 4) as usize;
+            let row = (body * 4) as usize;
+            if let (Some(from), Some(to)) = (src.get(s..s + row), rgba.get_mut(d..d + row)) {
+                to.copy_from_slice(from);
+            }
+        }
+        return Some(egui::IconData { width: SIZE, height: SIZE, rgba });
+    }
+    Some(egui::IconData { width: SIZE, height: SIZE, rgba: brand::icon::rgba(SIZE) })
 }
 
 fn main() -> eframe::Result<()> {
@@ -255,16 +268,8 @@ fn main() -> eframe::Result<()> {
         }
     }));
     let args: Vec<String> = std::env::args().skip(1).collect();
-    // The restart helper a self-update spawns: it finishes the swap and relaunches, then exits.
-    if let Some(done) = craft_update::self_update::finish(&gridcraft_ui_egui::UPDATE_APP, &std::env::args_os().skip(1).collect::<Vec<_>>()) {
-        if let Err(e) = done {
-            eprintln!("GridCraft update helper failed: {e}");
-            std::process::exit(1);
-        }
-        return Ok(());
-    }
     if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("GridCraft {}", env!("CARGO_PKG_VERSION"));
+        println!("{} {}", brand::APP_NAME, env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     let mut control_port: Option<u16> = std::env::var("GRIDCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok());
@@ -298,7 +303,7 @@ fn main() -> eframe::Result<()> {
     if let Some(logger) = logger {
         match log_dir().filter(|_| prefs_enabled()) {
             Some(dir) => match logger.attach_dir(&dir) {
-                Ok(path) => log::info!("GridCraft {}, log file {}", env!("CARGO_PKG_VERSION"), path.display()),
+                Ok(path) => log::info!("{} {}, log file {}", brand::APP_NAME, env!("CARGO_PKG_VERSION"), path.display()),
                 // Standard error only by now (`attach_dir` gave up on the file); unlike `eprintln!`, never panics.
                 Err(e) => log::warn!("no log file: {e}"),
             },
@@ -327,11 +332,16 @@ fn main() -> eframe::Result<()> {
     for f in &files {
         app.open_path(f);
     }
+    // A plain launch (no files, no sample, no agent on the control channel) opens on the start
+    // page, File ▸ Home, with its greeting, New tiles and recent workbooks.
+    if files.is_empty() && sample.is_none() && control_port.is_none() {
+        app.open_backstage(gridcraft_ui_egui::backstage::Page::Home);
+    }
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("GridCraft")
+        .with_title(brand::APP_NAME)
         .with_inner_size([1440.0, 900.0])
         .with_min_inner_size([640.0, 420.0])
-        .with_app_id("ai.storyteller.gridcraft")
+        .with_app_id(brand::APP_ID)
         .with_drag_and_drop(true);
     if cfg!(target_os = "macos") {
         viewport = viewport.with_fullsize_content_view(true).with_titlebar_shown(false).with_title_shown(false);
@@ -376,7 +386,7 @@ fn main() -> eframe::Result<()> {
     let pending = std::cell::Cell::new(Some(app));
     let run = |options: eframe::NativeOptions| {
         eframe::run_native(
-            "GridCraft",
+            brand::APP_NAME,
             options,
             Box::new(|cc| {
                 let Some(mut app) = pending.take() else {

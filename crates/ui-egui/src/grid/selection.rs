@@ -158,7 +158,7 @@ pub(crate) fn paint_selection(input: SelectionPaintInput<'_>) {
     }
     if let crate::grid::Drag::MoveCols { before: Some(before), .. } = &app.grid.drag {
         let x = geo.x(sh, *before);
-        p.line_segment([pos2(x, geo.rect.top()), pos2(x, geo.rect.bottom())], Stroke::new(3.0, t.accent));
+        p.line_segment([pos2(x, geo.rect.top()), pos2(x, geo.rect.bottom())], Stroke::new(3.0, t.sel_border));
     }
     // Marching ants around the copied range.
     if let Some(clip) = &app.session.clipboard

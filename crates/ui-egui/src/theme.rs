@@ -1,6 +1,7 @@
 //! Design tokens and fonts.
 //!
-//! Colours are our own, tuned to read like a modern desktop spreadsheet. Fonts come from egui's
+//! Colours are Jolly Roger Office's shared pirate palette: Parchment (light) and Midnight Sea
+//! (dark), with a deep-sea ribbon band and brass accents (see [`Tokens::palette`]). Fonts come from egui's
 //! bundled faces and the operating system at runtime: the UI uses the platform UI font, cells use
 //! the best available match for the workbook font (Calibri/Carlito/Aptos/Arial…), and egui's
 //! bundled Ubuntu/Hack/egui-icons and monochrome emoji faces are the last resort. A build with
@@ -114,6 +115,14 @@ pub struct Tokens {
     pub sheet_macro_footprint: Color32,
     pub sheet_macro_conflict: Color32,
     pub sheet_macro_target: Color32,
+    /// The ribbon band (Jolly Roger Office's ribbon colour): behind the title bar and the ribbon's
+    /// tab row, with its own text, hover and accent colours ([`Tokens::on_band`]).
+    pub band: Color32,
+    pub band_text: Color32,
+    pub band_text_dim: Color32,
+    pub band_hover: Color32,
+    pub band_pressed: Color32,
+    pub band_accent: Color32,
 }
 
 /// The eight category colours, in the order of [`Tokens::cat`].
@@ -176,55 +185,71 @@ impl Tokens {
     }
 
     /// One palette for both modes: each colour is written once, with its light and dark values.
+    ///
+    /// Jolly Roger Office's shared palette: Parchment (light) and Midnight Sea (dark). The spec's
+    /// colours are used as given (`brand` roles: background, panel, ribbon band, text, accent,
+    /// danger, selection, borders); the other chrome roles (hover, pressed, dim text, header fills)
+    /// are tints between them, chosen to pass `contrast_tests`. Where a spec colour is too faint
+    /// for text on its surface (brass on parchment), the fill keeps the spec colour and text uses
+    /// `accent_dark`, a deeper shade of it.
     fn palette(dark: bool) -> Tokens {
         Tokens {
             dark,
-            window: pick(dark, Color32::from_rgb(0xF3, 0xF3, 0xF3), Color32::from_rgb(0x29, 0x29, 0x29)),
-            ribbon: pick(dark, Color32::from_rgb(0xFF, 0xFF, 0xFF), Color32::from_rgb(0x33, 0x33, 0x33)),
-            ribbon_border: pick(dark, Color32::from_rgb(0xE3, 0xE3, 0xE3), Color32::from_rgb(0x40, 0x40, 0x40)),
-            text: pick(dark, Color32::from_rgb(0x24, 0x24, 0x24), Color32::from_rgb(0xEE, 0xEE, 0xEE)),
-            text_dim: pick(dark, Color32::from_rgb(0x61, 0x61, 0x61), Color32::from_rgb(0xB0, 0xB0, 0xB0)),
-            text_disabled: pick(dark, Color32::from_rgb(0xB0, 0xB0, 0xB0), Color32::from_rgb(0x70, 0x70, 0x70)),
-            accent: pick(dark, Color32::from_rgb(0x10, 0x7C, 0x41), Color32::from_rgb(0x5C, 0xC5, 0x87)),
-            accent_dark: pick(dark, Color32::from_rgb(0x0B, 0x5E, 0x31), Color32::from_rgb(0x3F, 0xA8, 0x6C)),
-            accent_soft: pick(dark, Color32::from_rgb(0xDF, 0xF1, 0xE6), Color32::from_rgb(0x23, 0x45, 0x31)),
-            hover: pick(dark, Color32::from_rgb(0xEB, 0xEB, 0xEB), Color32::from_rgb(0x42, 0x42, 0x42)),
-            pressed: pick(dark, Color32::from_rgb(0xDD, 0xDD, 0xDD), Color32::from_rgb(0x4D, 0x4D, 0x4D)),
-            separator: pick(dark, Color32::from_rgb(0xE0, 0xE0, 0xE0), Color32::from_rgb(0x48, 0x48, 0x48)),
-            grid_bg: Color32::WHITE,
-            desk: pick(dark, Color32::from_rgb(0xDE, 0xDE, 0xDE), Color32::from_rgb(0x3A, 0x3A, 0x3A)),
-            gridline: Color32::from_rgb(0xE1, 0xE1, 0xE1),
-            header_bg: pick(dark, Color32::from_rgb(0xF8, 0xF8, 0xF8), Color32::from_rgb(0x30, 0x30, 0x30)),
-            header_text: pick(dark, Color32::from_rgb(0x42, 0x42, 0x42), Color32::from_rgb(0xCC, 0xCC, 0xCC)),
-            header_line: pick(dark, Color32::from_rgb(0xD6, 0xD6, 0xD6), Color32::from_rgb(0x45, 0x45, 0x45)),
-            header_sel_bg: pick(dark, Color32::from_rgb(0xE1, 0xE1, 0xE1), Color32::from_rgb(0x45, 0x45, 0x45)),
-            header_sel_text: pick(dark, Color32::from_rgb(0x0B, 0x5E, 0x31), Color32::from_rgb(0x6F, 0xD3, 0x9A)),
-            header_all_bg: pick(dark, Color32::from_rgb(0xC8, 0xE6, 0xD3), Color32::from_rgb(0x2E, 0x55, 0x3E)),
-            sel_fill: pick(dark, Color32::from_rgba_unmultiplied(0x10, 0x7C, 0x41, 0x1C), Color32::from_rgba_unmultiplied(0x10, 0x7C, 0x41, 0x24)),
-            sel_border: Color32::from_rgb(0x10, 0x7C, 0x41),
-            input_bg: pick(dark, Color32::WHITE, Color32::from_rgb(0x1F, 0x1F, 0x1F)),
-            input_border: pick(dark, Color32::from_rgb(0xD1, 0xD1, 0xD1), Color32::from_rgb(0x50, 0x50, 0x50)),
-            tab_bar: pick(dark, Color32::from_rgb(0xF3, 0xF3, 0xF3), Color32::from_rgb(0x29, 0x29, 0x29)),
-            tab_active: pick(dark, Color32::WHITE, Color32::from_rgb(0x3A, 0x3A, 0x3A)),
-            status_bar: pick(dark, Color32::from_rgb(0xF3, 0xF3, 0xF3), Color32::from_rgb(0x29, 0x29, 0x29)),
+            // Spec: background parchment / midnight.
+            window: pick(dark, rgb(0xF4E9D0), rgb(0x0F1B24)),
+            // Spec: panel.
+            ribbon: pick(dark, rgb(0xEADBB8), rgb(0x16262F)),
+            // Spec: borders (weathered wood / sea slate).
+            ribbon_border: pick(dark, rgb(0x8C6D46), rgb(0x3A4F5C)),
+            // Spec: text (ink / sail).
+            text: pick(dark, rgb(0x2B1D0E), rgb(0xE8DCC0)),
+            text_dim: pick(dark, rgb(0x5A4530), rgb(0xB5AA92)),
+            text_disabled: pick(dark, rgb(0xA38F70), rgb(0x667680)),
+            // Spec: accent (brass / gold).
+            accent: pick(dark, rgb(0xB8860B), rgb(0xD4A017)),
+            accent_dark: pick(dark, rgb(0x6B4E05), rgb(0xD4A017)),
+            // Spec: selection #C9A227 at 35 % over the background.
+            accent_soft: pick(dark, rgb(0xE5D095), rgb(0x504A25)),
+            hover: pick(dark, rgb(0xE6D5AE), rgb(0x1E3340)),
+            pressed: pick(dark, rgb(0xDCC799), rgb(0x284252)),
+            separator: pick(dark, rgb(0xCDB892), rgb(0x2A3D49)),
+            grid_bg: rgb(0xFFFDF8),
+            desk: pick(dark, rgb(0xDCCDA8), rgb(0x0A141B)),
+            gridline: rgb(0xE4DBC8),
+            header_bg: pick(dark, rgb(0xEADBB8), rgb(0x16262F)),
+            header_text: pick(dark, rgb(0x4A3826), rgb(0xCFC3A8)),
+            header_line: pick(dark, rgb(0xC4AE85), rgb(0x3A4F5C)),
+            header_sel_bg: pick(dark, rgb(0xDDC27A), rgb(0x4A4222)),
+            header_sel_text: pick(dark, rgb(0x2B1D0E), rgb(0xF2DC96)),
+            header_all_bg: pick(dark, rgb(0xD2B76A), rgb(0x5A4E1E)),
+            // Spec: selection #C9A227 at 35 %.
+            sel_fill: Color32::from_rgba_unmultiplied(0xC9, 0xA2, 0x27, 0x59),
+            sel_border: rgb(0xB8860B),
+            input_bg: pick(dark, rgb(0xFFFBF0), rgb(0x0A141B)),
+            input_border: pick(dark, rgb(0x8C6D46), rgb(0x3A4F5C)),
+            tab_bar: pick(dark, rgb(0xF4E9D0), rgb(0x0F1B24)),
+            tab_active: pick(dark, rgb(0xFFFBF0), rgb(0x16262F)),
+            status_bar: pick(dark, rgb(0xEADBB8), rgb(0x16262F)),
             cell_text: Color32::BLACK,
-            menu_bg: pick(dark, Color32::WHITE, Color32::from_rgb(0x30, 0x30, 0x30)),
-            shadow: pick(dark, Color32::from_black_alpha(40), Color32::from_black_alpha(90)),
-            danger: pick(dark, Color32::from_rgb(0xC4, 0x2B, 0x1C), Color32::from_rgb(0xFF, 0x95, 0x85)),
-            error_check_green: pick(dark, Color32::from_rgb(0x1E, 0x8E, 0x3E), Color32::from_rgb(0x4C, 0xC2, 0x6B)),
-            warning_fill: Color32::from_rgb(0xF2, 0xB7, 0x05),
-            warning_ink: Color32::BLACK,
-            notice_warn_bg: pick(dark, Color32::from_rgb(0xFF, 0xF4, 0xCE), Color32::from_rgb(0x4A, 0x3F, 0x1E)),
-            notice_warn_border: pick(dark, Color32::from_rgb(0xF0, 0xC3, 0x6E), Color32::from_rgb(0x7A, 0x67, 0x30)),
-            notice_info_bg: pick(dark, Color32::from_rgb(0xEA, 0xF2, 0xFB), Color32::from_rgb(0x24, 0x33, 0x44)),
-            notice_info_border: pick(dark, Color32::from_rgb(0xB9, 0xD2, 0xEC), Color32::from_rgb(0x3B, 0x55, 0x72)),
-            on_accent: pick(dark, Color32::WHITE, rgb(0x0F2A1A)),
+            menu_bg: pick(dark, rgb(0xFAF2DF), rgb(0x16262F)),
+            shadow: pick(dark, Color32::from_black_alpha(46), Color32::from_black_alpha(110)),
+            // Spec: danger (oxblood / signal red). The spec's dark #C0392B is under 4.5:1 for text
+            // on Midnight Sea, so dark danger text uses a lighter tint of it.
+            danger: pick(dark, rgb(0x8B1E1E), rgb(0xF07A6E)),
+            error_check_green: pick(dark, rgb(0x1E7A3A), rgb(0x4CC26B)),
+            warning_fill: rgb(0xD4A017),
+            warning_ink: rgb(0x2B1D0E),
+            notice_warn_bg: pick(dark, rgb(0xF5E2A6), rgb(0x3A3218)),
+            notice_warn_border: pick(dark, rgb(0xC9A227), rgb(0x7A6420)),
+            notice_info_bg: pick(dark, rgb(0xDCE6EA), rgb(0x17303D)),
+            notice_info_border: pick(dark, rgb(0x8FA9B8), rgb(0x2F5568)),
+            on_accent: pick(dark, rgb(0x2B1D0E), rgb(0x0F1B24)),
             cat: pick(
                 dark,
-                [rgb(0x2F6FCF), rgb(0x1E8A4C), rgb(0xC8601A), rgb(0xC8372D), rgb(0x8350C8), rgb(0x13808A), rgb(0x9C6C00), rgb(0x5A6B7D)],
+                [rgb(0x1F5FA8), rgb(0x2C6E3A), rgb(0xA4500F), rgb(0x8B1E1E), rgb(0x6A3D9A), rgb(0x116873), rgb(0x7A5A08), rgb(0x4B5866)],
                 [rgb(0x6EA8F7), rgb(0x5CC587), rgb(0xF0965A), rgb(0xF07B6E), rgb(0xB394EE), rgb(0x4CC7CF), rgb(0xF2C14E), rgb(0xA9B6C4)],
             ),
-            paper: pick(dark, Color32::WHITE, rgb(0x454545)),
+            paper: pick(dark, rgb(0xFFFBF0), rgb(0x2A3D49)),
             ref_colors: pick(
                 dark,
                 SHEET_REF_COLORS,
@@ -232,18 +257,41 @@ impl Tokens {
             ),
             sheet_ref_colors: SHEET_REF_COLORS,
             syntax: pick(dark, LIGHT_SYNTAX, DARK_SYNTAX),
-            warning: rgb(0xF2C32E),
-            on_warning: rgb(0x1F1F1F),
+            warning: rgb(0xD4A017),
+            on_warning: rgb(0x2B1D0E),
             sheet_control_bg: SHEET_CONTROL_BG,
             sheet_control_border: SHEET_CONTROL_BORDER,
             sheet_control_text: SHEET_CONTROL_TEXT,
             sheet_track: SHEET_TRACK,
-            recording: pick(dark, rgb(0xC42B1C), rgb(0xF1705F)),
-            breakpoint: pick(dark, rgb(0xD13438), rgb(0xF1707A)),
+            recording: pick(dark, rgb(0x8B1E1E), rgb(0xF1705F)),
+            breakpoint: pick(dark, rgb(0x8B1E1E), rgb(0xF1707A)),
             sheet_macro_input: SHEET_MACRO_INPUT,
             sheet_macro_footprint: SHEET_MACRO_FOOTPRINT,
             sheet_macro_conflict: SHEET_MACRO_CONFLICT,
             sheet_macro_target: SHEET_MACRO_TARGET,
+            band: pick(dark, rgb(0x1F3A4D), rgb(0x0A141B)),
+            band_text: pick(dark, rgb(0xF4E9D0), rgb(0xE8DCC0)),
+            band_text_dim: pick(dark, rgb(0xCDBF9C), rgb(0xA99E86)),
+            band_hover: pick(dark, rgb(0x223F55), rgb(0x16262F)),
+            band_pressed: pick(dark, rgb(0x36607A), rgb(0x1E3340)),
+            band_accent: rgb(0xD4A017),
+        }
+    }
+
+    /// The tokens for controls drawn on the ribbon band (the title bar and the ribbon's tab row):
+    /// the spec's ribbon colour behind ribbon text, with the gold accent.
+    pub fn on_band(&self) -> Tokens {
+        Tokens {
+            window: self.band,
+            text: self.band_text,
+            text_dim: self.band_text_dim,
+            text_disabled: self.band_hover.lerp_to_gamma(self.band_text_dim, 0.55),
+            hover: self.band_hover,
+            pressed: self.band_pressed,
+            accent: self.band_accent,
+            accent_dark: self.band_accent,
+            on_accent: rgb(0x1F3A4D),
+            ..*self
         }
     }
 
@@ -290,7 +338,7 @@ pub fn apply(ctx: &egui::Context, dark: bool) {
         v.extreme_bg_color = t.input_bg;
         v.selection.bg_fill = t.accent_soft;
         v.selection.stroke = Stroke::new(1.0, t.accent);
-        v.hyperlink_color = t.accent;
+        v.hyperlink_color = t.accent_dark;
         v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, t.text);
         v.widgets.inactive.fg_stroke = Stroke::new(1.0, t.text);
         v.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
@@ -353,11 +401,18 @@ mod contrast_tests {
         for (name, bg) in surfaces {
             add(&format!("text on {name}"), t.text, bg, TEXT);
             add(&format!("dim text on {name}"), t.text_dim, bg, TEXT);
-            add(&format!("accent glyph on {name}"), t.accent, bg, GLYPH);
+            add(&format!("accent glyph on {name}"), t.accent_dark, bg, GLYPH);
             add(&format!("danger on {name}"), t.danger, bg, TEXT);
         }
         add("text on pressed", t.text, t.pressed, TEXT);
-        add("accent text (File, contextual tabs) on window", t.accent, t.window, TEXT);
+        add("accent text (File, contextual tabs) on window", t.accent_dark, t.window, TEXT);
+        add("on_accent on accent fill", t.on_accent, t.accent, TEXT);
+        // The ribbon band (title bar and ribbon tabs).
+        let b = t.on_band();
+        for (name, fg, min) in [("text", b.text, TEXT), ("dim text", b.text_dim, TEXT), ("accent", b.accent, TEXT)] {
+            add(&format!("band {name}"), fg, b.window, min);
+            add(&format!("band {name} on hover"), fg, b.hover, min);
+        }
         for (name, bg) in [("ribbon", t.ribbon), ("menu", t.menu_bg), ("hover", t.hover), ("pressed", t.pressed)] {
             for c in Cat::ALL {
                 add(&format!("{c:?} icon colour on {name}"), t.cat(c), bg, GLYPH);
@@ -399,7 +454,7 @@ mod contrast_tests {
         add("breakpoint on window", t.breakpoint, t.window, GLYPH);
         add("breakpoint on current step", t.breakpoint, t.accent_soft, GLYPH);
         add("text on current step", t.text, t.accent_soft, TEXT);
-        add("current step arrow", t.accent, t.accent_soft, GLYPH);
+        add("current step arrow", t.accent_dark, t.accent_soft, GLYPH);
         add("error marker on window", t.danger, t.window, GLYPH);
         v
     }

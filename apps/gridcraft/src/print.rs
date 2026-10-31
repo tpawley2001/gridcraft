@@ -43,7 +43,7 @@ pub fn submit() -> Submit {
                 }),
                 grayscale: settings.grayscale,
                 scaling: craft_print::Scaling::ShrinkToFit,
-                title: "GridCraft document".into(),
+                title: format!("{} document", gridcraft_ui_egui::brand::APP_NAME),
                 ..Default::default()
             };
             let _ = sender.send(craft_print::submit(&bytes, &job).map_err(|error| error.to_string()));

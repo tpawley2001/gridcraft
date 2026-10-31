@@ -14,6 +14,10 @@ pub(super) fn options(app: &mut SheetApp, ui: &mut Ui) {
     if ui.checkbox(&mut formula_bar, lang.tr("Show formula bar")).changed() {
         app.run_or_alert("view.formulaBar", json!({"on": formula_bar}));
     }
+    let mut pirate_speak = app.ui.pirate_speak;
+    if ui.checkbox(&mut pirate_speak, lang.tr("Pirate speak (greeting and flavour text only)")).changed() {
+        app.run_or_alert("options.pirateSpeak", json!({"on": pirate_speak}));
+    }
     ui.add_space(18.0);
     section(ui, lang, "Options|Editing");
     let mut autocomplete = app.ui.autocomplete;
@@ -146,7 +150,7 @@ fn iteration_options(app: &mut SheetApp, ui: &mut Ui, lang: Language, calc: &gri
 /// committed the field is consumed so it doesn't also dismiss the message box in this frame.
 fn refuse(app: &mut SheetApp, ui: &mut Ui, text: &str) {
     ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter));
-    app.message = Some(("GridCraft".into(), app.ui.language.tr(text).into()));
+    app.message = Some((crate::brand::APP_NAME.into(), app.ui.language.tr(text).into()));
 }
 
 /// Maximum Iterations as typed: a whole number from 1 to 32767, or `None` (Excel refuses others).

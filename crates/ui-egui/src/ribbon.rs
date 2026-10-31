@@ -57,8 +57,12 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
         .exact_size(h)
         .frame(egui::Frame::NONE.fill(t.window).inner_margin(egui::Margin { left: 10, right: 10, top: 0, bottom: 6 }))
         .show(ui, |ui| {
-            // Tabs row.
+            // Tabs row, on the ribbon band (continuing the title bar's), edge to edge.
             let tabs_rect = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), 32.0));
+            let band = Rect::from_x_y_ranges(ui.max_rect().left() - 10.0..=ui.max_rect().right() + 10.0, ui.max_rect().top()..=tabs_rect.bottom());
+            ui.painter().rect_filled(band, 0.0, t.band);
+            let card_t = t;
+            let t = t.on_band();
             ui.scope_builder(egui::UiBuilder::new().max_rect(tabs_rect), |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
@@ -110,6 +114,7 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
                     }
                 });
             });
+            let t = card_t;
             if collapsed {
                 return;
             }
@@ -247,7 +252,8 @@ fn scroll_arrows(ui: &mut Ui, t: &Tokens, tab: &str, scroll: egui::scroll_area::
 /// The File tab opens the Backstage view (New, Open, Info, Save As, Print, Export, Options…), like
 /// Excel's; the ribbon's tab and collapsed state are left as they were for when it closes.
 fn file_menu(app: &mut SheetApp, ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
+    // Drawn on the ribbon band, beside the tabs.
+    let t = Tokens::get(ui.ctx()).on_band();
     let label = egui::RichText::new(app.ui.language.tr("File")).font(theme::ui_font(13.5)).color(t.accent);
     let file = ui.add(egui::Button::new(label).frame(false).min_size(vec2(46.0, 30.0)));
     if file.clicked() {
