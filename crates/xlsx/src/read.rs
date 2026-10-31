@@ -394,6 +394,15 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         wb.props.author = get("creator");
         wb.props.keywords = get("keywords");
         wb.props.description = get("description");
+        wb.props.category = get("category");
+        wb.props.language =
+            Some(get("language")).filter(|l| l.len() <= 35 && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).unwrap_or_default();
+        wb.props.last_modified_by = get("lastModifiedBy");
+        // Dates are kept only when they look like W3CDTF, so a hostile file can't smuggle markup
+        // or an unbounded string into what is written back.
+        let date = |n: &str| Some(get(n)).filter(|d| is_w3cdtf(d)).unwrap_or_default();
+        wb.props.created = date("created");
+        wb.props.modified = date("modified");
     }
     if let Some(r) = find_rel(&root_rels, "extended-properties").cloned()
         && let Ok(Some(x)) = cx.pkg.read_xml(&r.target)
@@ -467,4 +476,15 @@ pub fn parse_print_titles(text: &str) -> (TitleSpan, TitleSpan) {
         }
     }
     (rows, cols)
+}
+
+/// A W3CDTF timestamp as Office writes it (`2026-10-31T09:15:00Z`, optionally with fractional
+/// seconds or a `+hh:mm` offset): digits and the separators only, at most 40 characters.
+pub(crate) fn is_w3cdtf(s: &str) -> bool {
+    let b = s.as_bytes();
+    (10..=40).contains(&b.len())
+        && b.get(4) == Some(&b'-')
+        && b.get(7) == Some(&b'-')
+        && b.iter().take(4).all(u8::is_ascii_digit)
+        && s.chars().all(|c| c.is_ascii_digit() || matches!(c, '-' | ':' | 'T' | 'Z' | '.' | '+'))
 }

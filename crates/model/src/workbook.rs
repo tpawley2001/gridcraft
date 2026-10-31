@@ -95,6 +95,21 @@ pub struct DocProps {
     pub company: String,
     pub keywords: String,
     pub description: String,
+    /// `cp:category`.
+    #[serde(default)]
+    pub category: String,
+    /// `dc:language` (`en-US`).
+    #[serde(default)]
+    pub language: String,
+    /// `cp:lastModifiedBy`: who saved the file last, as the file says.
+    #[serde(default)]
+    pub last_modified_by: String,
+    /// `dcterms:created` and `dcterms:modified`, W3CDTF text as read (`2026-10-31T09:15:00Z`), kept
+    /// so a round trip doesn't erase when the workbook was made. Empty when the file had none.
+    #[serde(default)]
+    pub created: String,
+    #[serde(default)]
+    pub modified: String,
 }
 
 /// One phonetic (furigana) run of a string item (`<rPh>`): the reading `text` and the range of the

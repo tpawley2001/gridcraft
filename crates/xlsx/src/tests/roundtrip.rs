@@ -30,6 +30,11 @@ fn sample() -> Workbook {
         company: "Co".into(),
         keywords: "k".into(),
         description: "d".into(),
+        category: "Ledgers".into(),
+        language: "en-GB".into(),
+        last_modified_by: "Quartermaster".into(),
+        created: "2026-01-02T03:04:05Z".into(),
+        modified: "2026-10-31T09:15:00Z".into(),
     };
     wb.theme.colors[4] = 0x112233;
     wb.theme.minor_font = "Aptos".into();
@@ -1379,6 +1384,7 @@ fn doc_props_keep_boundary_whitespace() {
         company: " Co ".into(),
         keywords: " a, b ".into(),
         description: "\n  d\n".into(),
+        ..DocProps::default()
     };
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
     assert_eq!(back.props, wb.props);
@@ -1498,4 +1504,27 @@ fn a_partial_sheet_filter_is_not_folded_into_a_table() {
     let t = b.tables.first().expect("the table survived");
     assert!(t.filter.is_empty(), "the criteria landed on the wrong table column: {:?}", t.filter);
     assert!(b.autofilter.is_none(), "a sheet filter inside a table would be invalid");
+}
+
+/// Creation and modification dates, category and last-modified-by survived neither open nor
+/// save (a round trip blanked `docProps/core.xml`). Dates that aren't W3CDTF are dropped, so a
+/// file can't put markup or a huge string into what is written back.
+#[test]
+fn core_properties_keep_dates_and_last_author_but_not_junk() {
+    let mut wb = Workbook::new();
+    wb.props.created = "2025-12-24T18:00:00Z".into();
+    wb.props.modified = "2026-10-31T09:15:00.25+02:00".into();
+    wb.props.last_modified_by = "Anne Bonny".into();
+    let bytes = write_xlsx(&wb).unwrap();
+    let mut core = String::new();
+    zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap().by_name("docProps/core.xml").unwrap().read_to_string(&mut core).unwrap();
+    assert!(core.contains(r#"<dcterms:created xsi:type="dcterms:W3CDTF">2025-12-24T18:00:00Z</dcterms:created>"#), "{core}");
+    let (back, _) = read_xlsx(&bytes).unwrap();
+    assert_eq!(back.props, wb.props);
+    for junk in ["yesterday", "2026-10-31<b>", "2026-10-31T00:00:00Z2026-10-31T00:00:00Z2026"] {
+        let mut bad = Workbook::new();
+        bad.props.created = junk.into();
+        let (back, _) = read_xlsx(&write_xlsx(&bad).unwrap()).unwrap();
+        assert_eq!(back.props.created, "", "{junk}");
+    }
 }

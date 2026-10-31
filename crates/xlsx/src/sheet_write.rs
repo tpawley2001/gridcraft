@@ -336,9 +336,19 @@ fn write_sheet_drawing(s: &mut String, wb: &Workbook, si: usize, sheet: &Sheet, 
                 out.part(&format!("xl/charts/_rels/chartEx{n}.xml.rels"), None, crels.xml().into_bytes());
                 drels.add_uri(crate::chartex::REL_CHARTEX, &format!("../charts/chartEx{n}.xml"))
             } else {
-                let name = format!("xl/charts/chart{}.xml", out.charts);
+                let n = out.charts;
+                let name = format!("xl/charts/chart{n}.xml");
                 out.part(&name, Some(CT_CHART), crate::chart::write_chart(wb, si, ch, &out.book_name).into_bytes());
-                drels.add("chart", &format!("../charts/chart{}.xml", out.charts))
+                // Excel 2013 and later give every chart a style and a colour part (plain defaults
+                // here: the chart part spells out its own formatting); without them a round trip
+                // drops the relationships Excel wrote.
+                out.part(&format!("xl/charts/style{n}.xml"), Some(crate::chartex::CT_STYLE), crate::chartex::style_xml().into_bytes());
+                out.part(&format!("xl/charts/colors{n}.xml"), Some(crate::chartex::CT_COLORS), crate::chartex::colors_xml().into_bytes());
+                let mut crels = Rels::default();
+                crels.add_uri(crate::chartex::REL_STYLE, &format!("style{n}.xml"));
+                crels.add_uri(crate::chartex::REL_COLORS, &format!("colors{n}.xml"));
+                out.part(&format!("xl/charts/_rels/chart{n}.xml.rels"), None, crels.xml().into_bytes());
+                drels.add("chart", &format!("../charts/chart{n}.xml"))
             };
             objs.push(Obj::Chart(ch, rid));
         }
