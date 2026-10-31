@@ -147,8 +147,13 @@ fn read_plain(name: &str, bytes: &[u8], csv_as_text: bool) -> Result<(Workbook, 
         _ => kind.filter(|k| matches!(k, FileKind::Ods | FileKind::Xlsb)),
     };
     if let Some(import) = import {
-        let read = if import == FileKind::Ods { gridcraft_xlsx::read_ods } else { gridcraft_xlsx::read_xlsb };
-        let (wb, report) = read(bytes).map_err(|e| EngineError::Other(format!("We can't import '{name}': {e}")))?;
+        // ODS formulas are kept only when the calculator knows every function they call.
+        let read = if import == FileKind::Ods {
+            gridcraft_xlsx::read_ods_with(bytes, &gridcraft_calc::is_known_function)
+        } else {
+            gridcraft_xlsx::read_xlsb(bytes)
+        };
+        let (wb, report) = read.map_err(|e| EngineError::Other(format!("We can't import '{name}': {e}")))?;
         return Ok((wb, report.warnings));
     }
     // Text named `.xlsx` is read as text.

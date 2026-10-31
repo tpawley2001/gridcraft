@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use gridcraft_core::date::{days_in_month, serial_from_ymd};
 use gridcraft_core::{CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{Cell, NumFmt, Sheet, StyleId, Workbook};
+use gridcraft_model::{Cell, DefinedName, NumFmt, Sheet, StyleId, Workbook};
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
@@ -28,6 +28,7 @@ const MAX_MERGES: u64 = 100_000;
 const MAX_CELL_TEXT: usize = 1024 * 1024;
 const MAX_TEXT: u64 = 64 * 1024 * 1024;
 const MAX_SHEETS: usize = 1024;
+const MAX_NAMES: usize = 10_000;
 
 /// Reads only the small, exact mimetype entry, including when the ZIP uses compression.
 /// Looking at a filename or at arbitrary bytes inside the archive is not sufficient.
@@ -48,6 +49,13 @@ pub(crate) fn has_mimetype(bytes: &[u8]) -> bool {
 /// imported as constants, so editing their inputs does not recalculate the original formula.
 /// Always inspect the returned warnings. Saving to ODS is not supported.
 pub fn read_ods(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
+    read_ods_with(bytes, &|_| true)
+}
+
+/// [`read_ods`], keeping a formula only when every function it calls passes `known_function`.
+/// The engine passes the calculator's own list (this crate can't see it: format crates sit
+/// beside `calc`); bare [`read_ods`] accepts every function name.
+pub fn read_ods_with(bytes: &[u8], known_function: &dyn Fn(&str) -> bool) -> Result<(Workbook, ReadReport), IoError> {
     let mut package = Package::open(bytes)?;
     if !has_mimetype(bytes) {
         return Err(IoError::Format("missing or invalid ODS mimetype".into()));
@@ -58,6 +66,7 @@ pub fn read_ods(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let content = package.read("content.xml")?.ok_or_else(|| IoError::Format("ODS content.xml is missing".into()))?;
     let mut import = Import::new();
     import.parse(&content)?;
+    import.settle_formulas(known_function);
     if import.wb.sheets.is_empty() {
         return Err(IoError::Format("ODS contains no worksheets".into()));
     }
@@ -146,6 +155,8 @@ enum Tag {
     Row,
     Cell,
     Covered,
+    /// `table:named-range` / `table:named-expression`.
+    Name,
     Paragraph,
     Inline,
     Space,
@@ -172,6 +183,7 @@ fn tag(reader: &mut NsReader<&[u8]>, e: &BytesStart<'_>) -> Tag {
             b"table-row" => Tag::Row,
             b"table-cell" => Tag::Cell,
             b"covered-table-cell" => Tag::Covered,
+            b"named-range" | b"named-expression" => Tag::Name,
             _ => Tag::Other,
         };
     }
@@ -215,6 +227,8 @@ struct CellDraft {
     kind: Option<String>,
     raw: Option<String>,
     formula: bool,
+    /// The `table:formula` text, when the cell has one.
+    formula_text: Option<String>,
     text: String,
     paragraph: Option<usize>,
     paragraphs: usize,
@@ -233,6 +247,8 @@ struct Import {
     text: u64,
     formats: Vec<(&'static str, StyleId)>,
     spreadsheet_seen: bool,
+    /// A sheet was renamed on import, so sheet references in formulas could point elsewhere.
+    renamed: bool,
 }
 
 impl Import {
@@ -240,8 +256,21 @@ impl Import {
         let mut wb = Workbook::new();
         wb.sheets.clear();
         let mut report = ReadReport::default();
-        report.warn("ODS data-only import: formulas become their saved results and will not recalculate. Source formatting, charts, images and other features are not imported. Save a new .xlsx file; ODS saving is not supported.");
-        Self { wb, report, stack: vec![], sheet: None, row: None, cell: None, cells: 0, merges: 0, text: 0, formats: vec![], spreadsheet_seen: false }
+        report.warn("ODS import: formulas Excel can read are kept and recalculate; others become their saved results. Source formatting (other than number formats), charts, images and other features are not imported. Save a new .xlsx file; ODS saving is not supported.");
+        Self {
+            wb,
+            report,
+            stack: vec![],
+            sheet: None,
+            row: None,
+            cell: None,
+            cells: 0,
+            merges: 0,
+            text: 0,
+            formats: vec![],
+            spreadsheet_seen: false,
+            renamed: false,
+        }
     }
 
     fn parse(&mut self, bytes: &[u8]) -> Result<(), IoError> {
@@ -322,9 +351,24 @@ impl Import {
                     name = self.wb.next_sheet_name();
                 }
                 if name != original {
+                    self.renamed = true;
                     self.report.warn("Some ODS sheet names were shortened or renamed to valid, unique XLSX sheet names.");
                 }
                 self.sheet = Some(SheetDraft { sheet: Sheet::new(name), depth, row: 0 });
+            }
+            Tag::Name if self.sheet.is_none() && self.stack.starts_with(&[Tag::Document, Tag::Body, Tag::Spreadsheet]) => {
+                let name = attr(reader, e, TABLE, b"name")?.unwrap_or_default();
+                let formula = match attr(reader, e, TABLE, b"cell-range-address")? {
+                    Some(range) => crate::ods_formula::to_excel(&format!("of:=[{range}]")),
+                    None => attr(reader, e, TABLE, b"expression")?.and_then(|x| crate::ods_formula::to_excel(&x)),
+                };
+                let valid = !name.is_empty() && name.len() <= 255 && name.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '\\'));
+                match formula.filter(|f| valid && gridcraft_formula::parse(f).is_ok()) {
+                    Some(formula) if self.wb.names.len() < MAX_NAMES && !self.wb.names.iter().any(|n| n.name.eq_ignore_ascii_case(&name)) => {
+                        self.wb.names.push(DefinedName { name, scope: None, formula, comment: String::new(), hidden: false });
+                    }
+                    _ => self.report.warn("Some ODS named ranges couldn't be converted and were left out."),
+                }
             }
             Tag::Row if self.sheet.as_ref().is_some_and(|s| self.stack.get(s.depth + 1..).is_some_and(|p| p.iter().all(|t| *t == Tag::Rows))) => {
                 self.row =
@@ -343,6 +387,7 @@ impl Import {
                     Some("string") => b"string-value",
                     _ => b"value",
                 };
+                let formula_text = attr(reader, e, TABLE, b"formula")?;
                 self.cell = Some(CellDraft {
                     depth,
                     repeat: positive(attr(reader, e, TABLE, b"number-columns-repeated")?, 1, u32::MAX)?,
@@ -351,7 +396,8 @@ impl Import {
                     covered: t == Tag::Covered,
                     kind,
                     raw: attr(reader, e, OFFICE, key)?,
-                    formula: attr(reader, e, TABLE, b"formula")?.is_some(),
+                    formula: formula_text.is_some(),
+                    formula_text,
                     text: String::new(),
                     paragraph: None,
                     paragraphs: 0,
@@ -520,7 +566,38 @@ impl Import {
             },
             None => StyleId::DEFAULT,
         };
-        Cell { style, ..Cell::value(value) }
+        let formula = draft
+            .formula_text
+            .as_deref()
+            .and_then(crate::ods_formula::to_excel)
+            .map(|text| gridcraft_model::Formula::new(&text))
+            .filter(|f| f.expr.is_some())
+            .map(Arc::new);
+        Cell { style, formula, ..Cell::value(value) }
+    }
+
+    /// Keeps a formula only where recalculating it can reproduce the saved result: functions this
+    /// app knows, names the file defined and no renamed sheets. Others fall back to their value.
+    fn settle_formulas(&mut self, known: &dyn Fn(&str) -> bool) {
+        let names: Vec<String> = self.wb.names.iter().map(|n| n.name.to_ascii_uppercase()).collect();
+        let renamed = self.renamed;
+        let mut dropped = false;
+        for sheet in &mut self.wb.sheets {
+            let positions: Vec<CellRef> = sheet.cells.iter().filter(|(_, c)| c.formula.is_some()).map(|(p, _)| p).collect();
+            for pos in positions {
+                let Some(cell) = sheet.cells.get(pos) else { continue };
+                let keep = !renamed
+                    && cell.formula.as_ref().and_then(|f| f.expr.as_deref()).is_some_and(|e| crate::ods_formula::is_supported(e, &names, known));
+                if !keep {
+                    let value = Cell { formula: None, ..cell.clone() };
+                    Arc::make_mut(sheet).cells.set(pos, value);
+                    dropped = true;
+                }
+            }
+        }
+        if dropped {
+            self.report.warn("Some ODS formulas use features this app can't recalculate; those cells keep their saved results.");
+        }
     }
 
     fn finish_row(&mut self) -> Result<(), IoError> {

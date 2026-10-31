@@ -40,7 +40,7 @@ fn ods_namespace_declaration_bomb_is_rejected() {
 }
 
 #[test]
-fn ods_typed_values_and_formula_caches_are_constants_and_survive_xlsx() {
+fn ods_typed_values_formulas_and_caches_survive_xlsx() {
     let bytes = row(r#"
         <table:table-cell office:value-type="float" office:value="42.5"/>
         <table:table-cell office:value-type="boolean" office:boolean-value="true"/>
@@ -53,8 +53,11 @@ fn ods_typed_values_and_formula_caches_are_constants_and_survive_xlsx() {
         <table:table-cell office:value-type="float" office:value="NaN"><text:p>unavailable</text:p></table:table-cell>
         <table:table-cell office:value-type="boolean" office:boolean-value="0"/>
     "#);
-    let (wb, report) = read_ods(&bytes).unwrap();
-    assert!(report.warnings.iter().any(|w| w.contains("data-only") && w.contains("will not recalculate")));
+    // The engine passes the calculator's function list; here UNKNOWN stands for a function it lacks.
+    let (wb, report) = crate::read_ods_with(&bytes, &|f| f != "UNKNOWN").unwrap();
+    assert!(report.warnings.iter().any(|w| w.contains("formulas Excel can read are kept")));
+    // UNKNOWN() can't be recalculated here, so that cell keeps its (missing) result.
+    assert!(report.warnings.iter().any(|w| w.contains("can't recalculate")));
     assert!(report.warnings.iter().any(|w| w.contains("unsupported or missing")));
     let expected = [
         Value::Number(42.5),
@@ -70,7 +73,13 @@ fn ods_typed_values_and_formula_caches_are_constants_and_survive_xlsx() {
     ];
     for (c, value) in expected.iter().enumerate() {
         assert_eq!(&wb.sheets[0].value(CellRef::new(0, c as u32)), value);
-        assert!(wb.sheets[0].cell(CellRef::new(0, c as u32)).unwrap().formula.is_none());
+        let formula = wb.sheets[0].cell(CellRef::new(0, c as u32)).unwrap().formula.as_ref().map(|f| f.text.clone());
+        let want = match c {
+            5 => Some("A1*2"),
+            6 => Some("1/0"),
+            _ => None,
+        };
+        assert_eq!(formula.as_deref(), want, "column {c}");
     }
     let (reopened, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
     for (c, value) in expected.iter().enumerate() {
@@ -251,4 +260,45 @@ fn ods_blank_repeats_past_the_sheet_edge_are_clipped() {
         r#"<table:table table:name="Data"><table:table-row table:number-rows-repeated="1048576"><table:table-cell/></table:table-row><table:table-row><table:table-cell office:value-type="float" office:value="1"/></table:table-row></table:table>"#,
     );
     assert!(matches!(read_ods(&late), Err(IoError::TooLarge(_))));
+}
+
+/// LibreOffice's formulas (OpenFormula, `[.A1]` references, `;` separators) are kept as live
+/// formulas with their saved results; named ranges come along; what can't be translated or
+/// recalculated keeps its value.
+#[test]
+fn ods_formulas_and_named_ranges_are_kept_live() {
+    let body = r#"<table:table table:name="Data">
+        <table:table-row>
+          <table:table-cell office:value-type="float" office:value="2"/>
+          <table:table-cell office:value-type="float" office:value="3"/>
+          <table:table-cell table:formula="of:=SUM([.A1:.B1];1)" office:value-type="float" office:value="6"/>
+          <table:table-cell table:formula="of:=IF([.A1]&gt;1;&quot;big&quot;;&quot;small&quot;)" office:value-type="string" office:string-value="big"/>
+          <table:table-cell table:formula="of:=Rate*[.B1]" office:value-type="float" office:value="0.3"/>
+          <table:table-cell table:formula="of:=[$'Other sheet'.A1]+1" office:value-type="float" office:value="8"/>
+          <table:table-cell table:formula="of:=SUM([.A1:.A1]~[.B1])" office:value-type="float" office:value="5"/>
+          <table:table-cell table:formula="of:=ORG.LIBREOFFICE.ROUNDSIG(1;1)" office:value-type="float" office:value="1"/>
+          <table:table-cell table:formula="of:=Missing*2" office:value-type="float" office:value="4"/>
+        </table:table-row></table:table>
+        <table:table table:name="Other sheet"><table:table-row><table:table-cell office:value-type="float" office:value="7"/></table:table-row></table:table>
+        <table:named-expressions>
+          <table:named-range table:name="Rate" table:base-cell-address="$Data.$A$1" table:cell-range-address="$Data.$A$2"/>
+          <table:named-expression table:name="Bad" table:expression="of:=[.A1]~[.B1]"/>
+        </table:named-expressions>"#;
+    let (wb, report) = read_ods(&ods(body)).unwrap();
+    let f = |c: u32| wb.sheets[0].cell(CellRef::new(0, c)).and_then(|x| x.formula.as_ref().map(|f| f.text.clone()));
+    assert_eq!(f(2).as_deref(), Some("SUM(A1:B1,1)"));
+    assert_eq!(wb.sheets[0].value(CellRef::new(0, 2)), Value::Number(6.0), "the saved result is kept as the cache");
+    assert_eq!(f(3).as_deref(), Some("IF(A1>1,\"big\",\"small\")"));
+    assert_eq!(f(4).as_deref(), Some("Rate*B1"));
+    assert_eq!(f(5).as_deref(), Some("'Other sheet'!A1+1"));
+    for c in 6..=8 {
+        assert_eq!(f(c), None, "column {c} keeps its value");
+    }
+    assert_eq!(wb.sheets[0].value(CellRef::new(0, 8)), Value::Number(4.0));
+    assert_eq!(wb.names.len(), 1);
+    assert_eq!((wb.names[0].name.as_str(), wb.names[0].formula.as_str()), ("Rate", "Data!$A$2"));
+    assert!(report.warnings.iter().any(|w| w.contains("named ranges couldn't be converted")));
+    // The formulas survive an XLSX save.
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(back.sheets[0].cell(CellRef::new(0, 2)).and_then(|x| x.formula.as_ref().map(|f| f.text.clone())).as_deref(), Some("SUM(A1:B1,1)"));
 }
