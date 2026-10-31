@@ -560,6 +560,44 @@ pub struct Chart {
     /// whenever the PivotTable is refreshed or its layout changes.
     #[serde(default)]
     pub pivot: Option<String>,
+    /// Fixed axis bounds and units (Format Axis ▸ Bounds/Units); automatic when unset.
+    #[serde(default, skip_serializing_if = "ChartScale::is_auto")]
+    pub scale: ChartScale,
+}
+
+/// One value axis's scaling: `c:scaling` (min, max, log base, orientation) and the major/minor
+/// units. `None` is Excel's "Auto".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AxisScale {
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    pub major_unit: Option<f64>,
+    pub minor_unit: Option<f64>,
+    pub log_base: Option<f64>,
+    /// Values in reverse order (`orientation maxMin`).
+    pub reverse: bool,
+}
+
+impl AxisScale {
+    pub fn is_auto(&self) -> bool {
+        *self == AxisScale::default()
+    }
+}
+
+/// The scaling of a chart's value axes: `y` is the primary value axis; `x` is the horizontal value
+/// axis of a scatter or bubble chart (category axes have no bounds).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ChartScale {
+    #[serde(default)]
+    pub x: AxisScale,
+    #[serde(default)]
+    pub y: AxisScale,
+}
+
+impl ChartScale {
+    pub fn is_auto(&self) -> bool {
+        self.x.is_auto() && self.y.is_auto()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

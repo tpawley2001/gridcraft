@@ -4,7 +4,7 @@ use super::lines::{decimate, draw_markers, draw_runs};
 use super::trend::{draw_trend_labels, draw_trendlines, max_backward, max_forward, max_forward_slots, supports_trendline};
 use super::{
     Chart, ChartData, ChartKind, Ctx, Fmt, HAlign, LABEL_SIZE, MAX_CATS, MAX_LABELS, MAX_LINE_PTS, MAX_MARKERS, Prim, Scale, SeriesData, TEXT,
-    VAlign, WHITE, clean, fixed_scale, nice_scale,
+    VAlign, WHITE, clean, fixed_scale, nice_scale, with_fixed,
 };
 
 // ---------------------------------------------------------------- cartesian (column/bar/line/area/combo)
@@ -126,7 +126,7 @@ fn series_spans(data: &ChartData, fams: &[Fam], sec: &[bool], ncat: usize) -> Ve
     spans
 }
 
-fn axis_scales(data: &ChartData, fams: &[Fam], sec: &[bool], spans: &[Vec<Option<(f64, f64)>>]) -> Vec<(Scale, Fmt)> {
+fn axis_scales(chart: &Chart, data: &ChartData, fams: &[Fam], sec: &[bool], spans: &[Vec<Option<(f64, f64)>>]) -> Vec<(Scale, Fmt)> {
     // Axis scales.
     let mut axes: Vec<(Scale, Fmt)> = Vec::new();
     for axis in [false, true] {
@@ -145,7 +145,9 @@ fn axis_scales(data: &ChartData, fams: &[Fam], sec: &[bool], spans: &[Vec<Option
             (fixed_scale(if lo < -1e-9 { -1.0 } else { 0.0 }, if hi > 1e-9 || lo >= -1e-9 { 1.0 } else { 0.0 }, 0.2), Fmt::new("0%"))
         } else {
             let code = members.first().and_then(|i| data.series.get(*i)).map(|s| s.number_format.as_str()).unwrap_or("General");
-            (nice_scale(lo, hi, force_zero), Fmt::new(code))
+            // The primary axis takes the chart's fixed bounds and units.
+            let auto = nice_scale(lo, hi, force_zero);
+            (if axis { auto } else { with_fixed(auto, &chart.scale.y) }, Fmt::new(code))
         };
         axes.push((scale, fmt));
         if !axis && sec.iter().all(|s| !s) {
@@ -191,7 +193,7 @@ pub(super) fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx
 
     let spans = series_spans(data, &fams, &sec, ncat);
 
-    let axes = axis_scales(data, &fams, &sec, &spans);
+    let axes = axis_scales(chart, data, &fams, &sec, &spans);
     let Some((s1, f1)) = axes.first() else { return };
     let y1 = ValAxis { scale: *s1, fmt: f1 };
     let y2 = axes.get(1).map(|(s, f)| ValAxis { scale: *s, fmt: f });
@@ -217,6 +219,9 @@ pub(super) fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx
     let cw = cat_len / ncat_slots as f32;
     let center = |j: usize| if horizontal { plot.bottom() - (j as f32 + 0.5) * cw } else { plot.x + (j as f32 + 0.5) * cw };
     let vpos = |v: f64, sc: &Scale| if horizontal { plot.x + sc.frac(v) * plot.w } else { plot.bottom() - sc.frac(v) * plot.h };
+    // Bars and areas stop at the plot edge when fixed bounds cut through them (Excel clips them
+    // there); automatic scales always cover the data, so this changes nothing for them.
+    let inside = |v: f64, sc: &Scale| if sc.max > sc.min { v.clamp(sc.min, sc.max) } else { v };
 
     let (slot_of, nslots) = column_slots(&fams, &sec);
     let bw = cw / (nslots + 1.5);
@@ -249,8 +254,8 @@ pub(super) fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx
                     for (j, sp) in row.iter().enumerate() {
                         let (b, t) = sp.unwrap_or((0.0, 0.0));
                         let c = center(j);
-                        top.push([c, vpos(t, &sc)]);
-                        base.push([c, vpos(b, &sc)]);
+                        top.push([c, vpos(inside(t, &sc), &sc)]);
+                        base.push([c, vpos(inside(b, &sc), &sc)]);
                         // Source values (not stack totals), just above the top edge like the line labels.
                         if labels_on
                             && sp.is_some()
@@ -278,7 +283,7 @@ pub(super) fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx
                     let k = slot_of.get(i).copied().unwrap_or(0) as f32;
                     for (j, sp) in row.iter().enumerate() {
                         let Some((b, t)) = sp else { continue };
-                        let (pb, pt) = (vpos(*b, &sc), vpos(*t, &sc));
+                        let (pb, pt) = (vpos(inside(*b, &sc), &sc), vpos(inside(*t, &sc), &sc));
                         let c = center(j);
                         let lo = pb.min(pt);
                         let len = (pb - pt).abs();
@@ -386,8 +391,8 @@ pub(super) fn scatter(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) 
         }
     }
     let Some((ylo, yhi)) = value_range(all.iter().flatten().flatten().map(|p| p.1)) else { return };
-    let xs = nice_scale(xlo, xhi, false);
-    let ys = nice_scale(ylo, yhi, false);
+    let xs = with_fixed(nice_scale(xlo, xhi, false), &chart.scale.x);
+    let ys = with_fixed(nice_scale(ylo, yhi, false), &chart.scale.y);
     let fx = Fmt::new("General");
     let fy = Fmt::new(data.series.first().map(|s| s.number_format.as_str()).unwrap_or("General"));
     let plot = frame(ctx, area, CatAxis::Numeric(xs, &fx), &ValAxis { scale: ys, fmt: &fy }, None, false, chart.gridlines);

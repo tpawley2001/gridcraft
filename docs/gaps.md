@@ -49,6 +49,10 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   (`crates/model/src/features.rs`); all 2-D kinds survive XLSX round trip (#158, #161); charts
   can't be resized (#190). Smooth lines (#62), Switch Row/Column (#116) and trendlines (read,
   written, drawn) landed.
+- **Plunder Ledger fork (2026-10-31):** value-axis scaling (Format Axis bounds, major/minor
+  units, log base, reverse order) is now modelled (`Chart::scale`), read, written back in schema
+  order, and bounds + major unit are drawn (bars clip at the bounds). Reverse order and log scale
+  are kept but not yet drawn.
 - **Impact:** charts are in most business workbooks.
 - **Estimate:** 25–35 h for beta (40–60 h full). [chart-parity.md](chart-parity.md)
 

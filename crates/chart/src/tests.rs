@@ -50,6 +50,7 @@ fn chart(kind: ChartKind) -> Chart {
         source: None,
         by_rows: false,
         pivot: None,
+        scale: Default::default(),
     }
 }
 
@@ -1254,4 +1255,57 @@ fn box_whisker_draws_each_series_quartile_method() {
     assert_eq!(heights.len(), 2);
     // The boxes span 3.5 and 2.5 data units on the same value axis.
     assert!((heights[0] / heights[1] - 1.4).abs() < 0.001);
+}
+
+/// Fixed bounds and units from Format Axis replace the automatic ones; ticks start at a minimum
+/// that isn't a multiple of the unit, and unusable settings keep the automatic scale.
+#[test]
+fn fixed_axis_bounds_and_units() {
+    use gridcraft_model::AxisScale;
+    let auto = nice_scale(0.0, 61870.0, true);
+    let fixed = AxisScale { min: Some(10000.0), max: Some(150000.0), major_unit: Some(20000.0), ..AxisScale::default() };
+    let s = with_fixed(auto, &fixed);
+    assert_eq!((s.min, s.max, s.step), (10000.0, 150000.0, 20000.0));
+    assert_eq!(s.ticks(), vec![10000.0, 30000.0, 50000.0, 70000.0, 90000.0, 110000.0, 130000.0, 150000.0]);
+    // Only a maximum: the step is re-chosen for the new span.
+    let s = with_fixed(auto, &AxisScale { max: Some(1000.0), ..AxisScale::default() });
+    assert_eq!((s.min, s.max), (0.0, 1000.0));
+    assert!(s.ticks().len() <= 51 && s.step > 0.0);
+    for bad in [AxisScale { min: Some(5.0), max: Some(1.0), ..AxisScale::default() }, AxisScale { min: Some(f64::NAN), ..AxisScale::default() }] {
+        assert_eq!(with_fixed(auto, &bad), auto, "{bad:?}");
+    }
+    // A unit that would draw thousands of gridlines is ignored.
+    let s = with_fixed(auto, &AxisScale { major_unit: Some(0.001), ..AxisScale::default() });
+    assert_eq!(s.step, auto.step);
+    // Automatic scales still tick exactly as before.
+    assert_eq!(auto.ticks(), vec![0.0, 10000.0, 20000.0, 30000.0, 40000.0, 50000.0, 60000.0, 70000.0]);
+}
+
+/// Bars cut by fixed bounds stop at the plot edges, as in Excel: with the minimum at 20,000 every
+/// column starts on the same baseline (the plot bottom), and those above 40,000 end at the top.
+#[test]
+fn bars_are_clipped_to_fixed_bounds() {
+    let mut c = chart(ChartKind::ColumnClustered);
+    c.data_labels = false;
+    c.scale.y = gridcraft_model::AxisScale { min: Some(20000.0), max: Some(40000.0), ..Default::default() };
+    let d = sample(ChartKind::ColumnClustered);
+    let prims = render(&c, &d, 640.0, 400.0, &ApproxMeasure);
+    assert_sane(&prims, 640.0, 400.0);
+    let colors: Vec<Rgba> = d.series.iter().map(|s| s.color).collect();
+    let bars: Vec<(f32, f32)> = prims
+        .iter()
+        .filter_map(|p| match p {
+            Prim::Rect { y, w, h, fill: Some(f), .. } if colors.contains(f) && *w > 12.0 && *h > 0.5 => Some((*y, y + h)),
+            _ => None,
+        })
+        .collect();
+    assert!(bars.len() >= 10, "{bars:?}");
+    let bottom = bars.iter().map(|b| b.1).fold(f32::MIN, f32::max);
+    let top = bars.iter().map(|b| b.0).fold(f32::MAX, f32::min);
+    for (t, b) in &bars {
+        assert!((b - bottom).abs() < 0.01, "every bar starts on the plot bottom: {b} vs {bottom}");
+        assert!(*t >= top - 0.01);
+    }
+    // East's 45,000, 61,870, 52,000 and 41,000 all end at the top edge.
+    assert!(bars.iter().filter(|(t, _)| (t - top).abs() < 0.01).count() >= 4);
 }

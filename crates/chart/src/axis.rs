@@ -21,12 +21,15 @@ impl Scale {
         if !(span.is_finite() && self.step.is_finite() && self.step > 0.0 && span > 0.0) {
             return vec![self.min];
         }
-        let n = ((span / self.step).round() as i64).clamp(1, 50);
+        let n = ((span / self.step).floor() as i64 + i64::from((span / self.step).fract() > 1.0 - 1e-9)).clamp(1, 50);
+        // A fixed minimum (Format Axis ▸ Bounds) need not be a multiple of the step: ticks then
+        // start at the minimum, as in Excel, and only multiples of the step are snapped.
+        let aligned = ((self.min / self.step).round() * self.step - self.min).abs() < self.step * 1e-9;
         (0..=n)
             .map(|i| {
                 let v = self.min + i as f64 * self.step;
                 // Snap away accumulated float error.
-                let snapped = (v / self.step).round() * self.step;
+                let snapped = if aligned { (v / self.step).round() * self.step } else { v };
                 if snapped.abs() < self.step * 1e-9 { 0.0 } else { snapped }
             })
             .collect()
@@ -104,6 +107,24 @@ pub fn nice_scale(lo: f64, hi: f64, force_zero: bool) -> Scale {
     if !(min.is_finite() && max.is_finite()) || max <= min {
         return Scale { min: lo, max: hi, step: range };
     }
+    Scale { min, max, step }
+}
+
+/// `auto` with a chart's fixed bounds and major unit applied (Format Axis ▸ Bounds and Units).
+/// Unusable settings (not finite, minimum not below maximum, more than 50 gridlines) fall back to
+/// the automatic values.
+pub fn with_fixed(auto: Scale, fixed: &gridcraft_model::AxisScale) -> Scale {
+    let given = |v: Option<f64>| v.filter(|v| v.is_finite()).map(clean);
+    let (min, max) = (given(fixed.min).unwrap_or(auto.min), given(fixed.max).unwrap_or(auto.max));
+    if max <= min || !(max - min).is_finite() {
+        return auto;
+    }
+    let span = max - min;
+    let step = match given(fixed.major_unit).filter(|u| *u > 0.0 && span / *u <= 50.0) {
+        Some(u) => u,
+        None if (min, max) == (auto.min, auto.max) => auto.step,
+        None => nice_scale(min, max, false).step,
+    };
     Scale { min, max, step }
 }
 

@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 
 use gridcraft_core::{RangeRef, Value, category_levels};
 use gridcraft_formula::{Expr, SheetSel};
-use gridcraft_model::{Chart, ChartKind, Color, DefinedName, LegendPos, LineDash, Series, Trendline, TrendlineKind, Workbook};
+use gridcraft_model::{AxisScale, Chart, ChartKind, ChartScale, Color, DefinedName, LegendPos, LineDash, Series, Trendline, TrendlineKind, Workbook};
 
 use crate::drawing::{dml_color, srgb};
 use crate::xml::{El, esc, num};
@@ -275,7 +275,33 @@ pub fn read_chart(root: &El) -> Option<Chart> {
         source: None,
         by_rows: false,
         pivot: root.path(&["pivotSource", "name"]).map(|n| strip_book(n.text.trim()).to_string()).filter(|n| !n.is_empty()),
+        scale: ChartScale {
+            x: if scatter { x_ax.map(read_scale).unwrap_or_default() } else { AxisScale::default() },
+            y: y_ax.map(read_scale).unwrap_or_default(),
+        },
     })
+}
+
+/// A value axis's bounds, units, log base and orientation. Values that aren't finite, a log base
+/// outside 2..=1000 and a minimum not below the maximum are dropped (left automatic).
+fn read_scale(ax: &El) -> AxisScale {
+    let num = |e: Option<&El>| e.and_then(|e| e.attr("val")).and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite());
+    let scaling = ax.child("scaling");
+    let mut s = AxisScale {
+        min: num(scaling.and_then(|x| x.child("min"))),
+        max: num(scaling.and_then(|x| x.child("max"))),
+        major_unit: num(ax.child("majorUnit")).filter(|u| *u > 0.0),
+        minor_unit: num(ax.child("minorUnit")).filter(|u| *u > 0.0),
+        log_base: num(scaling.and_then(|x| x.child("logBase"))).filter(|b| (2.0..=1000.0).contains(b)),
+        reverse: scaling.and_then(|x| x.child_val("orientation")) == Some("maxMin"),
+    };
+    if let (Some(lo), Some(hi)) = (s.min, s.max)
+        && lo >= hi
+    {
+        s.min = None;
+        s.max = None;
+    }
+    s
 }
 
 // ---------------------------------------------------------------- writing
@@ -702,15 +728,17 @@ struct Ax<'a> {
     grid: bool,
     title: Option<&'a str>,
     crosses_max: bool,
+    scale: AxisScale,
 }
 
 fn axis_xml(a: &Ax<'_>) -> String {
     let mut s = format!(
-        "<c:{0}><c:axId val=\"{1}\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"{2}\"/><c:axPos val=\"{3}\"/>",
+        "<c:{0}><c:axId val=\"{1}\"/><c:scaling>{4}</c:scaling><c:delete val=\"{2}\"/><c:axPos val=\"{3}\"/>",
         if a.cat { "catAx" } else { "valAx" },
         a.id,
         a.delete as u8,
-        a.pos
+        a.pos,
+        scaling_xml(&a.scale, a.cat),
     );
     if a.grid {
         s.push_str("<c:majorGridlines/>");
@@ -727,7 +755,33 @@ fn axis_xml(a: &Ax<'_>) -> String {
     if a.cat {
         s.push_str("<c:auto val=\"1\"/><c:lblAlgn val=\"ctr\"/><c:lblOffset val=\"100\"/><c:noMultiLvlLbl val=\"0\"/></c:catAx>");
     } else {
-        s.push_str("<c:crossBetween val=\"between\"/></c:valAx>");
+        s.push_str("<c:crossBetween val=\"between\"/>");
+        // Schema order: crossBetween, majorUnit, minorUnit.
+        for (tag, v) in [("majorUnit", a.scale.major_unit), ("minorUnit", a.scale.minor_unit)] {
+            if let Some(v) = v.filter(|v| v.is_finite() && *v > 0.0) {
+                let _ = write!(s, "<c:{tag} val=\"{}\"/>", crate::xml::num(v));
+            }
+        }
+        s.push_str("</c:valAx>");
+    }
+    s
+}
+
+/// `c:scaling`'s children in schema order: logBase, orientation, max, min. A category axis
+/// keeps only its orientation.
+fn scaling_xml(sc: &AxisScale, cat: bool) -> String {
+    let mut s = String::new();
+    let finite = |v: Option<f64>| v.filter(|v| v.is_finite());
+    if !cat && let Some(b) = finite(sc.log_base).filter(|b| (2.0..=1000.0).contains(b)) {
+        let _ = write!(s, "<c:logBase val=\"{}\"/>", crate::xml::num(b));
+    }
+    let _ = write!(s, "<c:orientation val=\"{}\"/>", if sc.reverse { "maxMin" } else { "minMax" });
+    if !cat {
+        for (tag, v) in [("max", finite(sc.max)), ("min", finite(sc.min))] {
+            if let Some(v) = v {
+                let _ = write!(s, "<c:{tag} val=\"{}\"/>", crate::xml::num(v));
+            }
+        }
     }
     s
 }
@@ -805,6 +859,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: false,
                 title: ch.x_title.as_deref(),
                 crosses_max: false,
+                scale: ch.scale.x,
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
@@ -815,6 +870,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: ch.gridlines,
                 title: ch.y_title.as_deref(),
                 crosses_max: false,
+                scale: ch.scale.y,
             }));
         }
         G::Bar { bar: true, .. } => {
@@ -827,6 +883,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: false,
                 title: ch.x_title.as_deref(),
                 crosses_max: false,
+                scale: AxisScale::default(),
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
@@ -837,6 +894,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: ch.gridlines,
                 title: ch.y_title.as_deref(),
                 crosses_max: false,
+                scale: ch.scale.y,
             }));
         }
         _ => {
@@ -849,6 +907,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: false,
                 title: ch.x_title.as_deref(),
                 crosses_max: false,
+                scale: AxisScale::default(),
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
@@ -859,12 +918,33 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: ch.gridlines,
                 title: ch.y_title.as_deref(),
                 crosses_max: false,
+                scale: ch.scale.y,
             }));
         }
     }
     if secondary.is_some() {
-        s.push_str(&axis_xml(&Ax { cat: true, id: 3, cross: 4, pos: "b", delete: true, grid: false, title: None, crosses_max: false }));
-        s.push_str(&axis_xml(&Ax { cat: false, id: 4, cross: 3, pos: "r", delete: false, grid: false, title: None, crosses_max: true }));
+        s.push_str(&axis_xml(&Ax {
+            cat: true,
+            id: 3,
+            cross: 4,
+            pos: "b",
+            delete: true,
+            grid: false,
+            title: None,
+            crosses_max: false,
+            scale: AxisScale::default(),
+        }));
+        s.push_str(&axis_xml(&Ax {
+            cat: false,
+            id: 4,
+            cross: 3,
+            pos: "r",
+            delete: false,
+            grid: false,
+            title: None,
+            crosses_max: true,
+            scale: AxisScale::default(),
+        }));
     }
     s.push_str("</c:plotArea>");
     let pos = match ch.legend {
