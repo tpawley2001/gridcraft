@@ -1,4 +1,4 @@
-//! Windows only: embed the app icon and version info (VERSIONINFO) into `gridcraft.exe`, so it
+//! Windows only: embed the app icon and version info (VERSIONINFO) into `plunder-ledger.exe`, so it
 //! shows in Explorer, the taskbar, the Start menu and Alt-Tab.
 //!
 //! On every other target this does nothing. A missing resource compiler is a warning, so a
@@ -18,13 +18,13 @@ fn main() {
         .set("FileDescription", "Plunder Ledger spreadsheet")
         .set("CompanyName", "Hillyard Tech")
         .set("LegalCopyright", "Copyright (c) 2026 Hillyard Tech. Based on GridCraft by the ArtCraft team. MIT OR Apache-2.0.")
-        .set("OriginalFilename", "gridcraft.exe")
-        .set("InternalName", "gridcraft");
+        .set("OriginalFilename", "plunder-ledger.exe")
+        .set("InternalName", "plunder-ledger");
     if let Err(e) = res.compile() {
         if std::env::var_os("GRIDCRAFT_REQUIRE_WINRES").is_some() {
             eprintln!("embedding Windows resources failed: {e}");
             std::process::exit(1);
         }
-        println!("cargo:warning=gridcraft.exe built without icon/version resources: {e}");
+        println!("cargo:warning=plunder-ledger.exe built without icon/version resources: {e}");
     }
 }

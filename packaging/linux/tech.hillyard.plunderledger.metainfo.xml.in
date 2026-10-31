@@ -51,7 +51,7 @@
     <control>pointing</control>
   </supports>
   <provides>
-    <binary>gridcraft</binary>
+    <binary>plunder-ledger</binary>
     <binary>gridcraft-cli</binary>
     <mediatype>application/vnd.openxmlformats-officedocument.spreadsheetml.sheet</mediatype>
     <mediatype>application/vnd.ms-excel.sheet.macroEnabled.12</mediatype>

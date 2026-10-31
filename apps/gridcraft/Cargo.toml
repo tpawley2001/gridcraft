@@ -4,8 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-default-run = "gridcraft"
+default-run = "plunder-ledger"
 description = "GridCraft desktop app"
+
+# The desktop binary is `plunder-ledger` (the Jolly Roger Office launcher looks for it by that name);
+# the crate keeps upstream's name so the code stays easy to compare.
+[[bin]]
+name = "plunder-ledger"
+path = "src/main.rs"
 
 [lints]
 workspace = true

@@ -4,8 +4,8 @@ icon = "assets/app-icon/hicolor/256x256/apps/tech.hillyard.plunderledger.png"
 
 [linux.x86_64]
 asset = "gridcraft-{version}-linux-x86_64.tar.gz"
-exec = "gridcraft-{version}-linux-x86_64/bin/gridcraft"
+exec = "gridcraft-{version}-linux-x86_64/bin/plunder-ledger"
 
 [linux.aarch64]
 asset = "gridcraft-{version}-linux-aarch64.tar.gz"
-exec = "gridcraft-{version}-linux-aarch64/bin/gridcraft"
+exec = "gridcraft-{version}-linux-aarch64/bin/plunder-ledger"

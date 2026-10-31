@@ -10,12 +10,12 @@
   "extensions": [],
   "payloads": [
     "gridcraft-cli.exe",
-    "gridcraft.exe"
+    "plunder-ledger.exe"
   ],
   "registry": [
     [
       "-1",
-      "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\gridcraft.exe",
+      "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\plunder-ledger.exe",
       "",
       "[#GridcraftExe]"
     ],

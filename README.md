@@ -36,8 +36,8 @@ cargo run --release -p gridcraft -- --sample sales --control 7979   # + JSON con
 cargo xtask ci                                                 # fmt, clippy, tests, assets, layering, wasm
 ```
 
-The crate and binary names (`gridcraft`, `gridcraft-cli`) are kept from upstream so the code
-stays easy to compare with it; everything the user sees says Plunder Ledger. Product names,
+The desktop binary is `plunder-ledger`; crate names (`gridcraft`, `gridcraft-cli`, …) are kept
+from upstream so the code stays easy to compare with it. Product names,
 the About text and links live in one place: `crates/ui-egui/src/brand.rs`.
 
 ### Screenshots without a window

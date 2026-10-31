@@ -15,7 +15,7 @@ id: tech.hillyard.plunderledger
 runtime: org.freedesktop.Platform
 runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
-command: gridcraft
+command: plunder-ledger
 finish-args:
   - --filesystem=xdg-data/Jolly Roger Office/versions:ro
   # Display: Wayland first; X11 only when no Wayland compositor is running.
@@ -94,7 +94,7 @@ modules:
   - name: plunder-ledger
     buildsystem: simple
     build-commands:
-      - install -Dm755 bin/gridcraft /app/bin/gridcraft
+      - install -Dm755 bin/plunder-ledger /app/bin/plunder-ledger
       # Headless CLI and MCP server: `flatpak run --command=gridcraft-cli tech.hillyard.plunderledger`.
       - install -Dm755 bin/gridcraft-cli /app/bin/gridcraft-cli
       - install -Dm644 share/applications/tech.hillyard.plunderledger.desktop /app/share/applications/tech.hillyard.plunderledger.desktop

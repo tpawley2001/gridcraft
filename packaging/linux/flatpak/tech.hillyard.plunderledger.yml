@@ -16,7 +16,7 @@ runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
-command: gridcraft
+command: plunder-ledger
 finish-args:
   - --filesystem=xdg-data/Jolly Roger Office/versions:ro
   # Display: Wayland first; X11 only when no Wayland compositor is running.
@@ -97,7 +97,7 @@ modules:
         CARGO_NET_OFFLINE: 'true'
     build-commands:
       - cargo --offline build --release --locked -p gridcraft -p gridcraft-cli
-      - install -Dm755 target/release/gridcraft /app/bin/gridcraft
+      - install -Dm755 target/release/plunder-ledger /app/bin/plunder-ledger
       - install -Dm755 target/release/gridcraft-cli /app/bin/gridcraft-cli
       - install -Dm644 packaging/linux/tech.hillyard.plunderledger.desktop /app/share/applications/tech.hillyard.plunderledger.desktop
       - install -Dm644 packaging/linux/tech.hillyard.plunderledger.mime.xml /app/share/mime/packages/tech.hillyard.plunderledger.xml

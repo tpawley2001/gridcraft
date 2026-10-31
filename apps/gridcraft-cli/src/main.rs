@@ -528,27 +528,27 @@ fn mcp(args: &[String]) -> Result<(), String> {
     use gridcraft_mcp::{Backend, Headless, Remote, Server, control_addr};
     let a = Args::parse(args, &["connect", "in", "sample"], &[])?;
     a.no_extra(0)?;
-    let backend: Box<dyn Backend> = match a.opt("connect") {
-        Some(c) => {
-            let addr = control_addr(c);
-            Box::new(
-                Remote::connect(&addr)
-                    .map_err(|e| format!("cannot connect to the Plunder Ledger app at {addr}: {e} (start it with `gridcraft --control PORT`)"))?,
-            )
-        }
-        None => {
-            let session = match (a.opt("in"), a.opt("sample")) {
-                (Some(p), _) => open(p)?,
-                (None, Some(name)) => {
-                    let mut s = Session::new();
-                    exec(&mut s, "file.new", json!({"sample": name}))?;
-                    s
-                }
-                (None, None) => blank(),
-            };
-            Box::new(Headless::with_session(session))
-        }
-    };
+    let backend: Box<dyn Backend> =
+        match a.opt("connect") {
+            Some(c) => {
+                let addr = control_addr(c);
+                Box::new(Remote::connect(&addr).map_err(|e| {
+                    format!("cannot connect to the Plunder Ledger app at {addr}: {e} (start it with `plunder-ledger --control PORT`)")
+                })?)
+            }
+            None => {
+                let session = match (a.opt("in"), a.opt("sample")) {
+                    (Some(p), _) => open(p)?,
+                    (None, Some(name)) => {
+                        let mut s = Session::new();
+                        exec(&mut s, "file.new", json!({"sample": name}))?;
+                        s
+                    }
+                    (None, None) => blank(),
+                };
+                Box::new(Headless::with_session(session))
+            }
+        };
     eprintln!("gridcraft-cli: MCP server on stdio ({})", backend.describe());
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -569,7 +569,7 @@ fn send(args: &[String]) -> Result<(), String> {
     }
     let addr = control_addr(port);
     let mut r = Remote::connect(&addr)
-        .map_err(|e| format!("cannot connect to the Plunder Ledger app at {addr}: {e} (start it with `gridcraft --control {port}`)"))?;
+        .map_err(|e| format!("cannot connect to the Plunder Ledger app at {addr}: {e} (start it with `plunder-ledger --control {port}`)"))?;
     let v = r.call(method, params)?;
     outln!("{}", pretty(&v));
     Ok(())

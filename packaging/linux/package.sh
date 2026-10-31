@@ -2,7 +2,6 @@
 # Build and package Plunder Ledger for Linux (<arch> is x86_64 or aarch64, or riscv64 when cross-compiling):
 #
 #   $DIST/gridcraft-<version>-linux-<arch>.AppImage  any distro with glibc >= the build host's
-#   $DIST/gridcraft-<version>-linux-<arch>.AppImage.zsync  delta updates (needs zsyncmake)
 #   $DIST/gridcraft-<version>-linux-<arch>.deb       Debian, Ubuntu, Mint, Pop!_OS, ...
 #   $DIST/gridcraft-<version>-linux-<arch>.rpm       Fedora, openSUSE, RHEL, ...
 #   $DIST/gridcraft-<version>-linux-<arch>.tar.gz    plain FHS-style tree (bin/, share/)
@@ -56,7 +55,7 @@ STAGE="$WORK/root"
 rm -rf "$WORK"
 
 # ---- stage an FHS tree (shared by every format) -------------------------------------------------
-install -Dm755 "$BIN/gridcraft" "$STAGE/usr/bin/gridcraft"
+install -Dm755 "$BIN/plunder-ledger" "$STAGE/usr/bin/plunder-ledger"
 install -Dm755 "$BIN/gridcraft-cli" "$STAGE/usr/bin/gridcraft-cli"
 "${CROSS_COMPILE:-}strip" "$STAGE/usr/bin/gridcraft" "$STAGE/usr/bin/gridcraft-cli" 2>/dev/null || true
 install -Dm644 "$HERE/$APP_ID.desktop" "$STAGE/usr/share/applications/$APP_ID.desktop"
@@ -131,7 +130,7 @@ if has appimage; then
   }
   APPDIR="$WORK/PlunderLedger.AppDir"
   cp -R "$STAGE" "$APPDIR"
-  ln -s usr/bin/gridcraft "$APPDIR/AppRun"
+  ln -s usr/bin/plunder-ledger "$APPDIR/AppRun"
   cp "$HERE/$APP_ID.desktop" "$APPDIR/$APP_ID.desktop"
   cp "$ROOT/assets/app-icon/hicolor/256x256/apps/$APP_ID.png" "$APPDIR/$APP_ID.png"
   ln -s "$APP_ID.png" "$APPDIR/.DirIcon"
@@ -166,22 +165,13 @@ if has appimage; then
   RUNTIME="$(cd "$(dirname "$RUNTIME")" && pwd)/$(basename "$RUNTIME")"
   # A .zsync left by an earlier run would hide a missing zsyncmake and describe another file.
   rm -f "$OUT.zsync"
-  # Update information: AppImageUpdate, AppImageLauncher and the like read it from the file and
-  # fetch only the blocks that changed in a newer release, through the .zsync published next to
-  # each AppImage on GitHub Releases. `latest` is the newest published release that is not a
-  # pre-release. A fork's builds point at its own releases through GITHUB_REPOSITORY.
-  REPO="${GITHUB_REPOSITORY:-storytold/gridcraft}"
-  UPDATE_INFO="gh-releases-zsync|${REPO%%/*}|${REPO#*/}|latest|gridcraft-*-linux-$ARCH.AppImage.zsync"
+  # No update information: Plunder Ledger has no update channel, so AppImageUpdate and the like
+  # never fetch upstream (GridCraft) builds over it.
   # Extract-and-run: works without FUSE (containers, CI). The output embeds the static runtime,
   # so users don't need libfuse2 either. With zsyncmake on the host (CI installs the zsync
   # package) appimagetool also writes the .zsync, into its working directory, hence the cd.
-  (cd "$DIST" && ARCH="$ARCH" APPIMAGE_EXTRACT_AND_RUN=1 "$TOOL" --no-appstream --runtime-file "$RUNTIME" -u "$UPDATE_INFO" "$APPDIR" "$OUT")
+  (cd "$DIST" && ARCH="$ARCH" APPIMAGE_EXTRACT_AND_RUN=1 "$TOOL" --no-appstream --runtime-file "$RUNTIME" "$APPDIR" "$OUT")
   echo "wrote $OUT"
-  if [[ -s "$OUT.zsync" ]]; then
-    echo "wrote $OUT.zsync"
-  else
-    warn "zsyncmake not found, so $OUT.zsync was not written; AppImage delta updates need it"
-  fi
 fi
 
 if [[ -z "${CROSS_TARGET:-}" ]]; then

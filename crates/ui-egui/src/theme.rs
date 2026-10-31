@@ -337,7 +337,7 @@ pub fn apply(ctx: &egui::Context, dark: bool) {
         v.window_fill = t.menu_bg;
         v.extreme_bg_color = t.input_bg;
         v.selection.bg_fill = t.accent_soft;
-        v.selection.stroke = Stroke::new(1.0, t.accent);
+        v.selection.stroke = Stroke::new(1.0, t.accent_dark);
         v.hyperlink_color = t.accent_dark;
         v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, t.text);
         v.widgets.inactive.fg_stroke = Stroke::new(1.0, t.text);

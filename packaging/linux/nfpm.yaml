@@ -55,8 +55,8 @@ overrides:
       - xdg-desktop-portal
 
 contents:
-  - src: ${STAGE}/usr/bin/gridcraft
-    dst: /usr/bin/gridcraft
+  - src: ${STAGE}/usr/bin/plunder-ledger
+    dst: /usr/bin/plunder-ledger
     file_info: { mode: 0755 }
   - src: ${STAGE}/usr/bin/gridcraft-cli
     dst: /usr/bin/gridcraft-cli

@@ -153,11 +153,11 @@
     <?endif?>
     <ComponentGroup Id="GridcraftFiles" Directory="INSTALLFOLDER">
       <Component Id="GridcraftApp" Guid="0507D4B6-12FF-4882-84E1-59083E74A4EB">
-        <File Id="GridcraftExe" Source="$(var.BinDir)\gridcraft.exe" KeyPath="yes">
+        <File Id="GridcraftExe" Source="$(var.BinDir)\plunder-ledger.exe" KeyPath="yes">
           <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Plunder Ledger" Description="Plunder Ledger spreadsheet" WorkingDirectory="INSTALLFOLDER" Advertise="yes" Icon="GridcraftIcon.ico" IconIndex="0" />
         </File>
 
-        <RegistryValue Root="HKMU" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\gridcraft.exe" Value="[#GridcraftExe]" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\plunder-ledger.exe" Value="[#GridcraftExe]" Type="string" />
 
         <!-- ProgIds: how Explorer opens a file with Plunder Ledger. Nothing here sets HKCR\.<ext>'s
              default value, so the user's current default app is left alone. -->
