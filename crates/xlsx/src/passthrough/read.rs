@@ -162,6 +162,23 @@ impl KeptReader {
         seen: &mut HashSet<String>,
         through: &[&str],
     ) -> Result<(), String> {
+        p.parts.extend(self.parts_of(cx, roots, seen, through)?);
+        for r in roots {
+            if !p.rels.iter().any(|x| x.id == r.id) {
+                p.rels.push(r.clone());
+            }
+        }
+        Ok(())
+    }
+
+    /// The parts behind a set of relationships (all or nothing), added to `seen`.
+    fn parts_of(
+        &mut self,
+        cx: &mut Ctx<'_>,
+        roots: &[PreservedRel],
+        seen: &mut HashSet<String>,
+        through: &[&str],
+    ) -> Result<Vec<PreservedPart>, String> {
         let mut new_parts: Vec<PreservedPart> = vec![];
         let mut scratch = seen.clone();
         for r in roots {
@@ -170,13 +187,7 @@ impl KeptReader {
             new_parts.extend(parts);
         }
         *seen = scratch;
-        p.parts.extend(new_parts);
-        for r in roots {
-            if !p.rels.iter().any(|x| x.id == r.id) {
-                p.rels.push(r.clone());
-            }
-        }
-        Ok(())
+        Ok(new_parts)
     }
 
     /// Package-root and workbook-level content.
@@ -302,6 +313,9 @@ impl KeptReader {
                 cx.warn(format!("sheet \"{name}\": {} was dropped: {why}", kind(&r.rel_type)));
             }
         }
+        if let Some(r) = rels.iter().find(|r| !r.external && is_kind(r, &["drawing"])) {
+            self.drawing_anchors(cx, name, r, &mut p, &mut seen);
+        }
         // Notes have one VML drawing per sheet; another one holds the header and footer pictures.
         let vml_drawings = rels.iter().filter(|r| is_kind(r, &["vmlDrawing"])).count();
         let notes = rels.iter().filter(|r| is_kind(r, &["comments"])).count();
@@ -380,6 +394,57 @@ impl KeptReader {
             cx.warn(format!("sheet \"{name}\": embedded objects and form controls are not shown; they are kept for saving"));
         } else {
             p.vml = None;
+        }
+    }
+
+    /// The anchors of the sheet's drawing part wrapped in `mc:AlternateContent` (form and ActiveX
+    /// control shapes, which the drawing reader does not model), with the parts they refer to.
+    fn drawing_anchors(&mut self, cx: &mut Ctx<'_>, name: &str, drawing: &PreservedRel, p: &mut Preserved, seen: &mut HashSet<String>) {
+        let anchors = match cx.pkg.read_limited(&drawing.target, MAX_META) {
+            Ok(Some(bytes)) => scan_drawing(&bytes),
+            _ => return,
+        };
+        let Some(anchors) = anchors else {
+            cx.warn(format!("sheet \"{name}\": drawing objects in markup-compatibility blocks could not be read and were dropped"));
+            return;
+        };
+        if anchors.is_empty() {
+            return;
+        }
+        let drels = match raw_rels(cx, &drawing.target) {
+            Ok(r) => r,
+            Err(e) => {
+                cx.warn(format!("sheet \"{name}\": drawing objects in markup-compatibility blocks were dropped ({e})"));
+                return;
+            }
+        };
+        for (index, xml) in anchors {
+            let mut ids = vec![];
+            let ok = map_rel_ids(&xml, &mut |id| {
+                ids.push(id.to_string());
+                Some(id.to_string())
+            })
+            .is_some();
+            let roots: Option<Vec<PreservedRel>> = ids.iter().map(|id| drels.iter().find(|r| r.id == *id).cloned()).collect();
+            let kept = match (ok, roots) {
+                (false, _) => Err("its XML is damaged".to_string()),
+                (_, None) => Err("it refers to a missing relationship".to_string()),
+                (true, Some(_)) if xml.len() > self.budget => Err("it is too large".to_string()),
+                (true, Some(roots)) => self.parts_of(cx, &roots, seen, &[]).map(|parts| (roots, parts)),
+            };
+            match kept {
+                Ok((roots, parts)) => {
+                    self.budget = self.budget.saturating_sub(xml.len());
+                    p.parts.extend(parts);
+                    for r in roots {
+                        if !p.drawing_rels.iter().any(|x| x.id == r.id) {
+                            p.drawing_rels.push(r);
+                        }
+                    }
+                    p.anchors.push(PreservedAnchor { index, xml });
+                }
+                Err(why) => cx.warn(format!("sheet \"{name}\": a drawing object in a markup-compatibility block was dropped: {why}")),
+            }
         }
     }
 
@@ -490,6 +555,50 @@ fn scan_sheet(bytes: &[u8]) -> Option<SheetScan> {
     Some(out)
 }
 
+/// The `mc:AlternateContent` children of a drawing part's root, each with its position among the
+/// root's children and the root's namespace declarations added. `None` when the XML is damaged.
+fn scan_drawing(bytes: &[u8]) -> Option<Vec<(usize, String)>> {
+    let data = xml::to_utf8(bytes);
+    let text = std::str::from_utf8(&data).ok()?;
+    let mut reader = Reader::from_str(text);
+    let mut decls: Vec<(String, String)> = vec![];
+    let mut out = vec![];
+    let mut in_root = false;
+    let mut index = 0usize;
+    loop {
+        let start = usize::try_from(reader.buffer_position()).ok()?;
+        match reader.read_event().ok()? {
+            Event::Eof => break,
+            Event::Start(e) if !in_root => {
+                in_root = true;
+                for a in e.attributes().with_checks(false).flatten() {
+                    let key = a.key.as_ref();
+                    let prefix = if key == b"xmlns" { Some(&b""[..]) } else { key.strip_prefix(b"xmlns:") };
+                    if let Some(p) = prefix
+                        && let (Ok(p), Ok(v)) = (std::str::from_utf8(p), std::str::from_utf8(&a.value))
+                        && !v.contains('"')
+                    {
+                        decls.push((p.to_string(), v.to_string()));
+                    }
+                }
+            }
+            Event::Start(e) => {
+                let local = e.local_name().as_ref().to_vec();
+                reader.read_to_end(e.name()).ok()?;
+                let end = usize::try_from(reader.buffer_position()).ok()?;
+                if local == b"AlternateContent" && end.saturating_sub(start) <= MAX_FRAGMENT {
+                    out.push((index, with_decls(text.get(start..end)?, &decls)));
+                }
+                index = index.saturating_add(1);
+            }
+            Event::Empty(_) if in_root => index = index.saturating_add(1),
+            Event::End(_) => break,
+            _ => {}
+        }
+    }
+    Some(out)
+}
+
 /// The `r:id` of an element (an `id` attribute with a namespace prefix).
 fn rel_id_attr(e: &BytesStart<'_>) -> Option<String> {
     e.attributes()
@@ -524,7 +633,11 @@ fn with_decls(frag: &str, decls: &[(String, String)]) -> String {
     let head = frag.get(..frag.find('>').unwrap_or(frag.len())).unwrap_or("");
     let mut add = String::new();
     for (p, v) in decls {
-        if !head.contains(&format!("xmlns:{p}=")) {
+        if p.is_empty() {
+            if !head.contains(" xmlns=") {
+                let _ = write!(add, " xmlns=\"{v}\"");
+            }
+        } else if !head.contains(&format!("xmlns:{p}=")) {
             let _ = write!(add, " xmlns:{p}=\"{v}\"");
         }
     }

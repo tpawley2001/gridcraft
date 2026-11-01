@@ -45,6 +45,17 @@ pub struct PreservedXml {
     pub xml: String,
 }
 
+/// A drawing anchor of a sheet's drawing part that GridCraft does not model (a form or ActiveX
+/// control shape wrapped in `mc:AlternateContent`), written back verbatim with its relationship
+/// ids rewritten.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PreservedAnchor {
+    /// Its position among the drawing part's anchors in the source file.
+    pub index: usize,
+    /// The element, namespace declarations it needs included.
+    pub xml: String,
+}
+
 /// A chart sheet (a sheet that holds one chart and no cells) kept as it was in the source file. Its
 /// part, drawing, chart, style and colour parts are in [`Preserved::parts`]; the workbook
 /// relationship to it is in [`Preserved::rels`].
@@ -77,6 +88,11 @@ pub struct Preserved {
     pub vml: Option<PreservedPart>,
     /// Chart sheets, in file order (workbook owner only).
     pub sheets: Vec<PreservedSheet>,
+    /// Unmodelled anchors of the sheet's drawing part, in file order (sheet owner only).
+    pub anchors: Vec<PreservedAnchor>,
+    /// Relationships of the sheet's drawing part that `anchors` use (ids as in the source file);
+    /// their targets are in `parts`.
+    pub drawing_rels: Vec<PreservedRel>,
 }
 
 impl Preserved {
@@ -87,9 +103,11 @@ impl Preserved {
             && self.elements.is_empty()
             && self.vml.is_none()
             && self.sheets.is_empty()
+            && self.anchors.is_empty()
     }
     /// Total bytes held.
     pub fn byte_len(&self) -> usize {
-        self.parts.iter().chain(self.vml.iter()).fold(0usize, |n, p| n.saturating_add(p.data.len()))
+        let parts = self.parts.iter().chain(self.vml.iter()).fold(0usize, |n, p| n.saturating_add(p.data.len()));
+        self.anchors.iter().fold(parts, |n, a| n.saturating_add(a.xml.len()))
     }
 }

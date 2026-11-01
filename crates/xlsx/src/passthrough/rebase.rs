@@ -44,6 +44,17 @@ impl<'a> SheetKept<'a> {
         Some(rels.add("vmlDrawing", &format!("/{name}")))
     }
 
+    /// The kept anchors of the sheet's drawing part as (position, XML), their relationships added
+    /// to the drawing's `drels`.
+    pub fn drawing_anchors(&self, drels: &mut Rels) -> Vec<(usize, String)> {
+        let Some(p) = self.p else { return vec![] };
+        if p.anchors.is_empty() {
+            return vec![];
+        }
+        let ids = attach(drels, &p.drawing_rels, &self.names);
+        p.anchors.iter().filter_map(|a| Some((a.index, remap(&a.xml, &ids)?))).collect()
+    }
+
     /// The new relationship id for `<pageSetup r:id>` (printer settings).
     pub fn page_setup_id(&self) -> Option<&str> {
         let old = &self.p?.elements.iter().find(|e| e.slot == "pageSetup")?.xml;

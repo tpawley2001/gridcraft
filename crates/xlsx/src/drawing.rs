@@ -1,6 +1,7 @@
 //! DrawingML spreadsheet drawings (`xl/drawings/drawingN.xml`): anchors, pictures, shapes and
 //! chart frames.
 
+use std::collections::HashSet;
 use std::fmt::Write as _;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
@@ -350,13 +351,49 @@ fn write_hyperlink(link: Option<&DrawingHyperlink>, rels: &mut crate::write::Rel
     format!("<a:hlinkClick r:id=\"{rid}\"{tooltip}/>")
 }
 
-/// The drawing part for a sheet's objects; adds click hyperlink relationships.
-pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], rels: &mut crate::write::Rels) -> String {
+/// The `cNvPr` ids used in kept anchor XML.
+fn kept_ids(kept: &[(usize, String)]) -> HashSet<usize> {
+    fn walk(e: &El, ids: &mut HashSet<usize>) {
+        if e.name == "cNvPr"
+            && let Some(id) = e.attr("id").and_then(|v| v.trim().parse::<usize>().ok())
+        {
+            ids.insert(id);
+        }
+        for c in &e.children {
+            walk(c, ids);
+        }
+    }
+    let mut ids = HashSet::new();
+    for (_, x) in kept {
+        if let Ok(el) = crate::xml::parse(x.as_bytes()) {
+            walk(&el, &mut ids);
+        }
+    }
+    ids
+}
+
+/// The drawing part for a sheet's objects (relationship ids already assigned), with the kept
+/// anchors GridCraft doesn't model (`(position, XML)`, relationship ids rewritten) back at their
+/// positions. Object ids skip the ids the kept anchors use; adds click hyperlink relationships.
+pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(usize, String)], rels: &mut crate::write::Rels) -> String {
+    let taken = kept_ids(kept);
+    let mut next_id = 1usize;
+    let mut written = 0usize;
+    let mut kept = kept.iter().peekable();
     let mut s = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">",
     );
-    for (i, o) in objs.iter().enumerate() {
-        let id = i + 2;
+    for o in objs {
+        while let Some((_, x)) = kept.next_if(|(i, _)| *i <= written) {
+            s.push_str(x);
+            written += 1;
+        }
+        written += 1;
+        next_id = next_id.saturating_add(1);
+        while taken.contains(&next_id) {
+            next_id = next_id.saturating_add(1);
+        }
+        let id = next_id;
         let close_tag;
         match o {
             Obj::Image(img, rid) => {
@@ -480,6 +517,9 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], rels: &mut 
         }
         s.push_str("<xdr:clientData/>");
         s.push_str(close_tag);
+    }
+    for (_, x) in kept {
+        s.push_str(x);
     }
     s.push_str("</xdr:wsDr>");
     s
