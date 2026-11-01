@@ -2,7 +2,7 @@
 //!
 //! On read, the raw bytes of unmodelled parts are kept with their content type and their
 //! relationship graph, per owner: the package root (custom document properties, ribbon
-//! customisation, add-in task panes), the workbook (custom XML, links to external workbooks with
+//! customisation, add-in task panes, the sensitivity label), the workbook (custom XML, links to external workbooks with
 //! their `<externalReferences>`, data connections, XML maps) and each sheet (query tables, cells
 //! mapped to XML elements, form controls, ActiveX controls, OLE objects, the sheet background and
 //! printer settings, with the sheet's `<picture>`, `<oleObjects>` and `<controls>` XML, the `r:id`
@@ -98,7 +98,7 @@ const NS_REL_STRICT: &str = "http://purl.oclc.org/ooxml/officeDocument/relations
 const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
 
 /// Relationship kinds (last segment of the type) kept from the package root.
-const PACKAGE_ROOTS: &[&str] = &["custom-properties", "extensibility", "webextensiontaskpanes"];
+const PACKAGE_ROOTS: &[&str] = &["custom-properties", "extensibility", "webextensiontaskpanes", "classificationlabels"];
 /// Relationship kinds kept from the workbook without a workbook element.
 const WORKBOOK_ROOTS: &[&str] = &["customXml", "connections", "xmlMaps"];
 /// Relationship kinds kept from a sheet without a sheet element.

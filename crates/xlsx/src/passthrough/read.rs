@@ -280,7 +280,7 @@ impl KeptReader {
         }
         let mut p = Preserved::default();
         let mut seen = HashSet::new();
-        // Package root: custom document properties, ribbon customisation, task panes.
+        // Package root: custom document properties, ribbon customisation, task panes, sensitivity label.
         if let Ok(root) = raw_rels(cx, "") {
             for r in root.iter().filter(|r| is_kind(r, PACKAGE_ROOTS)) {
                 let mut q = Preserved::default();
