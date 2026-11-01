@@ -134,6 +134,9 @@ pub fn read_table(cx: &mut Ctx<'_>, x: &El) -> Option<Table> {
                                 denormalized: x.flag("denormalized", false),
                             })
                         }),
+                        header_row_dxf: table_dxf(cx, c, "headerRowDxfId"),
+                        data_dxf: table_dxf(cx, c, "dataDxfId"),
+                        totals_row_dxf: table_dxf(cx, c, "totalsRowDxfId"),
                     }
                 })
                 .collect()
@@ -159,7 +162,19 @@ pub fn read_table(cx: &mut Ctx<'_>, x: &El) -> Option<Table> {
         filter: x.child("autoFilter").and_then(|e| read_autofilter(cx, e)).map(|af| af.criteria).unwrap_or_default(),
         table_type: xml_table.then(|| "xml".to_string()),
         connection_id: x.attr_u32("connectionId").filter(|_| xml_table),
+        header_row_dxf: table_dxf(cx, x, "headerRowDxfId"),
+        data_dxf: table_dxf(cx, x, "dataDxfId"),
+        totals_row_dxf: table_dxf(cx, x, "totalsRowDxfId"),
+        header_row_border_dxf: table_dxf(cx, x, "headerRowBorderDxfId"),
+        table_border_dxf: table_dxf(cx, x, "tableBorderDxfId"),
+        totals_row_border_dxf: table_dxf(cx, x, "totalsRowBorderDxfId"),
     })
+}
+
+/// The differential format a table or table column attribute points at; an index outside
+/// `<dxfs>` is dropped.
+fn table_dxf(cx: &Ctx<'_>, x: &El, attr: &str) -> Option<gridcraft_model::Style> {
+    x.attr_u32(attr).and_then(|i| cx.dxfs.get(i as usize)).cloned()
 }
 
 pub(super) fn read_comments(x: &El, sheet: &mut Sheet) {

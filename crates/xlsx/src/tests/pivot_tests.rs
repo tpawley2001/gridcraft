@@ -65,7 +65,17 @@ fn workbook() -> Workbook {
         totals_row: false,
         columns: headers
             .iter()
-            .map(|h| TableColumn { name: (*h).into(), totals: TotalsFn::None, totals_label: None, formula: None, unique_name: None, xml: None })
+            .map(|h| TableColumn {
+                name: (*h).into(),
+                totals: TotalsFn::None,
+                totals_label: None,
+                formula: None,
+                unique_name: None,
+                xml: None,
+                header_row_dxf: None,
+                data_dxf: None,
+                totals_row_dxf: None,
+            })
             .collect(),
         style: "TableStyleMedium2".into(),
         banded_rows: true,
@@ -76,6 +86,12 @@ fn workbook() -> Workbook {
         filter: vec![],
         table_type: None,
         connection_id: None,
+        header_row_dxf: None,
+        data_dxf: None,
+        totals_row_dxf: None,
+        header_row_border_dxf: None,
+        table_border_dxf: None,
+        totals_row_border_dxf: None,
     });
     wb.names.push(DefinedName { name: "SalesData".into(), scope: None, formula: "Data!$A$1:$F$9".into(), comment: String::new(), hidden: false });
 

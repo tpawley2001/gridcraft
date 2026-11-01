@@ -901,6 +901,12 @@ mod tests {
             filter: Vec::new(),
             table_type: None,
             connection_id: None,
+            header_row_dxf: None,
+            data_dxf: None,
+            totals_row_dxf: None,
+            header_row_border_dxf: None,
+            table_border_dxf: None,
+            totals_row_border_dxf: None,
         });
         let inputs = vec![("Input".to_string(), place("B2:D2"), true), ("Plain".to_string(), place("B2:D2"), false)];
         let env = Env { wb: &wb, active_sheet: 0, inputs: &inputs, output: None, item: None };

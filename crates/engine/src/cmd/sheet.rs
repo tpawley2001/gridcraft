@@ -818,6 +818,9 @@ fn shift_table_columns(t: &mut gridcraft_model::Table, at: u32, count: u32, inse
                     formula: None,
                     unique_name: None,
                     xml: None,
+                    header_row_dxf: None,
+                    data_dxf: None,
+                    totals_row_dxf: None,
                 };
                 t.columns.insert((idx + k).min(t.columns.len()), col);
             }
@@ -862,4 +865,61 @@ pub(crate) fn check_table_shift(sh: &Sheet, e: &Edit) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod table_column_dxf_tests {
+    use gridcraft_core::RangeRef;
+    use gridcraft_model::{Style, Table, TableColumn};
+
+    fn col(name: &str, bold: bool) -> TableColumn {
+        TableColumn {
+            name: name.into(),
+            totals: Default::default(),
+            totals_label: None,
+            formula: None,
+            unique_name: None,
+            xml: None,
+            header_row_dxf: None,
+            data_dxf: bold.then(|| {
+                let mut s = Style::default();
+                s.font.bold = true;
+                s
+            }),
+            totals_row_dxf: None,
+        }
+    }
+
+    #[test]
+    fn column_dxfs_move_with_inserted_and_deleted_columns() {
+        let mut t = Table {
+            id: 1,
+            name: "T".into(),
+            range: RangeRef::parse("A1:C4").unwrap(),
+            header_row: true,
+            totals_row: false,
+            columns: vec![col("a", false), col("b", true), col("c", false)],
+            style: String::new(),
+            banded_rows: true,
+            banded_cols: false,
+            first_col: false,
+            last_col: false,
+            filter_button: true,
+            filter: vec![],
+            table_type: None,
+            connection_id: None,
+            header_row_dxf: None,
+            data_dxf: None,
+            totals_row_dxf: None,
+            header_row_border_dxf: None,
+            table_border_dxf: None,
+            totals_row_border_dxf: None,
+        };
+        super::shift_table_columns(&mut t, 1, 1, true);
+        let dxfs: Vec<bool> = t.columns.iter().map(|c| c.data_dxf.is_some()).collect();
+        assert_eq!(dxfs, [false, false, true, false]);
+        t.range = RangeRef::parse("A1:D4").unwrap();
+        super::shift_table_columns(&mut t, 2, 1, false);
+        assert!(t.columns.iter().all(|c| c.data_dxf.is_none()));
+    }
 }

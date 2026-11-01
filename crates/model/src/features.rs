@@ -61,6 +61,14 @@ pub struct TableColumn {
     /// deleted; inserted columns are unmapped.
     #[serde(default)]
     pub xml: Option<XmlColumnPr>,
+    /// Differential formats (`headerRowDxfId`, `dataDxfId`, `totalsRowDxfId`) applied to this
+    /// column's header cell, data cells and totals cell. They move with the column.
+    #[serde(default)]
+    pub header_row_dxf: Option<Style>,
+    #[serde(default)]
+    pub data_dxf: Option<Style>,
+    #[serde(default)]
+    pub totals_row_dxf: Option<Style>,
 }
 
 /// A table column's binding to an XML map (`<xmlColumnPr>`).
@@ -99,6 +107,22 @@ pub struct Table {
     /// The connection (`xl/connections.xml`) an XML table is bound through.
     #[serde(default)]
     pub connection_id: Option<u32>,
+    /// Differential formats of the header row, data area and totals row (`headerRowDxfId`,
+    /// `dataDxfId`, `totalsRowDxfId`).
+    #[serde(default)]
+    pub header_row_dxf: Option<Style>,
+    #[serde(default)]
+    pub data_dxf: Option<Style>,
+    #[serde(default)]
+    pub totals_row_dxf: Option<Style>,
+    /// Border formats of the header row, the whole table and the totals row
+    /// (`headerRowBorderDxfId`, `tableBorderDxfId`, `totalsRowBorderDxfId`).
+    #[serde(default)]
+    pub header_row_border_dxf: Option<Style>,
+    #[serde(default)]
+    pub table_border_dxf: Option<Style>,
+    #[serde(default)]
+    pub totals_row_border_dxf: Option<Style>,
 }
 
 impl Table {
