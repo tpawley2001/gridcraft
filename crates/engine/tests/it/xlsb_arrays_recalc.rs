@@ -116,7 +116,7 @@ fn xlsb_arrays_recalculate_in_cells_groups_names_and_intersections() {
     // H3:H5 shared SUM(I3,{1,2}), with I3:I5 = 1,2,3.
     for r in 2..5u32 {
         data.extend(row(r));
-        data.extend(fmla(7, &[1, 2, 0, 0, 0], &7u32.to_le_bytes()));
+        data.extend(fmla(7, &[1, 2, 0, 0, 0], &[]));
         if r == 2 {
             let range: Vec<u8> = [2u32, 4, 7, 7].iter().flat_map(|v| v.to_le_bytes()).collect();
             let tokens = [vec![0x2C, 0, 0, 0, 0, 1, 0xC0], arr(), vec![0x22, 2, 4, 0]].concat();

@@ -56,31 +56,41 @@ fn xlsb_array_constants_keep_all_value_types_and_formula_text() {
 }
 
 #[test]
-fn xlsb_shared_and_array_groups_carry_extra_data() {
-    for is_array in [false, true] {
-        let rgce = if is_array { sum_array() } else { [ptg_ref_n(0, 1, true, true), array_ptg(), vec![0x22, 2, 4, 0]].concat() };
-        let rgcb = array(1, 2, &[num(1.0), num(2.0)]);
-        let mut group = rfx(0, 2, 0, 0);
-        if is_array {
-            group.push(0);
+fn xlsb_shared_formula_carries_array_extra_data() {
+    let rgce = [ptg_ref_n(0, 1, true, true), array_ptg(), vec![0x22, 2, 4, 0]].concat();
+    let group = [rfx(0, 2, 0, 0), parsed(&rgce, &array(1, 2, &[num(1.0), num(2.0)]))].concat();
+    let mut data = vec![];
+    for r in 0..3 {
+        data.extend(row(r));
+        data.extend(fmla(0, &ptg_exp(0), &[]));
+        if r == 0 {
+            data.extend(record(427, &group));
         }
-        group.extend(parsed(&rgce, &rgcb));
-        let mut data = vec![];
-        for r in 0..3 {
-            data.extend(row(r));
-            data.extend(fmla(0, &ptg_exp(0), &0u32.to_le_bytes()));
-            if r == 0 {
-                data.extend(record(if is_array { 426 } else { 427 }, &group));
-            }
-            data.extend(cell(5, 1, &f64::from(r + 1).to_le_bytes()));
-        }
-        let (wb, report) = read_xlsb(&file(&worksheet(&data, &[]))).unwrap();
-        for r in 1..=3 {
-            let expected = if is_array { "SUM({1,2})".to_owned() } else { format!("SUM(B{r},{{1,2}})") };
-            assert_eq!(ftext(&wb, &format!("A{r}")), Some(expected));
-        }
-        assert!(!report.warnings.iter().any(|w| w.contains("kept as their saved results")));
+        data.extend(cell(5, 1, &f64::from(r + 1).to_le_bytes()));
     }
+    let (wb, report) = read_xlsb(&file(&worksheet(&data, &[]))).unwrap();
+    for r in 1..=3 {
+        assert_eq!(ftext(&wb, &format!("A{r}")), Some(format!("SUM(B{r},{{1,2}})")));
+    }
+    assert!(!report.warnings.iter().any(|w| w.contains("kept as their saved results")));
+}
+
+#[test]
+fn xlsb_array_formula_carries_array_extra_data() {
+    let group = [rfx(0, 2, 0, 0), vec![0], parsed(&sum_array(), &array(1, 3, &[num(1.0), num(2.0), num(3.0)]))].concat();
+    let mut data = vec![];
+    for r in 0..3 {
+        data.extend(row(r));
+        data.extend(fmla(0, &ptg_exp(0), &[]));
+        if r == 0 {
+            data.extend(record(426, &group));
+        }
+    }
+    let (wb, report) = read_xlsb(&file(&worksheet(&data, &[]))).unwrap();
+    assert_eq!(ftext(&wb, "A1").as_deref(), Some("SUM({1,2,3})"));
+    assert_eq!(ftext(&wb, "A2"), None);
+    assert_eq!(ftext(&wb, "A3"), None);
+    assert!(!report.warnings.iter().any(|w| w.contains("kept as their saved results")));
 }
 
 #[test]

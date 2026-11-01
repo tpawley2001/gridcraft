@@ -25,7 +25,6 @@ pub(crate) enum Grid {
     /// BIFF8 (.xls): u16 rows, 8-bit columns (65,536 × 256).
     Biff8,
     /// BIFF12 (.xlsb): u32 rows, 14-bit columns (1,048,576 × 16,384), `RgceLoc` / `RgceArea`.
-    /// Shared or array formulas, strings and array constants are not decoded yet.
     Biff12,
 }
 
@@ -271,10 +270,10 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
     decode_in(rgce, rgcb, base, mode, links, Grid::Biff8)
 }
 
-/// Decodes an XLSB cell, shared, array or name formula's `rgce` and `rgcb` extra data at `base` (shared formulas'
-/// `PtgRefN` / `PtgAreaN` hold offsets from it), resolving defined names and other sheets through
-/// `links`. A `PtgExp` (resolved by the reader) and names in other workbooks
-/// (PtgNameX) are refused.
+/// Decodes an XLSB cell, shared, array or name formula's `rgce` and `rgcb` at `base`. Shared
+/// formulas' `PtgRefN` / `PtgAreaN` hold offsets from it; defined names and other sheets resolve
+/// through `links`. `PtgArray` and `PtgMemArea` consume their corresponding extra data.
+/// A `PtgExp` (resolved by the reader) and names in other workbooks (`PtgNameX`) are refused.
 pub(crate) fn decode_xlsb(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links) -> Result<Expr, Unsupported> {
     decode_in(rgce, rgcb, base, mode, links, Grid::Biff12)
 }
@@ -779,6 +778,24 @@ mod tests {
     }
 
     #[test]
+    fn decodes_xlsb_array_constant_value_types() {
+        let text = |units: &[u16]| {
+            let units = units.iter().flat_map(|u| u.to_le_bytes()).collect::<Vec<_>>();
+            [&[1][..], &((units.len() / 2) as u16).to_le_bytes(), &units].concat()
+        };
+        let values =
+            [[&[0][..], &(-2.5f64).to_le_bytes()].concat(), text(&[0xD83D, 0xDE00]), text(&[]), vec![2, 0], vec![2, 1], vec![4, 0x2A, 0, 0, 0]];
+        let extra = [&3u32.to_le_bytes()[..], &2u32.to_le_bytes(), &values.concat()].concat();
+        let decode = |tokens: &[u8], extra: &[u8]| {
+            decode_xlsb(tokens, extra, CellRef::new(0, 0), Mode::Cell, &Links::default()).map(|e| gridcraft_formula::print(&e))
+        };
+        assert_eq!(decode(&[&[0x60][..], &[0; 14]].concat(), &extra).unwrap(), "{-2.5,\"😀\";\"\",FALSE;TRUE,#N/A}");
+        let long = [&[1][..], &256u16.to_le_bytes(), &[b'x', 0].repeat(256)].concat();
+        let long = [&1u32.to_le_bytes()[..], &1u32.to_le_bytes(), &long].concat();
+        assert!(decode(&[&[0x60][..], &[0; 14]].concat(), &long).is_err());
+    }
+
+    #[test]
     fn xlsb_arrays_and_memory_extras_are_consumed_in_token_order() {
         let array = [&1u32.to_le_bytes()[..], &2u32.to_le_bytes(), &[0], &1.0f64.to_le_bytes(), &[2, 1]].concat();
         let mem = [&1u32.to_le_bytes()[..], &[0; 16]].concat();
@@ -802,6 +819,14 @@ mod tests {
         let extras = [&array[..], &array].concat();
         let expr = decode_xlsb(&tokens, &extras, CellRef::new(0, 0), Mode::Cell, &Links::default()).unwrap();
         assert_eq!(gridcraft_formula::print(&expr), "{1,TRUE}+{1,TRUE}");
+
+        for ptg in [0x26, 0x46, 0x66] {
+            let tokens = [&[ptg][..], &[0; 6], &[0x1E, 1, 0]].concat();
+            let decode = |extra: &[u8]| decode_xlsb(&tokens, extra, CellRef::new(0, 0), Mode::Cell, &Links::default());
+            for extra in [vec![], 1u32.to_le_bytes().to_vec(), [&1u32.to_le_bytes()[..], &[0; 15]].concat(), u32::MAX.to_le_bytes().to_vec()] {
+                assert!(decode(&extra).is_err());
+            }
+        }
     }
 
     #[test]
