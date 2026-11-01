@@ -112,7 +112,7 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-11-01 | minor | G0018: XLSX `pageSetup scale="0"` keeps the default 100% and is omitted on save; nonzero scales keep the existing 10–400 clamp, and zero paper size keeps the default paper. |
+| 2026-11-01 | minor | XLSX `pageSetup scale="0"` keeps the default 100% and is omitted on save; nonzero scales keep the existing 10–400 clamp, and zero paper size keeps the default paper. |
 | 2026-11-01 | minor | XLSX tables and table columns keep their differential formats (`headerRowDxfId`, `dataDxfId`, `totalsRowDxfId` and the table's border dxfs) through open + save; they move with inserted and deleted columns; an out-of-range id is dropped (`table_dxfs.rs`) |
 | 2026-11-01 | trivial | `gridcraft-cli check`: the round trip is saved and re-opened in the source's package kind (`.xlsm`, `.xltm`, `.xltx`), so a macro-enabled file no longer reports `lost relationship vbaProject`; relationship kinds compare without hyphens, so Strict `extendedProperties`/`customProperties` match transitional `extended-properties`/`custom-properties` (see [cli.md](cli.md)) |
 | 2026-10-31 | trivial | A differential format's font (`<dxf><font>`, ECMA-376 Part 1 §18.8.17) keeps its `<family>` (§18.8.18) and `<charset>` (§18.8.5) on save, written after `<name>` in Excel's order; a dxf font stating only those still writes its `<font>` (`dxf_font_charset.rs`) |
