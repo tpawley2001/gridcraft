@@ -250,7 +250,7 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
     };
 
     let mut wb_rels = Rels::default();
-    let (sheets_xml, kept, pivots) = write_sheets(wb, &mut out, active, &mut wb_rels);
+    let (sheets_xml, kept, pivots) = write_sheets(wb, &mut out, active, &mut wb_rels, kind);
 
     let names = write_defined_names(wb, &kept, &out.chart_names);
 
@@ -441,9 +441,10 @@ fn write_sheets(
     out: &mut Out,
     active: usize,
     wb_rels: &mut Rels,
+    kind: XlsxKind,
 ) -> (String, crate::passthrough::WorkbookKept, crate::pivot::PivotWriter) {
-    // Kept content first: the chart sheets among the worksheets need their relationship ids.
-    let kept = crate::passthrough::write_workbook(wb, wb_rels, out);
+    // Kept content first: the kept sheets among the worksheets need their relationship ids.
+    let kept = crate::passthrough::write_workbook(wb, wb_rels, out, kind.is_macro_enabled());
     let mut pivots = crate::pivot::PivotWriter::default();
     let mut sheets_xml = String::new();
     let any_visible = wb.sheets.iter().any(|s| s.visibility == Visibility::Visible);

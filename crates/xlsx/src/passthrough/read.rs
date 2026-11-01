@@ -30,19 +30,28 @@ fn raw_rels(cx: &mut Ctx<'_>, part: &str) -> Result<Vec<PreservedRel>, String> {
 
 // ---------------------------------------------------------------- reading
 
-/// The `<sheet>` entries of the workbook that are chart sheets, each with the number of worksheets
-/// (model sheets) before it.
-fn chart_sheet_entries<'a>(wb_xml: &'a xml::El, wb_rels: &[PreservedRel], file_to_model: &[Option<usize>]) -> Vec<(usize, &'a xml::El)> {
+/// The `<sheet>` entries of the workbook that are kept sheets (chart, dialog and macro sheets), each
+/// with the number of worksheets (model sheets) before it.
+fn kept_sheet_entries<'a>(wb_xml: &'a xml::El, wb_rels: &[PreservedRel], file_to_model: &[Option<usize>]) -> Vec<(usize, &'a xml::El)> {
     let mut out = vec![];
     let mut worksheets = 0usize;
     for (i, se) in wb_xml.child("sheets").into_iter().flat_map(|s| s.kids("sheet")).enumerate() {
         if file_to_model.get(i).copied().flatten().is_some() {
             worksheets += 1;
-        } else if se.attr("id").and_then(|id| wb_rels.iter().find(|r| r.id == id)).is_some_and(|r| is_kind(r, &["chartsheet"])) {
+        } else if se.attr("id").and_then(|id| wb_rels.iter().find(|r| r.id == id)).is_some_and(|r| is_kind(r, KEPT_SHEET_KINDS)) {
             out.push((worksheets, se));
         }
     }
     out
+}
+
+/// What a kept `<sheet>` entry is, for warnings.
+fn sheet_kind_label(se: &xml::El, wb_rels: &[PreservedRel]) -> &'static str {
+    match se.attr("id").and_then(|id| wb_rels.iter().find(|r| r.id == id)) {
+        Some(r) if is_kind(r, &["dialogsheet"]) => "dialog sheet",
+        Some(r) if is_kind(r, MACRO_SHEET_KINDS) => "macro sheet",
+        _ => "chart sheet",
+    }
 }
 
 /// Collects kept content while a package is read.
@@ -194,8 +203,9 @@ impl KeptReader {
     pub fn workbook(&mut self, cx: &mut Ctx<'_>, wb_part: &str, wb_xml: &xml::El, file_to_model: &[Option<usize>]) -> Option<Arc<Preserved>> {
         if !self.on {
             let wb_rels = raw_rels(cx, wb_part).unwrap_or_default();
-            for (_, se) in chart_sheet_entries(wb_xml, &wb_rels, file_to_model) {
-                cx.warn(format!("chart sheet \"{}\" was skipped and is not kept on save", se.attr("name").unwrap_or("")));
+            for (_, se) in kept_sheet_entries(wb_xml, &wb_rels, file_to_model) {
+                let what = sheet_kind_label(se, &wb_rels);
+                cx.warn(format!("{what} \"{}\" was skipped and is not kept on save", se.attr("name").unwrap_or("")));
             }
             if self.strict {
                 cx.warn("unmodelled content of a Strict Open XML workbook (custom XML, links, controls…) is not kept on save");
@@ -223,12 +233,17 @@ impl KeptReader {
                 cx.warn(format!("{} part {} was dropped: {why}", kind(&r.rel_type), r.target));
             }
         }
-        // Chart sheets: the sheet entry (name, state, position) plus the chart sheet part and the
-        // drawing, chart, style and colour parts behind it.
-        for (worksheets, se) in chart_sheet_entries(wb_xml, &wb_rels, file_to_model) {
+        // Chart, dialog and macro sheets: the sheet entry (name, state, position) plus the sheet
+        // part and the drawing, chart, style, colour, VML and control parts behind it.
+        for (worksheets, se) in kept_sheet_entries(wb_xml, &wb_rels, file_to_model) {
             let name = se.attr("name").unwrap_or("").to_string();
             let Some(r) = se.attr("id").and_then(|id| wb_rels.iter().find(|r| r.id == id)) else { continue };
-            match self.keep_through(cx, &mut p, std::slice::from_ref(r), &mut seen, CHART_SHEET_GRAPH) {
+            let what = sheet_kind_label(se, &wb_rels);
+            if !is_kind(r, &["chartsheet"]) {
+                let note = if is_kind(r, MACRO_SHEET_KINDS) { "; kept only when saved as a macro-enabled workbook" } else { "" };
+                cx.warn(format!("{what} \"{name}\" is kept as it is but can't be shown or edited{note}"));
+            }
+            match self.keep_through(cx, &mut p, std::slice::from_ref(r), &mut seen, KEPT_SHEET_GRAPH) {
                 Ok(()) => p.sheets.push(PreservedSheet {
                     name,
                     visibility: match se.attr("state") {
@@ -240,7 +255,7 @@ impl KeptReader {
                     before: worksheets,
                     sheet_id: se.attr_u32("sheetId").unwrap_or(0),
                 }),
-                Err(why) => cx.warn(format!("chart sheet \"{name}\" was dropped: {why}")),
+                Err(why) => cx.warn(format!("{what} \"{name}\" was dropped: {why}")),
             }
         }
         // Links to external workbooks: `[1]` in formulas is the position in <externalReferences>,

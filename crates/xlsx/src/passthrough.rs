@@ -116,6 +116,7 @@ const REWRITTEN: &[&str] = &[
     "chartsheet",
     "dialogsheet",
     "xlmacrosheet",
+    "xlintlmacrosheet",
     "drawing",
     "chart",
     "chartex",
@@ -151,9 +152,29 @@ const REWRITTEN: &[&str] = &[
     "powerpivotdata",
 ];
 
-/// Relationship kinds a chart sheet reaches that are otherwise rewritten: its drawing, chart and
-/// their style, colour and shape parts are kept byte for byte (the chart sheet is not modelled).
-const CHART_SHEET_GRAPH: &[&str] = &["chartsheet", "drawing", "chart", "chartex", "chartstyle", "chartcolorstyle", "chartusershapes"];
+/// Sheet kinds (workbook relationship kinds) kept whole and written back in their place among the
+/// sheets: chart sheets, Excel 5 dialog sheets and Excel 4.0 macro sheets. None is modelled.
+pub const KEPT_SHEET_KINDS: &[&str] = &["chartsheet", "dialogsheet", "xlMacrosheet", "xlIntlMacrosheet"];
+/// The kept sheet kinds that are macros: written only into macro-enabled packages.
+const MACRO_SHEET_KINDS: &[&str] = &["xlMacrosheet", "xlIntlMacrosheet"];
+
+/// Relationship kinds a kept sheet reaches that are otherwise rewritten: its drawing, chart and
+/// their style, colour and shape parts, and the VML of its controls and notes, are kept byte for
+/// byte (the sheet is not modelled).
+const KEPT_SHEET_GRAPH: &[&str] = &[
+    "chartsheet",
+    "dialogsheet",
+    "xlmacrosheet",
+    "xlintlmacrosheet",
+    "drawing",
+    "chart",
+    "chartex",
+    "chartstyle",
+    "chartcolorstyle",
+    "chartusershapes",
+    "vmldrawing",
+    "comments",
+];
 
 /// Part-name prefixes (lower case) GridCraft's writer never produces: kept parts there keep their
 /// original names. Anything else is renamed so it can't collide with written parts.

@@ -56,14 +56,14 @@ pub struct PreservedAnchor {
     pub xml: String,
 }
 
-/// A chart sheet (a sheet that holds one chart and no cells) kept as it was in the source file. Its
-/// part, drawing, chart, style and colour parts are in [`Preserved::parts`]; the workbook
-/// relationship to it is in [`Preserved::rels`].
+/// A chart sheet (a sheet that holds one chart and no cells), dialog sheet or Excel 4.0 macro sheet
+/// kept as it was in the source file. Its part, drawing, chart, style, colour and VML parts are in
+/// [`Preserved::parts`]; the workbook relationship to it is in [`Preserved::rels`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PreservedSheet {
     pub name: String,
     pub visibility: Visibility,
-    /// The id of the workbook relationship to the chart sheet part, in the source file.
+    /// The id of the workbook relationship to the sheet part, in the source file.
     pub rel_id: String,
     /// How many worksheets come before it: its position among the model's sheets.
     pub before: usize,
@@ -86,7 +86,7 @@ pub struct Preserved {
     /// The sheet's legacy VML drawing when kept elements need its shapes (form controls, OLE
     /// objects). Its own relationships point into `parts`.
     pub vml: Option<PreservedPart>,
-    /// Chart sheets, in file order (workbook owner only).
+    /// Chart, dialog and macro sheets, in file order (workbook owner only).
     pub sheets: Vec<PreservedSheet>,
     /// Unmodelled anchors of the sheet's drawing part, in file order (sheet owner only).
     pub anchors: Vec<PreservedAnchor>,

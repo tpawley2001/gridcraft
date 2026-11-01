@@ -12,6 +12,7 @@ mod drawing_hyperlinks;
 mod encrypted_tests;
 mod fixtures;
 mod ink_roundtrip;
+mod kept_macro_dialog_sheets;
 mod literal_category_roundtrip;
 mod locale_numfmt;
 mod malformed;

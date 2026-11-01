@@ -114,7 +114,7 @@ pub(super) fn remap(x: &str, ids: &HashMap<String, String>) -> Option<String> {
     map_rel_ids(x, &mut |id| ids.get(id).cloned())
 }
 
-/// A kept chart sheet being written: its `<sheet>` entry's fields and its new relationship id.
+/// A kept chart, dialog or macro sheet being written: its `<sheet>` entry's fields and its new relationship id.
 pub struct KeptSheet {
     before: usize,
     name: String,
@@ -159,12 +159,12 @@ pub struct WorkbookKept {
 }
 
 impl WorkbookKept {
-    /// Where the model's sheet `i` is in the file's sheet list: chart sheets come between worksheets.
+    /// Where the model's sheet `i` is in the file's sheet list: kept sheets come between worksheets.
     pub fn file_index(&self, i: usize) -> usize {
         i + self.sheets.iter().filter(|s| s.before <= i).count()
     }
 
-    /// The `<sheet>` entries of the chart sheets that go right before the model's sheet `i`
+    /// The `<sheet>` entries of the kept sheets that go right before the model's sheet `i`
     /// (`i` = the number of sheets for those that come last), with their ids from `ids`.
     pub fn sheet_entries(&self, i: usize, last: bool, ids: &mut SheetIds) -> String {
         let mut x = String::new();
@@ -251,15 +251,19 @@ pub(crate) fn sheet_names_in(formula: &str) -> Vec<String> {
     names
 }
 
-/// Whether a kept chart sheet can be written back: its chart's series must still refer to sheets
-/// that exist under the same names (the chart is kept as it was, so a series on a deleted or
-/// renamed sheet would be left pointing at nothing), and no worksheet may have taken its name.
-fn chart_sheet_usable(wb: &Workbook, p: &Preserved, s: &PreservedSheet) -> bool {
+/// Whether a kept sheet can be written back: a chart's series must still refer to sheets that
+/// exist under the same names (the chart is kept as it was, so a series on a deleted or renamed
+/// sheet would be left pointing at nothing), no worksheet may have taken its name, and a macro
+/// sheet goes only into a macro-enabled package (`macros`), like the VBA project.
+fn kept_sheet_usable(wb: &Workbook, p: &Preserved, s: &PreservedSheet, macros: bool) -> bool {
     let same = |a: &str, b: &str| a.chars().take(31).collect::<String>().eq_ignore_ascii_case(&b.chars().take(31).collect::<String>());
     if wb.sheets.iter().any(|w| same(&w.name, &s.name)) {
         return false;
     }
     let Some(root) = p.rels.iter().find(|r| r.id == s.rel_id) else { return false };
+    if !macros && is_kind(root, MACRO_SHEET_KINDS) {
+        return false;
+    }
     let parts = reachable(p, root);
     let mut formulas = vec![];
     for q in p.parts.iter().filter(|q| parts.contains(&normalize(&q.name)) && q.content_type.contains("chart")) {
@@ -270,14 +274,15 @@ fn chart_sheet_usable(wb: &Workbook, p: &Preserved, s: &PreservedSheet) -> bool 
     formulas.iter().flat_map(|f| sheet_names_in(f)).all(|n| wb.sheets.iter().any(|w| same(&w.name, &n)))
 }
 
-/// Writes the workbook's kept parts and relationships. Chart sheets that can't be written back
-/// (see [`chart_sheet_usable`]) are left out with the parts only they reach.
-pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out) -> WorkbookKept {
+/// Writes the workbook's kept parts and relationships. Kept sheets that can't be written back
+/// (see [`kept_sheet_usable`]; `macros`: the package is macro-enabled) are left out with the parts
+/// only they reach.
+pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out, macros: bool) -> WorkbookKept {
     let Some(p) = wb.preserved.as_deref() else { return WorkbookKept::default() };
-    let (live, dropped): (Vec<&PreservedSheet>, Vec<&PreservedSheet>) = p.sheets.iter().partition(|s| chart_sheet_usable(wb, p, s));
+    let (live, dropped): (Vec<&PreservedSheet>, Vec<&PreservedSheet>) = p.sheets.iter().partition(|s| kept_sheet_usable(wb, p, s, macros));
     let root_of = |s: &PreservedSheet| p.rels.iter().find(|r| r.id == s.rel_id);
     let dropped_ids: HashSet<&str> = dropped.iter().map(|s| s.rel_id.as_str()).collect();
-    // Parts reached only by dropped chart sheets go with them.
+    // Parts reached only by dropped sheets go with them.
     let mut gone: HashSet<String> = dropped.iter().filter_map(|s| root_of(s)).flat_map(|r| reachable(p, r)).collect();
     if !gone.is_empty() {
         let others = p.rels.iter().filter(|r| !dropped_ids.contains(r.id.as_str())).flat_map(|r| reachable(p, r));
