@@ -472,3 +472,24 @@ fn strict_relationship_names_match_their_transitional_spelling() {
     let source = with_rels(&plain(), &[("_rels/.rels", strict), (WB_RELS, MADE_UP)], &[MADE_UP_PART]);
     assert_eq!(package_of(&source), ["lost relationship madeUp"]);
 }
+
+#[test]
+fn fragment_only_relationship_target_is_not_a_missing_part() {
+    // Excel writes an internal shape hyperlink as a relationship with no TargetMode and a
+    // fragment-only target: a same-document reference, not a part.
+    let bytes = zip_of(&[
+        (
+            "[Content_Types].xml",
+            r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="r"/><Default Extension="xml" ContentType="x"/></Types>"#,
+        ),
+        ("_rels/.rels", r#"<Relationships><Relationship Id="rId1" Type="x/officeDocument" Target="xl/workbook.xml"/></Relationships>"#),
+        ("xl/workbook.xml", "<workbook/>"),
+        ("xl/_rels/workbook.xml.rels", r#"<Relationships><Relationship Id="rId1" Type="x/drawing" Target="drawings/drawing1.xml"/></Relationships>"#),
+        ("xl/drawings/drawing1.xml", "<wsDr/>"),
+        (
+            "xl/drawings/_rels/drawing1.xml.rels",
+            r##"<Relationships><Relationship Id="rId1" Type="x/hyperlink" Target="#Sheet1!A1"/><Relationship Id="rId2" Type="x/hyperlink" Target="#'My Sheet'!B2"/></Relationships>"##,
+        ),
+    ]);
+    assert_eq!(validate_package(&bytes).unwrap(), Vec::<String>::new());
+}
