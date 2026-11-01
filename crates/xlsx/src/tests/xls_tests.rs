@@ -134,18 +134,18 @@ pub(crate) fn compound(name: &str, data: &[u8]) -> Vec<u8> {
     out
 }
 
-fn rec(id: u16, payload: &[u8]) -> Vec<u8> {
+pub(super) fn rec(id: u16, payload: &[u8]) -> Vec<u8> {
     let mut v = id.to_le_bytes().to_vec();
     v.extend_from_slice(&(payload.len() as u16).to_le_bytes());
     v.extend_from_slice(payload);
     v
 }
 
-fn cat(parts: &[&[u8]]) -> Vec<u8> {
+pub(super) fn cat(parts: &[&[u8]]) -> Vec<u8> {
     parts.concat()
 }
 
-fn u16s(v: &[u16]) -> Vec<u8> {
+pub(super) fn u16s(v: &[u16]) -> Vec<u8> {
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 
@@ -163,7 +163,7 @@ fn eof() -> Vec<u8> {
 }
 
 /// XLUnicodeString with compressed characters.
-fn xlstr(s: &str) -> Vec<u8> {
+pub(super) fn xlstr(s: &str) -> Vec<u8> {
     cat(&[&(s.len() as u16).to_le_bytes(), &[0], s.as_bytes()])
 }
 
@@ -286,7 +286,7 @@ fn sample(date1904: bool) -> Vec<u8> {
     cat(&[&globals([p1, p2, p3]), &sheet1, &data, &chart])
 }
 
-fn v(wb: &gridcraft_model::Workbook, sheet: usize, a1: &str) -> Value {
+pub(super) fn v(wb: &gridcraft_model::Workbook, sheet: usize, a1: &str) -> Value {
     wb.sheets[sheet].value(CellRef::parse(a1).unwrap())
 }
 
@@ -626,7 +626,7 @@ fn a_format_shorter_than_its_count_keeps_its_characters() {
     assert!(report.warnings.iter().any(|w| w.contains("declared length")), "{:?}", report.warnings);
 }
 
-fn one_sheet_with(sheet_records: &[u8]) -> Vec<u8> {
+pub(super) fn one_sheet_with(sheet_records: &[u8]) -> Vec<u8> {
     let globals = |pos: u32| cat(&[&bof(0x0005), &rec(0x0085, &cat(&[&pos.to_le_bytes(), &[0, 0, 6, 0], b"Sheet1"])), &eof()]);
     let sheet = cat(&[&bof(0x0010), sheet_records, &rec(0x0203, &cat(&[&cell(0, 0, 0), &7.0f64.to_le_bytes()])), &eof()]);
     compound("Workbook", &cat(&[&globals(globals(0).len() as u32), &sheet]))
