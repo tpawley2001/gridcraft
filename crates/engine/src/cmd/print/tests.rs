@@ -621,3 +621,44 @@ fn over_long_word_breaks_into_lines_that_fit() {
         assert!(gridcraft_pdf::text_width(Font::Helvetica, 11.0, l) <= 100.0 + 0.01, "{l} too wide");
     }
 }
+
+/// `rows` x `cols` cells, each holding the same `len`-character string made of 32-character runs.
+fn long_text_session(rows: u32, cols: u32, len: usize) -> Session {
+    let mut s = s();
+    let text: String = (0..len).map(|i| char::from(b'a' + ((i / 32) % 26) as u8)).collect();
+    let v = Value::from(text.as_str());
+    let d = s.doc_mut().unwrap();
+    let wb = std::sync::Arc::make_mut(&mut d.wb);
+    let sh = wb.sheet_mut(0).unwrap();
+    for r in 0..rows {
+        for c in 0..cols {
+            sh.set_value(CellRef::new(r, c), v.clone());
+        }
+    }
+    s
+}
+
+// Bound: generous for a debug build on a loaded machine; before the 1,024-character display
+// limit, laying out this sheet took minutes.
+const LONG_TEXT_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+#[test]
+fn long_text_sheet_exports_quickly() {
+    let mut s = long_text_session(2_000, 3, 200_000);
+    let t = std::time::Instant::now();
+    let (_, pages) = pdf_of(&mut s, json!({}));
+    let took = t.elapsed();
+    assert!(pages >= 1, "no pages printed");
+    assert!(took < LONG_TEXT_LIMIT, "exporting 6,000 long cells took {took:?}");
+}
+
+#[test]
+fn wrapped_long_text_sheet_exports_quickly() {
+    let mut s = long_text_session(200, 3, 200_000);
+    s.execute("home.wrapText", json!({"range": "A1:C200", "on": true})).unwrap();
+    let t = std::time::Instant::now();
+    let (_, pages) = pdf_of(&mut s, json!({}));
+    let took = t.elapsed();
+    assert!(pages >= 1, "no pages printed");
+    assert!(took < LONG_TEXT_LIMIT, "exporting 600 wrapped long cells took {took:?}");
+}
