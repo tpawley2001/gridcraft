@@ -448,3 +448,27 @@ fn json_schema_keys() {
     );
     assert_eq!(keys(&v["functions"][0]), set(&["name", "checked", "mismatched", "primary"]));
 }
+
+#[test]
+fn a_macro_enabled_source_keeps_its_vba_project_in_the_round_trip() {
+    // An `.xlsm` is checked as an `.xlsm`: saving it as `.xlsx` drops the VBA project by design,
+    // which is not a loss of the file being checked.
+    let mut wb = book(&[("A1", "1", n(1.0))]);
+    // Not a real VBA project: bytes the package check counts as content (an empty part isn't a loss).
+    wb.vba_project = Some(Arc::new(b"<vba><module/></vba>".to_vec()));
+    let xlsm = gridcraft_engine::io::save_bytes(&wb, "t.xlsm").unwrap();
+    let source = with_rels(&xlsm, &[(WB_RELS, MADE_UP)], &[MADE_UP_PART]);
+    let r = check_bytes("t.xlsm", &source, &Options::default());
+    let package = &r.round_trip.categories.iter().find(|c| c.name == "package").unwrap().examples;
+    assert_eq!(package, &["lost relationship madeUp"]);
+}
+
+#[test]
+fn strict_relationship_names_match_their_transitional_spelling() {
+    // Strict Open XML names the app properties relationship `extendedProperties`; GridCraft writes
+    // the transitional `extended-properties`. Same kind, so not a loss.
+    let strict =
+        r#"<Relationship Id="rId93" Type="http://purl.oclc.org/ooxml/officeDocument/relationships/extendedProperties" Target="docProps/app.xml"/>"#;
+    let source = with_rels(&plain(), &[("_rels/.rels", strict), (WB_RELS, MADE_UP)], &[MADE_UP_PART]);
+    assert_eq!(package_of(&source), ["lost relationship madeUp"]);
+}

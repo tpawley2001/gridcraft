@@ -37,8 +37,8 @@ use calc::volatile_names;
 #[cfg(test)]
 use calc::{bool_cached_as_number, values_match};
 #[cfg(test)]
-use fidelity::diff_workbooks;
-pub use fidelity::round_trip;
+use fidelity::{diff_workbooks, round_trip};
+use fidelity::{round_trip_as, round_trip_name};
 use package::full_calc_on_load;
 #[cfg(test)]
 use package::validate_package;
@@ -362,7 +362,7 @@ fn check_inner(path: &str, bytes: &[u8], opts: &Options) -> FileReport {
     calc.recalc_all(&mut fresh);
     let trust_cache = !full_calc_on_load(bytes);
     report.calc = oracle(&cached, &fresh, &calc, trust_cache, opts);
-    report.round_trip = round_trip(&fresh, bytes, opts);
+    report.round_trip = round_trip_as(&fresh, bytes, round_trip_name(path), opts);
     report
 }
 
