@@ -367,7 +367,12 @@ pub fn read_styles(root: &El, checkboxes: &[bool], minor_font: &str) -> StylesIn
 fn read_dxf(x: &El, palette: &[u32], fmts: &HashMap<u32, String>) -> Style {
     let mut s = Style::default();
     if let Some(e) = x.child("font") {
-        let f = read_font(e, palette);
+        let mut f = read_font(e, palette);
+        // A differential font keeps the family it states, even the default one: the cell font
+        // reader drops it as redundant, but here it is part of what the dxf says.
+        if let Some(v) = e.child("family").and_then(|c| c.attr_u32("val")).and_then(|v| u8::try_from(v).ok()) {
+            f.family = Some(v).filter(|v| *v <= MAX_FONT_FAMILY);
+        }
         // Differential fonts rarely name a face; unless stated, keep the default face and size.
         let has_size = e.child("sz").and_then(|n| n.attr_f64("val")).is_some();
         let has_name = e.child("name").and_then(|n| n.attr("val")).is_some();
@@ -470,6 +475,12 @@ fn font_xml(f: &Font, dxf: Option<&DxfStated>, minor: bool) -> String {
     } else {
         if stated.name || f.name != def.name {
             let _ = write!(s, "<name val=\"{}\"/>", esc_attr(&f.name));
+        }
+        if let Some(family) = f.family.filter(|v| *v <= MAX_FONT_FAMILY) {
+            let _ = write!(s, "<family val=\"{family}\"/>");
+        }
+        if let Some(charset) = f.charset {
+            let _ = write!(s, "<charset val=\"{charset}\"/>");
         }
         if let Some(sc) = &stated.scheme {
             let _ = write!(s, "<scheme val=\"{}\"/>", esc_attr(sc));
@@ -714,6 +725,8 @@ pub fn write_styles(wb: &Workbook, dxfs: &[Style], extra_fmts: &[String]) -> (St
             || d.font.vert != VertAlign::Baseline
             || d.font.size != def.font.size
             || d.font.name != def.font.name
+            || d.font.family.is_some()
+            || d.font.charset.is_some()
             || st.bold
             || st.italic
             || st.strike
