@@ -21,8 +21,8 @@ use crate::xml::{encode_xstring, esc, esc_attr, num, push_a1, push_u64};
 mod parts;
 mod rules;
 
-pub(crate) use parts::password_attrs;
-use parts::{autofilter_xml, comments_xml, protected_ranges_xml, table_columns, table_name, table_xml, thread_ids, threaded_xml, vml_xml};
+use parts::{autofilter_xml, comments_xml, protected_ranges_xml, table_xml, thread_ids, threaded_xml, vml_xml};
+pub(crate) use parts::{password_attrs, table_columns, table_name};
 use rules::{cf_rule_xml, solid_bar_id, validation_xml, x14_cfvo};
 
 fn sqref(ranges: &[RangeRef]) -> String {

@@ -8,11 +8,12 @@
 //! system, merged cells, column widths, row heights, defined names, print areas, print titles,
 //! the calculation settings (mode, iteration, precision as displayed), data validation and
 //! conditional formats (cell-value and formula rules, and the Excel 2007+ kinds: colour scales,
-//! data bars, icon sets, top/bottom, above average and text/date templates), page setup (paper,
-//! orientation, scale, fit to page, margins, headers and footers, print options, manual page
-//! breaks), the sheet tab colour, sheet protection, workbook structure protection and the sheet
-//! AutoFilter (range and criteria). Everything else (charts, pictures, comments, macros) is
-//! skipped with a warning.
+//! data bars, icon sets, top/bottom, above average and text/date templates), tables (name,
+//! range, header and totals rows, columns and table style), page setup (paper, orientation,
+//! scale, fit to page, margins, headers and footers, print options, manual page breaks), the
+//! sheet tab colour, sheet protection, workbook structure protection and the sheet AutoFilter
+//! (range and criteria). Everything else (charts, pictures, comments, macros) is skipped with a
+//! warning.
 //! Encrypted workbooks and pre-BIFF8 versions are refused.
 
 mod autofilter;
@@ -23,6 +24,7 @@ mod page_setup;
 mod protection;
 mod records;
 mod styles;
+mod tables;
 mod validation;
 
 use std::collections::{HashMap, HashSet};
@@ -223,6 +225,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     }
     wb.calc.precision_as_displayed = g.precision_as_displayed;
     defined_names(&g.names, &g.links, &model_index, &mut wb, &mut report);
+    tables::finish_workbook(&mut wb);
     let active = g
         .itab_cur
         .and_then(|index| usize::try_from(index).ok())
@@ -493,6 +496,7 @@ struct SheetState<'g> {
     /// The AutoFilter records read so far: built when the substream ends, with the range the
     /// `_FilterDatabase` name gives.
     autofilter: autofilter::State,
+    tables: tables::SheetTables,
 }
 
 impl SheetState<'_> {
@@ -639,6 +643,7 @@ fn worksheet(
         cond: cond_format::CondState::default(),
         page: page_setup::PageState::default(),
         autofilter: autofilter::State::default(),
+        tables: tables::SheetTables::default(),
     };
     let mut depth = 1usize;
     while let Some(rec) = recs.next_record()? {
@@ -669,6 +674,7 @@ fn worksheet(
     let pending = std::mem::take(&mut st.pending);
     resolve_pending(&mut st, &arrays, &shared, &pending);
     blank_array_followers(&mut st, &pending);
+    std::mem::take(&mut st.tables).finish(&mut st.sheet, budget, report)?;
     st.page.finish(&mut st.sheet.print);
     st.cond.finish(report);
     st.sheet.autofilter = std::mem::take(&mut st.autofilter).finish(filter, report);
@@ -891,6 +897,11 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x009D => autofilter::State::info(&mut c, st, report),
         0x009E => autofilter::State::criterion(&mut c, st, report),
         0x087E => autofilter::State::filter12(report),
+        // Tables: FeatHdr11 (nothing to import), Feature11/Feature12, ContinueFrt11, List12.
+        0x0871 => {}
+        0x0872 | 0x0878 => st.tables.feature(c.rest()),
+        0x0875 => st.tables.continue_frt(&c.rest()),
+        0x0877 => st.tables.list12(&c.rest()),
         0x00B0 => report.warn("PivotTables in .xls files are not imported yet; their values were kept."),
         _ => {}
     }
