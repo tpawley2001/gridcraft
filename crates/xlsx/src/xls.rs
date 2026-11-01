@@ -146,6 +146,7 @@ pub(crate) struct Lbl {
 struct Globals {
     sheets: Vec<BoundSheet>,
     date1904: bool,
+    itab_cur: Option<u32>,
     formats: HashMap<u16, String>,
     xf_formats: Vec<u16>,
     sst: Vec<Arc<str>>,
@@ -225,7 +226,14 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     }
     wb.calc.precision_as_displayed = g.precision_as_displayed;
     defined_names(&g.names, &g.links, &model_index, &mut wb, &mut report);
-    wb.set_active_sheet(wb.sheets.iter().position(|s| s.visibility == Visibility::Visible).unwrap_or(0));
+    let active = g
+        .itab_cur
+        .and_then(|index| usize::try_from(index).ok())
+        .and_then(|index| model_index.get(index).copied().flatten())
+        .filter(|&index| wb.sheets.get(index).is_some_and(|s| s.visibility == Visibility::Visible))
+        .or_else(|| wb.sheets.iter().position(|s| s.visibility == Visibility::Visible))
+        .unwrap_or(0);
+    wb.set_active_sheet(active);
     // The overview comes first.
     report.warnings.insert(
         0,
@@ -257,6 +265,7 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
         return Err(invalid("the Workbook stream does not start with the workbook globals"));
     }
     let mut g = Globals::default();
+    let mut window_seen = false;
     let mut offsets = std::collections::HashSet::new();
     while let Some(rec) = recs.next_record()? {
         budget.record()?;
@@ -266,6 +275,13 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
             0x0012 => protection::protect(&mut c, &mut g.protection, report),
             0x0013 => protection::password(&mut c, &mut g.protection, report),
             0x002F => return Err(invalid(ENCRYPTED)),
+            0x003D if !window_seen => {
+                window_seen = true;
+                // [MS-XLS] Window1: the first window's selected tab is at byte 10.
+                if c.remaining() == 18 {
+                    g.itab_cur = c.skip(10).and_then(|()| c.u16()).ok().map(u32::from);
+                }
+            }
             0x0085 => {
                 if g.sheets.len() >= MAX_SHEETS {
                     return Err(IoError::TooLarge("XLS: too many sheets".into()));
