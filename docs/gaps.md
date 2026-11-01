@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (§19: XLSB imports fonts, fills, borders, alignment and protection; XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas including text constants; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (§3: XLSX keeps the volatile dependencies part (RTD and CUBE topics) on save; §19: XLSB imports fonts, fills, borders, alignment and protection; XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas including text constants; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -38,7 +38,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - **Missing:** slicers and their caches, timelines, the data model, query tables attached to
   tables, unmodelled `extLst` entries, chart details. Pass-through (#330) keeps custom XML,
   external links, connections, sheet query tables, printer settings, worksheet custom properties,
-  form and ActiveX controls,
+  the volatile dependencies part (RTD and CUBE topics), form and ActiveX controls,
   OLE objects, sheet backgrounds and SmartArt graphics (diagram parts); never checked in Excel (repair prompts unknown).
 - **Evidence:** `crates/xlsx/src/passthrough.rs` (what is kept, and why the rest isn't).
 - **Impact:** open-edit-save still simplifies workbooks with slicers, timelines or Power Pivot.
@@ -204,6 +204,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 | 2026-11-01 | minor | §19: XLSB import decodes cell formulas instead of keeping only their saved results; unsupported tokens keep the value with one warning |
 | 2026-11-01 | minor | Hidden DrawingML shapes, connectors, pictures and charts keep `cNvPr hidden` on save and are excluded from drawing, hit-testing, printing and automatic print ranges |
 | 2026-11-01 | minor | §3: worksheet custom properties and their binary parts survive XLSX saves with remapped relationships and distinct content types from printer settings |
+| 2026-11-01 | minor | §3: XLSX keeps the volatile dependencies part (`xl/volatileDependencies.xml`, the RTD and CUBE topics) byte for byte on save, with its workbook relationship and content type override; not interpreted, and none is added to a workbook that has none |
 | 2026-11-01 | minor | §3, §17: XLSX keeps SmartArt graphics (the drawing anchor and its data, layout, style, colours and diagram drawing parts) on save; not shown yet |
 | 2026-11-01 | trivial | `gridcraft-cli check` treats fragment-only relationship targets as same-document references, avoiding false missing-part reports for internal drawing hyperlinks; duplicate ids and targets naming absent parts are still checked. |
 | 2026-11-01 | minor | XLSX `pageSetup scale="0"` keeps the default 100% and is omitted on save; nonzero scales keep the existing 10–400 clamp, and zero paper size keeps the default paper. |
