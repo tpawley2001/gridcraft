@@ -673,6 +673,9 @@ fn text_uncached(v: &Value, code: &str, sys: DateSystem) -> Result<String, CellE
     if !n.is_finite() {
         return Err(CellError::Num);
     }
+    if fmt.is_general() {
+        return crate::decimal::format_general_text(n).ok_or(CellError::Value);
+    }
     let (f, overflow) = fmt.format_number(n, sys);
     if overflow { Err(CellError::Value) } else { Ok(f.text) }
 }
