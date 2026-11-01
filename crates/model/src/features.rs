@@ -600,8 +600,22 @@ impl ChartScale {
     }
 }
 
+/// A drawing object's click hyperlink (DrawingML `a:hlinkClick`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DrawingHyperlink {
+    /// External URL, or a workbook location prefixed with `#`.
+    pub target: String,
+    #[serde(default)]
+    pub tooltip: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Image {
+    #[serde(default)]
+    pub hyperlink: Option<DrawingHyperlink>,
+    /// Imported drawing object name (`xdr:cNvPr name`).
+    #[serde(default)]
+    pub name: Option<String>,
     pub id: u32,
     pub anchor: Anchor,
     /// Encoded bytes (PNG/JPEG), base64 in JSON. Shared, so a copy of the sheet (an undo step)
@@ -631,6 +645,11 @@ pub enum ShapeKind {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Shape {
+    #[serde(default)]
+    pub hyperlink: Option<DrawingHyperlink>,
+    /// Imported drawing object name (`xdr:cNvPr name`).
+    #[serde(default)]
+    pub name: Option<String>,
     pub id: u32,
     pub kind: ShapeKind,
     pub anchor: Anchor,

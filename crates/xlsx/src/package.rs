@@ -123,7 +123,8 @@ impl<'a> Package<'a> {
                 let kind = ty.rsplit('/').next().unwrap_or("").to_string();
                 let target_raw = r.attr("Target")?;
                 let external = r.attr("TargetMode").is_some_and(|m| m.eq_ignore_ascii_case("External"));
-                let target = if external { target_raw.to_string() } else { resolve(dir, target_raw) };
+                let target =
+                    if external || (kind == "hyperlink" && target_raw.starts_with('#')) { target_raw.to_string() } else { resolve(dir, target_raw) };
                 Some(Rel { id, kind, target, external })
             })
             .collect())

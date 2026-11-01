@@ -355,7 +355,11 @@ fn write_sheet_drawing(s: &mut String, wb: &Workbook, si: usize, sheet: &Sheet, 
         for sh in &sheet.shapes {
             objs.push(Obj::Shape(sh));
         }
-        out.part(&format!("xl/drawings/drawing{dn}.xml"), Some(CT_DRAWING), crate::drawing::write_drawing(sheet, &wb.theme, &objs).into_bytes());
+        out.part(
+            &format!("xl/drawings/drawing{dn}.xml"),
+            Some(CT_DRAWING),
+            crate::drawing::write_drawing(sheet, &wb.theme, &objs, &mut drels).into_bytes(),
+        );
         if !drels.is_empty() {
             out.part(&format!("xl/drawings/_rels/drawing{dn}.xml.rels"), None, drels.xml().into_bytes());
         }
