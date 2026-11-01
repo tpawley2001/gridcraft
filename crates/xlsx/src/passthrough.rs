@@ -6,8 +6,9 @@
 //! their `<externalReferences>`, data connections, XML maps) and each sheet (query tables, cells
 //! mapped to XML elements, form controls, ActiveX controls, OLE objects, the sheet background and
 //! printer settings, with the sheet's `<picture>`, `<oleObjects>` and `<controls>` XML, the `r:id`
-//! of `<pageSetup>`, the legacy VML shapes those controls need and the pictures of the headers and
-//! footers, `&G`, with their `<legacyDrawingHF>`). The workbook also keeps its
+//! of `<pageSetup>`, the legacy VML shapes those controls need, the DrawingML anchors of the sheet's drawing
+//! wrapped in `mc:AlternateContent` that the drawing reader doesn't model (control shapes), and the
+//! pictures of the headers and footers, `&G`, with their `<legacyDrawingHF>`). The workbook also keeps its
 //! `<fileVersion>` and the calcFeatures extension, which Excel needs to trust the saved values.
 //!
 //! On write, kept parts get fresh part names where needed and new relationship ids; the `r:id`s in
@@ -30,7 +31,7 @@ use std::fmt::Write as _;
 use std::path::{Component, Path};
 use std::sync::Arc;
 
-use gridcraft_model::{Preserved, PreservedPart, PreservedRel, PreservedSheet, PreservedXml, Sheet, Visibility, Workbook};
+use gridcraft_model::{Preserved, PreservedAnchor, PreservedPart, PreservedRel, PreservedSheet, PreservedXml, Sheet, Visibility, Workbook};
 use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::QName;

@@ -194,7 +194,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
     let prio = write_sheet_rules(&mut s, sheet, &mut rels, out);
     let kept = write_sheet_printing(&mut s, sheet, &mut rels, out);
 
-    write_sheet_drawing(&mut s, wb, si, sheet, &mut rels, out);
+    write_sheet_drawing(&mut s, wb, si, sheet, &kept, &mut rels, out);
     write_sheet_notes(&mut s, sheet, si, &kept, &mut rels, out);
     // Tables.
     if !tables.is_empty() {
@@ -304,12 +304,21 @@ fn write_sheet_notes(s: &mut String, sheet: &Sheet, si: usize, kept: &crate::pas
     s.push_str(&kept.elements());
 }
 
-fn write_sheet_drawing(s: &mut String, wb: &Workbook, si: usize, sheet: &Sheet, rels: &mut Rels, out: &mut Out) {
-    // Drawing: pictures, charts, shapes.
-    if !sheet.images.is_empty() || !sheet.charts.is_empty() || !sheet.shapes.is_empty() {
+fn write_sheet_drawing(
+    s: &mut String,
+    wb: &Workbook,
+    si: usize,
+    sheet: &Sheet,
+    kept: &crate::passthrough::SheetKept<'_>,
+    rels: &mut Rels,
+    out: &mut Out,
+) {
+    // Drawing: pictures, charts, shapes, and the kept anchors GridCraft doesn't model.
+    let mut drels = Rels::default();
+    let anchors = kept.drawing_anchors(&mut drels);
+    if !sheet.images.is_empty() || !sheet.charts.is_empty() || !sheet.shapes.is_empty() || !anchors.is_empty() {
         out.drawings += 1;
         let dn = out.drawings;
-        let mut drels = Rels::default();
         let mut objs: Vec<Obj<'_>> = vec![];
         for img in &sheet.images {
             if img.data.is_empty() {
@@ -358,7 +367,7 @@ fn write_sheet_drawing(s: &mut String, wb: &Workbook, si: usize, sheet: &Sheet, 
         out.part(
             &format!("xl/drawings/drawing{dn}.xml"),
             Some(CT_DRAWING),
-            crate::drawing::write_drawing(sheet, &wb.theme, &objs, &mut drels).into_bytes(),
+            crate::drawing::write_drawing(sheet, &wb.theme, &objs, &anchors, &mut drels).into_bytes(),
         );
         if !drels.is_empty() {
             out.part(&format!("xl/drawings/_rels/drawing{dn}.xml.rels"), None, drels.xml().into_bytes());

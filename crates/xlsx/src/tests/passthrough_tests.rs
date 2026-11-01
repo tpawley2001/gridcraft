@@ -12,6 +12,8 @@ use crate::package::{normalize, resolve, split_dir};
 use crate::xml;
 use crate::{read_xlsx, write_xlsx};
 
+mod alternate_content;
+
 const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const PRINTER: &[u8] = &[0, 1, 2, 3, 250, 251, 252, 253, 9, 9, 9];
