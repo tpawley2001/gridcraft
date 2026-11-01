@@ -38,6 +38,7 @@ mod smartart_passthrough;
 mod smooth_roundtrip;
 mod strict_passthrough;
 mod table_dxfs;
+mod table_ids;
 mod trendline_roundtrip;
 mod xls_tests;
 mod xlsb_tests;

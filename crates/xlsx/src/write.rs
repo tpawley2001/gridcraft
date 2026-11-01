@@ -143,7 +143,9 @@ pub struct Out {
     pub comments: u32,
     /// Authors of threaded comments, in first-use order; written to `xl/persons/person.xml`.
     pub persons: Vec<String>,
-    pub table_id: u32,
+    /// The table ids of the workbook, by sheet and table index, decided before any sheet is
+    /// written (see [`table_ids`]).
+    pub table_ids: Vec<Vec<u32>>,
     pub dynamic_arrays: bool,
     pub needs_calc: bool,
     pub cell_pictures: crate::richdata::PicturesOut,
@@ -247,6 +249,70 @@ fn check_sheet_names(wb: &Workbook) -> Result<(), IoError> {
     Ok(())
 }
 
+/// The `id` of every table of `wb`, by sheet and table index, in write order.
+///
+/// A table keeps its model id, unless another table already took it; a table without
+/// one (made in the app) or with a duplicate gets the next id above every id in use. The ids of
+/// single mapped XML cells (`<singleXmlCell id>`, kept verbatim in `tableSingleCells` parts) share
+/// the table id space (ECMA-376 Part 1 §18.5.1.2, §18.12.2), so they count as used too: a table
+/// that took one would make Excel repair the file.
+fn table_ids(wb: &Workbook) -> Result<Vec<Vec<u32>>, IoError> {
+    let mut used: std::collections::HashSet<u32> = single_cell_ids(wb);
+    let mut next = used.iter().copied().max().unwrap_or(0);
+    for sheet in &wb.sheets {
+        for t in &sheet.tables {
+            next = next.max(t.id);
+        }
+    }
+    let mut ids = Vec::with_capacity(wb.sheets.len());
+    for sheet in &wb.sheets {
+        let mut sheet_ids = Vec::with_capacity(sheet.tables.len());
+        for t in &sheet.tables {
+            let id = if t.id != 0 && used.insert(t.id) {
+                t.id
+            } else {
+                next = next.checked_add(1).ok_or_else(|| IoError::Format("no table id available above the existing ids".into()))?;
+                used.insert(next);
+                next
+            };
+            sheet_ids.push(id);
+        }
+        ids.push(sheet_ids);
+    }
+    Ok(ids)
+}
+
+/// The `id`s of single mapped XML cells in all kept `tableSingleCells` parts.
+fn single_cell_ids(wb: &Workbook) -> std::collections::HashSet<u32> {
+    let mut ids = std::collections::HashSet::new();
+    let owners = wb.preserved.iter().map(|p| p.as_ref()).chain(wb.sheets.iter().filter_map(|s| s.preserved.as_deref()));
+    let parts = owners.flat_map(|p| {
+        // Parts can be reached through another kept part, rather than directly from a sheet.
+        let targets: std::collections::HashSet<String> = p
+            .rels
+            .iter()
+            .chain(p.parts.iter().flat_map(|part| &part.rels))
+            .filter(|r| !r.external && r.rel_type.rsplit('/').next().is_some_and(|k| k.eq_ignore_ascii_case("tableSingleCells")))
+            .map(|r| crate::package::normalize(&r.target))
+            .collect();
+        p.parts.iter().filter(move |part| {
+            part.content_type.eq_ignore_ascii_case("application/vnd.openxmlformats-officedocument.spreadsheetml.tableSingleCells+xml")
+                || targets.contains(&crate::package::normalize(&part.name))
+        })
+    });
+    for part in parts {
+        let mut add = |e: crate::xml::El| {
+            if let Some(id) = e.attr_u32("id") {
+                ids.insert(id);
+            }
+            Ok(())
+        };
+        // A part that can't be parsed keeps no ids: it is written back as it is either way.
+        let _ = crate::xml::parse_streaming(&part.data, &["singleXmlCell"], &mut add);
+    }
+    ids
+}
+
 /// Workbook name written in a PivotChart's link when the file name isn't known.
 const DEFAULT_BOOK_NAME: &str = "Workbook.xlsx";
 
@@ -278,7 +344,7 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
         tables: 0,
         comments: 0,
         persons: vec![],
-        table_id: 0,
+        table_ids: table_ids(wb)?,
         dynamic_arrays: false,
         needs_calc: false,
         cell_pictures: Default::default(),
@@ -586,3 +652,64 @@ fn write_defined_names(wb: &Workbook, kept: &crate::passthrough::WorkbookKept, c
 
 /// Cell metadata declaring dynamic-array formulas (MS-XLSX `XLDAPR`).
 const METADATA: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<metadata xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:xda=\"http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray\"><metadataTypes count=\"1\"><metadataType name=\"XLDAPR\" minSupportedVersion=\"120000\" copy=\"1\" pasteAll=\"1\" pasteValues=\"1\" merge=\"1\" splitFirst=\"1\" rowColShift=\"1\" clearFormats=\"1\" clearComments=\"1\" assign=\"1\" coerce=\"1\" cellMeta=\"1\"/></metadataTypes><futureMetadata name=\"XLDAPR\" count=\"1\"><bk><extLst><ext uri=\"{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}\"><xda:dynamicArrayProperties fDynamic=\"1\" fCollapsed=\"0\"/></ext></extLst></bk></futureMetadata><cellMetadata count=\"1\"><bk><rc t=\"1\" v=\"0\"/></bk></cellMetadata></metadata>";
+
+#[cfg(test)]
+mod table_id_tests {
+    use super::*;
+    use gridcraft_model::Table;
+
+    fn table(id: u32, range: &str) -> Table {
+        Table {
+            id,
+            name: String::new(),
+            range: RangeRef::parse(range).unwrap(),
+            header_row: false,
+            totals_row: false,
+            columns: vec![],
+            style: String::new(),
+            banded_rows: false,
+            banded_cols: false,
+            first_col: false,
+            last_col: false,
+            filter_button: false,
+            filter: vec![],
+            table_type: None,
+            connection_id: None,
+            header_row_dxf: None,
+            data_dxf: None,
+            totals_row_dxf: None,
+            header_row_border_dxf: None,
+            table_border_dxf: None,
+            totals_row_border_dxf: None,
+        }
+    }
+
+    #[test]
+    fn model_table_ids_are_preserved_and_duplicates_allocated_above_the_maximum() {
+        for (source, expected) in [(vec![7, 2], vec![7, 2]), (vec![5, 5], vec![5, 6]), (vec![0, 0], vec![1, 2]), (vec![0, 9], vec![10, 9])] {
+            let mut wb = Workbook::new();
+            wb.sheet_mut(0).unwrap().tables = source.into_iter().map(|id| table(id, "A1:A2")).collect();
+            assert_eq!(table_ids(&wb).unwrap(), vec![expected]);
+        }
+    }
+
+    #[test]
+    fn exhausted_table_ids_return_an_error() {
+        let mut wb = Workbook::new();
+        wb.sheet_mut(0).unwrap().tables = vec![table(u32::MAX, "A1:A2"), table(0, "C1:C2")];
+        assert!(matches!(write_xlsx(&wb, XlsxKind::Workbook), Err(IoError::Format(_))));
+    }
+
+    #[test]
+    fn skipped_tables_do_not_shift_saved_ids() {
+        let mut wb = Workbook::new();
+        let mut skipped = table(3, "A1");
+        skipped.totals_row = true;
+        wb.sheet_mut(0).unwrap().tables = vec![skipped, table(7, "C1:C2")];
+        let bytes = write_xlsx(&wb, XlsxKind::Workbook).unwrap();
+        let mut saved = crate::package::Package::open(&bytes).unwrap();
+        let xml = saved.read_xml("xl/tables/table1.xml").unwrap().unwrap();
+        assert_eq!(xml.attr_u32("id"), Some(7));
+        assert!(saved.read("xl/tables/table2.xml").unwrap().is_none());
+    }
+}

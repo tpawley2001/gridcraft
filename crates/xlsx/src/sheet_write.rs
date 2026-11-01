@@ -62,12 +62,13 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
     };
     // Table header cells must hold the column names.
     let mut overrides: BTreeMap<CellRef, String> = BTreeMap::new();
-    let tables: Vec<(&Table, Vec<String>)> = folded
+    let tables: Vec<(usize, &Table, Vec<String>)> = folded
         .iter()
-        .filter(|t| t.range.height() > t.header_row as u32 + t.totals_row as u32 || (t.header_row && t.range.height() > t.totals_row as u32))
-        .map(|t| (t, table_columns(t)))
+        .enumerate()
+        .filter(|(_, t)| t.range.height() > t.header_row as u32 + t.totals_row as u32 || (t.header_row && t.range.height() > t.totals_row as u32))
+        .map(|(index, t)| (index, t, table_columns(t)))
         .collect();
-    for (t, cols) in &tables {
+    for (_, t, cols) in &tables {
         if t.header_row {
             for (i, name) in cols.iter().enumerate() {
                 overrides.insert(CellRef::new(t.range.start.row, t.range.start.col + i as u32), name.clone());
@@ -202,12 +203,13 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
     if !tables.is_empty() {
         let mut parts = String::new();
         let mut used_names: HashSet<String> = HashSet::new();
-        for (t, cols) in &tables {
+        for (index, t, cols) in &tables {
             out.tables += 1;
-            out.table_id += 1;
             let n = out.tables;
-            let name = table_name(&t.name, &mut used_names, out.table_id);
-            let xml = table_xml(t, cols, &name, out.table_id, out);
+            // The id was decided for the whole workbook before any sheet was written.
+            let id = out.table_ids.get(si).and_then(|ids| ids.get(*index)).copied().unwrap_or(n);
+            let name = table_name(&t.name, &mut used_names, n);
+            let xml = table_xml(t, cols, &name, id, out);
             out.part(&format!("xl/tables/table{n}.xml"), Some(CT_TABLE), xml.into_bytes());
             let rid = rels.add("table", &format!("../tables/table{n}.xml"));
             let _ = write!(parts, "<tablePart r:id=\"{rid}\"/>");
