@@ -258,7 +258,11 @@ pub(super) fn relationship_kinds(bytes: &[u8]) -> Result<BTreeMap<String, String
             {
                 continue;
             }
-            kinds.entry(kind.to_ascii_lowercase()).or_insert_with(|| kind.to_string());
+            // Keyed without case or hyphens: Strict Open XML spells some kinds differently from
+            // transitional (`extendedProperties`, `customProperties` for `extended-properties`,
+            // `custom-properties`), and they are the same kind.
+            let key: String = kind.chars().filter(|c| *c != '-').map(|c| c.to_ascii_lowercase()).collect();
+            kinds.entry(key).or_insert_with(|| kind.to_string());
         }
     }
     Ok(kinds)

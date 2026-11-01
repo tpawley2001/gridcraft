@@ -4,10 +4,29 @@ use super::{BTreeSet, Category, Cell, CellError, CellRef, Diffs, Options, RoundT
 
 // ---------------------------------------------------------------- round trip
 
-/// Writes `wb` with GridCraft's XLSX writer, validates the package against itself and against
-/// `source` (the file `wb` was read from), reads it back and compares.
+/// [`round_trip_as`] through an `.xlsx` package.
+#[cfg(test)]
 pub fn round_trip(wb: &Workbook, source: &[u8], opts: &Options) -> RoundTrip {
-    let bytes = match gridcraft_engine::io::save_bytes(wb, "roundtrip.xlsx") {
+    round_trip_as(wb, source, "roundtrip.xlsx", opts)
+}
+
+/// The name a round trip of `source_name` is saved under: the source's package kind, so a
+/// macro-enabled file keeps its VBA project (an `.xlsx` save drops it by design).
+pub(super) fn round_trip_name(source_name: &str) -> &'static str {
+    let ext = source_name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    match ext.as_str() {
+        "xlsm" => "roundtrip.xlsm",
+        "xltm" => "roundtrip.xltm",
+        "xltx" => "roundtrip.xltx",
+        _ => "roundtrip.xlsx",
+    }
+}
+
+/// Writes `wb` with GridCraft's XLSX writer, validates the package against itself and against
+/// `source` (the file `wb` was read from), reads it back and compares; saved and re-opened
+/// as `name` (see [`round_trip_name`]).
+pub(super) fn round_trip_as(wb: &Workbook, source: &[u8], name: &str, opts: &Options) -> RoundTrip {
+    let bytes = match gridcraft_engine::io::save_bytes(wb, name) {
         Ok(b) => b,
         Err(e) => return RoundTrip { error: Some(format!("write failed: {e}")), categories: vec![] },
     };
@@ -23,7 +42,7 @@ pub fn round_trip(wb: &Workbook, source: &[u8], opts: &Options) -> RoundTrip {
             }
         }
     }
-    let back = match gridcraft_engine::io::open_bytes("roundtrip.xlsx", &bytes) {
+    let back = match gridcraft_engine::io::open_bytes(name, &bytes) {
         Ok((b, _)) => b,
         Err(e) => return RoundTrip { error: Some(format!("reading the written file failed: {e}")), categories: vec![package.done()] },
     };
