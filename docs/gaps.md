@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-31 · **Change:** minor (XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -133,6 +133,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   FORECAST.ETS family are in; the sheet has no Forecast Start (hindcast) option yet. **Estimate:** 12–20 h.
 
 ### 14. Page Layout view and print polish (U, F)
+- XLSX `pageSetup scale="0"` uses the default 100% and is omitted on save.
 - Page Layout view landed (#329): paper view with rulers and in-place header/footer editing.
   Margins are dragged on the rulers (#792). Remaining: pictures in headers/footers, Different First Page / Odd & Even pages. Desktop now submits directly through craft-print with printer choice, copies, duplex and grayscale; browser printing stays available. Print ranges and driver tray/options UI remain. **Estimate:** 5–10 h.
 
@@ -189,6 +190,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-01 | minor | G0018: XLSX `pageSetup scale="0"` keeps the default 100% and is omitted on save; nonzero scales keep the existing 10–400 clamp, and zero paper size keeps the default paper. |
 | 2026-10-31 | minor | G0004: closed XLSX object click hyperlink loss for shapes, text boxes and pictures; external URLs and workbook locations retained with tooltips |
 | 2026-10-24 | minor | §8: PivotTable Enable show details: `pivot.options` `enableShowDetails` turns Show Details off for a PivotTable, read and written in XLSX as `enableDrill` |
 | 2026-10-23 | minor | §8: PivotTable Show Details: double-clicking a value cell lists its source records on a new sheet (#2364) |

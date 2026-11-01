@@ -194,7 +194,8 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
                 if let Some(p) = e.attr_u32("paperSize").and_then(paper_name) {
                     sheet.print.paper = p.to_string();
                 }
-                if let Some(s) = e.attr_u32("scale") {
+                // Excel treats a zero scale as unstated, keeping the default 100%.
+                if let Some(s) = e.attr_u32("scale").filter(|&s| s != 0) {
                     sheet.print.scale = s.clamp(10, 400) as u16;
                 }
                 if fit_to_page || root.child("sheetPr").and_then(|p| p.child("pageSetUpPr")).is_some_and(|p| p.flag("fitToPage", false)) {
