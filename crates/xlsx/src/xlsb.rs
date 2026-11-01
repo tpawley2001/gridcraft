@@ -1,14 +1,16 @@
 //! XLSB import of cell values and formulas, implemented from Microsoft's public MS-XLSB specification:
 //! <https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xlsb/acc8aa92-1f02-4167-99f5-84f9f676b95a>.
 //! Cell formulas are decoded with the shared BIFF token decoder; those it can't represent keep
-//! their saved result as a constant. Number formats are imported; other formatting, macros and
-//! other workbook features are not run or imported.
+//! their saved result as a constant. Cell formatting (number formats, fonts, fills, borders,
+//! alignment and protection) is imported from the styles part; gradient fills, cell style
+//! inheritance, differential formats, macros and other workbook features are not run or imported.
 
-use std::collections::HashMap;
+mod styles;
+
 use std::sync::Arc;
 
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{Cell, Formula, NumFmt, Sheet, Style, StyleId, Visibility, Workbook};
+use gridcraft_model::{Cell, Formula, Sheet, StyleId, Visibility, Workbook};
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::Event;
@@ -65,7 +67,7 @@ impl Budget {
     }
 }
 
-/// Imports worksheet scalar values, cell formulas (with their saved results) and number formats.
+/// Imports worksheet scalar values, cell formulas (with their saved results) and cell formatting.
 /// Dates retain the workbook's original date system. Inspect warnings for unsupported features.
 pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut package = Package::open(bytes)?;
@@ -84,7 +86,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut wb = Workbook::new();
     wb.sheets.clear();
     let mut report = ReadReport::default();
-    report.warn("XLSB import: fonts, fills, borders, alignment, charts, images, macros and other features are not imported. Save a new .xlsx file; XLSB saving is not supported.");
+    report.warn("XLSB import: charts, images, macros and other features are not imported. Save a new .xlsx file; XLSB saving is not supported.");
     let sheets = workbook(&book, &mut wb, &mut report)?;
     let rels = relationships(&mut package, &root.target)?;
     let mut budget = Budget::default();
@@ -554,89 +556,16 @@ fn import_styles(
             return Err(invalid("external or multiple styles relationships"));
         }
         check_type(types, &rel.target, STYLES)?;
-        number_formats(&required(package, &rel.target)?, budget)
+        styles::parse(&required(package, &rel.target)?, budget)
     };
     match parse() {
-        Ok((formats, xfs)) => xfs
-            .into_iter()
-            .map(|id| {
-                let code =
-                    if id < 164 { crate::tables::builtin_format(u32::from(id)) } else { formats.get(&id).map(String::as_str) }.unwrap_or("General");
-                if code.eq_ignore_ascii_case("General") {
-                    StyleId::DEFAULT
-                } else {
-                    wb.styles.intern(Style { num_fmt: NumFmt::new(code), ..Style::default() })
-                }
-            })
-            .collect(),
+        Ok(parsed) => styles::build(parsed, wb),
         Err(e) => {
             budget.text = text_before;
             report.warn(format!("XLSB styles could not be imported; default styles were used: {e}"));
             vec![]
         }
     }
-}
-
-/// [MS-XLSB] Styles: BrtFmt codes and the ordered cell XF list. Cell style XFs
-/// belong to a separate block and never contribute to cell style indices.
-fn number_formats(bytes: &[u8], budget: &mut Budget) -> Result<(HashMap<u16, String>, Vec<u16>), IoError> {
-    let mut records = Records::new(bytes);
-    let mut ignored_report = ReadReport::default();
-    records.first(278, &mut ignored_report)?; // BrtBeginStyleSheet
-    let mut formats = HashMap::new();
-    let mut xfs = vec![];
-    let mut block = None;
-    let mut fmt_count = 0usize;
-    let mut xf_count = 0usize;
-    while let Some((id, payload)) = records.next(&mut ignored_report)? {
-        let mut b = Bytes::new(payload);
-        match id {
-            279 => {
-                if block.is_some() {
-                    return Err(invalid("incomplete styles block"));
-                }
-                records.end(payload, &mut ignored_report)?;
-                return Ok((formats, xfs));
-            }
-            615 | 617 | 626 => {
-                if block.is_some() {
-                    return Err(invalid("nested styles block"));
-                }
-                block = Some(id);
-            }
-            616 | 618 | 627 => {
-                if block.take() != Some(id - 1) {
-                    return Err(invalid("mismatched styles block end"));
-                }
-            }
-            44 => {
-                fmt_count += 1;
-                if fmt_count > MAX_STYLE_RECORDS {
-                    return Err(invalid("too many number format records"));
-                }
-                if block == Some(615) {
-                    let id = b.u16()?;
-                    let code = b.text(MAX_TEXT.saturating_sub(budget.text) as u32)?;
-                    b.finish()?;
-                    budget.text(code.len())?;
-                    formats.insert(id, code);
-                }
-            }
-            47 => {
-                xf_count += 1;
-                if xf_count > MAX_STYLE_RECORDS {
-                    return Err(invalid("too many XF records"));
-                }
-                b.u16()?; // ixfeParent
-                let id = b.u16()?;
-                if block == Some(617) {
-                    xfs.push(id);
-                }
-            }
-            _ => {}
-        }
-    }
-    Err(invalid("missing styles end record"))
 }
 
 fn error(code: u8) -> Result<CellError, IoError> {

@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas including text constants; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (§19: XLSB imports fonts, fills, borders, alignment and protection; XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas including text constants; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -162,9 +162,10 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   [ui-parity.md](ui-parity.md#accessibility)
 
 ### 19. XLSB/ODS beyond values; minor formats (FF)
-- XLSB imports values, built-in/custom number formats and cell formulas (references, operators, functions, text constants; shared and array
-  formulas, names, 3-D references and array constants still become their saved results); fonts,
-  fills, borders and alignment remain unimported. ODS
+- XLSB imports values, built-in/custom number formats, fonts, pattern fills, borders, alignment, protection and cell
+  formulas (references, operators, functions, text constants; shared and array formulas, names, 3-D references and
+  array constants still become their saved results); gradient fills, cell style (ixfeParent) inheritance and dxfs are
+  not imported. ODS
   values only, no write; no `.prn`, `.dif`, `.slk`, XML Spreadsheet 2003; CSV
   writes raw instead of displayed values; templates saved with the workbook content type.
   **Estimate:** 15–23 h.
