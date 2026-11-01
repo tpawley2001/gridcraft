@@ -5,18 +5,21 @@
 use gridcraft_core::{DateSystem, Value};
 use gridcraft_numfmt::text_function;
 
+/// The workbook's value 3.14159 (days), not an approximation of pi.
+const V: f64 = 314_159.0 / 100_000.0;
+
 /// (format, value, Excel's result).
 const CASES: &[(&str, f64, &str)] = &[
-    ("[h]:m:s.000", 3.14159, "75:23:53.376"),
-    ("[m]:s.000", 3.14159, "4523:53.376"),
-    ("[s].000", 3.14159, "271433.376"),
-    ("[hh]:mm:ss.0", 3.14159, "75:23:53.4"),
-    ("[mm]:ss.0", 3.14159, "4523:53.4"),
-    ("[ss].000", 3.14159, "271433.376"),
-    ("s:m\" @ hour \"[hh]", 3.14159, "53:23 @ hour 75"),
-    ("s\" secs and \"[m]\" mins\"", 3.14159, "53 secs and 4523 mins"),
-    ("\"It was \"[h]\" [yes, \"h\"] hours and \"mm:ss", 3.14159, "It was 75 [yes, 75] hours and 23:53"),
-    ("[s]\" [yes, \"ss\"] seconds\"", 3.14159, "271433 [yes, 271433] seconds"),
+    ("[h]:m:s.000", V, "75:23:53.376"),
+    ("[m]:s.000", V, "4523:53.376"),
+    ("[s].000", V, "271433.376"),
+    ("[hh]:mm:ss.0", V, "75:23:53.4"),
+    ("[mm]:ss.0", V, "4523:53.4"),
+    ("[ss].000", V, "271433.376"),
+    ("s:m\" @ hour \"[hh]", V, "53:23 @ hour 75"),
+    ("s\" secs and \"[m]\" mins\"", V, "53 secs and 4523 mins"),
+    ("\"It was \"[h]\" [yes, \"h\"] hours and \"mm:ss", V, "It was 75 [yes, 75] hours and 23:53"),
+    ("[s]\" [yes, \"ss\"] seconds\"", V, "271433 [yes, 271433] seconds"),
     ("[h]:m:s.000", 0.085_462_962_962_963, "2:3:4.000"),
 ];
 
