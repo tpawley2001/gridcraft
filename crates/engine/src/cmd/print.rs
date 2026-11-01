@@ -69,7 +69,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Print Preview",
             ["File"],
             None,
-            "{page? (1-based), sheets?: active|all, range?, fitToPage?} → {pages, pageList: [{page, sheet, range, rows, columns, scale, paper, orientation, width, height}]}",
+            "{page? (1-based), sheets?: active|all, range?, fitToPage?} → {pages, pageList: [{page, sheet, range, rows, columns, scale, paper, orientation, width, height}]}; a chart sheet's page (sheets: all) has chart: true instead of range, rows and columns",
             has_doc,
             print_preview
         ),
@@ -105,6 +105,22 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
     // spanning 40 pages was decoded (and pushed into the PDF) 40 times (#2389).
     let mut pics = PicCache::new();
     for lay in layouts {
+        if let Some(cs) = lay.chart_sheet.and_then(|ci| wb.chart_sheets.get(ci)) {
+            page_no += 1;
+            let pg = doc.add_page(lay.page_w, lay.page_h);
+            draw_chart_sheet(pg, wb, lay, &cs.chart);
+            let cx = HfContext {
+                page: page_no,
+                pages: total,
+                sheet: cs.name.clone(),
+                file: file.to_string(),
+                path: path.to_string(),
+                date: date.clone(),
+                time: time.clone(),
+            };
+            draw_header_footer(pg, lay, lay.settings.hf_page(true, page_no), &cx);
+            continue;
+        }
         let Some(sh) = wb.sheet(lay.sheet) else { continue };
         let mut cf = if sh.cond_formats.is_empty() { None } else { Some(crate::cf::CfCache::new()) };
         let k = lay.k();
@@ -171,6 +187,15 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
     (doc.finish(), n)
 }
 
+/// A chart sheet's page: the chart scaled to fill the printable area.
+fn draw_chart_sheet(pg: &mut Page, wb: &Workbook, lay: &SheetLayout, chart: &gridcraft_model::Chart) {
+    let (aw, ah) = lay.avail();
+    let (w, h) = (aw / PX_TO_PT, ah / PX_TO_PT);
+    let data = gridcraft_chart::resolve(wb, lay.sheet, chart);
+    let prims = gridcraft_chart::render(chart, &data, w, h, &draw::PdfMeasure);
+    draw::draw_prims(pg, &prims, draw::Xf { ox: lay.margins[0], oy: lay.margins[2], k: PX_TO_PT });
+}
+
 // ---------------------------------------------------------------- commands
 
 fn build_pdf(s: &Session, p: &Json, cmd: &str) -> Result<(Vec<u8>, usize)> {
@@ -209,6 +234,21 @@ fn print_preview(s: &mut Session, p: &Json) -> Result<Json> {
     let mut list = Vec::new();
     let mut n = 0usize;
     for lay in &lays {
+        let orientation = if lay.settings.orientation == Orientation::Landscape { "landscape" } else { "portrait" };
+        if let Some(cs) = lay.chart_sheet.and_then(|ci| d.wb.chart_sheets.get(ci)) {
+            n += 1;
+            list.push(json!({
+                "page": n,
+                "sheet": cs.name,
+                "chart": true,
+                "scale": 100.0,
+                "paper": lay.settings.paper,
+                "orientation": orientation,
+                "width": lay.page_w,
+                "height": lay.page_h,
+            }));
+            continue;
+        }
         let name = d.wb.sheet(lay.sheet).map(|s| s.name.clone()).unwrap_or_default();
         for (ri, ci) in &lay.pages {
             n += 1;
@@ -222,7 +262,7 @@ fn print_preview(s: &mut Session, p: &Json) -> Result<Json> {
                 "columns": format!("{}:{}", gridcraft_core::col_to_letters(cb.0), gridcraft_core::col_to_letters(cb.1)),
                 "scale": (lay.scale * 1000.0).round() / 10.0,
                 "paper": lay.settings.paper,
-                "orientation": if lay.settings.orientation == Orientation::Landscape { "landscape" } else { "portrait" },
+                "orientation": orientation,
                 "width": lay.page_w,
                 "height": lay.page_h,
             }));

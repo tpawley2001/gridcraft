@@ -215,3 +215,18 @@ pub struct LineInfo {
     #[serde(default)]
     pub custom: bool,
 }
+
+/// What printing needs of a chart sheet (`xl/chartsheets/sheetN.xml`) read from a file. Chart
+/// sheets aren't modelled as sheets: their parts are kept and written back unchanged (see
+/// [`crate::PreservedSheet`]), and this read-only copy lets Print Entire Workbook print each
+/// visible one as a page holding its chart, like Excel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChartSheetPrint {
+    pub name: String,
+    pub visibility: crate::Visibility,
+    /// How many worksheets come before it: its position among the model's sheets.
+    pub before: usize,
+    pub chart: crate::Chart,
+    /// Orientation, paper, margins and header/footer from the chart sheet's page setup.
+    pub print: PrintSettings,
+}
