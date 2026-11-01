@@ -5,11 +5,11 @@ use gridcraft_model::Visibility;
 use super::make_zip;
 use crate::{Format, read_xlsb, read_xlsx, sniff, write_xlsx};
 
-const ROOT: &str = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="book" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="records/book.bin"/></Relationships>"#;
-const RELS: &str = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="one" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="../data/one.bin"/><Relationship Id="two" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="../data/two.bin"/><Relationship Id="strings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="../text/strings.bin"/></Relationships>"#;
-const TYPES: &str = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/records/book.bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/data/one.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/data/two.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/text/strings.bin" ContentType="application/vnd.ms-excel.sharedStrings"/></Types>"#;
+pub(super) const ROOT: &str = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="book" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="records/book.bin"/></Relationships>"#;
+pub(super) const RELS: &str = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="one" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="../data/one.bin"/><Relationship Id="two" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="../data/two.bin"/><Relationship Id="strings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="../text/strings.bin"/></Relationships>"#;
+pub(super) const TYPES: &str = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/records/book.bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/data/one.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/data/two.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/text/strings.bin" ContentType="application/vnd.ms-excel.sharedStrings"/></Types>"#;
 
-fn record(id: u16, bytes: &[u8]) -> Vec<u8> {
+pub(super) fn record(id: u16, bytes: &[u8]) -> Vec<u8> {
     let mut out = vec![];
     if id < 128 {
         out.push(id as u8);
@@ -28,7 +28,7 @@ fn record(id: u16, bytes: &[u8]) -> Vec<u8> {
     out.extend(bytes);
     out
 }
-fn wide(text: &str) -> Vec<u8> {
+pub(super) fn wide(text: &str) -> Vec<u8> {
     let units: Vec<_> = text.encode_utf16().collect();
     let mut out = (units.len() as u32).to_le_bytes().to_vec();
     for unit in units {
@@ -36,7 +36,7 @@ fn wide(text: &str) -> Vec<u8> {
     }
     out
 }
-fn rich(text: &str, extras: bool) -> Vec<u8> {
+pub(super) fn rich(text: &str, extras: bool) -> Vec<u8> {
     let mut out = vec![if extras { 3 } else { 0 }];
     out.extend(wide(text));
     if extras {
@@ -48,12 +48,12 @@ fn rich(text: &str, extras: bool) -> Vec<u8> {
     }
     out
 }
-fn row(r: u32) -> Vec<u8> {
+pub(super) fn row(r: u32) -> Vec<u8> {
     let mut out = r.to_le_bytes().to_vec();
     out.extend([0; 13]);
     record(0, &out)
 }
-fn cell(id: u16, col: u32, value: &[u8]) -> Vec<u8> {
+pub(super) fn cell(id: u16, col: u32, value: &[u8]) -> Vec<u8> {
     let mut data = col.to_le_bytes().to_vec();
     data.extend([0; 4]);
     data.extend(value);
@@ -65,7 +65,7 @@ fn cell(id: u16, col: u32, value: &[u8]) -> Vec<u8> {
     }
     record(id, &data)
 }
-fn worksheet(data: &[u8], tail: &[u8]) -> Vec<u8> {
+pub(super) fn worksheet(data: &[u8], tail: &[u8]) -> Vec<u8> {
     let mut out = record(129, &[]);
     out.extend(record(148, &[0xff; 16])); // A bogus dimension must never allocate a dense grid.
     out.extend(record(145, &[]));
@@ -75,7 +75,7 @@ fn worksheet(data: &[u8], tail: &[u8]) -> Vec<u8> {
     out.extend(record(130, &[]));
     out
 }
-fn book(date1904: bool) -> Vec<u8> {
+pub(super) fn book(date1904: bool) -> Vec<u8> {
     let mut out = record(131, &[]);
     let mut props = u32::from(date1904).to_le_bytes().to_vec();
     props.extend(0u32.to_le_bytes());
@@ -93,7 +93,7 @@ fn book(date1904: bool) -> Vec<u8> {
     out.extend(record(132, &[]));
     out
 }
-fn sst() -> Vec<u8> {
+pub(super) fn sst() -> Vec<u8> {
     let mut out = record(159, &[1, 0, 0, 0, 1, 0, 0, 0]);
     out.extend(record(19, &rich("shared 🦀 café", true)));
     out.extend(record(160, &[]));

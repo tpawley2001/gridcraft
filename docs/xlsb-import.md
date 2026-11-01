@@ -3,6 +3,11 @@
 Open an `.xlsb` file with File → Open, drag it onto GridCraft, or pass it to the CLI.
 GridCraft imports worksheet data into a new workbook and shows the conversion limits.
 
+The import reads worksheet names, visibility, numbers, text, booleans, errors, merged
+cells, hyperlinks (web pages, files and places in the workbook, with their tooltips) and notes
+(author and plain text). A note's box size, position and whether it is shown come from a
+drawing part that is not imported: notes open hidden in the default box. Hyperlinks or notes
+that can't be read are skipped with one warning each. Formula cells become their **last saved results**, not live formulas. Those results
 The import reads worksheet names, visibility, numbers, text, booleans, errors and merged
 cells. It also keeps the sheet layout: column widths, row heights, hidden and outlined
 rows and columns, default column width and row height, frozen panes, gridlines, headings,
