@@ -60,7 +60,7 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
     pg.save();
     pg.clip_rect(bx, by, bw, bh);
     draw_sparklines(pg, wb, si, sh, b, block);
-    for (imi, im) in sh.images.iter().enumerate() {
+    for (imi, im) in sh.images.iter().enumerate().filter(|(_, o)| !o.hidden) {
         let r = anchor_rect(sh, &im.anchor);
         if !visible(r) {
             continue;
@@ -73,7 +73,7 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
             pg.image_rgba(Rect::new(x, y, w, h), px, [*pw, *ph]);
         }
     }
-    for shp in &sh.shapes {
+    for shp in sh.shapes.iter().filter(|o| !o.hidden) {
         let r = anchor_rect(sh, &shp.anchor);
         if !visible(r) {
             continue;
@@ -81,7 +81,7 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
         let (x, y, w, h) = place(r);
         draw_shape(pg, wb, shp, b, (x, y, w, h));
     }
-    for ch in &sh.charts {
+    for ch in sh.charts.iter().filter(|o| !o.hidden) {
         let r = anchor_rect(sh, &ch.anchor);
         if !visible(r) {
             continue;

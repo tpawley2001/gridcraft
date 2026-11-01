@@ -155,3 +155,51 @@ fn unselected_hidden_and_offscreen_charts_do_not_highlight_sources() {
         assert!(source_strokes(&h).is_empty(), "{state} chart must not highlight its source");
     }
 }
+
+#[test]
+fn hidden_objects_are_neither_painted_nor_selected_by_clicking() {
+    let (mut h, _) = fixture(false, false);
+    let (shape_rect, shape_id) = {
+        let app = h.state();
+        let sh = app.session.active().unwrap().wb.active().unwrap();
+        let shape = &sh.shapes[0];
+        {
+            let geo = app.grid.geo.as_ref().unwrap();
+            let a = &shape.anchor;
+            (
+                Rect::from_min_size(
+                    pos2(geo.x(sh, a.cell.col) + a.dx * geo.z, geo.y(sh, a.cell.row) + a.dy * geo.z),
+                    vec2(a.width * geo.z, a.height * geo.z),
+                ),
+                shape.id,
+            )
+        }
+    };
+    assert!(h.output().shapes.iter().any(|s| matches!(&s.shape, Shape::Rect(r) if r.fill == SHAPE_FILL)));
+    {
+        let app = h.state();
+        let sh = app.session.active().unwrap().wb.active().unwrap();
+        assert_eq!(
+            gridcraft_ui_egui::chartview::hit(app, app.grid.geo.as_ref().unwrap(), sh, shape_rect.center()).map(|(_, id, _)| id),
+            Some(shape_id)
+        );
+    }
+
+    {
+        let wb = std::sync::Arc::make_mut(&mut h.state_mut().session.active_mut().unwrap().wb);
+        let sh = wb.sheet_mut(0).unwrap();
+        for shape in &mut sh.shapes {
+            shape.hidden = true;
+        }
+        for chart in &mut sh.charts {
+            chart.hidden = true;
+        }
+    }
+    h.state_mut().selected_chart = None;
+    h.run_steps(3);
+    assert!(!h.output().shapes.iter().any(|s| matches!(&s.shape, Shape::Rect(r) if r.fill == SHAPE_FILL)));
+    let app = h.state();
+    let sh = app.session.active().unwrap().wb.active().unwrap();
+    assert!(gridcraft_ui_egui::chartview::hit(app, app.grid.geo.as_ref().unwrap(), sh, shape_rect.center()).is_none());
+    assert_ne!(app.selected_chart, Some(shape_id));
+}

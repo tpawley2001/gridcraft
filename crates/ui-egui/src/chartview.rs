@@ -265,7 +265,7 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
         return painted;
     }
     // Source outlines stay in cell space beneath every floating object.
-    if let Some(ch) = sh.charts.iter().find(|ch| app.selected_chart == Some(ch.id))
+    if let Some(ch) = sh.charts.iter().find(|ch| !ch.hidden && app.selected_chart == Some(ch.id))
         && anchor_rect(geo, sh, &ch.anchor).intersects(p.clip_rect())
     {
         for s in &ch.series {
@@ -284,7 +284,7 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
     let mut done = |start: egui::layers::ShapeIdx, rect: Rect| painted.push(PaintedObject { shapes: start.0..p.add(egui::Shape::Noop).0, rect });
     // The grid paints the active workbook: its pictures are cached under it.
     let doc = app.session.active().map_or(0, |d| d.uid);
-    for sp in &sh.shapes {
+    for sp in sh.shapes.iter().filter(|o| !o.hidden) {
         let r = anchor_rect(geo, sh, &sp.anchor);
         if !r.intersects(p.clip_rect()) {
             continue;
@@ -350,7 +350,7 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
         }
         done(start, r);
     }
-    for im in &sh.images {
+    for im in sh.images.iter().filter(|o| !o.hidden) {
         let r = anchor_rect(geo, sh, &im.anchor);
         if !r.intersects(p.clip_rect()) {
             continue;
@@ -366,7 +366,7 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
         }
         done(start, r);
     }
-    for ch in &sh.charts {
+    for ch in sh.charts.iter().filter(|o| !o.hidden) {
         let r = anchor_rect(geo, sh, &ch.anchor);
         if !r.intersects(p.clip_rect()) {
             continue;
@@ -514,19 +514,19 @@ pub fn hit(app: &SheetApp, geo: &Geo, sh: &Sheet, p: Pos2) -> Option<(&'static s
             return Some(("slicer", sl.id, r));
         }
     }
-    for ch in sh.charts.iter().rev() {
+    for ch in sh.charts.iter().rev().filter(|o| !o.hidden) {
         let r = anchor_rect(geo, sh, &ch.anchor);
         if r.expand(4.0).contains(p) && geo.cells.contains(p) {
             return Some(("chart", ch.id, r));
         }
     }
-    for im in sh.images.iter().rev() {
+    for im in sh.images.iter().rev().filter(|o| !o.hidden) {
         let r = anchor_rect(geo, sh, &im.anchor);
         if r.contains(p) && geo.cells.contains(p) {
             return Some(("image", im.id, r));
         }
     }
-    for s in sh.shapes.iter().rev() {
+    for s in sh.shapes.iter().rev().filter(|o| !o.hidden) {
         let r = anchor_rect(geo, sh, &s.anchor);
         if r.expand(3.0).contains(p) && geo.cells.contains(p) {
             return Some(("shape", s.id, r));

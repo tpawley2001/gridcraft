@@ -22,6 +22,7 @@ fn smooth_line_setting_round_trips() {
         trendlines: Vec::new(),
     };
     s.charts.push(Chart {
+        hidden: false,
         id: 1,
         kind: ChartKind::Line,
         anchor: Anchor { cell: gridcraft_core::CellRef::new(0, 3), width: 480.0, height: 300.0, ..Anchor::default() },
@@ -41,6 +42,7 @@ fn smooth_line_setting_round_trips() {
     let mut smooth_series = base_series.clone();
     smooth_series.smooth = true;
     s.charts.push(Chart {
+        hidden: false,
         id: 2,
         kind: ChartKind::ScatterLines,
         anchor: Anchor { cell: gridcraft_core::CellRef::new(15, 3), width: 480.0, height: 300.0, ..Anchor::default() },

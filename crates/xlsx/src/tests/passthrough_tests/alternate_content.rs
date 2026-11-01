@@ -225,6 +225,7 @@ fn added_chart_keeps_control_anchor() {
     let (mut wb, _) = read_xlsx(&package(2, false)).unwrap();
     let sheet = Arc::make_mut(&mut wb.sheets[0]);
     sheet.charts.push(Chart {
+        hidden: false,
         id: 99,
         kind: ChartKind::Line,
         anchor: Anchor { cell: CellRef::new(4, 4), width: 480.0, height: 300.0, ..Anchor::default() },
