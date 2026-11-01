@@ -108,10 +108,10 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     wb.sheets.clear();
     let mut report = ReadReport::default();
     report.warn("XLSB import: charts, images, macros and other features are not imported. Save a new .xlsx file; XLSB saving is not supported.");
-    let (sheets, names, mut links) = workbook(&book, &mut wb, &mut report)?;
+    let mut itab_cur: Option<u32> = None;
+    let (sheets, names, mut links) = workbook(&book, &mut wb, &mut report, &mut itab_cur)?;
     // Cells using a name the import drops would calculate to #NAME?: they keep their saved result.
     links.skipped = names.iter().map(|l| !l.rgce.is_empty() && decode_xlsb(&l.rgce, CellRef::new(0, 0), Mode::Name, &links).is_err()).collect();
-    let mut model_index = Vec::with_capacity(sheets.len());
     let rels = relationships(&mut package, &root.target)?;
     let mut budget = Budget::default();
     let styles = import_styles(&mut package, &types, &rels, &mut wb, &mut budget, &mut report);
@@ -128,6 +128,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     } else {
         vec![]
     };
+    let mut model_index: Vec<Option<usize>> = Vec::with_capacity(sheets.len());
     for info in sheets {
         model_index.push(None);
         let Some(id) = info.rel else {
@@ -172,7 +173,13 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             budget.formulas_kept
         ));
     }
-    wb.set_active_sheet(wb.sheets.iter().position(|s| s.visibility == Visibility::Visible).unwrap_or(0));
+    let active = itab_cur
+        .and_then(|index| usize::try_from(index).ok())
+        .and_then(|index| model_index.get(index).copied().flatten())
+        .filter(|&index| wb.sheets.get(index).is_some_and(|s| s.visibility == Visibility::Visible))
+        .or_else(|| wb.sheets.iter().position(|s| s.visibility == Visibility::Visible))
+        .unwrap_or(0);
+    wb.set_active_sheet(active);
     Ok((wb, report))
 }
 
@@ -467,8 +474,14 @@ struct SheetInfo {
     visibility: Visibility,
 }
 /// Reads the workbook part: the sheet list, the date system, the supporting links and XTIs
-/// formulas refer to other sheets through ([MS-XLSB] 2.1.7.61 EXTERNALS) and the defined names.
-fn workbook(bytes: &[u8], wb: &mut Workbook, report: &mut ReadReport) -> Result<(Vec<SheetInfo>, Vec<Lbl>, Links), IoError> {
+/// formulas refer to other sheets through ([MS-XLSB] 2.1.7.61 EXTERNALS), the defined names and
+/// the selected sheet tab.
+fn workbook(
+    bytes: &[u8],
+    wb: &mut Workbook,
+    report: &mut ReadReport,
+    itab_cur: &mut Option<u32>,
+) -> Result<(Vec<SheetInfo>, Vec<Lbl>, Links), IoError> {
     let mut records = Records::new(bytes);
     records.first(131, report)?;
     let mut sheets = vec![];
@@ -476,6 +489,7 @@ fn workbook(bytes: &[u8], wb: &mut Workbook, report: &mut ReadReport) -> Result<
     let mut links = Links::default();
     let mut bundle = false;
     let mut bundle_seen = false;
+    let mut view_seen = false;
     while let Some((id, payload)) = records.next(report)? {
         let mut b = Bytes::new(payload);
         match id {
@@ -506,6 +520,13 @@ fn workbook(bytes: &[u8], wb: &mut Workbook, report: &mut ReadReport) -> Result<
                 b.u32()?;
                 b.text(31)?;
                 b.finish()?;
+            }
+            158 if !view_seen => {
+                view_seen = true;
+                // [MS-XLSB] BrtBookView: the first view's active tab is at byte 24.
+                if payload.len() == 29 {
+                    *itab_cur = b.take(24).and_then(|_| b.u32()).ok();
+                }
             }
             156 => {
                 if !bundle {
