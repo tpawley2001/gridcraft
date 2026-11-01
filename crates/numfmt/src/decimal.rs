@@ -145,10 +145,10 @@ pub fn format_general_fit(n: f64, max_chars: usize) -> Option<String> {
     let sign = if n < 0.0 { "-" } else { "" };
     let (digits, x) = decimal_digits(n.abs());
     // Fixed notation for magnitudes from 1E-4 up to what fits.
-    if x >= -4 {
-        if let Some(s) = general_fixed(sign, &digits, x, max_chars) {
-            return Some(s);
-        }
+    if x >= -4
+        && let Some(s) = general_fixed(sign, &digits, x, max_chars)
+    {
+        return Some(s);
     }
     general_scientific(sign, &digits, x, max_chars)
 }
