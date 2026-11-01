@@ -179,21 +179,9 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
                 sheet.print.center_h = e.flag("horizontalCentered", false);
                 sheet.print.center_v = e.flag("verticalCentered", false);
             }
-            "pageMargins" => {
-                let m = &mut sheet.print.margins;
-                for (i, k) in ["left", "right", "top", "bottom", "header", "footer"].iter().enumerate() {
-                    if let (Some(v), Some(slot)) = (e.attr_f64(k), m.get_mut(i)) {
-                        *slot = v.clamp(0.0, 50.0) as f32;
-                    }
-                }
-            }
+            "pageMargins" => read_page_margins(e, &mut sheet.print),
             "pageSetup" => {
-                if e.attr("orientation") == Some("landscape") {
-                    sheet.print.orientation = Orientation::Landscape;
-                }
-                if let Some(p) = e.attr_u32("paperSize").and_then(paper_name) {
-                    sheet.print.paper = p.to_string();
-                }
+                read_paper(e, &mut sheet.print);
                 // Excel treats a zero scale as unstated, keeping the default 100%.
                 if let Some(s) = e.attr_u32("scale").filter(|&s| s != 0) {
                     sheet.print.scale = s.clamp(10, 400) as u16;
@@ -204,24 +192,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
                     sheet.print.fit_to = Some((w, h));
                 }
             }
-            "headerFooter" => {
-                let pr = &mut sheet.print;
-                for (tag, slot) in [
-                    ("oddHeader", &mut pr.header),
-                    ("oddFooter", &mut pr.footer),
-                    ("evenHeader", &mut pr.even_header),
-                    ("evenFooter", &mut pr.even_footer),
-                    ("firstHeader", &mut pr.first_header),
-                    ("firstFooter", &mut pr.first_footer),
-                ] {
-                    // Excel caps each at 255 characters; a hostile file can't make them huge.
-                    *slot = e.child(tag).map(|h| h.text.chars().take(255).collect()).unwrap_or_default();
-                }
-                pr.different_first = e.flag("differentFirst", false);
-                pr.different_odd_even = e.flag("differentOddEven", false);
-                pr.hf_scale_with_doc = e.flag("scaleWithDoc", true);
-                pr.hf_align_with_margins = e.flag("alignWithMargins", true);
-            }
+            "headerFooter" => read_header_footer(e, &mut sheet.print),
             "rowBreaks" => sheet.print.row_breaks = e.kids("brk").filter_map(|b| b.attr_u32("id")).filter(|&r| r > 0 && r < MAX_ROWS).collect(),
             "colBreaks" => sheet.print.col_breaks = e.kids("brk").filter_map(|b| b.attr_u32("id")).filter(|&c| c > 0 && c < MAX_COLS).collect(),
             "sheetProtection" if e.flag("sheet", false) => {
@@ -698,4 +669,42 @@ mod tests {
         assert_eq!(ranges.len(), 12_000);
         assert_eq!(ranges.last().copied(), RangeRef::parse("A12000"));
     }
+}
+
+/// `<pageMargins>` (worksheets and chart sheets), in inches.
+pub(crate) fn read_page_margins(e: &El, pr: &mut gridcraft_model::PrintSettings) {
+    for (i, k) in ["left", "right", "top", "bottom", "header", "footer"].iter().enumerate() {
+        if let (Some(v), Some(slot)) = (e.attr_f64(k), pr.margins.get_mut(i)) {
+            *slot = v.clamp(0.0, 50.0) as f32;
+        }
+    }
+}
+
+/// The orientation and paper size of a `<pageSetup>` (worksheets and chart sheets).
+pub(crate) fn read_paper(e: &El, pr: &mut gridcraft_model::PrintSettings) {
+    if e.attr("orientation") == Some("landscape") {
+        pr.orientation = Orientation::Landscape;
+    }
+    if let Some(p) = e.attr_u32("paperSize").and_then(paper_name) {
+        pr.paper = p.to_string();
+    }
+}
+
+/// `<headerFooter>` (worksheets and chart sheets).
+pub(crate) fn read_header_footer(e: &El, pr: &mut gridcraft_model::PrintSettings) {
+    for (tag, slot) in [
+        ("oddHeader", &mut pr.header),
+        ("oddFooter", &mut pr.footer),
+        ("evenHeader", &mut pr.even_header),
+        ("evenFooter", &mut pr.even_footer),
+        ("firstHeader", &mut pr.first_header),
+        ("firstFooter", &mut pr.first_footer),
+    ] {
+        // Excel caps each at 255 characters; a hostile file can't make them huge.
+        *slot = e.child(tag).map(|h| h.text.chars().take(255).collect()).unwrap_or_default();
+    }
+    pr.different_first = e.flag("differentFirst", false);
+    pr.different_odd_even = e.flag("differentOddEven", false);
+    pr.hf_scale_with_doc = e.flag("scaleWithDoc", true);
+    pr.hf_align_with_margins = e.flag("alignWithMargins", true);
 }

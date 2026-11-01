@@ -3,7 +3,10 @@
 use std::sync::Arc;
 
 use gridcraft_core::{DateSystem, RangeRef};
-use gridcraft_model::{CalcMode, CellPicture, DefinedName, PhoneticString, Sheet, ShowObjects, Style, StyleId, StyleTable, Visibility, Workbook};
+use gridcraft_model::{
+    CalcMode, CellPicture, Chart, ChartSheetPrint, DefinedName, PhoneticString, PrintSettings, Sheet, ShowObjects, Style, StyleId, StyleTable,
+    Visibility, Workbook,
+};
 
 use crate::package::{Package, Rel};
 use crate::styles::{StylesIn, read_styles};
@@ -272,6 +275,7 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
 
     // Sheets. `file_to_model[i]` maps the i-th <sheet> to a model sheet index.
     let mut file_to_model: Vec<Option<usize>> = vec![];
+    let mut chart_sheets: Vec<ChartSheetPrint> = vec![];
     let mut pivot_caches = crate::pivot::CachesIn::new(&wb_xml, &wb_rels);
     let sheet_els: Vec<El> = wb_xml.child("sheets").map(|s| s.kids("sheet").cloned().collect()).unwrap_or_default();
     for (i, se) in sheet_els.iter().enumerate() {
@@ -284,7 +288,13 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         };
         if crate::passthrough::KEPT_SHEET_KINDS.iter().any(|k| k.eq_ignore_ascii_case(&rel.kind)) {
             // Chart, dialog and macro sheets are kept as they are and written back in place (see
-            // `passthrough`); nothing to model.
+            // `passthrough`); nothing to model. Chart sheets also keep a copy of their chart and
+            // page setup for printing.
+            if rel.kind.eq_ignore_ascii_case("chartsheet")
+                && let Some((chart, print)) = read_chart_sheet(&mut cx, &rel.target)?
+            {
+                chart_sheets.push(ChartSheetPrint { name, visibility: visibility(se), before: wb.sheets.len(), chart, print });
+            }
             file_to_model.push(None);
             continue;
         }
@@ -309,11 +319,7 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         }
         sheet.preserved = kept.sheet(&mut cx, &rel.target, &name);
         sheet.file_id = se.attr_u32("sheetId").unwrap_or(0);
-        sheet.visibility = match se.attr("state") {
-            Some("hidden") => Visibility::Hidden,
-            Some("veryHidden") => Visibility::VeryHidden,
-            _ => Visibility::Visible,
-        };
+        sheet.visibility = visibility(se);
         file_to_model.push(Some(wb.sheets.len()));
         wb.sheets.push(Arc::new(sheet));
     }
@@ -374,16 +380,16 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
                 *f = r.clone();
             }
         };
-        for sheet in wb.sheets.iter_mut().filter(|s| !s.charts.is_empty()) {
-            for ch in Arc::make_mut(sheet).charts.iter_mut() {
-                for s in ch.series.iter_mut() {
-                    resolve(&mut s.values);
-                    s.categories.iter_mut().for_each(&resolve);
-                    s.name.iter_mut().for_each(&resolve);
-                }
+        let sheet_charts = wb.sheets.iter_mut().filter(|s| !s.charts.is_empty()).flat_map(|s| Arc::make_mut(s).charts.iter_mut());
+        for ch in sheet_charts.chain(chart_sheets.iter_mut().map(|c| &mut c.chart)) {
+            for s in ch.series.iter_mut() {
+                resolve(&mut s.values);
+                s.categories.iter_mut().for_each(&resolve);
+                s.name.iter_mut().for_each(&resolve);
             }
         }
     }
+    wb.chart_sheets = Arc::new(chart_sheets);
 
     // Document properties.
     if let Some(r) = find_rel(&root_rels, "core-properties").cloned()
@@ -430,6 +436,55 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     wb.styles = cx.styles;
     wb.phonetics = cx.phonetics;
     Ok((wb, cx.report))
+}
+
+fn visibility(se: &El) -> Visibility {
+    match se.attr("state") {
+        Some("hidden") => Visibility::Hidden,
+        Some("veryHidden") => Visibility::VeryHidden,
+        _ => Visibility::Visible,
+    }
+}
+
+/// The chart and page setup of a chart sheet part (ECMA-376 Part 1 §18.3.1.12), for printing:
+/// the chart behind its `<drawing>`, read with the embedded-chart reader, and its
+/// `<pageSetup>` orientation and paper, `<pageMargins>` and `<headerFooter>`. `None` when the
+/// sheet, its drawing or its chart is missing or unreadable. Problems are not reported: the
+/// parts are kept for saving either way (see `passthrough`), which warns about them.
+fn read_chart_sheet(cx: &mut Ctx<'_>, part: &str) -> Result<Option<(Chart, PrintSettings)>, IoError> {
+    let warned = cx.report.warnings.len();
+    let found = chart_sheet_parts(cx, part);
+    cx.report.warnings.truncate(warned);
+    found
+}
+
+fn chart_sheet_parts(cx: &mut Ctx<'_>, part: &str) -> Result<Option<(Chart, PrintSettings)>, IoError> {
+    let Some(x) = cx.optional_xml(part)? else { return Ok(None) };
+    let rels = match cx.pkg.rels(part) {
+        Ok(r) => r,
+        Err(IoError::TooLarge(m)) => return Err(IoError::TooLarge(m)),
+        Err(_) => return Ok(None),
+    };
+    let Some(drawing) = x.child("drawing").and_then(|d| d.attr("id")).and_then(|id| rels.iter().find(|r| r.id == id && !r.external)) else {
+        return Ok(None);
+    };
+    let mut holder = Sheet::new("");
+    match crate::drawing::read_drawing(cx, &drawing.target, &mut holder) {
+        Ok(()) => {}
+        Err(IoError::TooLarge(m)) => return Err(IoError::TooLarge(m)),
+        Err(_) => return Ok(None),
+    }
+    let Some(chart) = holder.charts.into_iter().next() else { return Ok(None) };
+    let mut print = PrintSettings::default();
+    for e in &x.children {
+        match e.name.as_str() {
+            "pageMargins" => crate::sheet_read::read_page_margins(e, &mut print),
+            "pageSetup" => crate::sheet_read::read_paper(e, &mut print),
+            "headerFooter" => crate::sheet_read::read_header_footer(e, &mut print),
+            _ => {}
+        }
+    }
+    Ok(Some((chart, print)))
 }
 
 pub(crate) fn unique_name(wb: &Workbook, name: &str, i: usize) -> String {

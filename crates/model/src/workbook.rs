@@ -213,6 +213,10 @@ pub struct Workbook {
     /// Unmodelled file content kept for saving (package root and workbook level). Not in JSON.
     #[serde(skip)]
     pub preserved: Option<Arc<crate::preserved::Preserved>>,
+    /// Chart sheets of the file it was read from, in tab order, for printing only (they are not
+    /// in `sheets`; their parts are in `preserved`). Shared between snapshots. Not in JSON.
+    #[serde(skip)]
+    pub chart_sheets: Arc<Vec<crate::ChartSheetPrint>>,
     /// The folder the workbook was read from, which relative paths to linked workbooks in
     /// `preserved` are relative to. Saving into another folder rewrites them from there. Not in JSON.
     #[serde(skip)]
@@ -311,6 +315,7 @@ impl Workbook {
             macros_read: vec![],
             macros_unread: Arc::default(),
             preserved: None,
+            chart_sheets: Arc::default(),
             source_dir: None,
             source_path: None,
         }

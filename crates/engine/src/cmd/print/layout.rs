@@ -72,6 +72,9 @@ pub struct SheetLayout {
     pub heading_h: f32,
     /// Manual page breaks apply (they don't when the sheet is fitted to pages).
     pub manual_breaks: bool,
+    /// The page is a chart sheet's (an index into [`Workbook::chart_sheets`]): one page holding
+    /// its chart scaled to the printable area. `sheet` is then the worksheet before it.
+    pub chart_sheet: Option<usize>,
 }
 
 impl SheetLayout {
@@ -201,10 +204,9 @@ fn title_span(t: Option<(u32, u32)>, max: u32) -> Option<(u32, u32)> {
     Some((a, b.min(max - 1).min(a.saturating_add(499))))
 }
 
-/// Paginates one sheet.
-pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_override: Option<RangeRef>) -> Option<SheetLayout> {
-    let sh = wb.sheet(si)?;
-    let st = sh.print.clone();
+/// Page width and height and the margins (left, right, top, bottom, header, footer), in points,
+/// of a page setup.
+fn page_geometry(st: &PrintSettings) -> (f32, f32, [f32; 6]) {
     let (mut pw, mut ph) = paper_size(&st.paper);
     if st.orientation == Orientation::Landscape {
         std::mem::swap(&mut pw, &mut ph);
@@ -220,6 +222,39 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
             margins[b] *= f;
         }
     }
+    (pw, ph, margins)
+}
+
+/// The one page of a chart sheet: its own page setup, the chart scaled to fill the printable
+/// area (Excel's default for chart sheets).
+fn layout_chart_sheet(wb: &Workbook, ci: usize) -> Option<SheetLayout> {
+    let cs = wb.chart_sheets.get(ci)?;
+    let (page_w, page_h, margins) = page_geometry(&cs.print);
+    Some(SheetLayout {
+        sheet: cs.before.min(wb.sheets.len().saturating_sub(1)),
+        settings: cs.print.clone(),
+        page_w,
+        page_h,
+        margins,
+        scale: 1.0,
+        area: RangeRef::cell(CellRef::new(0, 0)),
+        row_bands: vec![(0, 0)],
+        col_bands: vec![(0, 0)],
+        pages: vec![(0, 0)],
+        title_rows: None,
+        title_cols: None,
+        heading_w: 0.0,
+        heading_h: 0.0,
+        manual_breaks: false,
+        chart_sheet: Some(ci),
+    })
+}
+
+/// Paginates one sheet.
+pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_override: Option<RangeRef>) -> Option<SheetLayout> {
+    let sh = wb.sheet(si)?;
+    let st = sh.print.clone();
+    let (pw, ph, margins) = page_geometry(&st);
     let area = match range_override {
         Some(r) => trim_full(sh, r),
         None => print_range(sh).unwrap_or(RangeRef::cell(CellRef::new(0, 0))),
@@ -249,6 +284,7 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
         heading_w,
         heading_h,
         manual_breaks: fit.is_none(),
+        chart_sheet: None,
     };
     let paginate = |lay: &mut SheetLayout, manual: bool| {
         lay.manual_breaks = manual;
@@ -324,24 +360,41 @@ pub(crate) fn split_bands(sh: &Sheet, lay: &SheetLayout, cap: usize) -> (Bands, 
     (rows, cols)
 }
 
-/// Lays out every sheet a print command covers.
+/// Lays out every sheet a print command covers. Printing the whole workbook also prints each
+/// visible chart sheet as one page, in tab order.
 pub fn layouts(wb: &Workbook, opts: &PrintOptions) -> Vec<SheetLayout> {
     let mut out = Vec::new();
     let mut pages = 0usize;
-    let sheets: Vec<usize> = if opts.all_sheets {
-        (0..wb.sheets.len()).filter(|i| wb.sheet(*i).is_some_and(|s| s.visibility == Visibility::Visible)).collect()
+    // Tabs in order: `Ok(sheet)` for a worksheet, `Err(chart sheet)` for a chart sheet.
+    let mut tabs: Vec<std::result::Result<usize, usize>> = Vec::new();
+    if opts.all_sheets {
+        let n = wb.sheets.len();
+        for i in 0..=n {
+            // A chart sheet sits before the worksheet `before` counts up to; past the end, last.
+            let charts = wb.chart_sheets.iter().enumerate().filter(|(_, c)| c.visibility == Visibility::Visible);
+            tabs.extend(charts.filter(|(_, c)| if i == n { c.before >= n } else { c.before == i }).map(|(ci, _)| Err(ci)));
+            if wb.sheet(i).is_some_and(|s| s.visibility == Visibility::Visible) {
+                tabs.push(Ok(i));
+            }
+        }
     } else {
-        vec![wb.active_sheet()]
-    };
-    for si in sheets {
+        tabs.push(Ok(wb.active_sheet()));
+    }
+    for tab in tabs {
         if pages >= MAX_PAGES {
             break;
         }
-        let ovr = if si == wb.active_sheet() { opts.range } else { None };
-        if opts.all_sheets && ovr.is_none() && wb.sheet(si).is_some_and(|s| print_range(s).is_none()) {
-            continue;
-        }
-        if let Some(mut l) = layout_sheet(wb, si, opts, ovr) {
+        let lay = match tab {
+            Ok(si) => {
+                let ovr = if si == wb.active_sheet() { opts.range } else { None };
+                if opts.all_sheets && ovr.is_none() && wb.sheet(si).is_some_and(|s| print_range(s).is_none()) {
+                    continue;
+                }
+                layout_sheet(wb, si, opts, ovr)
+            }
+            Err(ci) => layout_chart_sheet(wb, ci),
+        };
+        if let Some(mut l) = lay {
             l.pages.truncate(MAX_PAGES - pages);
             pages += l.pages.len();
             out.push(l);
