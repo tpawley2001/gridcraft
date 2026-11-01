@@ -627,8 +627,20 @@ mod tests {
         assert!(xlsb(&[0x23, 1, 0, 0, 0], base).is_err());
         assert!(xlsb(&[0x3A, 0, 0, 0, 0, 0, 0, 0, 0], base).is_err());
         assert!(xlsb(&[0x01, 0, 0, 0, 0, 0, 0], base).is_err());
-        assert!(xlsb(&[0x17, 1, 0, b'a', 0], base).is_err());
+        // A truncated PtgStr, and one over Excel's 255-character limit.
+        assert!(xlsb(&[0x17, 2, 0, b'a', 0], base).is_err());
+        assert!(xlsb(&[&[0x17u8, 0, 1][..], &[b'a', 0].repeat(256)].concat(), base).is_err());
         assert!(xlsb(&[0x60, 0, 0, 0, 0, 0, 0, 0], base).is_err());
+    }
+
+    #[test]
+    fn decodes_xlsb_text_constants() {
+        // BIFF12 PtgStr: u16 character count, then UTF-16LE, no high-byte flag.
+        let base = CellRef::new(0, 0);
+        assert_eq!(xlsb(&[0x17, 1, 0, b'a', 0], base).unwrap(), "\"a\"");
+        assert_eq!(xlsb(&[0x17, 0, 0], base).unwrap(), "\"\"");
+        let euro = [&[0x17u8, 2, 0][..], &0x20ACu16.to_le_bytes(), &[b'5', 0]].concat();
+        assert_eq!(xlsb(&euro, base).unwrap(), "\"\u{20AC}5\"");
     }
 
     #[test]

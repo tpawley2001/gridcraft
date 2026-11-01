@@ -597,3 +597,89 @@ fn xlsb_styles_damaged_part_keeps_values_and_warns() {
     assert_eq!(wb.sheets[0].style_id(CellRef::parse("A1").unwrap()), gridcraft_model::StyleId::DEFAULT);
     assert!(report.warnings.iter().any(|w| w.to_lowercase().contains("styles")));
 }
+
+// ---- Text constants (BIFF12 PtgStr: u16 cch + UTF-16LE characters).
+
+fn ptg_str(s: &str) -> Vec<u8> {
+    let units: Vec<u16> = s.encode_utf16().collect();
+    let mut out = vec![0x17];
+    out.extend((units.len() as u16).to_le_bytes());
+    for u in units {
+        out.extend(u.to_le_bytes());
+    }
+    out
+}
+/// PtgAttrIf / PtgAttrSkip; the jump offsets are not needed to decode the formula text.
+fn attr(kind: u8) -> Vec<u8> {
+    vec![0x19, kind, 0, 0]
+}
+fn text_constant_book() -> gridcraft_model::Workbook {
+    formula_book(&[
+        // A3: ="x"&A1 (cached "x1")
+        fmla(8, 0, &wide("x1"), &cat(&[&ptg_str("x"), &ptg_ref(0, 0, true, true), &[0x08]])),
+        // B3: =IF(A1>0,"pos","") (cached "pos"): PtgFuncVar, 3 arguments, iftab 1
+        fmla(
+            8,
+            1,
+            &wide("pos"),
+            &cat(&[
+                &ptg_ref(0, 0, true, true),
+                &ptg_int(0),
+                &[0x0D],
+                &attr(0x02),
+                &ptg_str("pos"),
+                &attr(0x08),
+                &ptg_str(""),
+                &attr(0x08),
+                &[0x42, 3, 1, 0],
+            ]),
+        ),
+        // C3: =LEN("Ünïcødé €") (cached 9): PtgFunc iftab 32
+        fmla(9, 2, &9.0f64.to_le_bytes(), &cat(&[&ptg_str("Ünïcødé €"), &[0x41, 32, 0]])),
+        // D3: =A1&"say ""hi""" (cached 1say "hi")
+        fmla(8, 3, &wide("1say \"hi\""), &cat(&[&ptg_ref(0, 0, true, true), &ptg_str("say \"hi\""), &[0x08]])),
+    ])
+}
+
+#[test]
+fn xlsb_text_constants_decode_to_formula_text() {
+    let wb = text_constant_book();
+    let rows = [
+        ("A3", "\"x\"&A1", text("x1")),
+        ("B3", "IF(A1>0,\"pos\",\"\")", text("pos")),
+        ("C3", "LEN(\"Ünïcødé €\")", Value::Number(9.0)),
+        ("D3", "A1&\"say \"\"hi\"\"\"", text("1say \"hi\"")),
+    ];
+    for (a1, formula, cached) in rows {
+        assert_eq!(ftext(&wb, a1).as_deref(), Some(formula), "{a1} formula");
+        assert_eq!(wb.sheets[0].value(CellRef::parse(a1).unwrap()), cached, "{a1} keeps its saved result");
+    }
+}
+
+#[test]
+fn xlsb_text_constants_survive_saving_as_xlsx() {
+    let (back, _) = read_xlsx(&write_xlsx(&text_constant_book()).unwrap()).unwrap();
+    assert_eq!(ftext(&back, "B3").as_deref(), Some("IF(A1>0,\"pos\",\"\")"));
+    assert_eq!(ftext(&back, "C3").as_deref(), Some("LEN(\"Ünïcødé €\")"));
+}
+
+#[test]
+fn xlsb_text_constants_do_not_trigger_the_kept_as_saved_results_warning() {
+    let mut data = row(0);
+    data.extend(fmla(8, 0, &wide("ab"), &cat(&[&ptg_str("a"), &ptg_str("b"), &[0x08]])));
+    let (wb, report) = read_xlsb(&file(&worksheet(&data, &[]))).unwrap();
+    assert_eq!(ftext(&wb, "A1").as_deref(), Some("\"a\"&\"b\""));
+    assert!(!report.warnings.iter().any(|w| w.contains("kept as their saved results")), "{:?}", report.warnings);
+    assert!(!report.warnings.iter().any(|w| w.contains("text or array constants")), "{:?}", report.warnings);
+}
+
+#[test]
+fn xlsb_truncated_text_constant_keeps_the_saved_result() {
+    let mut data = row(0);
+    // PtgStr claims 5 characters but carries 1: the cell keeps its cached value and the file opens.
+    data.extend(fmla(8, 0, &wide("a"), &[0x17, 5, 0, b'a', 0]));
+    let (wb, report) = read_xlsb(&file(&worksheet(&data, &[]))).unwrap();
+    assert_eq!(wb.sheets[0].value(CellRef::new(0, 0)), text("a"));
+    assert_eq!(ftext(&wb, "A1"), None);
+    assert!(report.warnings.iter().any(|w| w.to_lowercase().contains("formula")), "{:?}", report.warnings);
+}
