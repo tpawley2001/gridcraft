@@ -4,6 +4,7 @@
 use gridcraft_core::{CellError, CellRef, DateSystem, RangeRef, Value};
 
 use crate::{Format, IoError, read_xls, read_xlsx, sniff, write_xlsx};
+use gridcraft_model::{CfOperator, CfRule, Color};
 
 const END: u32 = 0xFFFF_FFFE;
 const FREE: u32 = 0xFFFF_FFFF;
@@ -858,4 +859,115 @@ fn xls_dv_survives_save_as_xlsx() {
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
     assert_eq!(back.sheets[0].validations, wb.sheets[0].validations);
     assert_eq!(back.sheets[0].validations[0].f1, "\"yes,no\"");
+}
+
+// ---------------------------------------------------------------- conditional formatting (CondFmt / CF)
+
+/// CondFmt (0x01B0): one CF record follows, applying to `refs` (rwFirst, rwLast, colFirst, colLast).
+fn cond_fmt(ccf: u16, refs: &[[u16; 4]]) -> Vec<u8> {
+    let mut b = u16s(&[ccf, 0]);
+    let (r0, r1) = (refs.iter().map(|r| r[0]).min().unwrap(), refs.iter().map(|r| r[1]).max().unwrap());
+    let (c0, c1) = (refs.iter().map(|r| r[2]).min().unwrap(), refs.iter().map(|r| r[3]).max().unwrap());
+    b.extend(u16s(&[r0, r1, c0, c1, refs.len() as u16]));
+    for r in refs {
+        b.extend(u16s(r));
+    }
+    rec(0x01B0, &b)
+}
+
+/// The DXFN of the [MS-XLS] §3.1.2 worked example: font block only, font colour icv 0x0A (red),
+/// everything else "not specified".
+fn dxfn_red_font() -> Vec<u8> {
+    let mut b = (0x003F_FFFFu32 | 1 << 26).to_le_bytes().to_vec();
+    b.extend(0x0002u16.to_le_bytes());
+    b.push(0); // cchFont
+    b.extend([
+        0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x3F, 0x01, 0x00, 0x63, 0x00,
+        0x75, 0x00, 0x6D, 0x00, 0x65, 0x00, 0x6E, 0x00, 0x74, 0x00, 0x20, 0x00, 0x57, 0x00, 0x72, 0x00, 0x69, 0x00, 0x74, 0x00, 0x65, 0x00, 0x72,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x04, 0x00, 0x06, 0xDC, 0x00, 0x58, 0x03, 0x03, 0xFF,
+    ]);
+    b.extend((-1i32).to_le_bytes()); // stxp.twpHeight: unset
+    b.extend(0u32.to_le_bytes()); // stxp.ts
+    b.extend([0, 0, 0, 0, 0, 0, 0, 0]); // bls, sss, uls, bFamily, bCharSet, unused
+    b.extend(0x0Au32.to_le_bytes()); // icvFore: red
+    b.extend(0u32.to_le_bytes()); // reserved
+    b.extend(0x9Au32.to_le_bytes()); // tsNinch: italic + strikeout not specified
+    for v in [1u32, 1, 1, 1, 0, 0x7FFF_FFFF] {
+        b.extend(v.to_le_bytes()); // fSssNinch, fUlsNinch, fBlsNinch, unused, ich, cch
+    }
+    b.extend(1u16.to_le_bytes()); // iFnt
+    assert_eq!(b.len(), 0x7C);
+    b
+}
+
+/// CF (0x01B1): ct, cp, rgce1, rgce2 with `dxfn`.
+fn cf(ct: u8, cp: u8, dxfn: &[u8], rgce1: &[u8], rgce2: &[u8]) -> Vec<u8> {
+    let mut b = vec![ct, cp];
+    b.extend(u16s(&[rgce1.len() as u16, rgce2.len() as u16]));
+    b.extend(dxfn);
+    b.extend(rgce1);
+    b.extend(rgce2);
+    rec(0x01B1, &b)
+}
+
+#[test]
+fn xls_cf_spec_example_between_rule_with_red_font() {
+    // [MS-XLS] §3.1.2: CondFmt on A2, CF "between 1.5 and 2.5" with red text.
+    let cf_rec = cf(1, 1, &dxfn_red_font(), &ptg_num(1.5), &ptg_num(2.5));
+    assert_eq!(cf_rec.len(), 4 + 0x94);
+    let (wb, report) = read_xls(&one_sheet_with(&cat(&[&cond_fmt(1, &[[1, 1, 0, 0]]), &cf_rec]))).unwrap();
+    let cfs = &wb.sheets[0].cond_formats;
+    assert_eq!(cfs.len(), 1, "{:?}", report.warnings);
+    assert_eq!(cfs[0].ranges, vec![RangeRef::parse("A2").unwrap()]);
+    match &cfs[0].rule {
+        CfRule::CellIs { op, a, b, style } => {
+            assert_eq!((*op, a.as_str(), b.as_deref()), (CfOperator::Between, "1.5", Some("2.5")));
+            assert_eq!(style.font.color, Color::Rgb(0xFF0000));
+            assert!(!style.font.bold && !style.font.italic, "unspecified font attributes stay default");
+        }
+        other => panic!("expected CellIs, got {other:?}"),
+    }
+    assert!(!report.warnings.iter().any(|w| w.contains("Conditional formatting")), "{:?}", report.warnings);
+}
+
+#[test]
+fn xls_cf_operators_one_operand_and_formula_rules() {
+    let red = dxfn_red_font();
+    let int3 = [0x1E, 0x03, 0x00];
+    let records = cat(&[
+        &cond_fmt(3, &[[0, 9, 1, 1], [0, 9, 3, 3]]),
+        &cf(1, 5, &red, &int3, &[]),
+        &cf(1, 2, &red, &ptg_num(1.5), &ptg_num(2.5)),
+        &cf(2, 0, &red, &[0x1D, 0x01], &[]),
+    ]);
+    let (wb, report) = read_xls(&one_sheet_with(&records)).unwrap();
+    let cfs = &wb.sheets[0].cond_formats;
+    assert_eq!(cfs.len(), 3, "{:?}", report.warnings);
+    let ranges = vec![RangeRef::parse("B1:B10").unwrap(), RangeRef::parse("D1:D10").unwrap()];
+    assert!(cfs.iter().all(|c| c.ranges == ranges));
+    assert_eq!(cfs.iter().map(|c| c.priority).collect::<Vec<_>>(), vec![1, 2, 3]);
+    assert!(matches!(&cfs[0].rule, CfRule::CellIs { op: CfOperator::Greater, a, b: None, .. } if a == "3"));
+    assert!(matches!(&cfs[1].rule, CfRule::CellIs { op: CfOperator::NotBetween, b: Some(b), .. } if b == "2.5"));
+    assert!(matches!(&cfs[2].rule, CfRule::Expression { formula, .. } if formula == "TRUE"));
+}
+
+#[test]
+fn xls_cf_survives_save_as_xlsx() {
+    let records = cat(&[&cond_fmt(1, &[[1, 1, 0, 0]]), &cf(1, 1, &dxfn_red_font(), &ptg_num(1.5), &ptg_num(2.5))]);
+    let (wb, _) = read_xls(&one_sheet_with(&records)).unwrap();
+    assert_eq!(wb.sheets[0].cond_formats.len(), 1);
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(back.sheets[0].cond_formats, wb.sheets[0].cond_formats);
+}
+
+#[test]
+fn xls_cf_truncated_or_unknown_rules_are_skipped_without_panicking() {
+    let good = cf(1, 1, &dxfn_red_font(), &ptg_num(1.5), &ptg_num(2.5));
+    let truncated = rec(0x01B1, &good[4..40]);
+    let bad_ct = cf(7, 1, &dxfn_red_font(), &ptg_num(1.0), &[]);
+    let records = cat(&[&cond_fmt(3, &[[0, 0, 0, 0]]), &truncated, &bad_ct, &good]);
+    let (wb, report) = read_xls(&one_sheet_with(&records)).unwrap();
+    assert_eq!(wb.sheets[0].cond_formats.len(), 1, "only the well-formed rule is kept");
+    assert!(!report.warnings.is_empty());
+    assert_eq!(v(&wb, 0, "A1"), Value::Number(7.0));
 }
