@@ -1,6 +1,6 @@
 # Function parity: worksheet functions and formulas
 
-> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-01 · **Change:** minor (TEXT mixed elapsed-time codes; TEXT of negative elapsed times; TEXT General: sign outside the 11 characters, fixed notation for 1E-9; earlier: YEARFRAC basis 0 February-end rule, MOD quotient limit, PERCENTRANK significance; earlier: edge cases matched to Excel: base conversions, BITLSHIFT/BITRSHIFT, UNICHAR noncharacters, UPPER/LOWER/PROPER casing, FIXED/DOLLAR output, F/T/GAMMA/WEIBULL/BETA distributions, BINOM trial cap, HARMEAN; earlier: ECMA.CEILING listed with USDOLLAR as not on Microsoft's list; earlier: IMSQRT reproduces the stray real part Excel gives for negative reals) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-01 · **Change:** minor (TEXT lowercase `e+`/`e-` codes are `#VALUE!`; TEXT mixed elapsed-time codes; TEXT of negative elapsed times; TEXT General: sign outside the 11 characters, fixed notation for 1E-9; earlier: YEARFRAC basis 0 February-end rule, MOD quotient limit, PERCENTRANK significance; earlier: edge cases matched to Excel: base conversions, BITLSHIFT/BITRSHIFT, UNICHAR noncharacters, UPPER/LOWER/PROPER casing, FIXED/DOLLAR output, F/T/GAMMA/WEIBULL/BETA distributions, BINOM trial cap, HARMEAN; earlier: ECMA.CEILING listed with USDOLLAR as not on Microsoft's list; earlier: IMSQRT reproduces the stray real part Excel gives for negative reals) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's worksheet functions, category by category, against GridCraft's function library. Part of
 [target-app-parity.md](target-app-parity.md); gaps feed [gaps.md](gaps.md).
@@ -138,6 +138,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-01 | minor | TEXT: a lowercase `e+` / `e-` exponent code makes the format invalid (`TEXT(3.14159,"#,##0.00e+00")` is `#VALUE!`), like Excel 365; uppercase `E+` / `E-` and cell display formats are unchanged |
 | 2026-11-01 | minor | TEXT and cell display resolve minutes after seconds and apply elapsed totals to matching plain time codes within each section |
 | 2026-11-01 | minor | TEXT of a negative value with an elapsed-only format (`[h]`, `[m]`, `[s]`, no date or AM/PM codes) prints a leading minus, matching Excel; cell display unchanged |
 | 2026-11-01 | minor | `TEXT(n,"General")` matches Excel: the minus sign is outside the 11-character budget and fixed notation is kept when it shows as many digits (`0.000000001`) |

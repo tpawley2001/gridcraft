@@ -459,6 +459,7 @@ pub fn text_function(v: &Value, code: &str, sys: DateSystem) -> Result<String, C
     let fmt = NumberFormat::parse_cached(code);
     let n = match v.scalar() {
         Value::Error(e) => return Err(e),
+        _ if has_lowercase_exponent(code) => return Err(CellError::Value),
         Value::Empty => 0.0,
         Value::Number(n) => n,
         Value::Bool(b) => return Ok(fmt.format_text(if b { "TRUE" } else { "FALSE" }).text),
@@ -480,6 +481,36 @@ pub fn text_function(v: &Value, code: &str, sys: DateSystem) -> Result<String, C
     }
     let (f, overflow) = fmt.format_number(n, sys);
     if overflow { Err(CellError::Value) } else { Ok(f.text) }
+}
+
+/// Whether `code` has an unquoted, unescaped lowercase `e+` / `e-` exponent code in any section.
+/// Excel 365's `TEXT()` rejects such a format with `#VALUE!` (cell display still accepts it).
+fn has_lowercase_exponent(code: &str) -> bool {
+    let mut chars = code.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                for q in chars.by_ref() {
+                    if q == '"' {
+                        break;
+                    }
+                }
+            }
+            '[' => {
+                for q in chars.by_ref() {
+                    if q == ']' {
+                        break;
+                    }
+                }
+            }
+            '\\' | '_' | '*' => {
+                chars.next();
+            }
+            'e' if matches!(chars.peek(), Some('+' | '-')) => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 #[cfg(test)]
