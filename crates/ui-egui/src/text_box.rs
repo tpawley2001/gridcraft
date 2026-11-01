@@ -33,7 +33,7 @@ impl SheetApp {
         }
         let Some(d) = self.session.active() else { return false };
         let Some(sh) = d.wb.active() else { return false };
-        let Some(shape) = sh.shapes.iter().find(|s| s.id == id && s.kind == ShapeKind::TextBox) else {
+        let Some(shape) = sh.shapes.iter().find(|s| !s.hidden && s.id == id && s.kind == ShapeKind::TextBox) else {
             return false;
         };
         // shape.setText refuses edits on a protected sheet; don't open an editor that can't commit.
@@ -118,7 +118,7 @@ pub(crate) fn show(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &gridcr
         app.text_box_editor = Some(ed);
         return;
     }
-    let Some(shape) = sh.shapes.iter().find(|s| s.id == ed.id && s.kind == ShapeKind::TextBox) else {
+    let Some(shape) = sh.shapes.iter().find(|s| !s.hidden && s.id == ed.id && s.kind == ShapeKind::TextBox) else {
         app.session.mode = Mode::Ready;
         return;
     };

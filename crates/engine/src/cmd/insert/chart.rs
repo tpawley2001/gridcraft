@@ -246,6 +246,7 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
         }
     });
     let chart = Chart {
+        hidden: false,
         id,
         kind,
         anchor: Anchor {

@@ -976,20 +976,20 @@ pub(super) fn hidden_row_edge(geo: &Geo, sh: &Sheet, y: f32) -> Option<u32> {
 
 fn object_anchor(sh: &Sheet, kind: &str, id: u32) -> Option<gridcraft_engine::model::Anchor> {
     match kind {
-        "chart" => sh.charts.iter().find(|c| c.id == id).map(|c| c.anchor),
-        "image" => sh.images.iter().find(|c| c.id == id).map(|c| c.anchor),
+        "chart" => sh.charts.iter().find(|c| !c.hidden && c.id == id).map(|c| c.anchor),
+        "image" => sh.images.iter().find(|c| !c.hidden && c.id == id).map(|c| c.anchor),
         "slicer" => sh.slicers.iter().find(|c| c.id == id).map(|c| c.anchor),
-        _ => sh.shapes.iter().find(|c| c.id == id).map(|c| c.anchor),
+        _ => sh.shapes.iter().find(|c| !c.hidden && c.id == id).map(|c| c.anchor),
     }
 }
 
 pub(super) fn delete_selected_object(app: &mut SheetApp, sh: &Sheet) -> bool {
     let Some(id) = app.selected_chart else { return false };
-    let kind = if sh.charts.iter().any(|object| object.id == id) {
+    let kind = if sh.charts.iter().any(|object| !object.hidden && object.id == id) {
         "chart"
-    } else if sh.images.iter().any(|object| object.id == id) {
+    } else if sh.images.iter().any(|object| !object.hidden && object.id == id) {
         "image"
-    } else if sh.shapes.iter().any(|object| object.id == id) {
+    } else if sh.shapes.iter().any(|object| !object.hidden && object.id == id) {
         "shape"
     } else {
         return false;

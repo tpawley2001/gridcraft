@@ -10,6 +10,7 @@ use crate::{read_xlsx, write_xlsx};
 
 fn chart(id: u32, kind: ChartKind, scale: ChartScale) -> Chart {
     Chart {
+        hidden: false,
         id,
         kind,
         anchor: Anchor { cell: gridcraft_core::CellRef::new(0, 3), width: 480.0, height: 300.0, ..Anchor::default() },

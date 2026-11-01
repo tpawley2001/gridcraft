@@ -566,6 +566,9 @@ impl Trendline {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Chart {
+    /// Hidden drawing objects stay in the workbook but are not displayed or printed.
+    #[serde(default)]
+    pub hidden: bool,
     pub id: u32,
     pub kind: ChartKind,
     pub anchor: Anchor,
@@ -635,6 +638,9 @@ pub struct DrawingHyperlink {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Image {
+    /// Hidden drawing objects stay in the workbook but are not displayed or printed.
+    #[serde(default)]
+    pub hidden: bool,
     #[serde(default)]
     pub hyperlink: Option<DrawingHyperlink>,
     /// Imported drawing object name (`xdr:cNvPr name`).
@@ -669,6 +675,9 @@ pub enum ShapeKind {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Shape {
+    /// Hidden drawing objects stay in the workbook but are not displayed or printed.
+    #[serde(default)]
+    pub hidden: bool,
     #[serde(default)]
     pub hyperlink: Option<DrawingHyperlink>,
     /// Imported drawing object name (`xdr:cNvPr name`).

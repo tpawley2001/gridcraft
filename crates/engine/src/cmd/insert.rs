@@ -822,6 +822,7 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
         }
     });
     let chart = Chart {
+        hidden: false,
         id,
         kind,
         anchor: Anchor {
@@ -1063,6 +1064,7 @@ fn insert_picture(s: &mut Session, p: &Json) -> Result<Json> {
     let at = cell_param(s, p, "at")?.unwrap_or(d.selection.active);
     let scale = (640.0 / w.max(1) as f32).min(1.0);
     let img = Image {
+        hidden: false,
         hyperlink: None,
         name: None,
         id,
@@ -1134,6 +1136,7 @@ fn insert_shape(s: &mut Session, p: &Json) -> Result<Json> {
         Color::Theme(4, -250)
     });
     let shape = Shape {
+        hidden: false,
         hyperlink: None,
         name: None,
         id,
@@ -1750,6 +1753,7 @@ fn insert_icon(s: &mut Session, p: &Json) -> Result<Json> {
     let at = cell_param(s, p, "at")?.unwrap_or(d.selection.active);
     let color = super::format::color_param(p.get("color")).unwrap_or(Color::Theme(1, 0));
     let shape = Shape {
+        hidden: false,
         hyperlink: None,
         name: None,
         id,

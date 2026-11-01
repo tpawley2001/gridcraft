@@ -180,6 +180,7 @@ pub(super) fn read(obj: &El, anchor: Anchor) -> Option<Shape> {
     let (width, line) = validate_line(sp)?;
     let text = parse_points(path, &anchor, w, h)?;
     Some(Shape {
+        hidden: false,
         hyperlink: None,
         name: None,
         id: 0,
@@ -228,8 +229,9 @@ pub(super) fn write(shape: &Shape, theme: &Theme, id: usize, link: &str) -> Opti
     }
     let [r, g, b] = shape.line.resolve(theme)?;
     let name = crate::xml::esc_attr(&shape.name.clone().unwrap_or_else(|| format!("Ink {id}")));
+    let hidden = if shape.hidden { " hidden=\"1\"" } else { "" };
     let mut xml = format!(
-        "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"{name}\">{link}</xdr:cNvPr><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr>{}<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:pathLst><a:path w=\"{w}\" h=\"{h}\" fill=\"none\">",
+        "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"{name}\"{hidden}>{link}</xdr:cNvPr><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr>{}<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:pathLst><a:path w=\"{w}\" h=\"{h}\" fill=\"none\">",
         xfrm(a, "a:xfrm")
     );
     for (i, (x, y)) in points.iter().enumerate() {

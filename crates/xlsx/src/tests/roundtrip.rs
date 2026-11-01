@@ -370,6 +370,7 @@ fn sample() -> Workbook {
     });
     let png = b"\x89PNG\r\n\x1a\n0000IHDRfake".to_vec();
     s.images.push(Image {
+        hidden: false,
         hyperlink: None,
         name: None,
         id: 10,
@@ -380,6 +381,7 @@ fn sample() -> Workbook {
         alt: "Logo \"x\"".into(),
     });
     s.shapes.push(Shape {
+        hidden: false,
         hyperlink: None,
         name: None,
         id: 11,
@@ -391,6 +393,7 @@ fn sample() -> Workbook {
         format: Default::default(),
     });
     s.shapes.push(Shape {
+        hidden: false,
         hyperlink: None,
         name: None,
         id: 12,
@@ -402,6 +405,7 @@ fn sample() -> Workbook {
         format: Default::default(),
     });
     s.shapes.push(Shape {
+        hidden: false,
         hyperlink: None,
         name: None,
         id: 13,
@@ -424,6 +428,7 @@ fn sample() -> Workbook {
         },
     });
     let base_chart = Chart {
+        hidden: false,
         id: 20,
         kind: ChartKind::ColumnClustered,
         anchor: Anchor { cell: at("J5"), dx: 0.0, dy: 0.0, width: 480.0, height: 288.0, ..Default::default() },
