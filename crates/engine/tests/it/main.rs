@@ -34,4 +34,5 @@ mod table_resize_overlap;
 mod table_total_row_last_row;
 mod workbook_author;
 mod wrap_row_height;
+mod xlsb_arrays_recalc;
 mod xlsb_names_recalc;

@@ -118,7 +118,8 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut itab_cur: Option<u32> = None;
     let (sheets, names, mut links) = workbook(&book, &mut wb, &mut report, &mut itab_cur)?;
     // Cells using a name the import drops would calculate to #NAME?: they keep their saved result.
-    links.skipped = names.iter().map(|l| !l.rgce.is_empty() && decode_xlsb(&l.rgce, CellRef::new(0, 0), Mode::Name, &links).is_err()).collect();
+    links.skipped =
+        names.iter().map(|l| !l.rgce.is_empty() && decode_xlsb(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &links).is_err()).collect();
     let rels = relationships(&mut package, &root.target)?;
     if let Some(rel) = rels.iter().find(|r| r.kind == "theme") {
         let theme = (|| -> Result<_, IoError> {
@@ -200,10 +201,10 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     if wb.sheets.is_empty() {
         return Err(invalid("no supported worksheets"));
     }
-    add_defined_names(&names, &model_index, &mut wb, &mut report, |l| decode_xlsb(&l.rgce, CellRef::new(0, 0), Mode::Name, &links));
+    add_defined_names(&names, &model_index, &mut wb, &mut report, |l| decode_xlsb(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &links));
     if budget.formulas_kept > 0 {
         report.warn(format!(
-            "{} XLSB formula(s) use features that can't be imported yet (array constants, links to other workbooks); they were kept as their saved results and will not recalculate.",
+            "{} XLSB formula(s) use features that can't be imported yet (including links to other workbooks); they were kept as their saved results and will not recalculate.",
             budget.formulas_kept
         ));
     }
@@ -780,14 +781,16 @@ fn boolean(b: &mut Bytes<'_>) -> Result<bool, IoError> {
     }
 }
 /// The formula flags and `CellParsedFormula` after a formula cell's saved result: returns the
-/// tokens (`rgce`); the extra data (`rgcb`) is only used by tokens the decoder refuses.
-fn cached_formula<'a>(b: &mut Bytes<'a>) -> Result<&'a [u8], IoError> {
+/// tokens (`rgce`) and extra data (`rgcb`).
+fn cached_formula<'a>(b: &mut Bytes<'a>) -> Result<FormulaBytes<'a>, IoError> {
     b.take(2)?;
-    Ok(parsed_formula(b)?.0)
+    parsed_formula(b)
 }
 /// A parsed formula's `cce`, `rgce`, `cb` and `rgcb` (`CellParsedFormula`,
 /// `SharedParsedFormula`, `ArrayParsedFormula`): the tokens and their extra data.
-fn parsed_formula<'a>(b: &mut Bytes<'a>) -> Result<(&'a [u8], &'a [u8]), IoError> {
+type FormulaBytes<'a> = (&'a [u8], &'a [u8]);
+
+fn parsed_formula<'a>(b: &mut Bytes<'a>) -> Result<FormulaBytes<'a>, IoError> {
     let cce = b.u32()?;
     if !(1..=16384).contains(&cce) {
         return Err(invalid("invalid formula token length"));
@@ -891,7 +894,7 @@ impl FormulaGroups for Target<'_> {
     }
     fn attach_group(&mut self, pos: CellRef, p: &Parsed, _shared: bool, array: Option<RangeRef>) {
         // Shared formulas use PtgRefN / PtgAreaN, which the decoder resolves against `pos`.
-        let Ok(Some(mut f)) = formula(&p.rgce, pos, self.links) else { return };
+        let Ok(Some(mut f)) = formula(&p.rgce, &p.rgcb, pos, self.links) else { return };
         f.array = array.filter(|r| !r.is_single());
         if let Some(cell) = self.sheet.cells.get_mut(pos) {
             cell.formula = Some(Arc::new(f));
@@ -904,7 +907,7 @@ impl FormulaGroups for Target<'_> {
     }
 }
 /// A cell's value and, for formula cells, the formula's tokens.
-fn value<'a>(id: u16, b: &mut Bytes<'a>, strings: &[Arc<str>], budget: &mut Budget) -> Result<(Value, Option<&'a [u8]>), IoError> {
+fn value<'a>(id: u16, b: &mut Bytes<'a>, strings: &[Arc<str>], budget: &mut Budget) -> Result<(Value, Option<FormulaBytes<'a>>), IoError> {
     let value = match id {
         1 => Value::Empty,
         2 => {
@@ -933,8 +936,8 @@ fn value<'a>(id: u16, b: &mut Bytes<'a>, strings: &[Arc<str>], budget: &mut Budg
 
 /// The formula of `rgce` at `pos`: `Ok(None)` for a lone constant (`=1`), which calculates
 /// nothing and is kept as its saved value; `Err` when it can't be represented.
-fn formula(rgce: &[u8], pos: CellRef, links: &Links) -> Result<Option<Formula>, ()> {
-    let e = decode_xlsb(rgce, pos, Mode::Cell, links).map_err(|_| ())?;
+fn formula(rgce: &[u8], rgcb: &[u8], pos: CellRef, links: &Links) -> Result<Option<Formula>, ()> {
+    let e = decode_xlsb(rgce, rgcb, pos, Mode::Cell, links).map_err(|_| ())?;
     if matches!(e, Expr::Number(_) | Expr::Bool(_) | Expr::Error(_) | Expr::Text(_)) {
         return Ok(None);
     }
@@ -1201,12 +1204,12 @@ fn worksheet(
                 let (value, rgce) = value(id, &mut b, strings, budget)?;
                 b.finish()?;
                 let pos = CellRef::new(r, c);
-                let exp = rgce.and_then(exp_row);
+                let exp = rgce.and_then(|(tokens, _)| exp_row(tokens));
                 if let Some(anchor_row) = exp {
                     groups.pending.push((pos, anchor_row));
                 }
-                let formula = rgce.filter(|_| exp.is_none()).and_then(|rgce| {
-                    formula(rgce, pos, links).unwrap_or_else(|()| {
+                let formula = rgce.filter(|_| exp.is_none()).and_then(|(rgce, rgcb)| {
+                    formula(rgce, rgcb, pos, links).unwrap_or_else(|()| {
                         budget.formulas_kept += 1;
                         None
                     })

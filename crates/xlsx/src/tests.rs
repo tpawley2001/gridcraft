@@ -49,6 +49,7 @@ mod xls_cf12_tests;
 mod xls_print_tests;
 mod xls_protection_tests;
 mod xls_tests;
+mod xlsb_array_const_tests;
 mod xlsb_layout_tests;
 mod xlsb_links_tests;
 mod xlsb_names_tests;

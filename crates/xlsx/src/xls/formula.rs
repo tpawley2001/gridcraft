@@ -271,12 +271,12 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
     decode_in(rgce, rgcb, base, mode, links, Grid::Biff8)
 }
 
-/// Decodes an XLSB cell, shared or array formula's `rgce` at `base` (shared formulas'
+/// Decodes an XLSB cell, shared, array or name formula's `rgce` and `rgcb` extra data at `base` (shared formulas'
 /// `PtgRefN` / `PtgAreaN` hold offsets from it), resolving defined names and other sheets through
-/// `links`. A `PtgExp` (resolved by the reader), array constants and names in other workbooks
+/// `links`. A `PtgExp` (resolved by the reader) and names in other workbooks
 /// (PtgNameX) are refused.
-pub(crate) fn decode_xlsb(rgce: &[u8], base: CellRef, mode: Mode, links: &Links) -> Result<Expr, Unsupported> {
-    decode_in(rgce, &[], base, mode, links, Grid::Biff12)
+pub(crate) fn decode_xlsb(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links) -> Result<Expr, Unsupported> {
+    decode_in(rgce, rgcb, base, mode, links, Grid::Biff12)
 }
 
 fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, grid: Grid) -> Result<Expr, Unsupported> {
@@ -292,8 +292,8 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
         let mut kids = 0usize;
         // Operand classes (reference / value / array) share one token number.
         let id = if ptg & 0x60 != 0 { 0x20 | (ptg & 0x1F) } else { ptg };
-        if wide && matches!(id, 0x20 | 0x26 | 0x39) {
-            // Unsupported BIFF12 array payloads, or lookups in tables this import doesn't read.
+        if wide && id == 0x39 {
+            // External workbook names are not resolved by this import.
             return Err(Unsupported("XLSB formula token"));
         }
         match id {
@@ -375,8 +375,9 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
                 push(&mut stack, kids, Expr::Number(n))?;
             }
             0x20 => {
-                t.take(7)?;
-                push(&mut stack, kids, array_constant(&mut extra)?)?;
+                t.take(if wide { 14 } else { 7 })?;
+                let array = if wide { array_constant_xlsb(&mut extra)? } else { array_constant(&mut extra)? };
+                push(&mut stack, kids, array)?;
             }
             0x21 => {
                 let iftab = t.u16()?;
@@ -430,8 +431,8 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
             0x26 => {
                 // PtgMemArea: a cache of the sub-expression that follows; skip its extra data.
                 t.take(6)?;
-                let n = usize::from(extra.u16()?);
-                extra.take(n.checked_mul(8).ok_or(TRUNC)?)?;
+                let n = if wide { usize::try_from(extra.u32()?).map_err(|_| TRUNC)? } else { usize::from(extra.u16()?) };
+                extra.take(n.checked_mul(if wide { 16 } else { 8 }).ok_or(TRUNC)?)?;
             }
             0x27 | 0x28 => {
                 t.take(6)?;
@@ -549,6 +550,50 @@ fn array_constant(b: &mut Bytes<'_>) -> Result<Expr, Unsupported> {
     Ok(Expr::Array(out))
 }
 
+/// BIFF12 PtgExtraArray and SerAr ([MS-XLSB] 2.5.98.41, 2.5.98.93–97).
+fn array_constant_xlsb(b: &mut Bytes<'_>) -> Result<Expr, Unsupported> {
+    let rows = usize::try_from(b.u32()?).map_err(|_| TRUNC)?;
+    let cols = usize::try_from(b.u32()?).map_err(|_| TRUNC)?;
+    if rows == 0 || cols == 0 || rows > 1_048_576 || cols > 16_384 || rows.saturating_mul(cols) > MAX_ARRAY {
+        return Err(Unsupported("invalid array constant dimensions"));
+    }
+    let mut out = Vec::with_capacity(rows);
+    for _ in 0..rows {
+        let mut row = Vec::with_capacity(cols);
+        for _ in 0..cols {
+            row.push(match b.u8()? {
+                0x00 => {
+                    let n = b.f64()?;
+                    if !n.is_finite() {
+                        return Err(Unsupported("invalid number constant"));
+                    }
+                    Expr::Number(n)
+                }
+                0x01 => {
+                    let cch = usize::from(b.u16()?);
+                    if cch >= 256 {
+                        return Err(Unsupported("array string too long"));
+                    }
+                    Expr::Text(Arc::from(b.chars(cch, true)?))
+                }
+                0x02 => match b.u8()? {
+                    0 => Expr::Bool(false),
+                    1 => Expr::Bool(true),
+                    _ => return Err(Unsupported("invalid array boolean")),
+                },
+                0x04 => {
+                    let e = b.u8()?;
+                    b.take(3)?;
+                    Expr::Error(cell_error(e))
+                }
+                _ => return Err(Unsupported("unknown array constant value")),
+            });
+        }
+        out.push(row);
+    }
+    Ok(Expr::Array(out))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,11 +650,11 @@ mod tests {
     }
 
     fn xlsb(rgce: &[u8], base: CellRef) -> Result<String, Unsupported> {
-        decode_xlsb(rgce, base, Mode::Cell, &Links::default()).map(|e| gridcraft_formula::print(&e))
+        decode_xlsb(rgce, &[], base, Mode::Cell, &Links::default()).map(|e| gridcraft_formula::print(&e))
     }
 
     fn xlsb_linked(rgce: &[u8], mode: Mode) -> Result<String, Unsupported> {
-        decode_xlsb(rgce, CellRef::new(0, 0), mode, &links()).map(|e| gridcraft_formula::print(&e))
+        decode_xlsb(rgce, &[], CellRef::new(0, 0), mode, &links()).map(|e| gridcraft_formula::print(&e))
     }
 
     #[test]
@@ -620,7 +665,7 @@ mod tests {
         assert_eq!(r.len(), 9);
         let mut l = links();
         l.xti[2] = Xti { book: 0, first: 1, last: 1 };
-        let one = |rgce: &[u8]| decode_xlsb(rgce, CellRef::new(0, 0), Mode::Cell, &l).map(|e| gridcraft_formula::print(&e));
+        let one = |rgce: &[u8]| decode_xlsb(rgce, &[], CellRef::new(0, 0), Mode::Cell, &l).map(|e| gridcraft_formula::print(&e));
         assert_eq!(one(&r).unwrap(), "'My Data'!$B$2");
         // PtgArea3d: ixti u16 + RgceArea (two u32 rows, two u16 columns) = 14 bytes; a 3-D span.
         let a = [&[0x3Bu8][..], &0u16.to_le_bytes(), &0u32.to_le_bytes(), &9u32.to_le_bytes(), &0xC000u16.to_le_bytes(), &0xC000u16.to_le_bytes()]
@@ -731,6 +776,32 @@ mod tests {
         assert_eq!(xlsb(&rgce, base).unwrap(), format!("\"{}\"", "x".repeat(255)));
         assert!(xlsb(&[0x17, 1, 0, b'x'], base).is_err());
         assert!(xlsb(&[0x17, 1], base).is_err());
+    }
+
+    #[test]
+    fn xlsb_arrays_and_memory_extras_are_consumed_in_token_order() {
+        let array = [&1u32.to_le_bytes()[..], &2u32.to_le_bytes(), &[0], &1.0f64.to_le_bytes(), &[2, 1]].concat();
+        let mem = [&1u32.to_le_bytes()[..], &[0; 16]].concat();
+        for class in [0x20, 0x40, 0x60] {
+            let tokens = [&[class | 6][..], &[0; 6], &[class], &[0; 14]].concat();
+            let extra = [&mem[..], &array].concat();
+            let decode = |t: &[u8], e: &[u8]| decode_xlsb(t, e, CellRef::new(0, 0), Mode::Cell, &Links::default());
+            assert_eq!(gridcraft_formula::print(&decode(&tokens, &extra).unwrap()), "{1,TRUE}");
+            for len in 0..extra.len() {
+                assert!(decode(&tokens, &extra[..len]).is_err(), "extra length {len}");
+            }
+            for len in 0..tokens.len() {
+                assert!(decode(&tokens[..len], &extra).is_err(), "token length {len}");
+            }
+        }
+        let mut tokens = vec![0x60];
+        tokens.extend([0; 14]);
+        tokens.push(0x60);
+        tokens.extend([0; 14]);
+        tokens.push(0x03);
+        let extras = [&array[..], &array].concat();
+        let expr = decode_xlsb(&tokens, &extras, CellRef::new(0, 0), Mode::Cell, &Links::default()).unwrap();
+        assert_eq!(gridcraft_formula::print(&expr), "{1,TRUE}+{1,TRUE}");
     }
 
     #[test]
