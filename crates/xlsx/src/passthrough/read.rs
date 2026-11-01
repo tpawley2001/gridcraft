@@ -400,7 +400,7 @@ impl KeptReader {
         // Notes have one VML drawing per sheet; another one holds the header and footer pictures.
         let vml_drawings = rels.iter().filter(|r| is_kind(r, &["vmlDrawing"])).count();
         let notes = rels.iter().filter(|r| is_kind(r, &["comments"])).count();
-        if rels.iter().any(|r| is_kind(r, SHEET_ELEMENT_KINDS)) || vml_drawings > notes {
+        if rels.iter().any(|r| is_kind(r, SHEET_ELEMENT_KINDS) || is_kind(r, &["customProperty"])) || vml_drawings > notes {
             self.sheet_elements(cx, part, name, &rels, &mut p, &mut seen);
         }
         (!p.is_empty()).then(|| Arc::new(p))
@@ -440,6 +440,13 @@ impl KeptReader {
             }
         }
         let mut frags = scan.fragments;
+        // Worksheet custom properties: add-in tags, each naming a part of its own.
+        if let Some(x) = frags.iter().position(|(slot, _)| slot == "customProperties").map(|i| frags.remove(i).1) {
+            match self.custom_properties(cx, &x, rels, p, seen) {
+                Ok(()) => p.elements.push(PreservedXml { slot: "customProperties".into(), xml: x }),
+                Err(why) => cx.warn(format!("sheet \"{name}\": custom properties were dropped: {why}")),
+            }
+        }
         // Controls and OLE objects are drawn from shapes in the legacy VML drawing.
         if frags.iter().any(|(slot, _)| slot != "picture") {
             match self.vml(cx, rels, scan.legacy_drawing.as_deref(), seen) {
@@ -570,6 +577,38 @@ impl KeptReader {
         drels.iter().find(|r| r.id == id && !r.external).cloned()
     }
 
+    /// Keeps the parts behind a sheet's `<customProperties>`: every `<customPr>` must name a
+    /// `customProperty` relationship of the sheet, and each part must have that content type.
+    fn custom_properties(
+        &mut self,
+        cx: &mut Ctx<'_>,
+        x: &str,
+        rels: &[PreservedRel],
+        p: &mut Preserved,
+        seen: &mut HashSet<String>,
+    ) -> Result<(), String> {
+        let el = xml::parse(x.as_bytes()).map_err(|_| "its XML is damaged".to_string())?;
+        let mut roots = vec![];
+        for pr in el.kids("customPr") {
+            let id = pr.attr("id").ok_or("a custom property has no part")?;
+            let r = rels.iter().find(|r| r.id == id && is_kind(r, &["customProperty"])).ok_or("it refers to a missing relationship")?;
+            if !roots.iter().any(|q: &PreservedRel| q.id == r.id) {
+                roots.push(r.clone());
+            }
+        }
+        if roots.is_empty() {
+            return Err("it names no part".into());
+        }
+        let mut q = Preserved::default();
+        self.keep(cx, &mut q, &roots, seen)?;
+        if let Some(bad) = q.parts.iter().find(|part| !part.content_type.eq_ignore_ascii_case(CT_CUSTOM_PROPERTY)) {
+            return Err(format!("{} is not a custom property part", bad.name));
+        }
+        p.parts.extend(q.parts);
+        p.rels.extend(q.rels);
+        Ok(())
+    }
+
     /// The sheet's VML drawing without its notes (GridCraft writes those), and the parts its
     /// shapes refer to (preview images).
     fn vml(
@@ -616,7 +655,7 @@ struct SheetScan {
     page_setup: Option<String>,
 }
 
-/// Finds the sheet's `<picture>`, `<oleObjects>`, `<controls>` (also inside
+/// Finds the sheet's `<customProperties>`, `<picture>`, `<oleObjects>`, `<controls>` (also inside
 /// `<mc:AlternateContent>`) and the `<legacyDrawing>` and `<legacyDrawingHF>` ids. `None` when the XML is damaged.
 fn scan_sheet(bytes: &[u8]) -> Option<SheetScan> {
     let data = xml::to_utf8(bytes);
@@ -650,7 +689,7 @@ fn scan_sheet(bytes: &[u8]) -> Option<SheetScan> {
                 }
                 reader.read_to_end(e.name()).ok()?;
                 let end = usize::try_from(reader.buffer_position()).ok()?;
-                let wanted = matches!(local.as_slice(), b"picture" | b"oleObjects" | b"controls" | b"AlternateContent");
+                let wanted = matches!(local.as_slice(), b"customProperties" | b"picture" | b"oleObjects" | b"controls" | b"AlternateContent");
                 if wanted && end.saturating_sub(start) <= MAX_FRAGMENT {
                     let frag = text.get(start..end)?;
                     push_fragment(&mut out, frag, &local, &decls);
@@ -799,7 +838,7 @@ fn push_fragment(out: &mut SheetScan, frag: &str, local: &[u8], decls: &[(String
     } else {
         String::from_utf8_lossy(local).into_owned()
     };
-    if SHEET_SLOTS.contains(&slot.as_str()) && !out.fragments.iter().any(|(s, _)| *s == slot) {
+    if (SHEET_SLOTS.contains(&slot.as_str()) || SHEET_SLOTS_EARLY.contains(&slot.as_str())) && !out.fragments.iter().any(|(s, _)| *s == slot) {
         out.fragments.push((slot, frag));
     }
 }

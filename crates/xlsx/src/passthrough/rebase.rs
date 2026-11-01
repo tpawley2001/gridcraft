@@ -61,11 +61,20 @@ impl<'a> SheetKept<'a> {
         self.ids.get(old).map(String::as_str)
     }
 
+    /// The kept sheet elements that come before `<drawing>`, in schema order.
+    pub fn early_elements(&self) -> String {
+        self.slots(SHEET_SLOTS_EARLY).replace(&format!(" xmlns:r=\"{NS_REL}\""), "")
+    }
+
     /// The kept sheet elements, in schema order.
     pub fn elements(&self) -> String {
+        self.slots(SHEET_SLOTS)
+    }
+
+    fn slots(&self, slots: &[&str]) -> String {
         let Some(p) = self.p else { return String::new() };
         let mut s = String::new();
-        for slot in SHEET_SLOTS {
+        for slot in slots {
             for e in p.elements.iter().filter(|e| e.slot == *slot) {
                 if let Some(x) = remap(&e.xml, &self.ids) {
                     s.push_str(&x);

@@ -193,6 +193,8 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
 
     let prio = write_sheet_rules(&mut s, sheet, &mut rels, out);
     let kept = write_sheet_printing(&mut s, sheet, &mut rels, out);
+    // Kept content that comes before <drawing> in CT_Worksheet (custom properties).
+    s.push_str(&kept.early_elements());
 
     write_sheet_drawing(&mut s, wb, si, sheet, &kept, &mut rels, out);
     write_sheet_notes(&mut s, sheet, si, &kept, &mut rels, out);
