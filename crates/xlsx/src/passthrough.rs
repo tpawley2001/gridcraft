@@ -2,7 +2,8 @@
 //!
 //! On read, the raw bytes of unmodelled parts are kept with their content type and their
 //! relationship graph, per owner: the package root (custom document properties, ribbon
-//! customisation, add-in task panes, the sensitivity label), the workbook (custom XML, links to external workbooks with
+//! customisation, add-in task panes, the sensitivity label), the workbook (custom XML, the volatile
+//! dependencies part with the RTD and CUBE topics, links to external workbooks with
 //! their `<externalReferences>`, data connections, XML maps) and each sheet (query tables, cells
 //! mapped to XML elements, form controls, ActiveX controls, OLE objects, the sheet background,
 //! printer settings and worksheet custom properties (add-in tags such as `ORB_SHEETNAME`), with the
@@ -102,7 +103,7 @@ const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
 /// Relationship kinds (last segment of the type) kept from the package root.
 const PACKAGE_ROOTS: &[&str] = &["custom-properties", "extensibility", "webextensiontaskpanes", "classificationlabels"];
 /// Relationship kinds kept from the workbook without a workbook element.
-const WORKBOOK_ROOTS: &[&str] = &["customXml", "connections", "xmlMaps"];
+const WORKBOOK_ROOTS: &[&str] = &["customXml", "connections", "xmlMaps", "volatileDependencies"];
 /// Relationship kinds kept from a sheet without a sheet element.
 const SHEET_ROOTS: &[&str] = &["queryTable", "tableSingleCells"];
 /// Sheet relationship kinds that mean the sheet XML may hold elements worth keeping.
@@ -198,6 +199,7 @@ const OWN_DIRS: &[&str] = &[
     "xl/externallinks/",
     "xl/connections.xml",
     "xl/xmlmaps.xml",
+    "xl/volatiledependencies.xml",
     "xl/querytables/",
     "xl/ctrlprops/",
     "xl/embeddings/",
