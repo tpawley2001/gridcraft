@@ -447,6 +447,10 @@ pub fn text_function(v: &Value, code: &str, sys: DateSystem) -> Result<String, C
     if !n.is_finite() {
         return Err(CellError::Num);
     }
+    if fmt.is_general() {
+        // TEXT counts 11 characters without the sign and prefers fixed notation (Excel).
+        return decimal::format_general_text(n).ok_or(CellError::Value);
+    }
     let (f, overflow) = fmt.format_number(n, sys);
     if overflow { Err(CellError::Value) } else { Ok(f.text) }
 }

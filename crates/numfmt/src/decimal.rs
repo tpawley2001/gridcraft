@@ -144,38 +144,94 @@ pub fn format_general_fit(n: f64, max_chars: usize) -> Option<String> {
     }
     let sign = if n < 0.0 { "-" } else { "" };
     let (digits, x) = decimal_digits(n.abs());
-    let int_len = sign.len() + (x.max(0) as usize) + 1;
     // Fixed notation for magnitudes from 1E-4 up to what fits.
-    if x >= -4 && int_len <= max_chars {
-        let avail = max_chars - int_len;
-        let mut decimals = if avail >= 2 { avail - 1 } else { 0 };
-        loop {
-            let (i, f) = fixed_from_digits(&digits, x, decimals);
-            let f = f.trim_end_matches('0');
-            if i.is_empty() && f.is_empty() {
-                break; // rounded away to zero: use scientific
-            }
-            let mut s = String::from(sign);
-            s.push_str(if i.is_empty() { "0" } else { &i });
-            if !f.is_empty() {
-                s.push('.');
-                s.push_str(f);
-            }
-            if s.chars().count() <= max_chars {
-                return Some(s);
-            }
-            if decimals == 0 {
-                break;
-            }
-            decimals -= 1;
+    if x >= -4 {
+        if let Some(s) = general_fixed(sign, &digits, x, max_chars) {
+            return Some(s);
         }
     }
+    general_scientific(sign, &digits, x, max_chars)
+}
+
+/// General as `TEXT(value, "General")` writes it: 11 characters for the unsigned number (a
+/// leading minus sign is extra), fixed notation whenever it shows at least as many significant
+/// digits as scientific notation would (`0.000000001`, but `1E-10`).
+pub fn format_general_text(n: f64) -> Option<String> {
+    const WIDTH: usize = 11;
+    if !n.is_finite() {
+        return None;
+    }
+    if n == 0.0 {
+        return Some("0".to_string());
+    }
+    let (digits, x) = decimal_digits(n.abs());
+    let fixed = general_fixed("", &digits, x, WIDTH);
+    let sci = general_scientific("", &digits, x, WIDTH);
+    let body = match (fixed, sci) {
+        (Some(f), Some(s)) => {
+            if shown_digits(&f) >= shown_digits(&s) {
+                f
+            } else {
+                s
+            }
+        }
+        (f, s) => f.or(s)?,
+    };
+    Some(if n < 0.0 { format!("-{body}") } else { body })
+}
+
+/// Significant digits shown by a General string (leading and trailing zeros of the mantissa
+/// don't count).
+fn shown_digits(s: &str) -> usize {
+    let mantissa = s.split('E').next().unwrap_or(s);
+    let ds: Vec<u8> = mantissa.bytes().filter(u8::is_ascii_digit).collect();
+    let first = ds.iter().position(|&d| d != b'0');
+    let last = ds.iter().rposition(|&d| d != b'0');
+    match (first, last) {
+        (Some(a), Some(b)) => b - a + 1,
+        _ => 0,
+    }
+}
+
+/// Fixed notation with as many decimals as fit in `max_chars`; `None` when the integer part
+/// doesn't fit or the value rounds away to zero.
+fn general_fixed(sign: &str, digits: &[u8; 15], x: i32, max_chars: usize) -> Option<String> {
+    let int_len = sign.len() + (x.max(0) as usize) + 1;
+    if int_len > max_chars {
+        return None;
+    }
+    let avail = max_chars - int_len;
+    let mut decimals = if avail >= 2 { avail - 1 } else { 0 };
+    loop {
+        let (i, f) = fixed_from_digits(digits, x, decimals);
+        let f = f.trim_end_matches('0');
+        if i.is_empty() && f.is_empty() {
+            return None; // rounded away to zero: use scientific
+        }
+        let mut s = String::from(sign);
+        s.push_str(if i.is_empty() { "0" } else { &i });
+        if !f.is_empty() {
+            s.push('.');
+            s.push_str(f);
+        }
+        if s.chars().count() <= max_chars {
+            return Some(s);
+        }
+        if decimals == 0 {
+            return None;
+        }
+        decimals -= 1;
+    }
+}
+
+/// Scientific notation with the most mantissa digits that fit in `max_chars`.
+fn general_scientific(sign: &str, digits: &[u8; 15], x: i32, max_chars: usize) -> Option<String> {
     for md in (0..=max_chars.min(14)).rev() {
         let mut e = x;
-        let (mut mi, mut mf) = fixed_from_digits(&digits, 0, md);
+        let (mut mi, mut mf) = fixed_from_digits(digits, 0, md);
         if mi.len() > 1 {
             e += 1;
-            (mi, mf) = fixed_from_digits(&digits, -1, md);
+            (mi, mf) = fixed_from_digits(digits, -1, md);
         }
         let mf = mf.trim_end_matches('0');
         let mut s = String::from(sign);
@@ -230,5 +286,9 @@ mod tests {
         assert_eq!(format_general_fit(9.99999999999, 5).as_deref(), Some("10"));
         assert_eq!(format_general_fit(f64::NAN, 11), None);
         assert_eq!(format_general_fit(1.7976931348623157e308, 11).as_deref(), Some("1.7977E+308"));
+        assert_eq!(format_general_text(-1.7976931348623157e308).as_deref(), Some("-1.7977E+308"));
+        assert_eq!(format_general_text(f64::MIN_POSITIVE).as_deref(), Some("2.2251E-308"));
+        assert_eq!(format_general_text(5e-324).as_deref(), Some("4.9407E-324"));
+        assert_eq!(format_general_text(f64::NAN), None);
     }
 }
