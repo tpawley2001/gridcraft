@@ -172,7 +172,7 @@ fn xlsb_scalar_caches_rk_unicode_visibility_and_epochs_survive_xlsx_save() {
         assert_eq!(wb.sheets[1].visibility, Visibility::Hidden);
         assert_eq!(wb.sheets[0].cells.len(), 14);
         assert_eq!(wb.sheets[0].merges, vec![RangeRef::new(CellRef::new(5, 0), CellRef::new(6, 1))]);
-        assert!(report.warnings.iter().any(|w| w.contains("may display as numbers")));
+        assert!(report.warnings.iter().any(|w| w.contains("not imported")));
         for (col, expected) in expected.iter().enumerate() {
             assert_eq!(&wb.sheets[0].value(CellRef::new(2, col as u32)), expected);
         }
@@ -438,4 +438,162 @@ fn xlsb_import_warning_no_longer_says_formulas_become_values_when_all_decode() {
     let (wb, report) = read_xlsb(&file(&worksheet(&data, &[]))).unwrap();
     assert_eq!(ftext(&wb, "A1").as_deref(), Some("1+2"));
     assert!(!report.warnings.iter().any(|w| w.contains("formulas become their saved results")), "{:?}", report.warnings);
+}
+
+// Number formats from the styles part ([MS-XLSB] 2.1.7.50): BrtFmt (44) in BrtBeginFmts (615)..BrtEndFmts (616),
+// BrtXF (47) in BrtBeginCellXFs (617)..BrtEndCellXFs (618); cell style XFs (626..627) are not cell XFs.
+const STYLES_RELS: &str = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="one" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="../data/one.bin"/><Relationship Id="two" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="../data/two.bin"/><Relationship Id="strings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="../text/strings.bin"/><Relationship Id="styles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="../text/styles.bin"/></Relationships>"#;
+const STYLES_TYPES: &str = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/records/book.bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/data/one.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/data/two.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/text/strings.bin" ContentType="application/vnd.ms-excel.sharedStrings"/><Override PartName="/text/styles.bin" ContentType="application/vnd.ms-excel.styles"/></Types>"#;
+
+fn xf(fmt: u16) -> Vec<u8> {
+    // ixfeParent, iFmt, then font/fill/border/rotation/indent/alignment/flags (16 bytes in all).
+    let mut data = 0u16.to_le_bytes().to_vec();
+    data.extend(fmt.to_le_bytes());
+    data.extend([0; 12]);
+    record(47, &data)
+}
+/// Cell XFs: 0 General, 1 built-in 14, 2 custom 164 `0.00%`. A cell style XF with iFmt 10 comes first.
+fn styles_part() -> Vec<u8> {
+    let mut out = record(278, &[]);
+    out.extend(record(615, &1u32.to_le_bytes()));
+    let mut fmt = 164u16.to_le_bytes().to_vec();
+    fmt.extend(wide("0.00%"));
+    out.extend(record(44, &fmt));
+    out.extend(record(616, &[]));
+    out.extend(record(626, &1u32.to_le_bytes()));
+    out.extend(xf(10));
+    out.extend(record(627, &[]));
+    out.extend(record(617, &3u32.to_le_bytes()));
+    for f in [0, 14, 164] {
+        out.extend(xf(f));
+    }
+    out.extend(record(618, &[]));
+    out.extend(record(279, &[]));
+    out
+}
+/// A cell record with `iStyleRef` = `xf` (low 24 bits; fPhShow set to check it is masked off).
+fn styled(id: u16, col: u32, xf: u32, value: &[u8]) -> Vec<u8> {
+    let mut data = col.to_le_bytes().to_vec();
+    data.extend((xf | 1 << 24).to_le_bytes());
+    data.extend(value);
+    if (8..=11).contains(&id) {
+        data.extend([0; 2]);
+        data.extend(3u32.to_le_bytes());
+        data.extend([0x1e, 1, 0]); // PtgInt(1)
+        data.extend(0u32.to_le_bytes());
+    }
+    record(id, &data)
+}
+fn styled_sheet() -> Vec<u8> {
+    let mut data = row(0);
+    data.extend(styled(5, 0, 1, &45292.0f64.to_le_bytes())); // A1 date
+    data.extend(styled(5, 1, 2, &0.25f64.to_le_bytes())); // B1 percent
+    data.extend(styled(5, 2, 0, &3.5f64.to_le_bytes())); // C1 General
+    data.extend(styled(1, 3, 2, &[])); // D1 blank, formatted
+    data.extend(styled(5, 4, 99, &7.0f64.to_le_bytes())); // E1 XF past the list
+    data.extend(styled(9, 5, 2, &1.0f64.to_le_bytes())); // F1 =1 cached 1 (BrtFmlaNum)
+    data.extend(styled(1, 6, 0, &[])); // G1 blank, General: not stored
+    worksheet(&data, &[])
+}
+fn styled_file(styles: Option<&[u8]>) -> Vec<u8> {
+    let book = book(false);
+    let sheet = styled_sheet();
+    let strings = sst();
+    let two = worksheet(&[], &[]);
+    let mut parts: Vec<(&str, &[u8])> = vec![
+        ("[Content_Types].xml", STYLES_TYPES.as_bytes()),
+        ("_rels/.rels", ROOT.as_bytes()),
+        ("records/book.bin", &book),
+        ("records/_rels/book.bin.rels", if styles.is_some() { STYLES_RELS.as_bytes() } else { RELS.as_bytes() }),
+        ("data/one.bin", &sheet),
+        ("data/two.bin", &two),
+        ("text/strings.bin", &strings),
+    ];
+    if let Some(s) = styles {
+        parts.push(("text/styles.bin", s));
+    }
+    make_zip(&parts)
+}
+fn fmt_at(wb: &gridcraft_model::Workbook, a1: &str) -> String {
+    wb.styles.get(wb.sheets[0].style_id(CellRef::parse(a1).unwrap())).num_fmt.as_str().to_string()
+}
+
+#[test]
+fn xlsb_styles_number_formats_apply_to_cells() {
+    let (wb, _) = read_xlsb(&styled_file(Some(&styles_part()))).unwrap();
+    let sh = &wb.sheets[0];
+    assert_eq!(sh.value(CellRef::parse("A1").unwrap()), Value::Number(45292.0));
+    assert_eq!(fmt_at(&wb, "A1"), "m/d/yyyy");
+    assert_eq!(fmt_at(&wb, "B1"), "0.00%");
+    assert_eq!(sh.style_id(CellRef::parse("C1").unwrap()), gridcraft_model::StyleId::DEFAULT);
+    let d1 = sh.cells.get(CellRef::parse("D1").unwrap()).expect("formatted blank cell is stored");
+    assert_eq!(d1.value, Value::Empty);
+    assert_eq!(fmt_at(&wb, "D1"), "0.00%");
+    assert_eq!(sh.value(CellRef::parse("E1").unwrap()), Value::Number(7.0));
+    assert_eq!(sh.style_id(CellRef::parse("E1").unwrap()), gridcraft_model::StyleId::DEFAULT);
+    let f1 = sh.cells.get(CellRef::parse("F1").unwrap()).unwrap();
+    assert!(f1.formula.is_none(), "a lone constant stays a value (P05-001 rule)");
+    assert_eq!(fmt_at(&wb, "F1"), "0.00%");
+    assert!(sh.cells.get(CellRef::parse("G1").unwrap()).is_none());
+}
+
+#[test]
+fn xlsb_styles_formula_cells_keep_formula_and_format() {
+    let mut data = row(0);
+    data.extend(styled(5, 0, 0, &2.0f64.to_le_bytes())); // A1 = 2
+    let mut rgce = vec![0x44]; // PtgRef (value class) A1, absolute
+    rgce.extend(0u32.to_le_bytes());
+    rgce.extend(0u16.to_le_bytes());
+    let mut cellrec = 1u32.to_le_bytes().to_vec(); // column B
+    cellrec.extend(2u32.to_le_bytes()); // XF 2
+    cellrec.extend(2.0f64.to_le_bytes());
+    cellrec.extend([0; 2]);
+    cellrec.extend((rgce.len() as u32).to_le_bytes());
+    cellrec.extend(&rgce);
+    cellrec.extend(0u32.to_le_bytes());
+    data.extend(record(9, &cellrec));
+    let sheet = worksheet(&data, &[]);
+    let (book_, strings, two, styles) = (book(false), sst(), worksheet(&[], &[]), styles_part());
+    let bytes = make_zip(&[
+        ("[Content_Types].xml", STYLES_TYPES.as_bytes()),
+        ("_rels/.rels", ROOT.as_bytes()),
+        ("records/book.bin", &book_),
+        ("records/_rels/book.bin.rels", STYLES_RELS.as_bytes()),
+        ("data/one.bin", &sheet),
+        ("data/two.bin", &two),
+        ("text/strings.bin", &strings),
+        ("text/styles.bin", &styles),
+    ]);
+    let (wb, _) = read_xlsb(&bytes).unwrap();
+    let b1 = wb.sheets[0].cells.get(CellRef::parse("B1").unwrap()).unwrap();
+    assert!(b1.formula.is_some());
+    assert_eq!(fmt_at(&wb, "B1"), "0.00%");
+}
+
+#[test]
+fn xlsb_styles_survive_saving_as_xlsx() {
+    let (wb, _) = read_xlsb(&styled_file(Some(&styles_part()))).unwrap();
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(fmt_at(&back, "A1"), "m/d/yyyy");
+    assert_eq!(fmt_at(&back, "B1"), "0.00%");
+    assert_eq!(fmt_at(&back, "D1"), "0.00%");
+}
+
+#[test]
+fn xlsb_styles_part_is_optional() {
+    let (wb, report) = read_xlsb(&styled_file(None)).unwrap();
+    assert_eq!(wb.sheets[0].value(CellRef::parse("B1").unwrap()), Value::Number(0.25));
+    assert_eq!(wb.sheets[0].style_id(CellRef::parse("B1").unwrap()), gridcraft_model::StyleId::DEFAULT);
+    assert!(!report.warnings.iter().any(|w| w.to_lowercase().contains("styles")));
+}
+
+#[test]
+fn xlsb_styles_damaged_part_keeps_values_and_warns() {
+    let mut styles = styles_part();
+    styles.truncate(styles.len() - 12); // Cuts the last BrtXF mid-record.
+    let (wb, report) = read_xlsb(&styled_file(Some(&styles))).unwrap();
+    assert_eq!(wb.sheets[0].value(CellRef::parse("A1").unwrap()), Value::Number(45292.0));
+    assert_eq!(wb.sheets[0].value(CellRef::parse("B1").unwrap()), Value::Number(0.25));
+    assert_eq!(wb.sheets[0].style_id(CellRef::parse("A1").unwrap()), gridcraft_model::StyleId::DEFAULT);
+    assert!(report.warnings.iter().any(|w| w.to_lowercase().contains("styles")));
 }
