@@ -299,6 +299,13 @@ impl KeptReader {
                 cx.warn(format!("{} part {} was dropped: {why}", kind(&r.rel_type), r.target));
             }
         }
+        // Office add-in task panes: the task panes part and the web extension parts it names.
+        for r in wb_rels.iter().filter(|r| is_kind(r, WORKBOOK_WEB_EXTENSIONS)) {
+            match self.keep(cx, &mut p, std::slice::from_ref(r), &mut seen) {
+                Ok(()) => cx.warn("Office add-in task panes are not shown; they are kept for saving"),
+                Err(why) => cx.warn(format!("Office add-in task panes were dropped: {why}")),
+            }
+        }
         // Chart, dialog and macro sheets: the sheet entry (name, state, position) plus the sheet
         // part and the drawing, chart, style, colour, VML and control parts behind it.
         for (worksheets, se) in kept_sheet_entries(wb_xml, &wb_rels, file_to_model) {
@@ -518,6 +525,7 @@ impl KeptReader {
         };
         let mut smartart = false;
         let mut group = false;
+        let mut webextension = false;
         for (index, xml, kind) in anchors {
             let xml = match self.transitional(cx, &drawing.target, xml) {
                 Ok(x) => x,
@@ -560,11 +568,13 @@ impl KeptReader {
                     p.anchors.push(PreservedAnchor { index, xml });
                     smartart |= kind == AnchorKind::SmartArt;
                     group |= kind == AnchorKind::Group;
+                    webextension |= kind == AnchorKind::WebExtension;
                 }
                 Err(why) => match kind {
                     AnchorKind::Control => cx.warn(format!("sheet \"{name}\": a drawing object in a markup-compatibility block was dropped: {why}")),
                     AnchorKind::SmartArt => cx.warn(format!("sheet \"{name}\": a SmartArt graphic was dropped: {why}")),
                     AnchorKind::Group => cx.warn(format!("sheet \"{name}\": a group of drawing objects was dropped: {why}")),
+                    AnchorKind::WebExtension => cx.warn(format!("sheet \"{name}\": an Office add-in was dropped: {why}")),
                 },
             }
         }
@@ -573,6 +583,9 @@ impl KeptReader {
         }
         if group {
             cx.warn(format!("sheet \"{name}\": grouped drawing objects are not shown; they are kept for saving"));
+        }
+        if webextension {
+            cx.warn(format!("sheet \"{name}\": Office add-ins are not shown; they are kept for saving"));
         }
     }
 
@@ -734,6 +747,8 @@ enum AnchorKind {
     SmartArt,
     /// An anchor whose object is a group of drawing objects (`xdr:grpSp`, ECMA-376 Part 1 §20.5.2.17).
     Group,
+    /// An anchor holding an Office add-in (a web extension, [MS-OWEXML] 2.1.1).
+    WebExtension,
 }
 
 /// The `graphicData` URI of a SmartArt graphic.
@@ -741,6 +756,24 @@ const URI_DIAGRAM: &str = "http://schemas.openxmlformats.org/drawingml/2006/diag
 /// The `graphicData` URIs of charts.
 const URI_CHART: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 const URI_CHARTEX: &str = "http://schemas.microsoft.com/office/drawing/2014/chartex";
+/// The `graphicData` URI of an Office add-in's web extension ([MS-OWEXML] 2.1.1).
+const URI_WEB_EXTENSION: &str = "http://schemas.microsoft.com/office/webextensions/webextension/2010/11";
+
+/// Whether an anchor fragment (`twoCellAnchor`, `oneCellAnchor`, `absoluteAnchor`) holds an
+/// Office add-in: a `graphicFrame` whose `graphicData` is a web extension, in the anchor itself or
+/// in an `mc:Choice` of it (the fallback holds the add-in's snapshot picture).
+fn is_web_extension_anchor(frag: &str) -> bool {
+    if !frag.contains(URI_WEB_EXTENSION) {
+        return false;
+    }
+    let Ok(el) = xml::parse(frag.as_bytes()) else { return false };
+    let frames = el
+        .children
+        .iter()
+        .filter(|c| c.name == "graphicFrame")
+        .chain(el.children.iter().filter(|c| c.name == "AlternateContent").flat_map(|c| c.kids("Choice")).flat_map(|c| c.kids("graphicFrame")));
+    frames.filter_map(|c| c.path(&["graphic", "graphicData"])).any(|gd| gd.attr("uri") == Some(URI_WEB_EXTENSION))
+}
 
 /// Whether an anchor fragment (`twoCellAnchor`, `oneCellAnchor`, `absoluteAnchor`) holds a
 /// SmartArt graphic frame.
@@ -842,6 +875,7 @@ fn scan_drawing(bytes: &[u8]) -> Option<Vec<(usize, String, AnchorKind)>> {
                         b"AlternateContent" => Some(AnchorKind::Control),
                         b"twoCellAnchor" | b"oneCellAnchor" | b"absoluteAnchor" if is_smartart_anchor(frag) => Some(AnchorKind::SmartArt),
                         b"twoCellAnchor" | b"oneCellAnchor" | b"absoluteAnchor" if is_group_anchor(frag) => Some(AnchorKind::Group),
+                        b"twoCellAnchor" | b"oneCellAnchor" | b"absoluteAnchor" if is_web_extension_anchor(frag) => Some(AnchorKind::WebExtension),
                         _ => None,
                     };
                     if let Some(kind) = kind {

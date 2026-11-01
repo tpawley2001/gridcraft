@@ -4,12 +4,14 @@
 //! relationship graph, per owner: the package root (custom document properties, ribbon
 //! customisation, add-in task panes, the sensitivity label), the workbook (custom XML, the volatile
 //! dependencies part with the RTD and CUBE topics, links to external workbooks with
-//! their `<externalReferences>`, data connections, XML maps) and each sheet (query tables, cells
+//! their `<externalReferences>`, data connections, XML maps, add-in task panes with the web extension
+//! parts they show) and each sheet (query tables, cells
 //! mapped to XML elements, form controls, ActiveX controls, OLE objects, the sheet background,
 //! printer settings and worksheet custom properties (add-in tags such as `ORB_SHEETNAME`), with the
 //! sheet's `<customProperties>`, `<picture>`, `<oleObjects>` and `<controls>` XML, the `r:id` of
 //! `<pageSetup>`, the legacy VML shapes those controls need, the DrawingML anchors of the sheet's drawing
-//! wrapped in `mc:AlternateContent` that the drawing reader doesn't model (control shapes) and its SmartArt
+//! wrapped in `mc:AlternateContent` that the drawing reader doesn't model (control shapes and Office
+//! add-ins, with their web extension part, its own rels and the add-in's snapshot picture) and its SmartArt
 //! graphics with their diagram parts, and the
 //! pictures of the headers and footers, `&G`, with their `<legacyDrawingHF>`). The workbook also keeps its
 //! `<fileVersion>` and the calcFeatures extension, which Excel needs to trust the saved values.
@@ -104,6 +106,9 @@ const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
 const PACKAGE_ROOTS: &[&str] = &["custom-properties", "extensibility", "webextensiontaskpanes", "classificationlabels"];
 /// Relationship kinds kept from the workbook without a workbook element.
 const WORKBOOK_ROOTS: &[&str] = &["customXml", "connections", "xmlMaps", "volatileDependencies"];
+/// Workbook relationship kinds of Office add-ins: the task panes part, which names the web
+/// extension parts it shows ([MS-OWEXML] 2.3).
+const WORKBOOK_WEB_EXTENSIONS: &[&str] = &["webextensiontaskpanes"];
 /// Relationship kinds kept from a sheet without a sheet element.
 const SHEET_ROOTS: &[&str] = &["queryTable", "tableSingleCells"];
 /// Sheet relationship kinds that mean the sheet XML may hold elements worth keeping.
