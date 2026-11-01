@@ -1,17 +1,162 @@
 //! Conditional formatting in `.xls` sheets: a CondFmt record ([MS-XLS] 2.4.56) names the ranges,
 //! and the CF records ([MS-XLS] 2.4.42) that follow it hold one rule each, with the format it
 //! applies as a DXFN ([MS-XLS] 2.5.70). Only cell-value and formula rules exist in BIFF8; the
-//! Excel 2007 kinds (CF12 / CFEx) are read elsewhere or not at all.
+//! Excel 2007 kinds (CondFmt12 / CF12 / CFEx) are read in [`cf12`].
+
+mod cf12;
+
+use std::collections::HashMap;
 
 use gridcraft_core::color::INDEXED;
 use gridcraft_core::{CellRef, RangeRef};
-use gridcraft_model::{BorderLine, BorderStyle, CfOperator, CfRule, Color, Fill, NumFmt, PatternType, Style, Underline, VertAlign};
+use gridcraft_model::{
+    BorderLine, BorderStyle, CfOperator, CfRule, Color, CondFormat, Fill, NumFmt, PatternType, Sheet, Style, Underline, VertAlign,
+};
 
 use super::formula::{Links, Mode, decode};
+use crate::ReadReport;
 use crate::tables::builtin_format;
 
 /// Most ranges one CondFmt applies to.
 const MAX_RANGES: usize = 8192;
+/// Most rules kept per sheet, and most ranges kept over all of them.
+const MAX_RULES: usize = 16_384;
+const MAX_KEPT_RANGES: usize = 1_000_000;
+
+/// The CondFmt / CondFmt12 records read so far in a sheet.
+struct Group {
+    ranges: Vec<RangeRef>,
+    /// Index in `Sheet::cond_formats` of each classic CF record that followed (`None`: skipped).
+    rules: Vec<Option<usize>>,
+}
+
+/// Conditional formatting state while a sheet's records are read.
+#[derive(Default)]
+pub(super) struct CondState {
+    /// The `nID` and ranges of the header whose rule records are being read.
+    current: Option<(u16, Vec<RangeRef>)>,
+    groups: HashMap<u16, Group>,
+    kept_ranges: usize,
+    /// Whether a classic rule was skipped (warned once per sheet).
+    skipped: bool,
+    /// Why Excel 2007+ rules were skipped or read in part (each reason once).
+    skipped12: Vec<&'static str>,
+    capped: bool,
+}
+
+impl CondState {
+    /// Called for every record: a header's rules are the records right after it.
+    pub(super) fn next_record(&mut self, id: u16) {
+        if !matches!(id, 0x01B1 | 0x087A | 0x087B) {
+            self.current = None;
+        }
+    }
+
+    /// CondFmt (0x01B0), or CondFmt12 (0x0879) after its 12-byte header.
+    pub(super) fn header(&mut self, bytes: &[u8], frt: bool) {
+        let body = if frt { bytes.get(12..).unwrap_or(&[]) } else { bytes };
+        let id = body.get(2..4).and_then(|b| b.try_into().ok()).map_or(0, |b| u16::from_le_bytes(b) >> 1);
+        self.current = cond_fmt(body).map(|ranges| (id, ranges));
+        match &self.current {
+            Some((id, ranges)) => {
+                self.groups.insert(*id, Group { ranges: ranges.clone(), rules: vec![] });
+            }
+            None if frt => self.skip12("damaged records"),
+            None => self.skipped = true,
+        }
+    }
+
+    fn skip12(&mut self, why: &'static str) {
+        if !self.skipped12.contains(&why) {
+            self.skipped12.push(why);
+        }
+    }
+
+    /// Adds a rule unless the sheet already holds too many; returns its index.
+    fn push(&mut self, sheet: &mut Sheet, ranges: &[RangeRef], rule: CfRule, priority: Option<u32>, stop_if_true: bool) -> Option<usize> {
+        if sheet.cond_formats.len() >= MAX_RULES || self.kept_ranges.saturating_add(ranges.len()) > MAX_KEPT_RANGES {
+            self.capped = true;
+            return None;
+        }
+        self.kept_ranges += ranges.len();
+        let priority = priority.unwrap_or_else(|| u32::try_from(sheet.cond_formats.len()).unwrap_or(u32::MAX).saturating_add(1));
+        sheet.cond_formats.push(CondFormat { ranges: ranges.to_vec(), rule, priority, stop_if_true });
+        Some(sheet.cond_formats.len() - 1)
+    }
+
+    /// CF (0x01B1).
+    pub(super) fn cf(&mut self, bytes: &[u8], links: &Links, sheet: &mut Sheet) {
+        let Some((id, ranges)) = self.current.take() else { return };
+        let base = ranges.first().map_or(CellRef::new(0, 0), |r| r.start);
+        let index = match cf(bytes, base, links) {
+            Ok(rule) => self.push(sheet, &ranges, rule, None, false),
+            Err(_) => {
+                self.skipped = true;
+                None
+            }
+        };
+        if let Some(g) = self.groups.get_mut(&id) {
+            g.rules.push(index);
+        }
+        self.current = Some((id, ranges));
+    }
+
+    /// CF12 (0x087A).
+    pub(super) fn cf12(&mut self, bytes: &[u8], links: &Links, sheet: &mut Sheet) {
+        let Some((id, ranges)) = self.current.take() else { return };
+        let base = ranges.first().map_or(CellRef::new(0, 0), |r| r.start);
+        let mut notes = vec![];
+        match cf12::cf12(bytes, base, links, &mut notes) {
+            Ok(r) => {
+                self.push(sheet, &ranges, r.rule, Some(r.priority), r.stop_if_true);
+            }
+            Err("truncated") => self.skip12("damaged records"),
+            Err(why) => self.skip12(why),
+        }
+        for why in notes {
+            self.skip12(why);
+        }
+        self.current = Some((id, ranges));
+    }
+
+    /// CFEx (0x087B): extends a classic CF rule, or announces the CF12 rule that follows.
+    pub(super) fn cf_ex(&mut self, bytes: &[u8], sheet: &mut Sheet) {
+        let Some(ex) = cf12::cf_ex(bytes) else {
+            self.skip12("damaged records");
+            return;
+        };
+        let Some(group) = self.groups.get(&ex.id) else {
+            self.skip12("extensions of a missing rule");
+            return;
+        };
+        let Some(ext) = ex.ext else {
+            self.current = Some((ex.id, group.ranges.clone()));
+            return;
+        };
+        let Some(cf) = group.rules.get(ext.index).copied().flatten().and_then(|i| sheet.cond_formats.get_mut(i)) else { return };
+        cf.priority = ext.priority;
+        cf.stop_if_true = ext.stop_if_true;
+        if let CfRule::Expression { formula, style } = &cf.rule {
+            let style = Box::new(ext.style.unwrap_or_else(|| (**style).clone()));
+            if let Some(rule) = cf12::template_rule(ext.template, &ext.params, Some(formula), style) {
+                cf.rule = rule;
+            }
+        }
+    }
+
+    /// Warns about what was skipped in this sheet.
+    pub(super) fn finish(&self, report: &mut ReadReport) {
+        if self.skipped {
+            report.warn("Some conditional formatting rules in this .xls sheet could not be read and were skipped.");
+        }
+        for why in &self.skipped12 {
+            report.warn(format!("Some Excel 2007+ conditional formats in this .xls sheet were skipped or read in part ({why})."));
+        }
+        if self.capped {
+            report.warn(format!("Conditional formats past {MAX_RULES} rules in this .xls sheet were skipped."));
+        }
+    }
+}
 
 /// A little-endian reader over a record's bytes that fails softly at the end.
 struct Bytes<'a> {
@@ -35,10 +180,13 @@ impl<'a> Bytes<'a> {
     fn u32(&mut self) -> Option<u32> {
         self.take(4).and_then(|s| s.try_into().ok()).map(u32::from_le_bytes)
     }
+    fn f64(&mut self) -> Option<f64> {
+        self.take(8).and_then(|s| s.try_into().ok()).map(f64::from_le_bytes)
+    }
 }
 
 /// The ranges of a CondFmt record (its `sqref`); `None` if it is malformed or names none.
-pub(super) fn cond_fmt(bytes: &[u8]) -> Option<Vec<RangeRef>> {
+fn cond_fmt(bytes: &[u8]) -> Option<Vec<RangeRef>> {
     let mut t = Bytes { b: bytes, pos: 0 };
     // ccf, fToughRecalc/nID and the bounding range are not needed.
     t.take(12)?;
@@ -56,7 +204,7 @@ pub(super) fn cond_fmt(bytes: &[u8]) -> Option<Vec<RangeRef>> {
 
 /// One CF record as a rule, its formulas relative to `base` (the first range's top-left cell).
 /// The error says why the rule was skipped.
-pub(super) fn cf(bytes: &[u8], base: CellRef, links: &Links) -> Result<CfRule, &'static str> {
+fn cf(bytes: &[u8], base: CellRef, links: &Links) -> Result<CfRule, &'static str> {
     const TRUNC: &str = "truncated";
     let mut t = Bytes { b: bytes, pos: 0 };
     let (ct, cp) = (t.u8().ok_or(TRUNC)?, t.u8().ok_or(TRUNC)?);
@@ -70,6 +218,18 @@ pub(super) fn cf(bytes: &[u8], base: CellRef, links: &Links) -> Result<CfRule, &
         }
         decode(rgce, &[], base, Mode::Cell, links).map(|e| gridcraft_formula::print(&e)).map_err(|_| "unsupported formula")
     };
+    cf_rule(ct, cp, rgce1, rgce2, style, &text)
+}
+
+/// A cell-value (`ct` 1) or formula (`ct` 2) rule; `text` prints a formula.
+fn cf_rule(
+    ct: u8,
+    cp: u8,
+    rgce1: &[u8],
+    rgce2: &[u8],
+    style: Box<Style>,
+    text: &dyn Fn(&[u8]) -> Result<String, &'static str>,
+) -> Result<CfRule, &'static str> {
     match (ct, cp) {
         (1, 1..=8) => {
             let op = match cp {

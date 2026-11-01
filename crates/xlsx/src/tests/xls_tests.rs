@@ -186,7 +186,7 @@ fn special(kind: u8, v: u8) -> [u8; 8] {
 }
 
 /// PtgRef (value class) with relative row and column.
-fn ptg_ref(r: u16, c: u16) -> Vec<u8> {
+pub(super) fn ptg_ref(r: u16, c: u16) -> Vec<u8> {
     cat(&[&[0x44], &u16s(&[r, c | 0xC000])])
 }
 
@@ -710,7 +710,7 @@ fn ptg_num(x: f64) -> Vec<u8> {
 }
 
 /// PtgStr with 8-bit characters.
-fn ptg_str(s: &str) -> Vec<u8> {
+pub(super) fn ptg_str(s: &str) -> Vec<u8> {
     cat(&[&[0x17, s.len() as u8, 0], s.as_bytes()])
 }
 
@@ -864,7 +864,7 @@ fn xls_dv_survives_save_as_xlsx() {
 // ---------------------------------------------------------------- conditional formatting (CondFmt / CF)
 
 /// CondFmt (0x01B0): one CF record follows, applying to `refs` (rwFirst, rwLast, colFirst, colLast).
-fn cond_fmt(ccf: u16, refs: &[[u16; 4]]) -> Vec<u8> {
+pub(super) fn cond_fmt(ccf: u16, refs: &[[u16; 4]]) -> Vec<u8> {
     let mut b = u16s(&[ccf, 0]);
     let (r0, r1) = (refs.iter().map(|r| r[0]).min().unwrap(), refs.iter().map(|r| r[1]).max().unwrap());
     let (c0, c1) = (refs.iter().map(|r| r[2]).min().unwrap(), refs.iter().map(|r| r[3]).max().unwrap());
@@ -901,7 +901,7 @@ fn dxfn_red_font() -> Vec<u8> {
 }
 
 /// CF (0x01B1): ct, cp, rgce1, rgce2 with `dxfn`.
-fn cf(ct: u8, cp: u8, dxfn: &[u8], rgce1: &[u8], rgce2: &[u8]) -> Vec<u8> {
+pub(super) fn cf(ct: u8, cp: u8, dxfn: &[u8], rgce1: &[u8], rgce2: &[u8]) -> Vec<u8> {
     let mut b = vec![ct, cp];
     b.extend(u16s(&[rgce1.len() as u16, rgce2.len() as u16]));
     b.extend(dxfn);

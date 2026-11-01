@@ -6,8 +6,10 @@
 //! shared and array formulas), number formats, the 1904 date system, merged cells, column
 //! widths, row heights, defined names, print areas, print titles and the calculation settings
 //! (mode, iteration, precision as displayed), data validation and conditional formats
-//! (cell-value and formula rules), page setup (paper, orientation, scale, fit to page, margins,
-//! headers and footers, print options, manual page breaks) and the sheet tab colour. Everything else (fonts, fills, borders, charts, pictures,
+//! (cell-value and formula rules, and the Excel 2007+ kinds: colour scales, data bars, icon sets,
+//! top/bottom, above average and text/date templates), page setup (paper, orientation, scale, fit
+//! to page, margins, headers and footers, print options, manual page breaks) and the sheet tab
+//! colour. Everything else (fonts, fills, borders, charts, pictures,
 //! comments, macros) is skipped with a warning.
 //! Encrypted workbooks and pre-BIFF8 versions are refused.
 
@@ -22,9 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gridcraft_core::{CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{
-    CalcMode, CalcSettings, Cell, CondFormat, DefinedName, Formula, LineInfo, NumFmt, Sheet, Style, StyleId, Visibility, Workbook,
-};
+use gridcraft_model::{CalcMode, CalcSettings, Cell, DefinedName, Formula, LineInfo, NumFmt, Sheet, Style, StyleId, Visibility, Workbook};
 
 use crate::cfb::Compound;
 use crate::tables::{builtin_format, col_width_to_px, pt_to_px};
@@ -467,10 +467,8 @@ struct SheetState<'g> {
     dropped: usize,
     unsupported: Vec<&'static str>,
     calc: CalcSettings,
-    /// The ranges of the CondFmt record whose CF records are being read.
-    cond_ranges: Option<Vec<RangeRef>>,
-    /// Whether a conditional formatting rule was skipped (warned once per sheet).
-    cond_skipped: bool,
+    /// Conditional formats read so far.
+    cond: cond_format::CondState,
     page: page_setup::PageState,
 }
 
@@ -613,8 +611,7 @@ fn worksheet(
         dropped: 0,
         unsupported: vec![],
         calc: CalcSettings::default(),
-        cond_ranges: None,
-        cond_skipped: false,
+        cond: cond_format::CondState::default(),
         page: page_setup::PageState::default(),
     };
     let mut depth = 1usize;
@@ -646,9 +643,7 @@ fn worksheet(
     resolve_pending(&mut st, &arrays, &shared, &pending);
     blank_array_followers(&mut st, &pending);
     st.page.finish(&mut st.sheet.print);
-    if st.cond_skipped {
-        report.warn("Some conditional formatting rules in this .xls sheet could not be read and were skipped.");
-    }
+    st.cond.finish(report);
     if st.dropped > 0 {
         report.warn(format!("{} cells outside the grid were skipped.", st.dropped));
     }
@@ -667,10 +662,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
     if !matches!(rec.id, 0x0207 | 0x04BC | 0x0221 | 0x0236) {
         st.pending_string = None;
     }
-    // A CondFmt's rules are the CF records right after it.
-    if rec.id != 0x01B1 {
-        st.cond_ranges = None;
-    }
+    st.cond.next_record(rec.id);
     if page_setup::read(rec, &mut st.sheet.print, &mut st.sheet.tab_color, &mut st.page, report) {
         return Ok(());
     }
@@ -860,22 +852,10 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x00EC => report.warn("Pictures, charts and shapes in .xls files are not imported yet."),
         // DVAL is only a header; import actual DV records regardless of its declared count.
         0x01BE => validation::read(&mut c, st, budget, report)?,
-        0x01B0 => {
-            st.cond_ranges = cond_format::cond_fmt(&c.rest());
-            st.cond_skipped |= st.cond_ranges.is_none();
-        }
-        0x01B1 => {
-            let Some(ranges) = &st.cond_ranges else { return Ok(()) };
-            let base = ranges.first().map_or(CellRef::new(0, 0), |r| r.start);
-            match cond_format::cf(&c.rest(), base, &st.g.links) {
-                Ok(rule) => {
-                    let priority = u32::try_from(st.sheet.cond_formats.len()).unwrap_or(u32::MAX).saturating_add(1);
-                    st.sheet.cond_formats.push(CondFormat { ranges: ranges.clone(), rule, priority, stop_if_true: false });
-                }
-                Err(_) => st.cond_skipped = true,
-            }
-        }
-        0x0879 | 0x087B => report.warn("Excel 2007+ conditional formats in .xls files are not imported yet."),
+        0x01B0 | 0x0879 => st.cond.header(&c.rest(), rec.id == 0x0879),
+        0x01B1 => st.cond.cf(&c.rest(), &st.g.links, &mut st.sheet),
+        0x087A => st.cond.cf12(&c.rest(), &st.g.links, &mut st.sheet),
+        0x087B => st.cond.cf_ex(&c.rest(), &mut st.sheet),
         0x01B8 => report.warn("Hyperlinks in .xls files are not imported yet."),
         0x00B0 => report.warn("PivotTables in .xls files are not imported yet; their values were kept."),
         _ => {}
