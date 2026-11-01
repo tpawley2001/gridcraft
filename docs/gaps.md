@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (§7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (§7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas including text constants; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -161,8 +161,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   [ui-parity.md](ui-parity.md#accessibility)
 
 ### 19. XLSB/ODS beyond values; minor formats (FF)
-- XLSB imports values, built-in/custom number formats and cell formulas (references, operators, functions; shared and array
-  formulas, names, 3-D references and text constants still become their saved results); fonts,
+- XLSB imports values, built-in/custom number formats and cell formulas (references, operators, functions, text constants; shared and array
+  formulas, names, 3-D references and array constants still become their saved results); fonts,
   fills, borders and alignment remain unimported. ODS
   values only, no write; no `.prn`, `.dif`, `.slk`, XML Spreadsheet 2003; CSV
   writes raw instead of displayed values; templates saved with the workbook content type.
@@ -195,6 +195,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-01 | minor | §19: XLSB cell formulas now decode text constants (PtgStr); array constants still keep saved results. |
 | 2026-11-01 | minor | §19: XLSB imports built-in and custom number formats, including formatted blanks; fonts, fills, borders and alignment remain unsupported |
 | 2026-11-01 | minor | §7: `.xls` imports data validation from DV records, including lists, formulas, prompts and ranges; rules survive Save As `.xlsx`. |
 | 2026-11-01 | minor | §7: `.xls` import reads conditional formatting (CondFmt/CF cell-value and formula rules); CF12/CFEx still skipped |
