@@ -449,7 +449,9 @@ fn xf(fmt: u16) -> Vec<u8> {
     // ixfeParent, iFmt, then font/fill/border/rotation/indent/alignment/flags (16 bytes in all).
     let mut data = 0u16.to_le_bytes().to_vec();
     data.extend(fmt.to_le_bytes());
-    data.extend([0; 12]);
+    data.extend([0; 8]);
+    data.extend(0x1010u16.to_le_bytes()); // alcv = 2 (bottom) and fLocked, as Excel writes them
+    data.extend([0; 2]);
     record(47, &data)
 }
 /// Cell XFs: 0 General, 1 built-in 14, 2 custom 164 `0.00%`. A cell style XF with iFmt 10 comes first.
@@ -682,4 +684,202 @@ fn xlsb_truncated_text_constant_keeps_the_saved_result() {
     assert_eq!(wb.sheets[0].value(CellRef::new(0, 0)), text("a"));
     assert_eq!(ftext(&wb, "A1"), None);
     assert!(report.warnings.iter().any(|w| w.to_lowercase().contains("formula")), "{:?}", report.warnings);
+}
+
+// Fonts, fills, borders, alignment and protection from the styles part ([MS-XLSB] 2.4.862 BrtXF,
+// 2.4.690 BrtFont, 2.4.681 BrtFill, 2.4.314 BrtBorder, 2.5.5 Blxf, 2.4.337 BrtColor). Record types:
+// BrtFont 43 in 611..612, BrtFill 45 in 603..604, BrtBorder 46 in 613..614.
+const AUTO: [u8; 8] = [0; 8];
+fn indexed(i: u8) -> [u8; 8] {
+    [1 << 1, i, 0, 0, 0, 0, 0, 0]
+}
+fn rgb(r: u8, g: u8, b: u8) -> [u8; 8] {
+    [1 | 2 << 1, 0, 0, 0, r, g, b, 255]
+}
+fn theme(i: u8, tint: i16) -> [u8; 8] {
+    let t = tint.to_le_bytes();
+    [3 << 1, i, t[0], t[1], 0, 0, 0, 0]
+}
+#[allow(clippy::too_many_arguments)]
+fn font(twips: u16, grbit: u16, bls: u16, sss: u16, uls: u8, family: u8, charset: u8, color: [u8; 8], scheme: u8, name: &str) -> Vec<u8> {
+    let mut d = twips.to_le_bytes().to_vec();
+    d.extend(grbit.to_le_bytes());
+    d.extend(bls.to_le_bytes());
+    d.extend(sss.to_le_bytes());
+    d.extend([uls, family, charset, 0]);
+    d.extend(color);
+    d.push(scheme);
+    d.extend(wide(name));
+    record(43, &d)
+}
+fn fill(fls: u32, fore: [u8; 8], back: [u8; 8]) -> Vec<u8> {
+    let mut d = fls.to_le_bytes().to_vec();
+    d.extend(fore);
+    d.extend(back);
+    d.extend([0; 4 + 5 * 8 + 4]); // no gradient
+    record(45, &d)
+}
+fn blxf(dg: u8, color: [u8; 8]) -> Vec<u8> {
+    let mut d = vec![dg, 0];
+    d.extend(color);
+    d
+}
+fn border(diag: u8, top: Vec<u8>, bottom: Vec<u8>, left: Vec<u8>, right: Vec<u8>, dg: Vec<u8>) -> Vec<u8> {
+    let mut d = vec![diag];
+    for b in [top, bottom, left, right, dg] {
+        d.extend(b);
+    }
+    record(46, &d)
+}
+/// A cell XF; `flags` is the alc/alcv/wrap/shrink/locked/hidden word.
+fn xf_full(font: u16, fill: u16, border: u16, trot: u8, indent: u8, flags: u16) -> Vec<u8> {
+    let mut d = 0u16.to_le_bytes().to_vec();
+    for v in [0, font, fill, border] {
+        d.extend(v.to_le_bytes());
+    }
+    d.extend([trot, indent]);
+    d.extend(flags.to_le_bytes());
+    d.extend(0u16.to_le_bytes());
+    record(47, &d)
+}
+const LOCKED: u16 = 1 << 12;
+const BOTTOM: u16 = 2 << 3;
+fn formats_part() -> Vec<u8> {
+    let mut out = record(278, &[]);
+    out.extend(record(611, &3u32.to_le_bytes()));
+    out.extend(font(220, 0, 400, 0, 0, 2, 0, theme(1, 0), 2, "Calibri")); // Excel's default font
+    out.extend(font(280, 1 << 1 | 1 << 3, 700, 0, 1, 2, 0, rgb(0xFF, 0, 0), 0, "Arial"));
+    out.extend(font(220, 0, 400, 1, 0x22, 1, 0xCC, theme(4, 13107), 2, "Calibri"));
+    out.extend(record(612, &[]));
+    out.extend(record(603, &4u32.to_le_bytes()));
+    out.extend(fill(0, indexed(64), indexed(65)));
+    out.extend(fill(17, indexed(64), indexed(65)));
+    out.extend(fill(1, rgb(0xFF, 0xFF, 0), indexed(64)));
+    out.extend(fill(9, theme(5, -8192), rgb(0, 0xFF, 0)));
+    out.extend(record(604, &[]));
+    out.extend(record(613, &2u32.to_le_bytes()));
+    out.extend(border(0, blxf(0, AUTO), blxf(0, AUTO), blxf(0, AUTO), blxf(0, AUTO), blxf(0, AUTO)));
+    out.extend(border(3, blxf(2, rgb(0, 0, 0xFF)), blxf(6, indexed(10)), blxf(3, theme(1, 0)), blxf(0, AUTO), blxf(1, rgb(0, 0xFF, 0))));
+    out.extend(record(614, &[]));
+    out.extend(record(617, &7u32.to_le_bytes()));
+    out.extend(xf_full(0, 0, 0, 0, 0, BOTTOM | LOCKED)); // 0: default
+    out.extend(xf_full(1, 2, 1, 0, 0, 2 | 1 << 6 | LOCKED)); // 1: center, top, wrap
+    out.extend(xf_full(2, 3, 0, 45, 2, 3 | 1 << 3 | 1 << 8 | LOCKED)); // 2: right, center, shrink
+    out.extend(xf_full(0, 1, 0, 135, 0, 7 | 4 << 3 | LOCKED)); // 3: distributed both ways
+    out.extend(xf_full(0, 0, 0, 255, 0, 6 | BOTTOM | LOCKED)); // 4: vertical text, center across
+    out.extend(xf_full(0, 0, 0, 0, 0, BOTTOM | 1 << 13)); // 5: unlocked, hidden
+    out.extend(xf_full(99, 99, 99, 0, 0, 1 | BOTTOM | LOCKED)); // 6: indices past the lists, left
+    out.extend(record(618, &[]));
+    out.extend(record(279, &[]));
+    out
+}
+fn formats_file(styles: &[u8]) -> Vec<u8> {
+    let mut data = row(0);
+    for xf in 0..7 {
+        data.extend(styled(5, xf, xf, &f64::from(xf).to_le_bytes()));
+    }
+    let (book, sheet, strings, two) = (book(false), worksheet(&data, &[]), sst(), worksheet(&[], &[]));
+    make_zip(&[
+        ("[Content_Types].xml", STYLES_TYPES.as_bytes()),
+        ("_rels/.rels", ROOT.as_bytes()),
+        ("records/book.bin", &book),
+        ("records/_rels/book.bin.rels", STYLES_RELS.as_bytes()),
+        ("data/one.bin", &sheet),
+        ("data/two.bin", &two),
+        ("text/strings.bin", &strings),
+        ("text/styles.bin", styles),
+    ])
+}
+fn style_at<'a>(wb: &'a gridcraft_model::Workbook, a1: &str) -> &'a gridcraft_model::Style {
+    wb.styles.get(wb.sheets[0].style_id(CellRef::parse(a1).unwrap()))
+}
+
+#[test]
+fn xlsb_formats_fonts_are_imported() {
+    use gridcraft_model::{Color, Underline, VertAlign};
+    let (wb, report) = read_xlsb(&formats_file(&formats_part())).unwrap();
+    assert!(!report.warnings.iter().any(|w| w.to_lowercase().contains("styles")), "{:?}", report.warnings);
+    // Excel's default font and alignment are the default style.
+    assert_eq!(wb.sheets[0].style_id(CellRef::parse("A1").unwrap()), gridcraft_model::StyleId::DEFAULT);
+    let b = &style_at(&wb, "B1").font;
+    assert_eq!((b.name.as_str(), b.size, b.bold, b.italic, b.strike), ("Arial", 14.0, true, true, true));
+    assert_eq!((b.underline, b.color, b.vert, b.minor), (Underline::Single, Color::Rgb(0xFF0000), VertAlign::Baseline, false));
+    let c = &style_at(&wb, "C1").font;
+    assert_eq!((c.name.as_str(), c.size, c.bold, c.italic), ("Calibri", 11.0, false, false));
+    assert_eq!((c.underline, c.color, c.vert, c.minor), (Underline::DoubleAccounting, Color::Theme(4, 400), VertAlign::Superscript, true));
+    assert_eq!((c.family, c.charset), (Some(1), Some(0xCC)));
+}
+
+#[test]
+fn xlsb_formats_fills_are_imported() {
+    use gridcraft_model::{Color, Fill, PatternType};
+    let (wb, _) = read_xlsb(&formats_file(&formats_part())).unwrap();
+    assert_eq!(style_at(&wb, "A1").fill, Fill::default());
+    assert_eq!(style_at(&wb, "B1").fill, Fill::solid(Color::Rgb(0xFFFF00)));
+    assert_eq!(style_at(&wb, "C1").fill, Fill { pattern: PatternType::DarkGrid, fg: Color::Theme(5, -250), bg: Color::Rgb(0x00FF00) });
+    assert_eq!(style_at(&wb, "D1").fill, Fill { pattern: PatternType::Gray125, fg: Color::Auto, bg: Color::Auto });
+}
+
+#[test]
+fn xlsb_formats_borders_are_imported() {
+    use gridcraft_model::{BorderLine, BorderStyle, Borders, Color};
+    let (wb, _) = read_xlsb(&formats_file(&formats_part())).unwrap();
+    let line = |style, color| BorderLine { style, color };
+    let green = line(BorderStyle::Thin, Color::Rgb(0x00FF00));
+    assert_eq!(
+        style_at(&wb, "B1").borders,
+        Borders {
+            top: line(BorderStyle::Medium, Color::Rgb(0x0000FF)),
+            bottom: line(BorderStyle::Double, Color::Rgb(0xFF0000)),
+            left: line(BorderStyle::Dashed, Color::Theme(1, 0)),
+            right: BorderLine::default(),
+            diag_down: green,
+            diag_up: green,
+        }
+    );
+    assert_eq!(style_at(&wb, "C1").borders, Borders::default());
+}
+
+#[test]
+fn xlsb_formats_alignment_and_protection_are_imported() {
+    use gridcraft_model::style::Protection;
+    use gridcraft_model::{Alignment, HAlign, Style, VAlign};
+    let (wb, _) = read_xlsb(&formats_file(&formats_part())).unwrap();
+    let al = |h, v, wrap, shrink, indent, rotation| Alignment { h, v, wrap, shrink, indent, rotation };
+    assert_eq!(style_at(&wb, "B1").align, al(HAlign::Center, VAlign::Top, true, false, 0, 0));
+    assert_eq!(style_at(&wb, "C1").align, al(HAlign::Right, VAlign::Center, false, true, 2, 45));
+    assert_eq!(style_at(&wb, "D1").align, al(HAlign::Distributed, VAlign::Distributed, false, false, 0, -45));
+    assert_eq!(style_at(&wb, "E1").align, al(HAlign::CenterAcross, VAlign::Bottom, false, false, 0, 255));
+    assert_eq!(style_at(&wb, "F1").protection, Protection { locked: false, hidden: true });
+    assert_eq!(style_at(&wb, "B1").protection, Protection::default());
+    // Font, fill and border indices past their lists fall back to the defaults; the alignment stays.
+    let mut left = Style::default();
+    left.align.h = HAlign::Left;
+    assert_eq!(style_at(&wb, "G1"), &left);
+}
+
+#[test]
+fn xlsb_formats_survive_saving_as_xlsx() {
+    use gridcraft_model::{Color, Fill, HAlign};
+    let (wb, _) = read_xlsb(&formats_file(&formats_part())).unwrap();
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    let b = style_at(&back, "B1");
+    assert!(b.font.bold && b.font.italic);
+    assert_eq!(b.font.name, "Arial");
+    assert_eq!(b.fill, Fill::solid(Color::Rgb(0xFFFF00)));
+    assert_eq!(b.align.h, HAlign::Center);
+    assert_eq!(back.sheets[0].value(CellRef::parse("B1").unwrap()), Value::Number(1.0));
+}
+
+#[test]
+fn xlsb_formats_damaged_font_record_keeps_values_and_warns() {
+    let mut part = formats_part();
+    // Cut the second BrtFont (Arial) to 6 bytes: shorter than its fixed fields.
+    let arial = font(280, 1 << 1 | 1 << 3, 700, 0, 1, 2, 0, rgb(0xFF, 0, 0), 0, "Arial");
+    let at = part.windows(arial.len()).position(|w| w == arial.as_slice()).unwrap();
+    part.splice(at..at + arial.len(), record(43, &arial[2..8]));
+    let (wb, report) = read_xlsb(&formats_file(&part)).unwrap();
+    assert!(report.warnings.iter().any(|w| w.to_lowercase().contains("styles")), "{:?}", report.warnings);
+    assert_eq!(wb.sheets[0].value(CellRef::parse("C1").unwrap()), Value::Number(2.0));
+    assert_eq!(wb.sheets[0].style_id(CellRef::parse("B1").unwrap()), gridcraft_model::StyleId::DEFAULT);
 }
