@@ -104,6 +104,9 @@ const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
 const PACKAGE_ROOTS: &[&str] = &["custom-properties", "extensibility", "webextensiontaskpanes", "classificationlabels"];
 /// Relationship kinds kept from the workbook without a workbook element.
 const WORKBOOK_ROOTS: &[&str] = &["customXml", "connections", "xmlMaps", "volatileDependencies"];
+/// Workbook relationship kinds of Office add-ins: the task panes part, which names the web
+/// extension parts it shows ([MS-OWEXML] 2.3.1).
+const WORKBOOK_WEB_EXTENSIONS: &[&str] = &["webextensiontaskpanes"];
 /// Relationship kinds kept from a sheet without a sheet element.
 const SHEET_ROOTS: &[&str] = &["queryTable", "tableSingleCells"];
 /// Sheet relationship kinds that mean the sheet XML may hold elements worth keeping.

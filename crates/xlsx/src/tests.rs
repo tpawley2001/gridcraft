@@ -47,6 +47,7 @@ mod xls_autofilter_tests;
 mod xls_cf12_tests;
 mod xls_print_tests;
 mod xls_protection_tests;
+mod webextension_passthrough;
 mod xls_tests;
 mod xlsb_layout_tests;
 mod xlsb_links_tests;
