@@ -50,6 +50,7 @@ mod xlsb_layout_tests;
 mod xlsb_links_tests;
 mod xlsb_names_tests;
 mod xlsb_print_tests;
+mod xlsb_protection_tests;
 mod xlsb_tables_tests;
 mod xlsb_tests;
 mod xlsb_theme_tests;

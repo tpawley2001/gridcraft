@@ -52,6 +52,21 @@ gridcraft-cli convert source.xlsb imported.xlsx
 
 CLI import warnings go to stderr, leaving structured output on stdout available for scripts.
 
+Sheet protection and workbook structure protection are imported, including legacy password
+verifiers and ISO iterated password hashes. Calculation mode (automatic, manual or automatic
+except data tables), iterative calculation, maximum iterations, maximum change and precision
+as displayed are retained. These settings survive saving the imported workbook as XLSX.
+Malformed protection or calculation records are skipped with a warning.
+
+Record layouts and identifiers follow Microsoft's public [MS-XLSB] specification,
+sections 2.3.2, 2.4.311–312, 2.4.318, 2.4.792–793 and 2.5.80. The ISO protection record
+identifiers are 677 (workbook) and 678 (sheet).
+
+## Revision history
+
+| Date | Change |
+| --- | --- |
+| 2026-11-01 | Import sheet and workbook structure protection and calculation settings. |
 ## Revision history
 
 | Date | Change | Summary |

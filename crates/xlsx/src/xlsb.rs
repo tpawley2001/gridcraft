@@ -16,7 +16,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{Cell, Color, Comment, Formula, Hyperlink, LineInfo, Orientation, PrintSettings, Sheet, StyleId, Visibility, Workbook};
+use gridcraft_model::{
+    CalcMode, Cell, Color, Comment, Formula, Hyperlink, LineInfo, Orientation, PasswordHash, PrintSettings, Sheet, SheetProtection, StyleId,
+    Visibility, Workbook,
+};
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::Event;
@@ -559,6 +562,8 @@ fn workbook(
                     *itab_cur = b.take(24).and_then(|_| b.u32()).ok();
                 }
             }
+            157 => calc_prop(payload, wb, report),
+            534 | 677 => book_protection(id, payload, wb, report),
             156 => {
                 if !bundle {
                     return Err(invalid("worksheet outside the worksheet list"));
@@ -1225,6 +1230,7 @@ fn worksheet(
                 b.finish()?;
                 groups.add(range, rgce, rgcb, id == 426);
             }
+            535 | 678 => sheet_protection(id, payload, &mut sheet, report),
             176 => {
                 if data {
                     return Err(invalid("merge inside worksheet data"));
@@ -1637,5 +1643,161 @@ fn list_part(payload: &[u8], list_parts: &mut Vec<String>, report: &mut ReadRepo
         Ok(Some(id)) if list_parts.len() < tables::MAX_TABLES => list_parts.push(id),
         Ok(Some(_)) => report.warn("XLSB tables past the first 1024 on a sheet were skipped."),
         Ok(None) | Err(_) => report.warn("XLSB tables whose part is missing or malformed were skipped."),
+    }
+}
+
+/// [MS-XLSB] 2.4.318: the thread count precedes the final two-byte flags.
+fn calc_prop(payload: &[u8], wb: &mut Workbook, report: &mut ReadReport) {
+    let parse = || -> Result<_, IoError> {
+        let mut b = Bytes::new(payload);
+        b.u32()?; // recalcID
+        let mode = match b.u32()? {
+            0 => CalcMode::Manual,
+            1 => CalcMode::Automatic,
+            2 => CalcMode::AutomaticExceptTables,
+            _ => return Err(invalid("invalid calculation mode")),
+        };
+        let count = b.u32()?;
+        let delta = b.f64()?;
+        b.u32()?; // cUserThreadCount (not modelled)
+        let flags = b.u16()?;
+        b.finish()?;
+        Ok((mode, count, delta, flags))
+    };
+    match parse() {
+        Ok((mode, count, delta, flags)) => {
+            wb.calc.mode = mode;
+            wb.calc.set_max_iterations(count);
+            wb.calc.set_max_change(delta);
+            wb.calc.iterative = flags & 4 != 0;
+            wb.calc.precision_as_displayed = flags & 8 == 0;
+        }
+        Err(_) => report.warn("Invalid XLSB BrtCalcProp record was skipped."),
+    }
+}
+
+fn legacy_password(value: u16) -> Option<PasswordHash> {
+    (value != 0).then_some(PasswordHash::Legacy(value))
+}
+
+/// IsoPasswordData ([MS-XLSB] 2.5.80): two LPByteBufs and an XLNullableWideString.
+fn iso_password(b: &mut Bytes<'_>, spin_count: u32) -> Result<Option<PasswordHash>, IoError> {
+    if spin_count > 10_000_000 {
+        return Err(invalid("password spin count exceeds its limit"));
+    }
+    // Bound encoded allocations independently of the record's untrusted length fields.
+    let mut buffer = || -> Result<_, IoError> {
+        let len = b.u32()?;
+        if len > 65_536 {
+            return Err(invalid("password data exceeds its limit"));
+        }
+        b.take(len as usize)
+    };
+    let hash = buffer()?;
+    let salt = buffer()?;
+    let algorithm = b.string(255, true)?.unwrap_or_default();
+    if hash.is_empty() {
+        if !salt.is_empty() || !algorithm.is_empty() {
+            return Err(invalid("password data without a hash"));
+        }
+        return Ok(None);
+    }
+    if algorithm.is_empty() {
+        return Err(invalid("password hash without an algorithm"));
+    }
+    Ok(Some(PasswordHash::Iterated { algorithm, hash: gridcraft_model::encode_base64(hash), salt: gridcraft_model::encode_base64(salt), spin_count }))
+}
+
+/// [MS-XLSB] 2.4.311–312. Window and revision protection are not modelled.
+fn book_protection(id: u16, payload: &[u8], wb: &mut Workbook, report: &mut ReadReport) {
+    let parse = || -> Result<_, IoError> {
+        let mut b = Bytes::new(payload);
+        let (flags, password) = if id == 677 {
+            let spin = b.u32()?;
+            let revision_spin = b.u32()?;
+            let flags = b.u16()?;
+            let password = iso_password(&mut b, spin)?;
+            let revision = iso_password(&mut b, revision_spin)?;
+            if password.is_none() && revision.is_none() {
+                return Err(invalid("empty workbook ISO protection"));
+            }
+            (flags, password)
+        } else {
+            let password = legacy_password(b.u16()?);
+            b.u16()?; // protpwdRev
+            (b.u16()?, password)
+        };
+        b.finish()?;
+        Ok((flags, password))
+    };
+    match parse() {
+        Ok((flags, password)) => {
+            // ISO records normally precede their legacy companion, which must not erase them.
+            if id == 677 || !matches!(wb.structure_password, Some(PasswordHash::Iterated { .. })) {
+                wb.protected_structure = flags & 1 != 0;
+                wb.structure_password = password;
+            }
+        }
+        Err(_) => report.warn(format!("Invalid XLSB workbook protection record {id} was skipped.")),
+    }
+}
+
+/// [MS-XLSB] 2.4.792–793: 16 four-byte protection flags in both record types.
+fn sheet_protection(id: u16, payload: &[u8], sheet: &mut Sheet, report: &mut ReadReport) {
+    let parse = || -> Result<_, IoError> {
+        let mut b = Bytes::new(payload);
+        let spin = if id == 678 { Some(b.u32()?) } else { None };
+        let legacy = if spin.is_none() { legacy_password(b.u16()?) } else { None };
+        let mut flags = [0; 16];
+        for flag in &mut flags {
+            *flag = b.u32()?;
+            if *flag > 1 {
+                return Err(invalid("invalid sheet protection boolean"));
+            }
+        }
+        let password =
+            if let Some(spin) = spin { Some(iso_password(&mut b, spin)?.ok_or_else(|| invalid("empty sheet ISO protection"))?) } else { legacy };
+        b.finish()?;
+        let [
+            locked,
+            _,
+            _,
+            cells,
+            columns,
+            rows,
+            insert_columns,
+            insert_rows,
+            _,
+            delete_columns,
+            delete_rows,
+            select_locked,
+            sort,
+            autofilter,
+            _,
+            select_unlocked,
+        ] = flags;
+        Ok((locked != 0).then_some(SheetProtection {
+            password,
+            legacy_password_hash: None,
+            select_locked: select_locked == 0,
+            select_unlocked: select_unlocked == 0,
+            format_cells: cells == 0,
+            format_columns: columns == 0,
+            format_rows: rows == 0,
+            insert_columns: insert_columns == 0,
+            insert_rows: insert_rows == 0,
+            delete_columns: delete_columns == 0,
+            delete_rows: delete_rows == 0,
+            sort: sort == 0,
+            autofilter: autofilter == 0,
+        }))
+    };
+    match parse() {
+        Ok(protection) => {
+            if id == 678 || !sheet.protection.as_ref().is_some_and(|p| matches!(p.password, Some(PasswordHash::Iterated { .. }))) {
+                sheet.protection = protection;
+            }
+        }
+        Err(_) => report.warn(format!("Invalid XLSB sheet protection record {id} was skipped.")),
     }
 }

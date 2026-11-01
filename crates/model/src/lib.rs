@@ -5,6 +5,8 @@
 #![forbid(unsafe_code)]
 
 mod b64;
+/// Standard base64 encoding for binary fields stored in document formats.
+pub use b64::encode as encode_base64;
 pub mod cell;
 mod cellmap;
 pub mod features;
