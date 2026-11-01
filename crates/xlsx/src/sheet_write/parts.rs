@@ -114,6 +114,18 @@ pub(super) fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, out: &m
     if let Some(ty) = &t.table_type {
         let _ = write!(s, " tableType=\"{}\"", esc_attr(ty));
     }
+    for (attr, dxf) in [
+        ("headerRowDxfId", &t.header_row_dxf),
+        ("dataDxfId", &t.data_dxf),
+        ("totalsRowDxfId", &t.totals_row_dxf),
+        ("headerRowBorderDxfId", &t.header_row_border_dxf),
+        ("tableBorderDxfId", &t.table_border_dxf),
+        ("totalsRowBorderDxfId", &t.totals_row_border_dxf),
+    ] {
+        if let Some(st) = dxf {
+            let _ = write!(s, " {attr}=\"{}\"", dxf_id(&mut out.dxfs, st));
+        }
+    }
     if let Some(c) = t.connection_id {
         let _ = write!(s, " connectionId=\"{c}\"");
     }
@@ -149,6 +161,13 @@ pub(super) fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, out: &m
                 let _ = write!(s, " totalsRowFunction=\"{f}\"");
             } else if let Some(l) = col.and_then(|c| c.totals_label.as_ref()) {
                 let _ = write!(s, " totalsRowLabel=\"{}\"", esc_attr(l));
+            }
+        }
+        if let Some(c) = col {
+            for (attr, dxf) in [("headerRowDxfId", &c.header_row_dxf), ("dataDxfId", &c.data_dxf), ("totalsRowDxfId", &c.totals_row_dxf)] {
+                if let Some(st) = dxf {
+                    let _ = write!(s, " {attr}=\"{}\"", dxf_id(&mut out.dxfs, st));
+                }
             }
         }
         let calc = col.and_then(|c| c.formula.as_ref()).filter(|f| !f.is_empty());

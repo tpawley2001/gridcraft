@@ -100,7 +100,7 @@ pub(super) fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
             totals_row: false,
             columns: names
                 .into_iter()
-                .map(|n| TableColumn { name: n, totals: TotalsFn::None, totals_label: None, formula: None, unique_name: None, xml: None })
+                .map(|n| TableColumn { name: n, totals: TotalsFn::None, totals_label: None, formula: None, unique_name: None, xml: None, header_row_dxf: None, data_dxf: None, totals_row_dxf: None })
                 .collect(),
             style,
             banded_rows: true,

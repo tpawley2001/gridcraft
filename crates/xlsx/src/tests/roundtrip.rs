@@ -322,8 +322,21 @@ fn sample() -> Workbook {
                 formula: None,
                 unique_name: None,
                 xml: None,
+                header_row_dxf: None,
+                data_dxf: None,
+                totals_row_dxf: None,
             },
-            TableColumn { name: "Amount".into(), totals: TotalsFn::Sum, totals_label: None, formula: None, unique_name: None, xml: None },
+            TableColumn {
+                name: "Amount".into(),
+                totals: TotalsFn::Sum,
+                totals_label: None,
+                formula: None,
+                unique_name: None,
+                xml: None,
+                header_row_dxf: None,
+                data_dxf: None,
+                totals_row_dxf: None,
+            },
             TableColumn {
                 name: "Tax".into(),
                 totals: TotalsFn::Custom,
@@ -331,6 +344,9 @@ fn sample() -> Workbook {
                 formula: Some("Q2*0.1".into()),
                 unique_name: None,
                 xml: None,
+                header_row_dxf: None,
+                data_dxf: None,
+                totals_row_dxf: None,
             },
         ],
         style: "TableStyleLight9".into(),
@@ -345,6 +361,12 @@ fn sample() -> Workbook {
         ],
         table_type: None,
         connection_id: None,
+        header_row_dxf: None,
+        data_dxf: None,
+        totals_row_dxf: None,
+        header_row_border_dxf: None,
+        table_border_dxf: None,
+        totals_row_border_dxf: None,
     });
     let png = b"\x89PNG\r\n\x1a\n0000IHDRfake".to_vec();
     s.images.push(Image {
@@ -855,8 +877,28 @@ fn writing_repairs_invalid_models() {
         header_row: true,
         totals_row: false,
         columns: vec![
-            TableColumn { name: "X".into(), totals: TotalsFn::None, totals_label: None, formula: None, unique_name: None, xml: None },
-            TableColumn { name: "x".into(), totals: TotalsFn::None, totals_label: None, formula: None, unique_name: None, xml: None },
+            TableColumn {
+                name: "X".into(),
+                totals: TotalsFn::None,
+                totals_label: None,
+                formula: None,
+                unique_name: None,
+                xml: None,
+                header_row_dxf: None,
+                data_dxf: None,
+                totals_row_dxf: None,
+            },
+            TableColumn {
+                name: "x".into(),
+                totals: TotalsFn::None,
+                totals_label: None,
+                formula: None,
+                unique_name: None,
+                xml: None,
+                header_row_dxf: None,
+                data_dxf: None,
+                totals_row_dxf: None,
+            },
         ],
         style: String::new(),
         banded_rows: true,
@@ -867,6 +909,12 @@ fn writing_repairs_invalid_models() {
         filter: vec![],
         table_type: None,
         connection_id: None,
+        header_row_dxf: None,
+        data_dxf: None,
+        totals_row_dxf: None,
+        header_row_border_dxf: None,
+        table_border_dxf: None,
+        totals_row_border_dxf: None,
     });
     s.cells.set(at("B2"), Cell { value: Value::Number(1.0), formula: None, style: StyleId(9999) });
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
@@ -1129,7 +1177,17 @@ fn table_newline_column_and_backslash_name_survive() {
     s.set_value(at("A1"), Value::text("Handle\nBars"));
     s.set_value(at("B1"), Value::text("Name"));
     s.set_value(at("B2"), Value::text("x"));
-    let col = |n: &str| TableColumn { name: n.into(), totals: TotalsFn::None, totals_label: None, formula: None, unique_name: None, xml: None };
+    let col = |n: &str| TableColumn {
+        name: n.into(),
+        totals: TotalsFn::None,
+        totals_label: None,
+        formula: None,
+        unique_name: None,
+        xml: None,
+        header_row_dxf: None,
+        data_dxf: None,
+        totals_row_dxf: None,
+    };
     s.tables.push(Table {
         id: 1,
         name: "\\_Prime.1".into(),
@@ -1146,6 +1204,12 @@ fn table_newline_column_and_backslash_name_survive() {
         filter: vec![],
         table_type: None,
         connection_id: None,
+        header_row_dxf: None,
+        data_dxf: None,
+        totals_row_dxf: None,
+        header_row_border_dxf: None,
+        table_border_dxf: None,
+        totals_row_border_dxf: None,
     });
     s.cells.set(at("D1"), Cell::formula(Formula::new("COUNTA(\\_Prime.1[Name])")));
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
@@ -1177,8 +1241,21 @@ fn header_and_totals_table_without_data_row_survives() {
                 formula: None,
                 unique_name: None,
                 xml: None,
+                header_row_dxf: None,
+                data_dxf: None,
+                totals_row_dxf: None,
             },
-            TableColumn { name: "Amount".into(), totals: TotalsFn::Sum, totals_label: None, formula: None, unique_name: None, xml: None },
+            TableColumn {
+                name: "Amount".into(),
+                totals: TotalsFn::Sum,
+                totals_label: None,
+                formula: None,
+                unique_name: None,
+                xml: None,
+                header_row_dxf: None,
+                data_dxf: None,
+                totals_row_dxf: None,
+            },
         ],
         style: "TableStyleMedium2".into(),
         banded_rows: true,
@@ -1189,6 +1266,12 @@ fn header_and_totals_table_without_data_row_survives() {
         filter: vec![],
         table_type: None,
         connection_id: None,
+        header_row_dxf: None,
+        data_dxf: None,
+        totals_row_dxf: None,
+        header_row_border_dxf: None,
+        table_border_dxf: None,
+        totals_row_border_dxf: None,
     });
     let (back, report) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
     assert!(report.warnings.is_empty(), "{:?}", report.warnings);
@@ -1448,7 +1531,17 @@ fn a_table_filter_criteria_survive_a_round_trip() {
         range: rr("A1:A4"),
         header_row: true,
         totals_row: false,
-        columns: vec![TableColumn { name: "Region".into(), totals: TotalsFn::None, totals_label: None, formula: None, unique_name: None, xml: None }],
+        columns: vec![TableColumn {
+            name: "Region".into(),
+            totals: TotalsFn::None,
+            totals_label: None,
+            formula: None,
+            unique_name: None,
+            xml: None,
+            header_row_dxf: None,
+            data_dxf: None,
+            totals_row_dxf: None,
+        }],
         style: "TableStyleMedium2".into(),
         banded_rows: true,
         banded_cols: false,
@@ -1458,6 +1551,12 @@ fn a_table_filter_criteria_survive_a_round_trip() {
         filter: vec![],
         table_type: None,
         connection_id: None,
+        header_row_dxf: None,
+        data_dxf: None,
+        totals_row_dxf: None,
+        header_row_border_dxf: None,
+        table_border_dxf: None,
+        totals_row_border_dxf: None,
     });
     // The dropdown of a table's header cell installs the sheet AutoFilter over the table's
     // range, and `data.filterBy` stores its criteria there.
@@ -1485,8 +1584,17 @@ fn a_partial_sheet_filter_is_not_folded_into_a_table() {
     for (a, v) in [("A1", "Id"), ("B1", "Region"), ("A2", "1"), ("B2", "East"), ("A3", "2"), ("B3", "West")] {
         s.set_value(at(a), Value::text(v));
     }
-    let column =
-        |name: &str| TableColumn { name: name.into(), totals: TotalsFn::None, totals_label: None, formula: None, unique_name: None, xml: None };
+    let column = |name: &str| TableColumn {
+        name: name.into(),
+        totals: TotalsFn::None,
+        totals_label: None,
+        formula: None,
+        unique_name: None,
+        xml: None,
+        header_row_dxf: None,
+        data_dxf: None,
+        totals_row_dxf: None,
+    };
     s.tables.push(Table {
         id: 1,
         name: "Sales".into(),
@@ -1503,6 +1611,12 @@ fn a_partial_sheet_filter_is_not_folded_into_a_table() {
         filter: vec![],
         table_type: None,
         connection_id: None,
+        header_row_dxf: None,
+        data_dxf: None,
+        totals_row_dxf: None,
+        header_row_border_dxf: None,
+        table_border_dxf: None,
+        totals_row_border_dxf: None,
     });
     s.autofilter =
         Some(AutoFilter { range: rr("B1:B3"), criteria: vec![(0, FilterCriterion::Values { values: vec!["East".into()], blanks: false })] });
