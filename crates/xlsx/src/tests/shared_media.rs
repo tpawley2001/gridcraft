@@ -27,6 +27,7 @@ fn sheet_with(name: &str, pictures: &[(u32, &[u8])]) -> Arc<Sheet> {
             data: data.to_vec().into(),
             mime: "image/png".into(),
             alt: String::new(),
+            blip_ext: Vec::new(),
         });
     }
     Arc::new(s)

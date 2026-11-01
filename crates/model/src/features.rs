@@ -654,6 +654,35 @@ pub struct Image {
     pub data: std::sync::Arc<Vec<u8>>,
     pub mime: String,
     pub alt: String,
+    /// Extensions of the picture's `a:blip` GridCraft does not model (artistic effects and
+    /// background removal with their HD Photo layer, the local-dpi flag), written back on save.
+    /// A picture inserted in GridCraft has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blip_ext: Vec<KeptExtension>,
+}
+
+/// One file-format extension element GridCraft does not model (an `a:ext`), kept verbatim with
+/// the namespace declarations it needs and the package parts its relationship ids name.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct KeptExtension {
+    pub xml: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<KeptExtensionPart>,
+}
+
+/// A package part a [`KeptExtension`] refers to by relationship id.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct KeptExtensionPart {
+    /// The relationship id the extension XML uses for it (rewritten on save).
+    pub id: String,
+    /// The full relationship type URI.
+    pub rel_type: String,
+    pub content_type: String,
+    /// The part's file extension (`wdp`), without the dot.
+    pub ext: String,
+    /// The part's bytes, base64 in JSON, shared like [`Image::data`].
+    #[serde(with = "crate::b64::shared")]
+    pub data: std::sync::Arc<Vec<u8>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

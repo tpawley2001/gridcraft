@@ -352,6 +352,7 @@ fn charts_and_images_are_drawn() {
         data: png.into(),
         mime: "image/png".into(),
         alt: String::new(),
+        blip_ext: Vec::new(),
     });
     let charts = s.doc().unwrap().wb.active().unwrap().charts.len();
     let (pdf, _) = pdf_of(&mut s, json!({}));

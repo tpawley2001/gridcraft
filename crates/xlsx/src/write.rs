@@ -172,6 +172,31 @@ impl Out {
         self.part(&format!("xl/media/{file}"), None, data.to_vec());
         file
     }
+    /// The `xl/media` file name (`{stem}N.ext`) of a part a picture extension refers to (an HD
+    /// Photo layer), written once per distinct content with its content type.
+    pub fn media_part(&mut self, stem: &str, ext: &str, content_type: &str, data: &[u8]) -> String {
+        let prefix = format!("xl/media/{stem}");
+        let suffix = format!(".{ext}");
+        let numbered = |name: &str| {
+            name.strip_prefix(&prefix)
+                .and_then(|rest| rest.strip_suffix(&suffix))
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        };
+        if let Some((name, _)) = self.parts.iter().find(|(name, bytes)| numbered(name) && bytes.as_slice() == data) {
+            return name.trim_start_matches("xl/media/").to_string();
+        }
+        let n = self.parts.iter().filter(|(name, _)| numbered(name)).count().saturating_add(1);
+        let mut n = u32::try_from(n).unwrap_or(u32::MAX);
+        loop {
+            let file = format!("{stem}{n}{suffix}");
+            let name = format!("xl/media/{file}");
+            if !self.parts.iter().any(|(p, _)| p.eq_ignore_ascii_case(&name)) || n == u32::MAX {
+                self.part(&name, Some(content_type), data.to_vec());
+                return file;
+            }
+            n = n.saturating_add(1);
+        }
+    }
     pub fn default_type(&mut self, ext: &str, ct: &str) {
         self.defaults.entry(ext.to_string()).or_insert_with(|| ct.to_string());
     }
