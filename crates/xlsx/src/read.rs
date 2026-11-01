@@ -282,8 +282,9 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             file_to_model.push(None);
             continue;
         };
-        if rel.kind == "chartsheet" {
-            // Kept as it is and written back in place (see `passthrough`); nothing to model.
+        if crate::passthrough::KEPT_SHEET_KINDS.iter().any(|k| k.eq_ignore_ascii_case(&rel.kind)) {
+            // Chart, dialog and macro sheets are kept as they are and written back in place (see
+            // `passthrough`); nothing to model.
             file_to_model.push(None);
             continue;
         }
