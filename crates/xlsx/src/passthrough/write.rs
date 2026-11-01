@@ -8,6 +8,13 @@ use super::*;
 pub struct KeptOut {
     used: HashSet<String>,
     n: u32,
+    /// The written names of the kept parts, by their original name (normalized). A part kept by
+    /// several owners (an Office add-in's web extension part, reached from the drawing and from
+    /// the task panes) is written once, and all of them point at it; two different parts that
+    /// happen to have the same name each get their own.
+    names: HashMap<String, Vec<(PreservedPart, String)>>,
+    /// Normalized names of the kept parts (and their rels) already written.
+    written: HashSet<String>,
     /// The highest VML shape block a kept header and footer drawing uses: notes go after it.
     vml_blocks: u32,
     /// Package-root relationships (type, target, external), added when `_rels/.rels` is written.
@@ -82,7 +89,17 @@ pub(super) fn part_rels_xml(rels: &[PreservedRel], names: &NameMap) -> String {
 pub(super) fn write_parts(out: &mut Out, parts: &[PreservedPart]) -> NameMap {
     let mut names = NameMap::new();
     for p in parts {
-        names.entry(normalize(&p.name)).or_insert_with(|| out.kept.claim(&p.name));
+        let key = normalize(&p.name);
+        let known = out.kept.names.get(&key).and_then(|v| v.iter().find(|(part, _)| part == p)).map(|(_, name)| name.clone());
+        let name = match known {
+            Some(name) => name,
+            None => {
+                let name = out.kept.claim(&p.name);
+                out.kept.names.entry(key.clone()).or_default().push((p.clone(), name.clone()));
+                name
+            }
+        };
+        names.entry(key).or_insert(name);
     }
     let mut written = HashSet::new();
     for p in parts {
@@ -90,6 +107,13 @@ pub(super) fn write_parts(out: &mut Out, parts: &[PreservedPart]) -> NameMap {
         if !written.insert(new.clone()) {
             continue;
         }
+        let key = normalize(&new);
+        if out.kept.written.contains(&key) {
+            // Written for another owner already: kept parts keep their names, so its rels name
+            // the same targets.
+            continue;
+        }
+        out.kept.written.insert(key);
         out.part(&new, Some(&p.content_type), p.data.to_vec());
         if !p.rels.is_empty() {
             out.part(&rels_part_name(&new), None, part_rels_xml(&p.rels, &names).into_bytes());

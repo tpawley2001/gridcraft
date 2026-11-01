@@ -69,7 +69,11 @@ fn package(webextension: bool, taskpanes: bool) -> Vec<u8> {
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="{NS_R}">{PICTURE_ANCHOR}{}</xdr:wsDr>"#,
         addin_anchor("rId3", "rId2")
     );
-    let drawing_rels = rels(&[("rId1", "image", "../media/image1.png"), ("rId2", "image", "../media/image2.png"), ("rId3", REL_WE, "../webextensions/webextension1.xml")]);
+    let drawing_rels = rels(&[
+        ("rId1", "image", "../media/image1.png"),
+        ("rId2", "image", "../media/image2.png"),
+        ("rId3", REL_WE, "../webextensions/webextension1.xml"),
+    ]);
     let root_rels = rels(&[("rId1", "officeDocument", "xl/workbook.xml")]);
     let wb_rels = rels(&wb_rels);
     let mut files: Vec<(&str, &[u8])> = vec![
@@ -112,9 +116,11 @@ impl Unpacked {
         }
         Unpacked { parts }
     }
+
     fn text(&self, name: &str) -> String {
         String::from_utf8(self.parts.get(name).unwrap_or_else(|| panic!("no part {name}")).clone()).unwrap()
     }
+
     /// (id, type, resolved target)
     fn rels(&self, part: &str) -> Vec<(String, String, String)> {
         let (dir, file) = split_dir(part);
@@ -125,14 +131,25 @@ impl Unpacked {
             .map(|r| (r.attr("Id").unwrap().into(), r.attr("Type").unwrap().into(), resolve(dir, r.attr("Target").unwrap())))
             .collect()
     }
+
     fn target(&self, part: &str, id: &str) -> String {
         self.rels(part).into_iter().find(|r| r.0 == id).unwrap_or_else(|| panic!("{part}: no relationship {id}")).2
     }
+
     fn rel_of_type(&self, part: &str, kind: &str) -> Option<(String, String)> {
         self.rels(part).into_iter().find(|r| r.1.ends_with(&format!("/{kind}"))).map(|r| (r.0, r.2))
     }
-    /// Every internal relationship target exists and rel ids are unique per part.
+
+    /// Every part has a content type, every internal relationship target exists and rel ids are
+    /// unique per part: nothing kept is written without the parts it names, or vice versa.
     fn assert_no_dangling(&self) {
+        let types = xml::parse(self.parts.get("[Content_Types].xml").unwrap()).unwrap();
+        let defaults: HashSet<String> = types.kids("Default").filter_map(|d| d.attr("Extension")).map(str::to_ascii_lowercase).collect();
+        let overrides: HashSet<String> = types.kids("Override").filter_map(|d| d.attr("PartName")).map(normalize).collect();
+        for name in self.parts.keys().filter(|n| *n != "[Content_Types].xml") {
+            let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+            assert!(overrides.contains(&normalize(name)) || defaults.contains(&ext), "{name} has no content type");
+        }
         for name in self.parts.keys().filter(|n| n.ends_with(".rels")) {
             let source = name.replace("_rels/", "").trim_end_matches(".rels").to_string();
             let mut ids = HashSet::new();
@@ -142,6 +159,7 @@ impl Unpacked {
             }
         }
     }
+
     /// The drawing part of sheet "Data" (through `<drawing r:id>`), with its XML.
     fn drawing(&self) -> (String, String) {
         let wb = xml::parse(self.text("xl/workbook.xml").as_bytes()).unwrap();
@@ -153,11 +171,6 @@ impl Unpacked {
         let text = self.text(&target);
         (target, text)
     }
-}
-
-fn between(s: &str, a: &str, b: &str) -> Option<String> {
-    let i = s.find(a)? + a.len();
-    Some(s[i..i + s[i..].find(b)?].to_string())
 }
 
 /// The add-in anchor of a drawing: its `from`/`to` markers and the two relationship ids.
@@ -175,8 +188,16 @@ fn addin_anchor_of(drawing: &str) -> (String, String, String, String) {
     let from = marker(anchor.child("from").unwrap());
     let to = marker(anchor.child("to").unwrap());
     let ac = anchor.child("AlternateContent").unwrap();
-    let we = ac.path(&["Choice", "graphicFrame", "graphic", "graphicData", "webextensionref"]).and_then(|e| e.attr("id")).unwrap_or_else(|| panic!("no webextensionref: {drawing}")).to_string();
-    let image = ac.path(&["Fallback", "pic", "blipFill", "blip"]).and_then(|e| e.attr("embed")).unwrap_or_else(|| panic!("no fallback picture: {drawing}")).to_string();
+    let we = ac
+        .path(&["Choice", "graphicFrame", "graphic", "graphicData", "webextensionref"])
+        .and_then(|e| e.attr("id"))
+        .unwrap_or_else(|| panic!("no webextensionref: {drawing}"))
+        .to_string();
+    let image = ac
+        .path(&["Fallback", "pic", "blipFill", "blip"])
+        .and_then(|e| e.attr("embed"))
+        .unwrap_or_else(|| panic!("no fallback picture: {drawing}"))
+        .to_string();
     (from, to, we, image)
 }
 
@@ -195,7 +216,11 @@ fn assert_addin_kept(out: &[u8]) {
     let ct = u.text("[Content_Types].xml");
     assert!(ct.contains(&format!("PartName=\"/{part}\" ContentType=\"{CT_WE}\"")), "content type of {part}: {ct}");
     // The web extension's own rels and the image they name.
-    let (_, _, image_part) = u.rels(&part).into_iter().find(|r| r.1.ends_with("/image")).unwrap_or_else(|| panic!("{part} lost its rels: {:?}", u.text(&format!("{}/_rels/{}.rels", split_dir(&part).0, split_dir(&part).1))));
+    let (_, _, image_part) = u
+        .rels(&part)
+        .into_iter()
+        .find(|r| r.1.ends_with("/image"))
+        .unwrap_or_else(|| panic!("{part} lost its rels: {:?}", u.text(&format!("{}/_rels/{}.rels", split_dir(&part).0, split_dir(&part).1))));
     assert_eq!(u.parts.get(&image_part).map(Vec::as_slice), Some(WE_IMAGE), "{image_part} changed");
     // The fallback picture.
     let (_, ty, fallback) = u.rels(&drawing).into_iter().find(|r| r.0 == image).unwrap_or_else(|| panic!("fallback {image} does not resolve"));
@@ -220,20 +245,22 @@ fn addin_survives_two_saves() {
     let (wb, rep) = read_xlsx(&package(true, true)).unwrap();
     assert!(rep.warnings.iter().any(|w| w.contains("Office add-in")), "expected a 'not shown, kept' warning: {:?}", rep.warnings);
     let out = write_xlsx(&wb).unwrap();
-    eprintln!("DBG out {:?}", Unpacked::new(&out).parts.keys().collect::<Vec<_>>());
     assert_addin_kept(&out);
     assert_taskpanes_kept(&out);
     let (wb2, _) = read_xlsx(&out).unwrap();
     let out2 = write_xlsx(&wb2).unwrap();
     assert_addin_kept(&out2);
     assert_taskpanes_kept(&out2);
+    // The second save writes the same parts, each once.
+    assert_eq!(Unpacked::new(&out2).parts.len(), Unpacked::new(&out).parts.len(), "a save changed the part count");
 }
 
 #[test]
 fn addin_beside_a_picture_keeps_both() {
     let (wb, _) = read_xlsx(&package(true, true)).unwrap();
     assert_eq!(wb.sheet(0).unwrap().images.len(), 1, "the ordinary picture is modelled");
-    let u = Unpacked::new(&write_xlsx(&wb).unwrap());
+    let out = write_xlsx(&wb).unwrap();
+    let u = Unpacked::new(&out);
     u.assert_no_dangling();
     let (drawing, dx) = u.drawing();
     let d = xml::parse(dx.as_bytes()).unwrap();
@@ -241,7 +268,7 @@ fn addin_beside_a_picture_keeps_both() {
     assert_eq!(names, ["twoCellAnchor", "twoCellAnchor"], "{dx}");
     let pic = d.children[0].path(&["pic", "blipFill", "blip"]).unwrap().attr("embed").unwrap();
     assert_eq!(u.parts.get(&u.target(&drawing, pic)).map(Vec::as_slice), Some(ORDINARY_PNG));
-    assert_addin_kept(&write_xlsx(&wb).unwrap());
+    assert_addin_kept(&out);
 }
 
 #[test]
@@ -249,31 +276,39 @@ fn taskpanes_share_the_addin_part() {
     let (wb, _) = read_xlsx(&package(true, true)).unwrap();
     let u = Unpacked::new(&write_xlsx(&wb).unwrap());
     u.assert_no_dangling();
-    let (_, drawing) = u.drawing();
+    let (drawing, _) = u.drawing();
     let (_, from_drawing) = u.rel_of_type(&drawing, "webextension").expect("drawing web extension");
     let (_, taskpanes) = u.rel_of_type("xl/workbook.xml", "webextensiontaskpanes").expect("task panes");
     let (_, from_taskpanes) = u.rel_of_type(&taskpanes, "webextension").expect("task panes web extension");
     assert_eq!(from_drawing, from_taskpanes, "the web extension part is written once");
     let written = u.parts.keys().filter(|n| n.starts_with("xl/webextensions/webextension")).count();
     assert_eq!(written, 1, "duplicate web extension parts: {:?}", u.parts.keys().collect::<Vec<_>>());
+    // Its own rels are written once too, and still name the image the part's XML refers to.
+    assert_eq!(u.parts.keys().filter(|n| n.starts_with("xl/webextensions/_rels/")).count(), 2, "{:?}", u.parts.keys().collect::<Vec<_>>());
 }
 
 #[test]
 fn deleted_sheet_drops_the_addin_but_keeps_taskpanes() {
     let (mut wb, _) = read_xlsx(&package(true, true)).unwrap();
-    wb.sheets.clear();
+    wb.sheets[0] = std::sync::Arc::new(gridcraft_model::Sheet::new("Data"));
     let out = write_xlsx(&wb).unwrap();
     let u = Unpacked::new(out.as_slice());
     u.assert_no_dangling();
     assert!(!u.parts.values().any(|v| v.as_slice() == PNG), "the add-in's fallback picture of a deleted sheet was written");
-    assert!(!u.parts.values().any(|v| String::from_utf8_lossy(v).contains("webextensionref")), "the add-in anchor of a deleted sheet was written");
+    assert!(
+        !u.parts.contains_key("xl/drawings/drawing1.xml"),
+        "the drawing of the replaced sheet was kept: {:?}",
+        u.parts.keys().collect::<Vec<_>>()
+    );
     assert_taskpanes_kept(&out);
 }
 
 #[test]
 fn missing_webextension_part_leaves_nothing_dangling() {
-    // The drawing names a web extension part the package doesn't hold.
-    let (wb, _) = read_xlsx(&package(false, true)).unwrap();
+    // The drawing names a web extension part the package doesn't hold: the anchor (choice and
+    // fallback alike) is dropped, so nothing points at a part that isn't written.
+    let (wb, rep) = read_xlsx(&package(false, true)).unwrap();
+    assert!(rep.warnings.iter().any(|w| w.contains("Office add-in")), "expected a warning: {:?}", rep.warnings);
     let out = write_xlsx(&wb).unwrap();
     let u = Unpacked::new(&out);
     u.assert_no_dangling();
@@ -281,10 +316,11 @@ fn missing_webextension_part_leaves_nothing_dangling() {
     assert!(!dx.contains("webextensionref"), "the anchor still names a missing part: {dx}");
     assert!(!u.rels(&drawing).iter().any(|r| r.1 == REL_WE), "a relationship to a missing part was written");
     assert!(!u.parts.keys().any(|n| n.starts_with("xl/webextensions/webextension")), "a missing part was invented");
-    // The fallback picture and the ordinary picture are still there.
-    let (_, _, _, image) = addin_anchor_of(&dx);
-    assert_eq!(u.parts.get(&u.target(&drawing, &image)).map(Vec::as_slice), Some(PNG));
-    assert_taskpanes_kept(&out);
+    assert!(u.rel_of_type("xl/workbook.xml", "webextensiontaskpanes").is_none(), "a task panes part naming a missing part was written");
+    // The ordinary picture is still there.
+    let d = xml::parse(dx.as_bytes()).unwrap();
+    let pic = d.children[0].path(&["pic", "blipFill", "blip"]).unwrap().attr("embed").unwrap();
+    assert_eq!(u.parts.get(&u.target(&drawing, pic)).map(Vec::as_slice), Some(ORDINARY_PNG));
 }
 
 #[test]
@@ -303,7 +339,7 @@ fn addin_anchor_keeps_its_relationship_ids() {
     // The web extension part is written byte for byte and names its own rels by id.
     let (wb, _) = read_xlsx(&package(true, true)).unwrap();
     let u = Unpacked::new(&write_xlsx(&wb).unwrap());
-    let (_, drawing) = u.drawing();
+    let (drawing, _) = u.drawing();
     let (_, part) = u.rel_of_type(&drawing, "webextension").unwrap();
     let (id, _, image) = u.rels(&part).into_iter().find(|r| r.1.ends_with("/image")).expect("the part's own rels");
     assert!(u.text(&part).contains(&format!("r:id=\"{id}\"")), "the part's own id changed");

@@ -179,19 +179,6 @@ impl KeptReader {
     /// The parts reachable from `root` that aren't in `seen` yet. Fails (and keeps nothing) when the
     /// graph reaches rewritten content, a missing or damaged part, or a size limit.
     fn closure(&mut self, cx: &mut Ctx<'_>, root: &PreservedRel, seen: &HashSet<String>, through: &[&str]) -> Result<Vec<PreservedPart>, String> {
-        self.closure_where(cx, root, seen, through, &mut |_, _| true)
-    }
-
-    /// [`Self::closure`] for a root whose graph may hold relationships `keep` rejects: those are
-    /// left out (with the parts only they reach) instead of dropping the whole graph.
-    fn closure_where(
-        &mut self,
-        cx: &mut Ctx<'_>,
-        root: &PreservedRel,
-        seen: &HashSet<String>,
-        through: &[&str],
-        keep: &mut dyn FnMut(&mut Ctx<'_>, &PreservedRel) -> bool,
-    ) -> Result<Vec<PreservedPart>, String> {
         if root.external {
             return Ok(vec![]);
         }
@@ -230,9 +217,7 @@ impl KeptReader {
                 if blocked(r) {
                     return Err(format!("it refers to {}", kind(&r.rel_type)));
                 }
-                if keep(cx, r) {
-                    queue.push_back((r.target.clone(), depth + 1));
-                }
+                queue.push_back((r.target.clone(), depth + 1));
             }
             parts.push(PreservedPart { name, content_type, data: Arc::from(data), rels });
         }
@@ -264,25 +249,6 @@ impl KeptReader {
         Ok(())
     }
 
-    /// [`Self::keep_through`] with [`Self::closure_where`]'s `keep`.
-    fn keep_where(
-        &mut self,
-        cx: &mut Ctx<'_>,
-        p: &mut Preserved,
-        roots: &[PreservedRel],
-        seen: &mut HashSet<String>,
-        through: &[&str],
-        keep: &mut dyn FnMut(&mut Ctx<'_>, &PreservedRel) -> bool,
-    ) -> Result<(), String> {
-        p.parts.extend(self.parts_of_where(cx, roots, seen, through, keep)?);
-        for r in roots {
-            if !p.rels.iter().any(|x| x.id == r.id) {
-                p.rels.push(r.clone());
-            }
-        }
-        Ok(())
-    }
-
     /// The parts behind a set of relationships (all or nothing), added to `seen`.
     fn parts_of(
         &mut self,
@@ -291,22 +257,10 @@ impl KeptReader {
         seen: &mut HashSet<String>,
         through: &[&str],
     ) -> Result<Vec<PreservedPart>, String> {
-        self.parts_of_where(cx, roots, seen, through, &mut |_, _| true)
-    }
-
-    /// [`Self::parts_of`] with [`Self::closure_where`]'s `keep`.
-    fn parts_of_where(
-        &mut self,
-        cx: &mut Ctx<'_>,
-        roots: &[PreservedRel],
-        seen: &mut HashSet<String>,
-        through: &[&str],
-        keep: &mut dyn FnMut(&mut Ctx<'_>, &PreservedRel) -> bool,
-    ) -> Result<Vec<PreservedPart>, String> {
         let mut new_parts: Vec<PreservedPart> = vec![];
         let mut scratch = seen.clone();
         for r in roots {
-            let parts = self.closure_where(cx, r, &scratch, through, keep)?;
+            let parts = self.closure(cx, r, &scratch, through)?;
             scratch.extend(parts.iter().map(|q| normalize(&q.name)));
             new_parts.extend(parts);
         }
@@ -345,16 +299,10 @@ impl KeptReader {
                 cx.warn(format!("{} part {} was dropped: {why}", kind(&r.rel_type), r.target));
             }
         }
-        // Office add-in task panes: the task panes part names the web extension parts it shows.
+        // Office add-in task panes: the task panes part and the web extension parts it names.
         for r in wb_rels.iter().filter(|r| is_kind(r, WORKBOOK_WEB_EXTENSIONS)) {
-            let mut q = Preserved::default();
-            match self.keep_where(cx, &mut q, std::slice::from_ref(r), &mut seen, &[], &mut |cx, r| part_exists(cx, &r.target)) {
-                Ok(()) => {
-                    drop_unkept_rels(&mut q.parts);
-                    p.parts.extend(q.parts);
-                    p.rels.extend(q.rels);
-                    cx.warn("Office add-in task panes are not shown; they are kept for saving");
-                }
+            match self.keep(cx, &mut p, std::slice::from_ref(r), &mut seen) {
+                Ok(()) => cx.warn("Office add-in task panes are not shown; they are kept for saving"),
                 Err(why) => cx.warn(format!("Office add-in task panes were dropped: {why}")),
             }
         }
@@ -462,7 +410,6 @@ impl KeptReader {
         if rels.iter().any(|r| is_kind(r, SHEET_ELEMENT_KINDS) || is_kind(r, &["customProperty"])) || vml_drawings > notes {
             self.sheet_elements(cx, part, name, &rels, &mut p, &mut seen);
         }
-        eprintln!("DBG sheet end {:?}", p.parts.iter().map(|p| p.name.clone()).collect::<Vec<_>>());
         (!p.is_empty()).then(|| Arc::new(p))
     }
 
@@ -607,9 +554,6 @@ impl KeptReader {
                 (false, _) => Err("its XML is damaged".to_string()),
                 (_, None) => Err("it refers to a missing relationship".to_string()),
                 (true, Some(_)) if xml.len() > self.budget => Err("it is too large".to_string()),
-                (true, Some(roots)) if kind == AnchorKind::WebExtension => {
-                    self.web_extension_parts(cx, &roots, seen).map(|parts| (roots, parts))
-                }
                 (true, Some(roots)) => self.parts_of(cx, &roots, seen, &[]).map(|parts| (roots, parts)),
             };
             match kept {
@@ -643,30 +587,6 @@ impl KeptReader {
         if webextension {
             cx.warn(format!("sheet \"{name}\": Office add-ins are not shown; they are kept for saving"));
         }
-    }
-
-    /// The parts behind a web extension anchor's relationships: the web extension part (with its
-    /// own rels and their targets) and the fallback picture. A relationship whose part is missing
-    /// is left out, so the anchor is written without it rather than pointing at nothing.
-    fn web_extension_parts(&mut self, cx: &mut Ctx<'_>, roots: &[PreservedRel], seen: &mut HashSet<String>) -> Result<Vec<PreservedPart>, String> {
-        let mut parts = vec![];
-        for r in roots.iter().filter(|r| !r.external) {
-            let mut q = Preserved::default();
-            match self.keep_where(cx, &mut q, std::slice::from_ref(r), seen, &[], &mut |cx, r| part_exists(cx, &r.target)) {
-                Ok(()) => {
-                    drop_unkept_rels(&mut q.parts);
-                    parts.extend(q.parts);
-                    // The part's own rels are kept with it (their targets are in `parts`).
-                    for r in q.rels.iter().filter(|r| !r.external) {
-                        if let Ok(more) = self.closure(cx, r, seen, &[]) {
-                            parts.extend(more);
-                        }
-                    }
-                }
-                Err(why) => cx.warn(format!("an Office add-in's {} was dropped: {why}", kind(&r.rel_type))),
-            }
-        }
-        Ok(parts)
     }
 
     /// The drawing relationship of a SmartArt graphic's pre-rendered shapes (the diagram drawing
@@ -743,20 +663,6 @@ impl KeptReader {
         let vml = PreservedPart { name: rel.target.clone(), content_type: CT_VML.into(), data: Arc::from(text.into_bytes()), rels: vrels };
         Ok((vml, q.parts))
     }
-}
-
-/// Leaves out the relationships of kept parts whose target isn't kept (a web extension part whose
-/// image is missing): the parts are written byte for byte, so the relationship would dangle.
-fn drop_unkept_rels(parts: &mut [PreservedPart]) {
-    let kept: HashSet<String> = parts.iter().map(|p| normalize(&p.name)).collect();
-    for part in parts.iter_mut() {
-        part.rels.retain(|r| r.external || kept.contains(&normalize(&r.target)));
-    }
-}
-
-/// Whether the package holds the part `name`.
-fn part_exists(cx: &mut Ctx<'_>, name: &str) -> bool {
-    matches!(cx.pkg.read_limited(name, 0), Ok(Some(_)))
 }
 
 /// What a sheet part holds for pass-through.
@@ -853,9 +759,9 @@ const URI_CHARTEX: &str = "http://schemas.microsoft.com/office/drawing/2014/char
 /// The `graphicData` URI of an Office add-in's web extension ([MS-OWEXML] 2.1.1).
 const URI_WEB_EXTENSION: &str = "http://schemas.microsoft.com/office/webextensions/webextension/2010/11";
 
-/// Whether an anchor fragment (`twoCellAnchor`, `oneCellAnchor`, `absoluteAnchor`) holds an Office
-/// add-in: a `graphicFrame` whose `graphicData` is a web extension, in the anchor or in an
-/// `mc:Choice` of it.
+/// Whether an anchor fragment (`twoCellAnchor`, `oneCellAnchor`, `absoluteAnchor`) holds an
+/// Office add-in: a `graphicFrame` whose `graphicData` is a web extension, in the anchor itself or
+/// in an `mc:Choice` of it (the fallback holds the add-in's snapshot picture).
 fn is_web_extension_anchor(frag: &str) -> bool {
     if !frag.contains(URI_WEB_EXTENSION) {
         return false;
