@@ -19,6 +19,14 @@ Source formatting is omitted: dates, times, percentages and currencies initially
 their underlying numbers. The workbook's date system is retained. Charts, images, names,
 macros and other workbook features are not imported. GridCraft does not write XLSB files.
 
+Tables keep their name, range, header and totals rows, column names, totals functions and
+labels, table style and its options (first/last column, banded rows/columns) and their
+AutoFilter; the sheet AutoFilter is imported too (value lists, custom comparisons, top 10,
+above/below average). Calculated column formulas and custom totals row formulas are not
+imported yet, nor are date, colour and icon filters; each gives one warning. A table whose
+part is missing or damaged, whose range doesn't fit its columns, or whose name repeats
+another table's is skipped with one warning per kind.
+
 Save opens Save As and suggests a new `.xlsx` file. The source XLSB file is not used as the
 workbook's save destination; requests to save to `.xlsb` return an error.
 

@@ -3,13 +3,14 @@
 //! Cell, shared and array formulas are decoded with the shared BIFF token decoder; those it can't
 //! represent keep their saved result as a constant. Cell formatting (number formats, fonts, fills,
 //! borders, alignment and protection), column widths, row heights, hidden and outlined
-//! rows/columns, frozen panes, sheet view options, tab colours, hyperlinks and notes are imported;
+//! rows/columns, frozen panes, sheet view options, tab colours, hyperlinks, notes, tables and
+//! AutoFilters are imported;
 //! gradient fills, cell style inheritance, differential formats, macros and other workbook features
 //! are not run or imported.
 
 mod styles;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use gridcraft_core::color::INDEXED;
@@ -28,6 +29,8 @@ use crate::xls::{
 };
 use crate::{IoError, ReadReport};
 use gridcraft_formula::Expr;
+
+mod tables;
 
 const MAIN: &str = "application/vnd.ms-excel.main";
 const BINARY_MAIN: &str = "application/vnd.ms-excel.sheet.binary.macroEnabled.main";
@@ -129,6 +132,8 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         vec![]
     };
     let mut model_index: Vec<Option<usize>> = Vec::with_capacity(sheets.len());
+    let mut table_names = HashSet::new();
+    let mut table_id = 1u32;
     for info in sheets {
         model_index.push(None);
         let Some(id) = info.rel else {
@@ -154,9 +159,20 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         let sheet_rels = sheet_relationships(&mut package, &rel.target, &mut report);
         budget.links = 0;
         budget.comments = 0;
-        let mut sheet =
-            worksheet(&required(&mut package, &rel.target)?, &info.name, &strings, &styles, &links, &sheet_rels, &mut budget, &mut report)?;
+        let mut list_parts = vec![];
+        let mut sheet = worksheet(
+            &required(&mut package, &rel.target)?,
+            &info.name,
+            &strings,
+            &styles,
+            &links,
+            &sheet_rels,
+            &mut budget,
+            &mut list_parts,
+            &mut report,
+        )?;
         sheet_comments(&mut package, &types, &sheet_rels, &mut sheet, &mut budget, &mut report);
+        tables::read_tables(&mut package, &types, &rel.target, &list_parts, &mut sheet, &mut table_names, &mut table_id, &mut report);
         sheet.visibility = info.visibility;
         if let Some(slot) = model_index.last_mut() {
             *slot = Some(wb.sheets.len());
@@ -918,6 +934,7 @@ fn worksheet(
     links: &Links,
     rels: &[Rel],
     budget: &mut Budget,
+    list_parts: &mut Vec<String>,
     report: &mut ReadReport,
 ) -> Result<Sheet, IoError> {
     let mut records = Records::new(bytes);
@@ -1065,6 +1082,8 @@ fn worksheet(
             138 => in_first_view = false,
             151 if in_first_view && pane(&mut sheet, payload).is_err() => report.warn("Malformed XLSB pane records were skipped."),
             494 => hyperlink(payload, rels, &mut sheet, budget, report),
+            161 if !data => sheet_autofilter(&mut records, payload, &mut sheet, report)?,
+            tables::LIST_PART => list_part(payload, list_parts, report),
             _ => {}
         }
     }
@@ -1382,4 +1401,22 @@ fn comments(bytes: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
         }
     }
     Err(invalid("missing comments end record"))
+}
+
+/// The worksheet AutoFilter block (`BrtBeginAFilter` ... `BrtEndAFilter`); only the first is kept.
+fn sheet_autofilter(records: &mut Records<'_>, payload: &[u8], sheet: &mut Sheet, report: &mut ReadReport) -> Result<(), IoError> {
+    let af = tables::autofilter(records, payload, report)?;
+    if sheet.autofilter.is_none() {
+        sheet.autofilter = af;
+    }
+    Ok(())
+}
+
+/// A `BrtListPart`: the relationship id of one of the sheet's table parts.
+fn list_part(payload: &[u8], list_parts: &mut Vec<String>, report: &mut ReadReport) {
+    match tables::list_part(payload) {
+        Ok(Some(id)) if list_parts.len() < tables::MAX_TABLES => list_parts.push(id),
+        Ok(Some(_)) => report.warn("XLSB tables past the first 1024 on a sheet were skipped."),
+        Ok(None) | Err(_) => report.warn("XLSB tables whose part is missing or malformed were skipped."),
+    }
 }
