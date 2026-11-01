@@ -1,6 +1,7 @@
 //! BIFF8 parsed formulas ([MS-XLS] 2.2.2, 2.5.198): reverse-Polish `Ptg` tokens back to an
 //! expression tree. Anything outside the common token set is reported as unsupported, and the
-//! caller keeps the cell's cached value instead.
+//! caller keeps the cell's cached value instead. XLSB ([MS-XLSB] 2.2.2, 2.5.97) cell formulas
+//! use the same token ids with wider cell coordinates; see [`Grid`].
 
 use std::sync::Arc;
 
@@ -16,7 +17,53 @@ const MAX_ARRAY: usize = 65_536;
 
 /// Why a formula could not be turned back into text.
 #[derive(Debug, PartialEq)]
-pub(super) struct Unsupported(pub &'static str);
+pub(crate) struct Unsupported(pub &'static str);
+
+/// The coordinate layout of a file format's references.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Grid {
+    /// BIFF8 (.xls): u16 rows, 8-bit columns (65,536 × 256).
+    Biff8,
+    /// BIFF12 (.xlsb): u32 rows, 14-bit columns (1,048,576 × 16,384), `RgceLoc` / `RgceArea`.
+    /// Only cell formulas without links to names, sheets or array data are decoded.
+    Biff12,
+}
+
+impl Grid {
+    fn last_row(self) -> u32 {
+        match self {
+            Grid::Biff8 => 0xFFFF,
+            Grid::Biff12 => 0xF_FFFF,
+        }
+    }
+    fn last_col(self) -> u32 {
+        match self {
+            Grid::Biff8 => 0xFF,
+            Grid::Biff12 => 0x3FFF,
+        }
+    }
+    fn row(self, t: &mut Bytes<'_>) -> Result<u32, Unsupported> {
+        match self {
+            Grid::Biff8 => t.u16().map(u32::from),
+            Grid::Biff12 => t.u32(),
+        }
+    }
+    /// A cell: row then column.
+    fn loc(self, t: &mut Bytes<'_>) -> Result<(u32, u16), Unsupported> {
+        Ok((self.row(t)?, t.u16()?))
+    }
+    /// An area: first and last row, then first and last column.
+    fn area(self, t: &mut Bytes<'_>) -> Result<(u32, u32, u16, u16), Unsupported> {
+        Ok((self.row(t)?, self.row(t)?, t.u16()?, t.u16()?))
+    }
+    /// Bytes of a `loc` (`area` is twice that).
+    fn loc_len(self) -> usize {
+        match self {
+            Grid::Biff8 => 4,
+            Grid::Biff12 => 6,
+        }
+    }
+}
 
 /// Where the formula lives: refs in cell formulas store coordinates; shared formulas store
 /// row/column offsets for relative parts; names store offsets for 3-D refs too.
@@ -122,31 +169,35 @@ fn col_field(v: u16) -> (u16, bool, bool) {
 }
 
 /// One end of a reference. In `relative` (RgceLocRel) form the relative parts are offsets
-/// from `base`, wrapped into the BIFF8 grid (65,536 × 256).
-fn anchor(row: u16, col: u16, base: CellRef, relative: bool) -> Anchor {
+/// from `base`, wrapped into the grid (65,536 × 256 for BIFF8).
+fn anchor(row: u32, col: u16, base: CellRef, relative: bool, grid: Grid) -> Result<Anchor, Unsupported> {
     let (c, col_rel, row_rel) = col_field(col);
+    let (last_row, last_col) = (grid.last_row(), grid.last_col());
     let (r, c) = if relative {
-        let r = if row_rel { (u32::from(row).wrapping_add(base.row)) & 0xFFFF } else { u32::from(row) };
-        // A 14-bit signed offset; adding modulo 256 gives the same column either way.
-        let c = if col_rel { (u32::from(c).wrapping_add(base.col)) & 0xFF } else { u32::from(c) & 0xFF };
+        let r = if row_rel { row.wrapping_add(base.row) & last_row } else { row };
+        // A 14-bit signed offset; adding modulo the column count gives the same column either way.
+        let c = if col_rel { (u32::from(c).wrapping_add(base.col)) & last_col } else { u32::from(c) & last_col };
         (r, c)
     } else {
-        (u32::from(row), u32::from(c) & 0xFF)
+        (row, u32::from(c) & last_col)
     };
-    Anchor { row: r, col: c, row_abs: !row_rel, col_abs: !col_rel }
+    if r > last_row {
+        return Err(Unsupported("reference outside the sheet"));
+    }
+    Ok(Anchor { row: r, col: c, row_abs: !row_rel, col_abs: !col_rel })
 }
 
-/// An area; a range spanning every BIFF8 row (or column) becomes a whole-column (row) ref.
-fn area(r0: u16, r1: u16, c0: u16, c1: u16, base: CellRef, relative: bool) -> RefKind {
-    let a = anchor(r0, c0, base, relative);
-    let b = anchor(r1, c1, base, relative);
-    if a.row == 0 && b.row == 0xFFFF {
-        return RefKind::Cols(a.col, a.col_abs, b.col, b.col_abs);
+/// An area; a range spanning every row (or column) of the grid becomes a whole-column (row) ref.
+fn area(r0: u32, r1: u32, c0: u16, c1: u16, base: CellRef, relative: bool, grid: Grid) -> Result<RefKind, Unsupported> {
+    let a = anchor(r0, c0, base, relative, grid)?;
+    let b = anchor(r1, c1, base, relative, grid)?;
+    if a.row == 0 && b.row == grid.last_row() {
+        return Ok(RefKind::Cols(a.col, a.col_abs, b.col, b.col_abs));
     }
-    if a.col == 0 && b.col == 0xFF {
-        return RefKind::Rows(a.row, a.row_abs, b.row, b.row_abs);
+    if a.col == 0 && b.col == grid.last_col() {
+        return Ok(RefKind::Rows(a.row, a.row_abs, b.row, b.row_abs));
     }
-    RefKind::Range(a, b)
+    Ok(RefKind::Range(a, b))
 }
 
 impl Links {
@@ -216,6 +267,17 @@ fn push(stack: &mut Stack, kids: usize, e: Expr) -> Result<(), Unsupported> {
 /// Decodes `rgce` (tokens) with `rgcb` (the extra data for array constants) evaluated at
 /// `base`. Returns the expression or why it can't be represented.
 pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links) -> Result<Expr, Unsupported> {
+    decode_in(rgce, rgcb, base, mode, links, Grid::Biff8)
+}
+
+/// Decodes an XLSB cell formula's `rgce` at `base`. Tokens that need workbook tables (names,
+/// other sheets), shared or array formulas, strings and array constants are refused.
+pub(crate) fn decode_xlsb(rgce: &[u8], base: CellRef) -> Result<Expr, Unsupported> {
+    decode_in(rgce, &[], base, Mode::Cell, &Links::default(), Grid::Biff12)
+}
+
+fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, grid: Grid) -> Result<Expr, Unsupported> {
+    let wide = grid == Grid::Biff12;
     if rgce.len() > MAX_RGCE {
         return Err(Unsupported("formula too long"));
     }
@@ -227,6 +289,10 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
         let mut kids = 0usize;
         // Operand classes (reference / value / array) share one token number.
         let id = if ptg & 0x60 != 0 { 0x20 | (ptg & 0x1F) } else { ptg };
+        if wide && matches!(id, 0x17 | 0x20 | 0x23 | 0x26 | 0x2C | 0x2D | 0x39 | 0x3A | 0x3B) {
+            // Different payloads in BIFF12, or lookups in tables this import doesn't read.
+            return Err(Unsupported("XLSB formula token"));
+        }
         match id {
             0x03..=0x11 => {
                 let op = match id {
@@ -342,13 +408,13 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
                 push(&mut stack, kids, Expr::Name(name.clone()))?;
             }
             0x24 | 0x2C => {
-                let (r, c) = (t.u16()?, t.u16()?);
-                let a = anchor(r, c, base, id == 0x2C);
+                let (r, c) = grid.loc(&mut t)?;
+                let a = anchor(r, c, base, id == 0x2C, grid)?;
                 push(&mut stack, kids, Expr::Ref(Reference { sheet: SheetSel::Current, kind: RefKind::Cell(a) }))?;
             }
             0x25 | 0x2D => {
-                let (r0, r1, c0, c1) = (t.u16()?, t.u16()?, t.u16()?, t.u16()?);
-                let kind = area(r0, r1, c0, c1, base, id == 0x2D);
+                let (r0, r1, c0, c1) = grid.area(&mut t)?;
+                let kind = area(r0, r1, c0, c1, base, id == 0x2D, grid)?;
                 push(&mut stack, kids, Expr::Ref(Reference { sheet: SheetSel::Current, kind }))?;
             }
             0x26 => {
@@ -364,11 +430,11 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
                 t.take(2)?;
             }
             0x2A => {
-                t.take(4)?;
+                t.take(grid.loc_len())?;
                 push(&mut stack, kids, Expr::Error(CellError::Ref))?;
             }
             0x2B => {
-                t.take(8)?;
+                t.take(grid.loc_len() * 2)?;
                 push(&mut stack, kids, Expr::Error(CellError::Ref))?;
             }
             0x39 => {
@@ -378,8 +444,8 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
             }
             0x3A => {
                 let ixti = t.u16()?;
-                let (r, c) = (t.u16()?, t.u16()?);
-                let a = anchor(r, c, base, mode == Mode::Name);
+                let (r, c) = grid.loc(&mut t)?;
+                let a = anchor(r, c, base, mode == Mode::Name, grid)?;
                 push(
                     &mut stack,
                     kids,
@@ -391,8 +457,8 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
             }
             0x3B => {
                 let ixti = t.u16()?;
-                let (r0, r1, c0, c1) = (t.u16()?, t.u16()?, t.u16()?, t.u16()?);
-                let kind = area(r0, r1, c0, c1, base, mode == Mode::Name);
+                let (r0, r1, c0, c1) = grid.area(&mut t)?;
+                let kind = area(r0, r1, c0, c1, base, mode == Mode::Name, grid)?;
                 push(
                     &mut stack,
                     kids,
@@ -403,11 +469,11 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
                 )?;
             }
             0x3C => {
-                t.take(6)?;
+                t.take(2 + grid.loc_len())?;
                 push(&mut stack, kids, Expr::Error(CellError::Ref))?;
             }
             0x3D => {
-                t.take(10)?;
+                t.take(2 + grid.loc_len() * 2)?;
                 push(&mut stack, kids, Expr::Error(CellError::Ref))?;
             }
             0x01 => return Err(Unsupported("nested shared or array formula reference")),
@@ -526,6 +592,43 @@ mod tests {
         assert!(text(&[0x03], &[]).is_err());
         assert!(text(&[0x21, 0xFF, 0x7F], &[]).is_err());
         assert!(text(&[0x60, 0, 0, 0, 0, 0, 0, 0], &[0xFF, 0xFF, 0xFF]).is_err());
+    }
+
+    fn xlsb(rgce: &[u8], base: CellRef) -> Result<String, Unsupported> {
+        decode_xlsb(rgce, base).map(|e| gridcraft_formula::print(&e))
+    }
+
+    #[test]
+    fn decodes_xlsb_wide_coordinates() {
+        let loc = |row: u32, col: u16| [&row.to_le_bytes()[..], &col.to_le_bytes()].concat();
+        // XFD1048576 (absolute), beyond the BIFF8 grid.
+        let r = [&[0x24u8][..], &loc(0xF_FFFF, 0x3FFF)].concat();
+        assert_eq!(xlsb(&r, CellRef::new(0, 0)).unwrap(), "$XFD$1048576");
+        // Relative AA70000 in a value-class PtgRef, with PtgAttrSpace before PtgUminus.
+        let r = [&[0x44u8][..], &loc(69_999, 26 | 0xC000), &[0x19, 0x40, 0, 1, 0x13]].concat();
+        assert_eq!(xlsb(&r, CellRef::new(5, 5)).unwrap(), "-AA70000");
+        // Whole columns and whole rows use the XLSB grid's extent.
+        let cols =
+            [&[0x25u8][..], &0u32.to_le_bytes(), &0xF_FFFFu32.to_le_bytes(), &(2u16 | 0xC000).to_le_bytes(), &(3u16 | 0xC000).to_le_bytes()].concat();
+        assert_eq!(xlsb(&[cols.as_slice(), &[0x19, 0x10, 0, 0]].concat(), CellRef::new(0, 0)).unwrap(), "SUM(C:D)");
+        let rows = [&[0x65u8][..], &4u32.to_le_bytes(), &4u32.to_le_bytes(), &0u16.to_le_bytes(), &0x3FFFu16.to_le_bytes()].concat();
+        assert_eq!(xlsb(&[rows.as_slice(), &[0x42, 1, 4, 0]].concat(), CellRef::new(0, 0)).unwrap(), "SUM($5:$5)");
+        // PtgRefErr / PtgAreaErr carry 6 / 12 unused bytes.
+        let err = [&[0x2Au8][..], &[0; 6], &[0x2B], &[0; 12], &[0x10]].concat();
+        assert_eq!(xlsb(&err, CellRef::new(0, 0)).unwrap(), "#REF!,#REF!");
+    }
+
+    #[test]
+    fn xlsb_refuses_what_it_cannot_resolve() {
+        let base = CellRef::new(0, 0);
+        // A row past the sheet, a truncated RgceLoc, names, 3-D refs, shared formulas, strings.
+        assert!(xlsb(&[0x24, 0, 0, 0x10, 0, 0, 0], base).is_err());
+        assert_eq!(xlsb(&[0x24, 0, 0, 0, 0], base), Err(TRUNC));
+        assert!(xlsb(&[0x23, 1, 0, 0, 0], base).is_err());
+        assert!(xlsb(&[0x3A, 0, 0, 0, 0, 0, 0, 0, 0], base).is_err());
+        assert!(xlsb(&[0x01, 0, 0, 0, 0, 0, 0], base).is_err());
+        assert!(xlsb(&[0x17, 1, 0, b'a', 0], base).is_err());
+        assert!(xlsb(&[0x60, 0, 0, 0, 0, 0, 0, 0], base).is_err());
     }
 
     #[test]

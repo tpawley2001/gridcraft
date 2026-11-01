@@ -172,7 +172,7 @@ fn xlsb_scalar_caches_rk_unicode_visibility_and_epochs_survive_xlsx_save() {
         assert_eq!(wb.sheets[1].visibility, Visibility::Hidden);
         assert_eq!(wb.sheets[0].cells.len(), 14);
         assert_eq!(wb.sheets[0].merges, vec![RangeRef::new(CellRef::new(5, 0), CellRef::new(6, 1))]);
-        assert!(report.warnings.iter().any(|w| w.contains("will not recalculate") && w.contains("may display as numbers")));
+        assert!(report.warnings.iter().any(|w| w.contains("may display as numbers")));
         for (col, expected) in expected.iter().enumerate() {
             assert_eq!(&wb.sheets[0].value(CellRef::new(2, col as u32)), expected);
         }
@@ -323,4 +323,119 @@ fn xlsb_phonetic_runs_use_documented_size_and_tolerate_padding() {
         assert_eq!(wb.sheets[0].value(CellRef::new(0, 0)), text("ruby"));
     }
     assert!(read_xlsb(&file(&worksheet(&[row(0), cell(62, 0, &phonetic(2, 12))].concat(), &[]))).is_err());
+}
+
+// ---- Formulas (MS-XLSB CellParsedFormula): rgce tokens decode to formula text.
+
+/// A formula cell record (8 string, 9 number, 10 bool, 11 error) with its cached value and rgce.
+fn fmla(id: u16, col: u32, cached: &[u8], rgce: &[u8]) -> Vec<u8> {
+    let mut data = col.to_le_bytes().to_vec();
+    data.extend([0; 4]);
+    data.extend(cached);
+    data.extend([0; 2]); // Formula flags.
+    data.extend((rgce.len() as u32).to_le_bytes());
+    data.extend(rgce);
+    data.extend(0u32.to_le_bytes());
+    record(id, &data)
+}
+/// PtgRef (reference class) to row/col with relative flags (ColRelShort bits 14/15).
+fn ptg_ref(row: u32, col: u16, col_rel: bool, row_rel: bool) -> Vec<u8> {
+    let mut out = vec![0x24];
+    out.extend(row.to_le_bytes());
+    out.extend((col | if col_rel { 0x4000 } else { 0 } | if row_rel { 0x8000 } else { 0 }).to_le_bytes());
+    out
+}
+/// PtgArea (reference class), all corners relative.
+fn ptg_area(r1: u32, r2: u32, c1: u16, c2: u16) -> Vec<u8> {
+    let mut out = vec![0x25];
+    out.extend(r1.to_le_bytes());
+    out.extend(r2.to_le_bytes());
+    out.extend((c1 | 0xC000).to_le_bytes());
+    out.extend((c2 | 0xC000).to_le_bytes());
+    out
+}
+fn ptg_int(n: u16) -> Vec<u8> {
+    let mut out = vec![0x1E];
+    out.extend(n.to_le_bytes());
+    out
+}
+fn formula_book(cells: &[Vec<u8>]) -> gridcraft_model::Workbook {
+    let mut data = row(0);
+    data.extend(cell(5, 0, &1.0f64.to_le_bytes())); // A1 = 1
+    data.extend(cell(5, 1, &2.0f64.to_le_bytes())); // B1 = 2
+    data.extend(row(1));
+    data.extend(cell(5, 0, &3.0f64.to_le_bytes())); // A2 = 3
+    data.extend(cell(5, 1, &4.0f64.to_le_bytes())); // B2 = 4
+    data.extend(row(2));
+    for c in cells {
+        data.extend(c);
+    }
+    read_xlsb(&file(&worksheet(&data, &[]))).unwrap().0
+}
+fn ftext(wb: &gridcraft_model::Workbook, a1: &str) -> Option<String> {
+    wb.sheets[0].cell(CellRef::parse(a1).unwrap()).and_then(|c| c.formula.as_ref()).map(|f| f.text.clone())
+}
+fn cat(parts: &[&[u8]]) -> Vec<u8> {
+    parts.concat()
+}
+
+#[test]
+fn xlsb_formulas_decode_references_operators_and_functions() {
+    let wb = formula_book(&[
+        // A3: =A1+1 (cached 2)
+        fmla(9, 0, &2.0f64.to_le_bytes(), &cat(&[&ptg_ref(0, 0, true, true), &ptg_int(1), &[0x03]])),
+        // B3: =$A$1*2 (cached 2)
+        fmla(9, 1, &2.0f64.to_le_bytes(), &cat(&[&ptg_ref(0, 0, false, false), &ptg_int(2), &[0x05]])),
+        // C3: =SUM(A1:B2) (cached 10): PtgFuncVar, 1 argument, iftab 4
+        fmla(9, 2, &10.0f64.to_le_bytes(), &cat(&[&ptg_area(0, 1, 0, 1), &[0x22, 1, 4, 0]])),
+        // D3: =ABS(B$2) (cached 4): PtgFunc iftab 24, column relative, row absolute
+        fmla(9, 3, &4.0f64.to_le_bytes(), &cat(&[&ptg_ref(1, 1, true, false), &[0x21, 24, 0]])),
+        // E3: =A1>1 (cached FALSE)
+        fmla(10, 4, &[0], &cat(&[&ptg_ref(0, 0, true, true), &ptg_int(1), &[0x0D]])),
+        // F3: =1/0 (cached #DIV/0!)
+        fmla(11, 5, &[0x07], &cat(&[&ptg_int(1), &ptg_int(0), &[0x06]])),
+    ]);
+    let rows = [
+        ("A3", "A1+1", Value::Number(2.0)),
+        ("B3", "$A$1*2", Value::Number(2.0)),
+        ("C3", "SUM(A1:B2)", Value::Number(10.0)),
+        ("D3", "ABS(B$2)", Value::Number(4.0)),
+        ("E3", "A1>1", Value::Bool(false)),
+        ("F3", "1/0", Value::Error(CellError::Div0)),
+    ];
+    for (a1, text, cached) in rows {
+        assert_eq!(ftext(&wb, a1).as_deref(), Some(text), "{a1} formula");
+        assert_eq!(wb.sheets[0].value(CellRef::parse(a1).unwrap()), cached, "{a1} keeps its saved result");
+    }
+}
+
+#[test]
+fn xlsb_formulas_survive_saving_as_xlsx() {
+    let wb = formula_book(&[fmla(9, 2, &10.0f64.to_le_bytes(), &cat(&[&ptg_area(0, 1, 0, 1), &[0x22, 1, 4, 0]]))]);
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(ftext(&back, "C3").as_deref(), Some("SUM(A1:B2)"));
+    assert_eq!(back.sheets[0].value(CellRef::parse("C3").unwrap()), Value::Number(10.0));
+}
+
+#[test]
+fn xlsb_unsupported_formula_tokens_keep_the_saved_result_and_warn() {
+    let mut data = row(0);
+    // A1: an unknown token (0x7F) after a valid one: kept as its cached value, the file still opens.
+    data.extend(fmla(9, 0, &5.0f64.to_le_bytes(), &[0x1E, 1, 0, 0x7F]));
+    // B1: a decodable formula next to it is still imported.
+    data.extend(fmla(9, 1, &6.0f64.to_le_bytes(), &cat(&[&ptg_int(2), &ptg_int(3), &[0x05]])));
+    let (wb, report) = read_xlsb(&file(&worksheet(&data, &[]))).unwrap();
+    assert_eq!(wb.sheets[0].value(CellRef::new(0, 0)), Value::Number(5.0));
+    assert_eq!(ftext(&wb, "A1"), None);
+    assert_eq!(ftext(&wb, "B1").as_deref(), Some("2*3"));
+    assert!(report.warnings.iter().any(|w| w.to_lowercase().contains("formula")), "{:?}", report.warnings);
+}
+
+#[test]
+fn xlsb_import_warning_no_longer_says_formulas_become_values_when_all_decode() {
+    let mut data = row(0);
+    data.extend(fmla(9, 0, &3.0f64.to_le_bytes(), &cat(&[&ptg_int(1), &ptg_int(2), &[0x03]])));
+    let (wb, report) = read_xlsb(&file(&worksheet(&data, &[]))).unwrap();
+    assert_eq!(ftext(&wb, "A1").as_deref(), Some("1+2"));
+    assert!(!report.warnings.iter().any(|w| w.contains("formulas become their saved results")), "{:?}", report.warnings);
 }

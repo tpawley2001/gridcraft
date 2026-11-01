@@ -9,7 +9,7 @@
 //! pictures, comments, conditional formats, validation, macros) is skipped with a warning.
 //! Encrypted workbooks and pre-BIFF8 versions are refused.
 
-mod formula;
+pub(crate) mod formula;
 mod ftab;
 mod records;
 
