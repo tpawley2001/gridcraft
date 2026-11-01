@@ -217,6 +217,10 @@ pub fn validate_package(bytes: &[u8]) -> Result<Vec<String>, String> {
                 continue;
             }
             let target = attr(&attrs, "Target").unwrap_or("");
+            // Fragment-only targets refer within the same document and name no package part.
+            if target.starts_with('#') {
+                continue;
+            }
             let resolved = resolve_target(src_dir, target);
             if !parts.contains(&resolved.to_ascii_lowercase()) {
                 let kind = attr(&attrs, "Type").and_then(|t| t.rsplit('/').next()).unwrap_or("?");
