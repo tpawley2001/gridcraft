@@ -5,13 +5,14 @@
 //! Read: worksheets, shared strings, cell values, formulas (text and cached results, including
 //! shared and array formulas), number formats, the 1904 date system, merged cells, column
 //! widths, row heights, defined names, print areas, print titles and the calculation settings
-//! (mode, iteration, precision as displayed). Everything else (fonts, fills, borders, charts,
-//! pictures, comments, conditional formats, validation, macros) is skipped with a warning.
+//! (mode, iteration, precision as displayed), and data validation. Everything else (fonts,
+//! fills, borders, charts, pictures, comments, conditional formats, macros) is skipped with a warning.
 //! Encrypted workbooks and pre-BIFF8 versions are refused.
 
 pub(crate) mod formula;
 mod ftab;
 mod records;
+mod validation;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -796,7 +797,8 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x001C => report.warn("Cell comments in .xls files are not imported yet."),
         0x00EC => report.warn("Pictures, charts and shapes in .xls files are not imported yet."),
         0x01B0 | 0x0879 => report.warn("Conditional formatting in .xls files is not imported yet."),
-        0x01B2 => report.warn("Data validation in .xls files is not imported yet."),
+        // DVAL is only a header; import actual DV records regardless of its declared count.
+        0x01BE => validation::read(&mut c, st, budget, report)?,
         0x01B8 => report.warn("Hyperlinks in .xls files are not imported yet."),
         0x00B0 => report.warn("PivotTables in .xls files are not imported yet; their values were kept."),
         _ => {}
