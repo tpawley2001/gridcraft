@@ -1,7 +1,7 @@
 # Importing Excel binary workbooks
 
 Last updated: 2026-11-01.
-> **Last updated:** 2026-11-01 · **Change:** minor (PivotTables imported; workbook themes and theme tab colours imported)
+> **Last updated:** 2026-11-01 · **Change:** minor (pictures, shapes, text boxes and charts imported; PivotTables imported; workbook themes and theme tab colours imported)
 
 Open an `.xlsb` file with File → Open, drag it onto GridCraft, or pass it to the CLI.
 GridCraft imports worksheet data into a new workbook and shows the conversion limits.
@@ -48,8 +48,12 @@ Data validation (drop-down lists, input messages and error alerts) and condition
 formatting (cell-value and formula rules, text, blank and error tests, duplicates, top/bottom,
 above/below average, dates, colour scales, data bars and icon sets) are imported with the
 fill, font, border and number format each rule applies. A rule or validation whose formula
-uses something the import can't read yet is left out, with one warning per sheet. Charts, images, names,
-macros and other workbook features are not imported. GridCraft does not write XLSB files.
+uses something the import can't read yet is left out, with one warning per sheet.
+
+Pictures, shapes, text boxes and charts are imported with their anchors from each sheet's
+drawing part (DrawingML XML, as in `.xlsx`); a drawing that can't be found or read is skipped
+with one warning and the sheet's cells are kept. Macros and other workbook features are not
+imported. GridCraft does not write XLSB files.
 
 Tables keep their name, range, header and totals rows, column names, totals functions and
 labels, table style and its options (first/last column, banded rows/columns) and their
@@ -90,6 +94,7 @@ identifiers are 677 (workbook) and 678 (sheet).
 
 | Date | Change |
 |---|---|
+| 2026-11-01 | Import pictures, shapes, text boxes and charts from each sheet's drawing part (BrtDrawing). |
 | 2026-11-01 | Array constants and PtgMemArea caches decode in cell, shared, array and defined-name formulas; malformed payloads retain saved results. Layouts follow [MS-XLSB] PtgArray, PtgExtraArray, SerAr and PtgExtraMem. |
 | --- | --- |
 | 2026-11-01 | Import PivotTables (cache definitions and PivotTable parts). |
