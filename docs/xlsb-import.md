@@ -42,7 +42,13 @@ uses the default theme with one warning; worksheet data still imports. Theme cel
 and tab colours retain their theme indices and tints through XLSX saves.
 
 Source formatting is omitted: dates, times, percentages and currencies initially display as
-their underlying numbers. The workbook's date system is retained. Charts, images, names,
+their underlying numbers. The workbook's date system is retained.
+
+Data validation (drop-down lists, input messages and error alerts) and conditional
+formatting (cell-value and formula rules, text, blank and error tests, duplicates, top/bottom,
+above/below average, dates, colour scales, data bars and icon sets) are imported with the
+fill, font, border and number format each rule applies. A rule or validation whose formula
+uses something the import can't read yet is left out, with one warning per sheet. Charts, images, names,
 macros and other workbook features are not imported. GridCraft does not write XLSB files.
 
 Tables keep their name, range, header and totals rows, column names, totals functions and

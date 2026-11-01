@@ -95,7 +95,7 @@ const MAX_DYNAMIC_CELLS: u64 = 16_000_000;
 const MAX_DYNAMIC_CHECKS: u64 = 16_000_000;
 /// Most conditional-format range cells one sheet keeps, over all rules of an element: every
 /// rule copies its element's whole range list, so rules × ranges must stay bounded.
-const MAX_COND_CELLS: u64 = 4_000_000;
+pub(crate) const MAX_COND_CELLS: u64 = 4_000_000;
 
 fn read_sheet_format(e: &El, sheet: &mut Sheet) {
     if let Some(h) = e.attr_f64("defaultRowHeight") {

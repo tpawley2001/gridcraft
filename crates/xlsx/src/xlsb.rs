@@ -64,6 +64,9 @@ const MAX_LINKS: usize = 65_536;
 const MAX_LINK_CELLS: usize = 10_000;
 const MAX_COMMENTS: usize = 65_536;
 
+mod dxf;
+mod rules;
+
 fn invalid(msg: impl Into<String>) -> IoError {
     IoError::Format(format!("XLSB: {}", msg.into()))
 }
@@ -137,6 +140,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     }
     let mut budget = Budget::default();
     let styles = import_styles(&mut package, &types, &rels, &mut wb, &mut budget, &mut report);
+    let dxfs = dxf::import(&mut package, &types, &rels, &mut budget, &mut report);
     let sst_rels: Vec<_> = rels.iter().filter(|r| r.kind == "sharedStrings").collect();
     if sst_rels.len() > 1 {
         return Err(invalid("multiple shared-string relationships"));
@@ -184,6 +188,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             &info.name,
             &strings,
             &styles,
+            &dxfs,
             &links,
             &sheet_rels,
             &mut budget,
@@ -1120,6 +1125,7 @@ fn worksheet(
     name: &str,
     strings: &[Arc<str>],
     styles: &[StyleId],
+    dxfs: &[gridcraft_model::Style],
     links: &Links,
     rels: &[Rel],
     budget: &mut Budget,
@@ -1138,6 +1144,7 @@ fn worksheet(
     let mut in_first_view = false;
     let mut groups = Groups::default();
     let mut page = PageState::default();
+    let mut rules = rules::Rules::default();
     while let Some((id, payload)) = records.next(report)? {
         let mut b = Bytes::new(payload);
         match id {
@@ -1151,6 +1158,7 @@ fn worksheet(
                     let (w, h) = page.fit.unwrap_or((1, 1));
                     sheet.print.fit_to = Some((w, h));
                 }
+                rules.finish(name, report);
                 return Ok(sheet);
             }
             145 => {
@@ -1320,6 +1328,8 @@ fn worksheet(
                     }
                 }
             }
+            64 | 573 | 574 => rules.validation(id, payload, &mut sheet, budget)?,
+            461..=471 | 564 => rules.cond_format(id, payload, &mut sheet, dxfs),
             _ => {}
         }
     }
