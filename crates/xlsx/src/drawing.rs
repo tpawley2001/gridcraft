@@ -249,7 +249,8 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                         sheet.shapes.push(Shape { id, ..s });
                     }
                 }
-                "grpSp" => cx.warn(format!("grouped shapes are not supported and were skipped ({part}, object {n})")),
+                // Groups are kept as they are by the pass-through, which reports them.
+                "grpSp" => {}
                 _ => {}
             }
         }
