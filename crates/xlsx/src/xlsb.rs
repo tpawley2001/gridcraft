@@ -3,9 +3,9 @@
 //! Cell, shared and array formulas are decoded with the shared BIFF token decoder; those it can't
 //! represent keep their saved result as a constant. Cell formatting (number formats, fonts, fills,
 //! borders, alignment and protection), column widths, row heights, hidden and outlined
-//! rows/columns, frozen panes, sheet view options and tab colours are imported; gradient fills,
-//! cell style inheritance, differential formats, macros and other workbook features are not run or
-//! imported.
+//! rows/columns, frozen panes, sheet view options, tab colours, hyperlinks and notes are imported;
+//! gradient fills, cell style inheritance, differential formats, macros and other workbook features
+//! are not run or imported.
 
 mod styles;
 
@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use gridcraft_core::color::INDEXED;
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{Cell, Color, Formula, LineInfo, Sheet, StyleId, Visibility, Workbook};
+use gridcraft_model::{Cell, Color, Comment, Formula, Hyperlink, LineInfo, Sheet, StyleId, Visibility, Workbook};
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::Event;
@@ -35,6 +35,7 @@ const WORKSHEET: &str = "application/vnd.ms-excel.worksheet";
 const STYLES: &str = "application/vnd.ms-excel.styles";
 const MAX_STYLE_RECORDS: usize = 65_536;
 const STRINGS: &str = "application/vnd.ms-excel.sharedStrings";
+const COMMENTS: &str = "application/vnd.ms-excel.comments";
 const CT_NS: &[u8] = b"http://schemas.openxmlformats.org/package/2006/content-types";
 const REL_NS: &[u8] = b"http://schemas.openxmlformats.org/package/2006/relationships";
 const REL_TYPE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
@@ -52,6 +53,9 @@ const MAX_COL_ASSIGNMENTS: u64 = 1_000_000;
 /// Defined names, supporting links and XTIs read at most.
 const MAX_NAMES: usize = 65_536;
 const MAX_LINKS: usize = 65_536;
+/// Per-sheet caps, matching the .xlsx reader's hyperlink cell cap.
+const MAX_LINK_CELLS: usize = 10_000;
+const MAX_COMMENTS: usize = 65_536;
 
 fn invalid(msg: impl Into<String>) -> IoError {
     IoError::Format(format!("XLSB: {}", msg.into()))
@@ -63,6 +67,9 @@ struct Budget {
     text: usize,
     /// Formula cells kept as their saved result because their formula couldn't be decoded.
     formulas_kept: usize,
+    /// Hyperlink cells and comments on the sheet being read; reset per sheet.
+    links: usize,
+    comments: usize,
 }
 impl Budget {
     fn text(&mut self, len: usize) -> Result<(), IoError> {
@@ -143,7 +150,12 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         }
         check_type(&types, &rel.target, WORKSHEET)?;
         wb.check_sheet_name(&info.name, None).map_err(invalid)?;
-        let mut sheet = worksheet(&required(&mut package, &rel.target)?, &info.name, &strings, &styles, &links, &mut budget, &mut report)?;
+        let sheet_rels = sheet_relationships(&mut package, &rel.target, &mut report);
+        budget.links = 0;
+        budget.comments = 0;
+        let mut sheet =
+            worksheet(&required(&mut package, &rel.target)?, &info.name, &strings, &styles, &links, &sheet_rels, &mut budget, &mut report)?;
+        sheet_comments(&mut package, &types, &sheet_rels, &mut sheet, &mut budget, &mut report);
         sheet.visibility = info.visibility;
         if let Some(slot) = model_index.last_mut() {
             *slot = Some(wb.sheets.len());
@@ -261,12 +273,36 @@ fn check_type(types: &[Entry], path: &str, expected: &str) -> Result<(), IoError
     Ok(())
 }
 
-fn relationships(package: &mut Package<'_>, path: &str) -> Result<Vec<Rel>, IoError> {
+fn rels_path(path: &str) -> String {
     let (dir, file) = split_dir(path);
-    let relpath = if dir.is_empty() { format!("_rels/{file}.rels") } else { format!("{dir}/_rels/{file}.rels") };
-    let data = package.read_limited(&relpath, MAX_META)?.ok_or_else(|| invalid(format!("missing relationships for {path}")))?;
+    if dir.is_empty() { format!("_rels/{file}.rels") } else { format!("{dir}/_rels/{file}.rels") }
+}
+
+fn relationships(package: &mut Package<'_>, path: &str) -> Result<Vec<Rel>, IoError> {
+    let data = package.read_limited(&rels_path(path), MAX_META)?.ok_or_else(|| invalid(format!("missing relationships for {path}")))?;
+    parse_relationships(&data, path)
+}
+
+/// A worksheet's relationships (hyperlink targets, comments): none when the part has no
+/// relationships, and none with one warning when they can't be read.
+fn sheet_relationships(package: &mut Package<'_>, path: &str, report: &mut ReadReport) -> Vec<Rel> {
+    let rels = match package.read_limited(&rels_path(path), MAX_META) {
+        Ok(None) => return vec![],
+        Ok(Some(data)) => parse_relationships(&data, path),
+        Err(e) => Err(e),
+    };
+    rels.unwrap_or_else(|_| {
+        report.warn(
+            "Unreadable XLSB worksheet relationships were skipped; that sheet's hyperlinks to files or web pages and its comments were not imported.",
+        );
+        vec![]
+    })
+}
+
+fn parse_relationships(data: &[u8], path: &str) -> Result<Vec<Rel>, IoError> {
+    let (dir, _) = split_dir(path);
     let mut out: Vec<Rel> = vec![];
-    for e in metadata(&data, REL_NS, b"Relationships")? {
+    for e in metadata(data, REL_NS, b"Relationships")? {
         if e.name != "Relationship" {
             continue;
         }
@@ -852,12 +888,14 @@ fn formula(rgce: &[u8], pos: CellRef, links: &Links) -> Result<Option<Formula>, 
     Ok(Some(f))
 }
 
+#[allow(clippy::too_many_arguments)] // workbook-level tables the sheet decoder reads
 fn worksheet(
     bytes: &[u8],
     name: &str,
     strings: &[Arc<str>],
     styles: &[StyleId],
     links: &Links,
+    rels: &[Rel],
     budget: &mut Budget,
     report: &mut ReadReport,
 ) -> Result<Sheet, IoError> {
@@ -1005,6 +1043,7 @@ fn worksheet(
             },
             138 => in_first_view = false,
             151 if in_first_view && pane(&mut sheet, payload).is_err() => report.warn("Malformed XLSB pane records were skipped."),
+            494 => hyperlink(payload, rels, &mut sheet, budget, report),
             _ => {}
         }
     }
@@ -1151,4 +1190,175 @@ fn pane(sheet: &mut Sheet, payload: &[u8]) -> Result<(), IoError> {
         }
     }
     Ok(())
+}
+
+/// An `UncheckedRfX` ([MS-XLSB] 2.5.158): first row, last row, first column, last column.
+/// `None` when it is reversed or outside the sheet.
+fn range(b: &mut Bytes<'_>) -> Result<Option<RangeRef>, IoError> {
+    let (r0, r1, c0, c1) = (b.u32()?, b.u32()?, b.u32()?, b.u32()?);
+    if r0 > r1 || c0 > c1 || r1 >= MAX_ROWS || c1 >= MAX_COLS {
+        return Ok(None);
+    }
+    Ok(Some(RangeRef::new(CellRef::new(r0, c0), CellRef::new(r1, c1))))
+}
+
+/// BrtHLink ([MS-XLSB] 2.4.676): the range, the relationship id of a file or web page, the
+/// in-workbook location, the tooltip and the display text. The target is built the way the
+/// .xlsx reader builds it from `<hyperlink>`, and every cell of the range gets the link.
+fn hyperlink(payload: &[u8], rels: &[Rel], sheet: &mut Sheet, budget: &mut Budget, report: &mut ReadReport) {
+    let parse = || -> Result<_, IoError> {
+        let mut b = Bytes::new(payload);
+        let range = range(&mut b)?;
+        let rel = b.string(32767, true)?.unwrap_or_default();
+        let location = b.text(32767)?;
+        let tooltip = b.text(32767)?;
+        b.text(32767)?; // display: the cell's own value is what shows.
+        Ok((range, rel, location, tooltip))
+    };
+    let Ok((range, rel, location, tooltip)) = parse() else {
+        report.warn("Malformed XLSB hyperlinks were skipped.");
+        return;
+    };
+    let Some(range) = range else {
+        report.warn("XLSB hyperlinks outside the sheet were skipped.");
+        return;
+    };
+    let mut target = String::new();
+    if !rel.is_empty() {
+        let Some(r) = rels.iter().find(|r| r.id == rel && r.kind == "hyperlink") else {
+            report.warn("XLSB hyperlinks with a missing relationship were skipped.");
+            return;
+        };
+        target = r.target.clone();
+    }
+    // A relationship is a file or web page; a bare location is a place in this workbook.
+    let external = !target.is_empty();
+    if !location.is_empty() {
+        if target.is_empty() {
+            target = location.trim_start_matches('#').to_string();
+        } else {
+            target = format!("{target}#{location}");
+        }
+    }
+    if target.is_empty() {
+        return;
+    }
+    if budget.text(target.len().saturating_add(tooltip.len())).is_err() {
+        report.warn("XLSB hyperlinks past the text limit were skipped.");
+        return;
+    }
+    let link = Hyperlink { target, tooltip: (!tooltip.is_empty()).then_some(tooltip), external };
+    for c in range.iter() {
+        if budget.links >= MAX_LINK_CELLS {
+            report.warn(format!("XLSB hyperlinks past the first {MAX_LINK_CELLS} cells of a sheet were dropped."));
+            return;
+        }
+        budget.links += 1;
+        sheet.hyperlinks.insert(c, link.clone());
+    }
+}
+
+/// Imports the notes of the sheet's comments part, if any. A part that is missing, of the wrong
+/// type or damaged is skipped with one warning; the sheet keeps its cells.
+fn sheet_comments(package: &mut Package<'_>, types: &[Entry], rels: &[Rel], sheet: &mut Sheet, budget: &mut Budget, report: &mut ReadReport) {
+    let Some(rel) = rels.iter().find(|r| r.kind == "comments") else { return };
+    let mut part = || -> Result<Vec<u8>, IoError> {
+        if rel.external {
+            return Err(invalid("external comments relationship"));
+        }
+        check_type(types, &rel.target, COMMENTS)?;
+        required(package, &rel.target)
+    };
+    let parsed = part().and_then(|bytes| comments(&bytes, budget, report));
+    match parsed {
+        Ok(notes) => {
+            for (cell, note) in notes {
+                sheet.comments.insert(cell, note);
+            }
+        }
+        Err(_) => report.warn("Damaged XLSB comments were skipped."),
+    }
+}
+
+/// The comments part ([MS-XLSB] 2.1.7.8): BrtBeginComments, the author list, then the comment
+/// list with one BrtBeginComment / BrtCommentText / BrtEndComment group per note.
+fn comments(bytes: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Result<Vec<(CellRef, Comment)>, IoError> {
+    let mut records = Records::new(bytes);
+    records.first(628, report)?;
+    let mut authors: Vec<String> = vec![];
+    let mut out = vec![];
+    // The open comment: its author index and cell (None when outside the sheet), then its text.
+    let mut open: Option<(u32, Option<CellRef>, Option<String>)> = None;
+    let (mut bad_author, mut bad_cell) = (false, false);
+    while let Some((id, payload)) = records.next(report)? {
+        let mut b = Bytes::new(payload);
+        match id {
+            629 => {
+                if open.is_some() {
+                    return Err(invalid("unterminated comment"));
+                }
+                records.end(payload, report)?;
+                if bad_author {
+                    report.warn("XLSB comments with an unknown author were imported without one.");
+                }
+                if bad_cell {
+                    report.warn("XLSB comments outside the sheet were skipped.");
+                }
+                return Ok(out);
+            }
+            632 => {
+                let author = b.text(32767)?;
+                budget.text(author.len())?;
+                if authors.len() >= MAX_COMMENTS {
+                    return Err(IoError::TooLarge("too many XLSB comment authors".into()));
+                }
+                authors.push(author);
+            }
+            635 => {
+                if open.is_some() {
+                    return Err(invalid("nested comment"));
+                }
+                let author = b.u32()?;
+                let cell = range(&mut b)?.map(|r| r.start);
+                b.take(16)?; // guid
+                b.finish()?;
+                open = Some((author, cell, None));
+            }
+            637 => {
+                let Some((_, _, text)) = open.as_mut() else { return Err(invalid("comment text outside a comment")) };
+                let t = rich_string(&mut b)?;
+                budget.text(t.len())?;
+                *text = Some(t);
+            }
+            636 => {
+                let (author, cell, text) = open.take().ok_or_else(|| invalid("unexpected comment end"))?;
+                let Some(cell) = cell else {
+                    bad_cell = true;
+                    continue;
+                };
+                if out.len() >= MAX_COMMENTS || budget.comments >= MAX_COMMENTS {
+                    report.warn(format!("XLSB comments past the first {MAX_COMMENTS} of a sheet were dropped."));
+                    continue;
+                }
+                let author = authors.get(author as usize).cloned().unwrap_or_else(|| {
+                    bad_author = true;
+                    String::new()
+                });
+                let mut text = text.unwrap_or_default();
+                // Excel starts a note with an "Author:" line, as in .xlsx.
+                if !author.is_empty()
+                    && let Some(rest) = text.strip_prefix(&format!("{author}:"))
+                {
+                    text = rest.strip_prefix('\n').unwrap_or(rest).to_string();
+                }
+                budget.comments += 1;
+                out.push((
+                    cell,
+                    Comment { author, text, replies: vec![], threaded: false, resolved: false, visible: false, dates: vec![], note_box: None },
+                ));
+            }
+            _ => {}
+        }
+    }
+    Err(invalid("missing comments end record"))
 }
