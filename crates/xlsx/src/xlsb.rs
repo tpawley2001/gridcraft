@@ -888,6 +888,7 @@ fn formula(rgce: &[u8], pos: CellRef, links: &Links) -> Result<Option<Formula>, 
     Ok(Some(f))
 }
 
+#[allow(clippy::too_many_arguments)] // workbook-level tables the sheet decoder reads
 fn worksheet(
     bytes: &[u8],
     name: &str,
