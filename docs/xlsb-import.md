@@ -1,5 +1,7 @@
 # Importing Excel binary workbooks
 
+> **Last updated:** 2026-11-01 · **Change:** minor (workbook themes and theme tab colours imported)
+
 Open an `.xlsb` file with File → Open, drag it onto GridCraft, or pass it to the CLI.
 GridCraft imports worksheet data into a new workbook and shows the conversion limits.
 
@@ -11,9 +13,14 @@ that can't be read are skipped with one warning each. Formula cells become their
 The import reads worksheet names, visibility, numbers, text, booleans, errors and merged
 cells. It also keeps the sheet layout: column widths, row heights, hidden and outlined
 rows and columns, default column width and row height, frozen panes, gridlines, headings,
-zero display, right-to-left, zoom and RGB or indexed tab colours (theme tab colours and split
-panes are not imported). Formula cells become their **last saved results**, not live formulas. Those results
+zero display, right-to-left, zoom and RGB, indexed or theme tab colours, including theme tints
+(split panes are not imported). Formula cells become their **last saved results**, not live formulas. Those results
 may be out of date if the source application did not recalculate before saving.
+
+The workbook theme's colours and major/minor fonts are imported. Without a theme relationship,
+the default Office theme is used. A missing, unreadable, oversized or malformed theme part
+uses the default theme with one warning; worksheet data still imports. Theme cell colours
+and tab colours retain their theme indices and tints through XLSX saves.
 
 Source formatting is omitted: dates, times, percentages and currencies initially display as
 their underlying numbers. The workbook's date system is retained. Charts, images, names,
@@ -36,3 +43,9 @@ gridcraft-cli convert source.xlsb imported.xlsx
 ```
 
 CLI import warnings go to stderr, leaving structured output on stdout available for scripts.
+
+## Revision history
+
+| Date | Change | Summary |
+|---|---|---|
+| 2026-11-01 | minor | XLSB imports workbook theme colours and major/minor fonts, plus theme tab colours with tints; unreadable theme parts keep defaults with one warning. |

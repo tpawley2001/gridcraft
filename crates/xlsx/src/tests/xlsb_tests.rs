@@ -868,7 +868,7 @@ fn theme(i: u8, tint: i16) -> [u8; 8] {
     [3 << 1, i, t[0], t[1], 0, 0, 0, 0]
 }
 #[allow(clippy::too_many_arguments)]
-fn font(twips: u16, grbit: u16, bls: u16, sss: u16, uls: u8, family: u8, charset: u8, color: [u8; 8], scheme: u8, name: &str) -> Vec<u8> {
+pub(super) fn font(twips: u16, grbit: u16, bls: u16, sss: u16, uls: u8, family: u8, charset: u8, color: [u8; 8], scheme: u8, name: &str) -> Vec<u8> {
     let mut d = twips.to_le_bytes().to_vec();
     d.extend(grbit.to_le_bytes());
     d.extend(bls.to_le_bytes());
@@ -899,7 +899,7 @@ fn border(diag: u8, top: Vec<u8>, bottom: Vec<u8>, left: Vec<u8>, right: Vec<u8>
     record(46, &d)
 }
 /// A cell XF; `flags` is the alc/alcv/wrap/shrink/locked/hidden word.
-fn xf_full(font: u16, fill: u16, border: u16, trot: u8, indent: u8, flags: u16) -> Vec<u8> {
+pub(super) fn xf_full(font: u16, fill: u16, border: u16, trot: u8, indent: u8, flags: u16) -> Vec<u8> {
     let mut d = 0u16.to_le_bytes().to_vec();
     for v in [0, font, fill, border] {
         d.extend(v.to_le_bytes());
