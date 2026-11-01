@@ -25,7 +25,7 @@ pub(crate) enum Grid {
     /// BIFF8 (.xls): u16 rows, 8-bit columns (65,536 × 256).
     Biff8,
     /// BIFF12 (.xlsb): u32 rows, 14-bit columns (1,048,576 × 16,384), `RgceLoc` / `RgceArea`.
-    /// Only cell formulas without links to names, sheets or array data are decoded.
+    /// Shared or array formulas, strings and array constants are not decoded yet.
     Biff12,
 }
 
@@ -68,7 +68,7 @@ impl Grid {
 /// Where the formula lives: refs in cell formulas store coordinates; shared formulas store
 /// row/column offsets for relative parts; names store offsets for 3-D refs too.
 #[derive(Clone, Copy, PartialEq)]
-pub(super) enum Mode {
+pub(crate) enum Mode {
     Cell,
     Shared,
     Name,
@@ -77,23 +77,24 @@ pub(super) enum Mode {
 /// A supporting link ([MS-XLS] 2.4.271): only links to this workbook (and add-in function
 /// names) are resolved; external workbooks are never followed.
 #[derive(Default)]
-pub(super) struct SupBook {
+pub(crate) struct SupBook {
     pub internal: bool,
     pub addin: bool,
     pub names: Vec<String>,
 }
 
-/// XTI ([MS-XLS] 2.5.344): a supporting link and a range of its sheets.
+/// XTI ([MS-XLS] 2.5.344, [MS-XLSB] 2.5.172): a supporting link and a range of its sheets.
+/// BIFF8 stores 16-bit fields, BIFF12 32-bit ones.
 #[derive(Clone, Copy)]
-pub(super) struct Xti {
-    pub book: u16,
-    pub first: i16,
-    pub last: i16,
+pub(crate) struct Xti {
+    pub book: u32,
+    pub first: i32,
+    pub last: i32,
 }
 
 /// Workbook-level tables formulas refer to.
 #[derive(Default)]
-pub(super) struct Links {
+pub(crate) struct Links {
     /// Every sheet's name in BoundSheet8 order (including skipped chart/macro sheets).
     pub sheets: Vec<String>,
     /// Defined names (Lbl records), in order; `None` for names that can't be referenced.
@@ -203,11 +204,11 @@ fn area(r0: u32, r1: u32, c0: u16, c1: u16, base: CellRef, relative: bool, grid:
 impl Links {
     fn sheet_sel(&self, ixti: u16) -> Result<Option<SheetSel>, Unsupported> {
         let x = self.xti.get(usize::from(ixti)).ok_or(Unsupported("reference to a missing sheet link"))?;
-        let book = self.books.get(usize::from(x.book)).ok_or(Unsupported("reference to a missing workbook link"))?;
+        let book = usize::try_from(x.book).ok().and_then(|b| self.books.get(b)).ok_or(Unsupported("reference to a missing workbook link"))?;
         if !book.internal {
             return Err(Unsupported("references to other workbooks (external links)"));
         }
-        let name = |i: i16| usize::try_from(i).ok().and_then(|i| self.sheets.get(i)).cloned();
+        let name = |i: i32| usize::try_from(i).ok().and_then(|i| self.sheets.get(i)).cloned();
         Ok(match (name(x.first), name(x.last)) {
             (Some(a), Some(_)) if x.first == x.last => Some(SheetSel::Named(a)),
             (Some(a), Some(b)) => Some(SheetSel::Span(a, b)),
@@ -218,7 +219,7 @@ impl Links {
 
     fn extern_name(&self, ixti: u16, index: u32) -> Result<String, Unsupported> {
         let x = self.xti.get(usize::from(ixti)).ok_or(Unsupported("reference to a missing name link"))?;
-        let book = self.books.get(usize::from(x.book)).ok_or(Unsupported("reference to a missing workbook link"))?;
+        let book = usize::try_from(x.book).ok().and_then(|b| self.books.get(b)).ok_or(Unsupported("reference to a missing workbook link"))?;
         if !book.internal && !book.addin {
             return Err(Unsupported("names in other workbooks (external links)"));
         }
@@ -271,10 +272,11 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
 }
 
 /// Decodes an XLSB cell, shared or array formula's `rgce` at `base` (shared formulas'
-/// `PtgRefN` / `PtgAreaN` hold offsets from it). Tokens that need workbook tables (names, other
-/// sheets), a `PtgExp` (resolved by the reader), strings and array constants are refused.
-pub(crate) fn decode_xlsb(rgce: &[u8], base: CellRef) -> Result<Expr, Unsupported> {
-    decode_in(rgce, &[], base, Mode::Cell, &Links::default(), Grid::Biff12)
+/// `PtgRefN` / `PtgAreaN` hold offsets from it), resolving defined names and other sheets through
+/// `links`. A `PtgExp` (resolved by the reader), array constants and names in other workbooks
+/// (PtgNameX) are refused.
+pub(crate) fn decode_xlsb(rgce: &[u8], base: CellRef, mode: Mode, links: &Links) -> Result<Expr, Unsupported> {
+    decode_in(rgce, &[], base, mode, links, Grid::Biff12)
 }
 
 fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, grid: Grid) -> Result<Expr, Unsupported> {
@@ -290,8 +292,8 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
         let mut kids = 0usize;
         // Operand classes (reference / value / array) share one token number.
         let id = if ptg & 0x60 != 0 { 0x20 | (ptg & 0x1F) } else { ptg };
-        if wide && matches!(id, 0x20 | 0x23 | 0x26 | 0x39 | 0x3A | 0x3B) {
-            // Unsupported BIFF12 array/reference payloads, or lookups in tables this import doesn't read.
+        if wide && matches!(id, 0x20 | 0x26 | 0x39) {
+            // Unsupported BIFF12 array payloads, or lookups in tables this import doesn't read.
             return Err(Unsupported("XLSB formula token"));
         }
         match id {
@@ -603,7 +605,52 @@ mod tests {
     }
 
     fn xlsb(rgce: &[u8], base: CellRef) -> Result<String, Unsupported> {
-        decode_xlsb(rgce, base).map(|e| gridcraft_formula::print(&e))
+        decode_xlsb(rgce, base, Mode::Cell, &Links::default()).map(|e| gridcraft_formula::print(&e))
+    }
+
+    fn xlsb_linked(rgce: &[u8], mode: Mode) -> Result<String, Unsupported> {
+        decode_xlsb(rgce, CellRef::new(0, 0), mode, &links()).map(|e| gridcraft_formula::print(&e))
+    }
+
+    #[test]
+    fn decodes_xlsb_names_and_other_sheets() {
+        let loc = |row: u32, col: u16| [&row.to_le_bytes()[..], &col.to_le_bytes()].concat();
+        // PtgRef3d: ixti u16 + RgceLoc (u32 row, u16 column) = 8 bytes.
+        let r = [&[0x3Au8][..], &2u16.to_le_bytes(), &loc(1, 1)].concat();
+        assert_eq!(r.len(), 9);
+        let mut l = links();
+        l.xti[2] = Xti { book: 0, first: 1, last: 1 };
+        let one = |rgce: &[u8]| decode_xlsb(rgce, CellRef::new(0, 0), Mode::Cell, &l).map(|e| gridcraft_formula::print(&e));
+        assert_eq!(one(&r).unwrap(), "'My Data'!$B$2");
+        // PtgArea3d: ixti u16 + RgceArea (two u32 rows, two u16 columns) = 14 bytes; a 3-D span.
+        let a = [&[0x3Bu8][..], &0u16.to_le_bytes(), &0u32.to_le_bytes(), &9u32.to_le_bytes(), &0xC000u16.to_le_bytes(), &0xC000u16.to_le_bytes()]
+            .concat();
+        assert_eq!(a.len(), 15);
+        assert_eq!(one(&a).unwrap(), "'Sheet1:My Data'!A1:A10");
+        // A row only BIFF12 can address.
+        let far = [&[0x3Au8][..], &2u16.to_le_bytes(), &loc(0xF_FFFF, 0x3FFF)].concat();
+        assert_eq!(one(&far).unwrap(), "'My Data'!$XFD$1048576");
+        // PtgName: a u32 one-based index into the defined names = 5 bytes.
+        assert_eq!(xlsb_linked(&[0x43, 1, 0, 0, 0, 0x1E, 2, 0, 0x05], Mode::Cell).unwrap(), "Rate*2");
+        // PtgRefErr3d (2 + 6 bytes) and PtgAreaErr3d (2 + 12 bytes) become #REF!.
+        let err = [&[0x3Cu8][..], &[0; 8], &[0x3D], &[0; 14], &[0x10]].concat();
+        assert_eq!(xlsb_linked(&err, Mode::Cell).unwrap(), "#REF!,#REF!");
+        // Name formulas: a relative 3-D reference is an offset; a deleted sheet is #REF!.
+        let rel = [&[0x3Au8][..], &0u16.to_le_bytes(), &loc(2, 0xC001)].concat();
+        assert_eq!(xlsb_linked(&rel, Mode::Name).unwrap(), "'Sheet1:My Data'!B3");
+        let gone = [&[0x3Au8][..], &3u16.to_le_bytes(), &loc(0, 0)].concat();
+        assert_eq!(xlsb_linked(&gone, Mode::Cell).unwrap(), "#REF!");
+        // External books, a missing XTI, name index 0 or past the end, truncated payloads.
+        let external = [&[0x3Au8][..], &2u16.to_le_bytes(), &loc(0, 0)].concat();
+        assert!(xlsb_linked(&external, Mode::Cell).is_err());
+        let missing = [&[0x3Au8][..], &9u16.to_le_bytes(), &loc(0, 0)].concat();
+        assert!(xlsb_linked(&missing, Mode::Cell).is_err());
+        assert!(xlsb_linked(&[0x23, 0, 0, 0, 0], Mode::Cell).is_err());
+        assert!(xlsb_linked(&[0x23, 2, 0, 0, 0], Mode::Cell).is_err());
+        assert_eq!(xlsb_linked(&r[..8], Mode::Cell), Err(TRUNC));
+        assert_eq!(xlsb_linked(&a[..14], Mode::Cell), Err(TRUNC));
+        // PtgNameX stays refused in XLSB.
+        assert!(xlsb_linked(&[0x39, 1, 0, 1, 0, 0, 0], Mode::Cell).is_err());
     }
 
     #[test]

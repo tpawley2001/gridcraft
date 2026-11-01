@@ -22,8 +22,10 @@ use quick_xml::name::ResolveResult;
 
 use crate::package::{Package, Rel, normalize, resolve, split_dir};
 use crate::tables::{col_width_to_px, pt_to_px};
-use crate::xls::formula::decode_xlsb;
-use crate::xls::{FormulaGroups, MAX_SHARED_ATTACHES, Parsed, Pending, blank_array_followers, resolve_pending};
+use crate::xls::formula::{Links, Mode, SupBook, Xti, decode_xlsb};
+use crate::xls::{
+    BUILTIN_NAMES, FormulaGroups, Lbl, MAX_SHARED_ATTACHES, Parsed, Pending, add_defined_names, blank_array_followers, resolve_pending,
+};
 use crate::{IoError, ReadReport};
 use gridcraft_formula::Expr;
 
@@ -47,6 +49,9 @@ const MAX_RECORDS: usize = 5_000_000;
 /// Most column-information cells one worksheet expands: overlapping BrtColInfo records repeat
 /// work even when the column map stays small.
 const MAX_COL_ASSIGNMENTS: u64 = 1_000_000;
+/// Defined names, supporting links and XTIs read at most.
+const MAX_NAMES: usize = 65_536;
+const MAX_LINKS: usize = 65_536;
 
 fn invalid(msg: impl Into<String>) -> IoError {
     IoError::Format(format!("XLSB: {}", msg.into()))
@@ -96,7 +101,10 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     wb.sheets.clear();
     let mut report = ReadReport::default();
     report.warn("XLSB import: charts, images, macros and other features are not imported. Save a new .xlsx file; XLSB saving is not supported.");
-    let sheets = workbook(&book, &mut wb, &mut report)?;
+    let (sheets, names, mut links) = workbook(&book, &mut wb, &mut report)?;
+    // Cells using a name the import drops would calculate to #NAME?: they keep their saved result.
+    links.skipped = names.iter().map(|l| !l.rgce.is_empty() && decode_xlsb(&l.rgce, CellRef::new(0, 0), Mode::Name, &links).is_err()).collect();
+    let mut model_index = Vec::with_capacity(sheets.len());
     let rels = relationships(&mut package, &root.target)?;
     let mut budget = Budget::default();
     let styles = import_styles(&mut package, &types, &rels, &mut wb, &mut budget, &mut report);
@@ -114,6 +122,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         vec![]
     };
     for info in sheets {
+        model_index.push(None);
         let Some(id) = info.rel else {
             if info.visibility != Visibility::VeryHidden {
                 return Err(invalid("worksheet relationship is null"));
@@ -134,16 +143,20 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         }
         check_type(&types, &rel.target, WORKSHEET)?;
         wb.check_sheet_name(&info.name, None).map_err(invalid)?;
-        let mut sheet = worksheet(&required(&mut package, &rel.target)?, &info.name, &strings, &styles, &mut budget, &mut report)?;
+        let mut sheet = worksheet(&required(&mut package, &rel.target)?, &info.name, &strings, &styles, &links, &mut budget, &mut report)?;
         sheet.visibility = info.visibility;
+        if let Some(slot) = model_index.last_mut() {
+            *slot = Some(wb.sheets.len());
+        }
         wb.sheets.push(Arc::new(sheet));
     }
     if wb.sheets.is_empty() {
         return Err(invalid("no supported worksheets"));
     }
+    add_defined_names(&names, &model_index, &mut wb, &mut report, |l| decode_xlsb(&l.rgce, CellRef::new(0, 0), Mode::Name, &links));
     if budget.formulas_kept > 0 {
         report.warn(format!(
-            "{} XLSB formula(s) use features that can't be imported yet (defined names, other sheets, array constants); they were kept as their saved results and will not recalculate.",
+            "{} XLSB formula(s) use features that can't be imported yet (array constants, links to other workbooks); they were kept as their saved results and will not recalculate.",
             budget.formulas_kept
         ));
     }
@@ -417,10 +430,14 @@ struct SheetInfo {
     rel: Option<String>,
     visibility: Visibility,
 }
-fn workbook(bytes: &[u8], wb: &mut Workbook, report: &mut ReadReport) -> Result<Vec<SheetInfo>, IoError> {
+/// Reads the workbook part: the sheet list, the date system, the supporting links and XTIs
+/// formulas refer to other sheets through ([MS-XLSB] 2.1.7.61 EXTERNALS) and the defined names.
+fn workbook(bytes: &[u8], wb: &mut Workbook, report: &mut ReadReport) -> Result<(Vec<SheetInfo>, Vec<Lbl>, Links), IoError> {
     let mut records = Records::new(bytes);
     records.first(131, report)?;
     let mut sheets = vec![];
+    let mut names = vec![];
+    let mut links = Links::default();
     let mut bundle = false;
     let mut bundle_seen = false;
     while let Some((id, payload)) = records.next(report)? {
@@ -431,7 +448,7 @@ fn workbook(bytes: &[u8], wb: &mut Workbook, report: &mut ReadReport) -> Result<
                     return Err(invalid("incomplete worksheet list"));
                 }
                 records.end(payload, report)?;
-                return Ok(sheets);
+                return Ok((sheets, names, links));
             }
             143 => {
                 if bundle_seen {
@@ -474,12 +491,84 @@ fn workbook(bytes: &[u8], wb: &mut Workbook, report: &mut ReadReport) -> Result<
                 let rel = b.string(255, true)?;
                 let name = b.text(31)?;
                 b.finish()?;
+                links.sheets.push(name.clone());
                 sheets.push(SheetInfo { name, rel, visibility });
+            }
+            // BrtSupBookSrc (another workbook), BrtSupSelf / BrtSupSame (this one), BrtSupAddin.
+            355 | 357 | 358 | 667 if links.books.len() < MAX_LINKS => {
+                links.books.push(SupBook { internal: matches!(id, 357 | 358), addin: id == 667, names: vec![] });
+            }
+            362 => {
+                // BrtExternSheet: cXti, then XTIs of iSupBook u32, itabFirst i32, itabLast i32.
+                let n = usize::try_from(b.u32()?).unwrap_or(usize::MAX);
+                for _ in 0..n.min(b.rest.len() / 12) {
+                    if links.xti.len() >= MAX_LINKS {
+                        break;
+                    }
+                    let book = b.u32()?;
+                    let first = b.u32()? as i32;
+                    let last = b.u32()? as i32;
+                    links.xti.push(Xti { book, first, last });
+                }
+            }
+            39 if names.len() < MAX_NAMES => {
+                // A malformed name keeps its slot so later names keep their PtgName index.
+                let lbl = name_record(&mut b).unwrap_or_else(|_| {
+                    report.warn("Some XLSB defined names could not be read and were skipped.");
+                    Lbl {
+                        name: String::new(),
+                        builtin: None,
+                        hidden: false,
+                        macro_name: false,
+                        future_function: false,
+                        scope: None,
+                        rgce: vec![],
+                        rgcb: vec![],
+                    }
+                });
+                links.names.push(lbl.name.clone());
+                names.push(lbl);
             }
             _ => {}
         }
     }
     Err(invalid("missing workbook end record"))
+}
+
+/// BrtName ([MS-XLSB] 2.4.647): flags, chKey, itab, name, then a NameParsedFormula (cce, rgce,
+/// cb, rgcb). The comment and macro strings that follow are not needed.
+fn name_record(b: &mut Bytes<'_>) -> Result<Lbl, IoError> {
+    let flags = b.u32()?;
+    let _key = b.u8()?;
+    let itab = b.u32()?;
+    let raw = b.text(255)?;
+    let cce = b.u32()?;
+    if cce > 16_384 {
+        return Err(invalid("defined name formula too long"));
+    }
+    let rgce = b.take(cce as usize)?.to_vec();
+    let cb = b.u32()?;
+    let rgcb = b.take(usize::try_from(cb).map_err(|_| invalid("defined name data too long"))?)?.to_vec();
+    let (name, builtin) = if flags & 0x0020 != 0 {
+        // Built-in names are spelled out, with or without the `_xlnm.` prefix.
+        let bare = raw.strip_prefix("_xlnm.").unwrap_or(&raw);
+        match BUILTIN_NAMES.iter().position(|n| n.eq_ignore_ascii_case(bare)) {
+            Some(i) => (BUILTIN_NAMES.get(i).map_or_else(|| bare.to_string(), |n| (*n).to_string()), u8::try_from(i).ok()),
+            None => (raw.clone(), Some(u8::MAX)),
+        }
+    } else {
+        (raw, None)
+    };
+    Ok(Lbl {
+        name,
+        builtin,
+        hidden: flags & 0x0001 != 0,
+        macro_name: flags & 0x000A != 0,
+        future_function: flags & 0x0002_0000 != 0,
+        scope: if itab == u32::MAX { None } else { usize::try_from(itab).ok() },
+        rgce,
+        rgcb,
+    })
 }
 
 fn rich_string(b: &mut Bytes<'_>) -> Result<String, IoError> {
@@ -672,12 +761,12 @@ impl Groups {
 
     /// Attaches the formulas the sheet's `PtgExp` cells refer to; the others keep their saved
     /// values and count as kept.
-    fn resolve(self, sheet: &mut Sheet, budget: &mut Budget, report: &mut ReadReport) {
+    fn resolve(self, sheet: &mut Sheet, links: &Links, budget: &mut Budget, report: &mut ReadReport) {
         if self.invalid {
             report.warn("Invalid XLSB shared or array formula ranges were skipped; their cells kept their saved results.");
         }
         let pending: Vec<Pending> = self.pending.iter().map(|&(pos, row)| Pending { pos, anchor: self.anchor(pos, row) }).collect();
-        let mut target = Target { sheet };
+        let mut target = Target { sheet, links };
         if resolve_pending(&mut target, &self.arrays, &self.shared, &pending) >= MAX_SHARED_ATTACHES {
             report.warn("An XLSB sheet has more shared formulas than can be expanded; the rest kept their saved results.");
         }
@@ -690,13 +779,14 @@ impl Groups {
                 !own && !array_of(p.anchor).is_some_and(|r| r.contains(p.pos))
             })
             .count();
-        blank_array_followers(&mut Target { sheet }, &pending);
+        blank_array_followers(&mut Target { sheet, links }, &pending);
     }
 }
 
 /// The sheet shared and array formulas are attached to.
 struct Target<'a> {
     sheet: &'a mut Sheet,
+    links: &'a Links,
 }
 
 impl FormulaGroups for Target<'_> {
@@ -708,7 +798,7 @@ impl FormulaGroups for Target<'_> {
     }
     fn attach_group(&mut self, pos: CellRef, p: &Parsed, _shared: bool, array: Option<RangeRef>) {
         // Shared formulas use PtgRefN / PtgAreaN, which the decoder resolves against `pos`.
-        let Ok(Some(mut f)) = formula(&p.rgce, pos) else { return };
+        let Ok(Some(mut f)) = formula(&p.rgce, pos, self.links) else { return };
         f.array = array.filter(|r| !r.is_single());
         if let Some(cell) = self.sheet.cells.get_mut(pos) {
             cell.formula = Some(Arc::new(f));
@@ -750,8 +840,8 @@ fn value<'a>(id: u16, b: &mut Bytes<'a>, strings: &[Arc<str>], budget: &mut Budg
 
 /// The formula of `rgce` at `pos`: `Ok(None)` for a lone constant (`=1`), which calculates
 /// nothing and is kept as its saved value; `Err` when it can't be represented.
-fn formula(rgce: &[u8], pos: CellRef) -> Result<Option<Formula>, ()> {
-    let e = decode_xlsb(rgce, pos).map_err(|_| ())?;
+fn formula(rgce: &[u8], pos: CellRef, links: &Links) -> Result<Option<Formula>, ()> {
+    let e = decode_xlsb(rgce, pos, Mode::Cell, links).map_err(|_| ())?;
     if matches!(e, Expr::Number(_) | Expr::Bool(_) | Expr::Error(_) | Expr::Text(_)) {
         return Ok(None);
     }
@@ -767,6 +857,7 @@ fn worksheet(
     name: &str,
     strings: &[Arc<str>],
     styles: &[StyleId],
+    links: &Links,
     budget: &mut Budget,
     report: &mut ReadReport,
 ) -> Result<Sheet, IoError> {
@@ -789,7 +880,7 @@ fn worksheet(
                     return Err(invalid("incomplete worksheet data"));
                 }
                 records.end(payload, report)?;
-                groups.resolve(&mut sheet, budget, report);
+                groups.resolve(&mut sheet, links, budget, report);
                 return Ok(sheet);
             }
             145 => {
@@ -848,7 +939,7 @@ fn worksheet(
                     groups.pending.push((pos, anchor_row));
                 }
                 let formula = rgce.filter(|_| exp.is_none()).and_then(|rgce| {
-                    formula(rgce, pos).unwrap_or_else(|()| {
+                    formula(rgce, pos, links).unwrap_or_else(|()| {
                         budget.formulas_kept += 1;
                         None
                     })

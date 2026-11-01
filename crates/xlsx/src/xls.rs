@@ -28,6 +28,7 @@ use crate::cfb::Compound;
 use crate::tables::{builtin_format, col_width_to_px, pt_to_px};
 use crate::{IoError, ReadReport};
 use formula::{Links, Mode, SupBook, Unsupported, Xti, cell_error, decode};
+use gridcraft_formula::Expr;
 use records::{Cursor, Record, Records};
 
 const MAX_CELLS: usize = 4_000_000;
@@ -121,14 +122,19 @@ struct BoundSheet {
     kind: u8,
 }
 
-struct Lbl {
-    name: String,
-    builtin: Option<u8>,
-    hidden: bool,
-    macro_name: bool,
-    itab: u16,
-    rgce: Vec<u8>,
-    rgcb: Vec<u8>,
+/// A defined name as stored in a BIFF8 Lbl or BIFF12 BrtName record.
+pub(crate) struct Lbl {
+    pub name: String,
+    /// The built-in name's index in [`BUILTIN_NAMES`] (`Print_Area` is 6).
+    pub builtin: Option<u8>,
+    pub hidden: bool,
+    pub macro_name: bool,
+    /// A newer function's name (`_xlfn.…`, BIFF12 only): referenced by calls, never imported.
+    pub future_function: bool,
+    /// The zero-based sheet the name is local to; `None` for workbook scope.
+    pub scope: Option<usize>,
+    pub rgce: Vec<u8>,
+    pub rgcb: Vec<u8>,
 }
 
 #[derive(Default)]
@@ -210,7 +216,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         return Err(invalid("the workbook has no worksheets that can be read"));
     }
     wb.calc.precision_as_displayed = g.precision_as_displayed;
-    defined_names(&g, &model_index, &mut wb, &mut report);
+    defined_names(&g.names, &g.links, &model_index, &mut wb, &mut report);
     wb.set_active_sheet(wb.sheets.iter().position(|s| s.visibility == Visibility::Visible).unwrap_or(0));
     // The overview comes first.
     report.warnings.insert(
@@ -313,7 +319,7 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
                     let book = c.u16()?;
                     let first = c.u16()? as i16;
                     let last = c.u16()? as i16;
-                    g.links.xti.push(Xti { book, first, last });
+                    g.links.xti.push(Xti { book: u32::from(book), first: i32::from(first), last: i32::from(last) });
                 }
             }
             0x0018 => {
@@ -334,7 +340,7 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
 }
 
 /// Built-in defined names ([MS-XLS] 2.4.150, Lbl.Name).
-const BUILTIN_NAMES: [&str; 14] = [
+pub(crate) const BUILTIN_NAMES: [&str; 14] = [
     "Consolidate_Area",
     "Auto_Open",
     "Auto_Close",
@@ -372,7 +378,8 @@ fn label(c: &mut Cursor<'_, '_>) -> Result<Lbl, IoError> {
     let rest = c.rest();
     let rgce = rest.get(..cce).unwrap_or(&rest).to_vec();
     let rgcb = rest.get(cce..).unwrap_or(&[]).to_vec();
-    Ok(Lbl { name, builtin, hidden: flags & 1 != 0, macro_name: flags & 0x000A != 0, itab, rgce, rgcb })
+    let scope = usize::from(itab).checked_sub(1);
+    Ok(Lbl { name, builtin, hidden: flags & 1 != 0, macro_name: flags & 0x000A != 0, future_function: false, scope, rgce, rgcb })
 }
 
 fn shared_strings(c: &mut Cursor<'_, '_>, budget: &mut Budget) -> Result<Vec<Arc<str>>, IoError> {
@@ -909,16 +916,32 @@ fn formula_cell(c: &mut Cursor<'_, '_>, st: &mut SheetState<'_>, budget: &mut Bu
     Ok(())
 }
 
-fn defined_names(g: &Globals, model_index: &[Option<usize>], wb: &mut Workbook, report: &mut ReadReport) {
-    let scope_of = |itab: u16| -> Option<Option<usize>> {
-        if itab == 0 {
-            return Some(None);
+fn defined_names(names: &[Lbl], links: &Links, model_index: &[Option<usize>], wb: &mut Workbook, report: &mut ReadReport) {
+    add_defined_names(names, model_index, wb, report, |l| decode(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, links));
+}
+
+/// Adds the defined names to `wb`: print areas and print titles go to their sheet's page setup,
+/// other built-in names and macro names are skipped. `model_index` maps file sheet positions to
+/// imported sheets; `decode` turns a name's formula into text.
+pub(crate) fn add_defined_names(
+    names: &[Lbl],
+    model_index: &[Option<usize>],
+    wb: &mut Workbook,
+    report: &mut ReadReport,
+    decode: impl Fn(&Lbl) -> Result<Expr, Unsupported>,
+) {
+    for lbl in names {
+        let scope = match lbl.scope {
+            None => None,
+            Some(i) => match model_index.get(i).copied().flatten() {
+                Some(m) => Some(m),
+                None => continue,
+            },
+        };
+        if lbl.future_function {
+            continue;
         }
-        model_index.get(usize::from(itab) - 1).copied().flatten().map(Some)
-    };
-    for lbl in &g.names {
-        let Some(scope) = scope_of(lbl.itab) else { continue };
-        let text = match decode(&lbl.rgce, &lbl.rgcb, CellRef::new(0, 0), Mode::Name, &g.links) {
+        let text = match decode(lbl) {
             Ok(e) => gridcraft_formula::print(&e),
             Err(_) if lbl.rgce.is_empty() => continue,
             Err(Unsupported(why)) => {
