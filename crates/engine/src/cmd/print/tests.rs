@@ -643,6 +643,7 @@ fn long_text_session(rows: u32, cols: u32, len: usize) -> Session {
 const LONG_TEXT_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[test]
+#[allow(clippy::disallowed_methods)] // native test: reads the clock to time the export
 fn long_text_sheet_exports_quickly() {
     let mut s = long_text_session(2_000, 3, 200_000);
     let t = std::time::Instant::now();
@@ -653,6 +654,7 @@ fn long_text_sheet_exports_quickly() {
 }
 
 #[test]
+#[allow(clippy::disallowed_methods)] // native test: reads the clock to time the export
 fn wrapped_long_text_sheet_exports_quickly() {
     let mut s = long_text_session(200, 3, 200_000);
     s.execute("home.wrapText", json!({"range": "A1:C200", "on": true})).unwrap();
