@@ -115,6 +115,24 @@ impl StyleRecords {
         self.xfs.push(xf);
     }
 
+    /// A BIFF5 XF record: only the number format and the protection/style flags are read (the
+    /// font, alignment, borders and fill use BIFF5 layouts that aren't imported).
+    pub(super) fn xf_biff5(&mut self, c: &mut Cursor<'_, '_>, max: usize) {
+        if self.xfs.len() >= max {
+            return;
+        }
+        let mut xf = Xf { flags: 1, ..Xf::default() };
+        let head = (|| {
+            let _ifnt = c.u16().ok()?;
+            Some((c.u16().ok()?, c.u16().ok()?))
+        })();
+        if let Some((ifmt, flags)) = head {
+            xf.ifmt = ifmt;
+            xf.flags = flags;
+        }
+        self.xfs.push(xf);
+    }
+
     /// A Palette record: colours for indexes 8 onwards.
     pub(super) fn palette(&mut self, c: &mut Cursor<'_, '_>) {
         let Ok(ccv) = c.u16() else {
