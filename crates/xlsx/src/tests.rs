@@ -40,6 +40,7 @@ mod strict_passthrough;
 mod table_dxfs;
 mod table_ids;
 mod trendline_roundtrip;
+mod volatile_dependencies;
 mod xls_tests;
 mod xlsb_tests;
 mod zip_order;
