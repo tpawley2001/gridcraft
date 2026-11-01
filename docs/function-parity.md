@@ -1,6 +1,6 @@
 # Function parity: worksheet functions and formulas
 
-> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-01 · **Change:** minor (TEXT General: sign outside the 11 characters, fixed notation for 1E-9; earlier: YEARFRAC basis 0 February-end rule, MOD quotient limit, PERCENTRANK significance; earlier: edge cases matched to Excel: base conversions, BITLSHIFT/BITRSHIFT, UNICHAR noncharacters, UPPER/LOWER/PROPER casing, FIXED/DOLLAR output, F/T/GAMMA/WEIBULL/BETA distributions, BINOM trial cap, HARMEAN; earlier: ECMA.CEILING listed with USDOLLAR as not on Microsoft's list; earlier: IMSQRT reproduces the stray real part Excel gives for negative reals) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-01 · **Change:** minor (TEXT of negative elapsed times; TEXT General: sign outside the 11 characters, fixed notation for 1E-9; earlier: YEARFRAC basis 0 February-end rule, MOD quotient limit, PERCENTRANK significance; earlier: edge cases matched to Excel: base conversions, BITLSHIFT/BITRSHIFT, UNICHAR noncharacters, UPPER/LOWER/PROPER casing, FIXED/DOLLAR output, F/T/GAMMA/WEIBULL/BETA distributions, BINOM trial cap, HARMEAN; earlier: ECMA.CEILING listed with USDOLLAR as not on Microsoft's list; earlier: IMSQRT reproduces the stray real part Excel gives for negative reals) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's worksheet functions, category by category, against GridCraft's function library. Part of
 [target-app-parity.md](target-app-parity.md); gaps feed [gaps.md](gaps.md).
@@ -122,6 +122,7 @@ section (`TEXT(TRUE,";;;\@@\@")` = `@TRUE@`).
 `TEXT(n,"General")` uses 11 characters for the unsigned number (the minus sign is extra) and
 keeps fixed notation when it shows as many significant digits as scientific (`TEXT(1E-9,"General")`
 = `0.000000001`, `TEXT(-1.234567891,"General")` = `-1.234567891`); cell display is unchanged.
+Negative values with elapsed-only time formats get a leading minus (`TEXT(-7384/86400,"[h]:m:s.000")` = `-2:3:4.000`); other date/time formats stay `#VALUE!`.
 
 `MEDIAN` and `AGGREGATE` function number 12 use an overflow-safe midpoint for even-sized
 inputs, so large finite middle values do not become `#NUM!` merely because their sum overflows (#1579).
@@ -136,6 +137,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-01 | minor | TEXT of a negative value with an elapsed-only format (`[h]`, `[m]`, `[s]`, no date or AM/PM codes) prints a leading minus, matching Excel; cell display unchanged |
 | 2026-11-01 | minor | `TEXT(n,"General")` matches Excel: the minus sign is outside the 11-character budget and fixed notation is kept when it shows as many digits (`0.000000001`) |
 | 2026-10-31 | minor | BIN2*, HEX2* and OCT2* reject surrounding spaces and tabs in source strings with `#NUM!`, matching Excel; plain unpadded values remain valid |
 | 2026-10-31 | minor | DEC2BIN, DEC2HEX and DEC2OCT validate `places` before returning negative two's-complement output, and Boolean places return `#VALUE!`, matching Excel |
