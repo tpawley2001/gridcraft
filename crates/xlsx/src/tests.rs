@@ -51,6 +51,7 @@ mod xlsb_links_tests;
 mod xlsb_names_tests;
 mod xlsb_tables_tests;
 mod xlsb_tests;
+mod xlsb_theme_tests;
 mod zip_order;
 
 use std::io::Write;

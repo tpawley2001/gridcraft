@@ -178,7 +178,7 @@ fn xf(b: &mut Bytes<'_>) -> Result<Xf, IoError> {
 }
 
 /// BrtColor (2.4.337).
-fn color(b: &mut Bytes<'_>) -> Result<Color, IoError> {
+pub(super) fn color(b: &mut Bytes<'_>) -> Result<Color, IoError> {
     let kind = b.u8()? >> 1;
     let index = b.u8()?;
     let tint = i16::from_le_bytes(b.u16()?.to_le_bytes());

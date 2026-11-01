@@ -3,8 +3,8 @@
 //! Cell, shared and array formulas are decoded with the shared BIFF token decoder; those it can't
 //! represent keep their saved result as a constant. Cell formatting (number formats, fonts, fills,
 //! borders, alignment and protection), column widths, row heights, hidden and outlined
-//! rows/columns, frozen panes, sheet view options, tab colours, hyperlinks, notes, tables and
-//! AutoFilters are imported;
+//! rows/columns, frozen panes, sheet view options, workbook theme colours and fonts, tab colours
+//! (including theme colours and tints), hyperlinks, notes, tables and AutoFilters are imported;
 //! gradient fills, cell style inheritance, differential formats, macros and other workbook features
 //! are not run or imported.
 
@@ -13,7 +13,6 @@ mod styles;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use gridcraft_core::color::INDEXED;
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_model::{Cell, Color, Comment, Formula, Hyperlink, LineInfo, Sheet, StyleId, Visibility, Workbook};
 use quick_xml::NsReader;
@@ -116,6 +115,20 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     // Cells using a name the import drops would calculate to #NAME?: they keep their saved result.
     links.skipped = names.iter().map(|l| !l.rgce.is_empty() && decode_xlsb(&l.rgce, CellRef::new(0, 0), Mode::Name, &links).is_err()).collect();
     let rels = relationships(&mut package, &root.target)?;
+    if let Some(rel) = rels.iter().find(|r| r.kind == "theme") {
+        let theme = (|| -> Result<_, IoError> {
+            if rel.external {
+                return Err(invalid("external theme relationship"));
+            }
+            let data = package.read_limited(&rel.target, MAX_META)?.ok_or_else(|| invalid("missing theme part"))?;
+            let xml = crate::xml::parse(&data)?;
+            Ok(crate::theme::read_theme(&xml))
+        })();
+        match theme {
+            Ok(theme) => wb.theme = theme,
+            Err(_) => report.warn("The XLSB workbook theme could not be read; theme colours and fonts use the default Office theme."),
+        }
+    }
     let mut budget = Budget::default();
     let styles = import_styles(&mut package, &types, &rels, &mut wb, &mut budget, &mut report);
     let sst_rels: Vec<_> = rels.iter().filter(|r| r.kind == "sharedStrings").collect();
@@ -1173,16 +1186,8 @@ fn sheet_format(sheet: &mut Sheet, payload: &[u8]) -> Result<(), IoError> {
 fn tab_color(sheet: &mut Sheet, payload: &[u8]) -> Result<(), IoError> {
     let mut b = Bytes::new(payload);
     b.take(3)?;
-    let kind = b.u8()? >> 1;
-    let index = b.u8()?;
-    b.u16()?;
-    let rgb = b.take(3)?;
-    let rgb = rgb.iter().fold(0u32, |acc, &c| (acc << 8) | u32::from(c));
-    sheet.tab_color = match kind {
-        1 => INDEXED.get(usize::from(index)).map(|&c| Color::Rgb(c)),
-        2 => Some(Color::Rgb(rgb)),
-        _ => None,
-    };
+    let color = styles::color(&mut b)?;
+    sheet.tab_color = if color == Color::Auto { None } else { Some(color) };
     Ok(())
 }
 

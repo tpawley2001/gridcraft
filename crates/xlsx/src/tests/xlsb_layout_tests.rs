@@ -228,7 +228,7 @@ fn xlsb_tab_colour() {
     let (s, _) = open(&ws_prop(1, 10, [0, 0, 0]), &[]);
     assert_eq!(s.tab_color, Some(Color::Rgb(gridcraft_core::color::INDEXED[10])));
     let (s, _) = open(&ws_prop(3, 4, [0, 0, 0]), &[]);
-    assert_eq!(s.tab_color, None);
+    assert_eq!(s.tab_color, Some(Color::Theme(4, 0)));
 }
 
 #[test]
