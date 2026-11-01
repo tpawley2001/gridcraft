@@ -132,7 +132,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     }
     if budget.formulas_kept > 0 {
         report.warn(format!(
-            "{} XLSB formula(s) use features that can't be imported yet (shared or array formulas, defined names, other sheets, text or array constants); they were kept as their saved results and will not recalculate.",
+            "{} XLSB formula(s) use features that can't be imported yet (shared or array formulas, defined names, other sheets, array constants); they were kept as their saved results and will not recalculate.",
             budget.formulas_kept
         ));
     }

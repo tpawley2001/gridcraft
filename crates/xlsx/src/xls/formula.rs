@@ -289,8 +289,8 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
         let mut kids = 0usize;
         // Operand classes (reference / value / array) share one token number.
         let id = if ptg & 0x60 != 0 { 0x20 | (ptg & 0x1F) } else { ptg };
-        if wide && matches!(id, 0x17 | 0x20 | 0x23 | 0x26 | 0x2C | 0x2D | 0x39 | 0x3A | 0x3B) {
-            // Different payloads in BIFF12, or lookups in tables this import doesn't read.
+        if wide && matches!(id, 0x20 | 0x23 | 0x26 | 0x2C | 0x2D | 0x39 | 0x3A | 0x3B) {
+            // Unsupported BIFF12 array/reference payloads, or lookups in tables this import doesn't read.
             return Err(Unsupported("XLSB formula token"));
         }
         match id {
@@ -331,8 +331,15 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
             }
             0x16 => push(&mut stack, kids, Expr::Missing)?,
             0x17 => {
-                let cch = usize::from(t.u8()?);
-                let high = t.u8()? & 1 != 0;
+                let (cch, high) = if wide {
+                    let cch = usize::from(t.u16()?);
+                    if cch > 255 {
+                        return Err(Unsupported("XLSB text constant too long"));
+                    }
+                    (cch, true)
+                } else {
+                    (usize::from(t.u8()?), t.u8()? & 1 != 0)
+                };
                 push(&mut stack, kids, Expr::Text(Arc::from(t.chars(cch, high)?)))?;
             }
             0x19 => {
@@ -627,8 +634,35 @@ mod tests {
         assert!(xlsb(&[0x23, 1, 0, 0, 0], base).is_err());
         assert!(xlsb(&[0x3A, 0, 0, 0, 0, 0, 0, 0, 0], base).is_err());
         assert!(xlsb(&[0x01, 0, 0, 0, 0, 0, 0], base).is_err());
-        assert!(xlsb(&[0x17, 1, 0, b'a', 0], base).is_err());
+        // A truncated PtgStr, and one over Excel's 255-character limit.
+        assert!(xlsb(&[0x17, 2, 0, b'a', 0], base).is_err());
+        assert!(xlsb(&[&[0x17u8, 0, 1][..], &[b'a', 0].repeat(256)].concat(), base).is_err());
         assert!(xlsb(&[0x60, 0, 0, 0, 0, 0, 0, 0], base).is_err());
+    }
+
+    #[test]
+    fn decodes_xlsb_text_constants() {
+        // BIFF12 PtgStr: u16 character count, then UTF-16LE, no high-byte flag.
+        let base = CellRef::new(0, 0);
+        assert_eq!(xlsb(&[0x17, 1, 0, b'a', 0], base).unwrap(), "\"a\"");
+        assert_eq!(xlsb(&[0x17, 0, 0], base).unwrap(), "\"\"");
+        let euro = [&[0x17u8, 2, 0][..], &0x20ACu16.to_le_bytes(), &[b'5', 0]].concat();
+        assert_eq!(xlsb(&euro, base).unwrap(), "\"\u{20AC}5\"");
+    }
+
+    #[test]
+    fn xlsb_text_constant_utf16_and_length_boundaries() {
+        let base = CellRef::new(0, 0);
+        // A surrogate pair is one character but consumes two UTF-16 code units.
+        assert_eq!(xlsb(&[0x17, 2, 0, 0x3D, 0xD8, 0, 0xDE], base).unwrap(), "\"😀\"");
+        for unit in [0xD800u16, 0xDC00] {
+            let rgce = [&[0x17, 1, 0][..], &unit.to_le_bytes()].concat();
+            assert_eq!(xlsb(&rgce, base).unwrap(), "\"\u{FFFD}\"");
+        }
+        let rgce = [&[0x17, 255, 0][..], &[b'x', 0].repeat(255)].concat();
+        assert_eq!(xlsb(&rgce, base).unwrap(), format!("\"{}\"", "x".repeat(255)));
+        assert!(xlsb(&[0x17, 1, 0, b'x'], base).is_err());
+        assert!(xlsb(&[0x17, 1], base).is_err());
     }
 
     #[test]
