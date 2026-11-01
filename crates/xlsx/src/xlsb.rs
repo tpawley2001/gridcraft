@@ -1,10 +1,12 @@
-//! XLSB import of cell values and formulas, implemented from Microsoft's public MS-XLSB specification:
+//! XLSB import of cell values, formulas and print settings, implemented from Microsoft's public
+//! MS-XLSB specification:
 //! <https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xlsb/acc8aa92-1f02-4167-99f5-84f9f676b95a>.
 //! Cell, shared and array formulas are decoded with the shared BIFF token decoder; those it can't
 //! represent keep their saved result as a constant. Cell formatting (number formats, fonts, fills,
 //! borders, alignment and protection), column widths, row heights, hidden and outlined
 //! rows/columns, frozen panes, sheet view options, workbook theme colours and fonts, tab colours
-//! (including theme colours and tints), hyperlinks, notes, tables and AutoFilters are imported;
+//! (including theme colours and tints), hyperlinks, notes, tables, AutoFilters and
+//! each sheet's page setup, print options, header/footer and manual page breaks are imported;
 //! gradient fills, cell style inheritance, differential formats, macros and other workbook features
 //! are not run or imported.
 
@@ -14,7 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{Cell, Color, Comment, Formula, Hyperlink, LineInfo, Sheet, StyleId, Visibility, Workbook};
+use gridcraft_model::{Cell, Color, Comment, Formula, Hyperlink, LineInfo, Orientation, PrintSettings, Sheet, StyleId, Visibility, Workbook};
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::Event;
@@ -938,6 +940,172 @@ fn formula(rgce: &[u8], pos: CellRef, links: &Links) -> Result<Option<Formula>, 
     Ok(Some(f))
 }
 
+/// `BrtMargins` ([MS-XLSB] 2.4.709): the six page margins, in inches, in the order the model and
+/// `<pageMargins>` keep them.
+fn read_margins(payload: &[u8]) -> Result<[f32; 6], IoError> {
+    let mut b = Bytes::new(payload);
+    let mut margins = [0.0f32; 6];
+    for slot in &mut margins {
+        *slot = b.f64()?.clamp(0.0, 50.0) as f32;
+    }
+    b.finish()?;
+    Ok(margins)
+}
+
+/// `BrtPrintOptions` ([MS-XLSB] 2.4.760).
+struct PrintOptions {
+    gridlines: bool,
+    headings: bool,
+    center_h: bool,
+    center_v: bool,
+}
+fn read_print_options(payload: &[u8]) -> Result<PrintOptions, IoError> {
+    let mut b = Bytes::new(payload);
+    let flags = b.u16()?;
+    b.finish()?;
+    Ok(PrintOptions { center_h: flags & 0x0001 != 0, center_v: flags & 0x0002 != 0, headings: flags & 0x0004 != 0, gridlines: flags & 0x0008 != 0 })
+}
+impl PrintOptions {
+    fn store(self, print: &mut PrintSettings) {
+        print.gridlines = self.gridlines;
+        print.headings = self.headings;
+        print.center_h = self.center_h;
+        print.center_v = self.center_v;
+    }
+}
+
+/// `BrtPageSetup` ([MS-XLSB] 2.4.722), reduced to the fields the model keeps: paper size, scale,
+/// orientation and the fit-to-pages dimensions (joined with the fit-to-page flag at the end).
+struct PageSetup {
+    paper: Option<&'static str>,
+    scale: Option<u16>,
+    orientation: Orientation,
+    fit: (u16, u16),
+}
+fn read_page_setup(payload: &[u8]) -> Result<PageSetup, IoError> {
+    let mut b = Bytes::new(payload);
+    let paper = b.u32()?;
+    let scale = b.u32()?;
+    b.u32()?; // iRes
+    b.u32()?; // iVRes
+    b.u32()?; // iCopies
+    b.u32()?; // iPageStart
+    let fit_width = b.u32()?;
+    let fit_height = b.u32()?;
+    let flags = b.u16()?;
+    b.string(260, true)?; // szRelID: the printer settings part, kept as pass-through content.
+    b.finish()?;
+    Ok(PageSetup {
+        paper: crate::tables::paper_name(paper),
+        // Excel writes 0 for a scale it never stated; keep the default 100% like the `.xlsx` reader.
+        scale: (scale != 0).then(|| scale.clamp(10, 400) as u16),
+        // fNoOrient (bit 6) leaves the orientation to the printer; fLandscape is bit 1.
+        orientation: if flags & 0x0040 == 0 && flags & 0x0002 != 0 { Orientation::Landscape } else { Orientation::Portrait },
+        fit: (fit_width.min(32767) as u16, fit_height.min(32767) as u16),
+    })
+}
+impl PageSetup {
+    /// Applies the modelled fields and returns the fit-to-pages dimensions.
+    fn store(self, print: &mut PrintSettings) -> (u16, u16) {
+        if let Some(paper) = self.paper {
+            print.paper = paper.to_string();
+        }
+        if let Some(scale) = self.scale {
+            print.scale = scale;
+        }
+        print.orientation = self.orientation;
+        self.fit
+    }
+}
+
+/// `BrtBeginHeaderFooter` ([MS-XLSB] 2.4.90): the four page-variant flags and the six
+/// `&L&C&R` code strings, kept verbatim.
+#[derive(Default)]
+struct HeaderFooter {
+    texts: [String; 6],
+    different_odd_even: bool,
+    different_first: bool,
+    scale_with_doc: bool,
+    align_with_margins: bool,
+}
+fn read_header_footer(payload: &[u8]) -> Result<HeaderFooter, IoError> {
+    let mut b = Bytes::new(payload);
+    let flags = b.u16()?;
+    let mut hf = HeaderFooter {
+        different_odd_even: flags & 0x0001 != 0,
+        different_first: flags & 0x0002 != 0,
+        scale_with_doc: flags & 0x0004 != 0,
+        align_with_margins: flags & 0x0008 != 0,
+        ..HeaderFooter::default()
+    };
+    for slot in &mut hf.texts {
+        // `HeaderFooterString` is capped at 255 characters; so is each of the model's strings.
+        *slot = b.string(255, true)?.map(|t| t.chars().take(255).collect()).unwrap_or_default();
+    }
+    b.finish()?;
+    Ok(hf)
+}
+impl HeaderFooter {
+    fn store(self, print: &mut PrintSettings) {
+        let [header, footer, even_header, even_footer, first_header, first_footer] = self.texts;
+        print.header = header;
+        print.footer = footer;
+        print.even_header = even_header;
+        print.even_footer = even_footer;
+        print.first_header = first_header;
+        print.first_footer = first_footer;
+        print.different_odd_even = self.different_odd_even;
+        print.different_first = self.different_first;
+        print.hf_scale_with_doc = self.scale_with_doc;
+        print.hf_align_with_margins = self.align_with_margins;
+    }
+}
+
+/// `BrtBrk` ([MS-XLSB] 2.4.315): the row (or column) index of one manual page break.
+fn read_break(payload: &[u8], row: bool) -> Result<u32, IoError> {
+    let mut b = Bytes::new(payload);
+    let at = b.u32()?;
+    b.u32()?; // unColRwStrt
+    b.u32()?; // unColRwEnd
+    b.u32()?; // fMan
+    b.u32()?; // fPivot
+    b.finish()?;
+    let max = if row { MAX_ROWS } else { MAX_COLS };
+    if at == 0 || at >= max {
+        return Err(invalid("page break is out of bounds"));
+    }
+    Ok(at)
+}
+
+/// Print records as a worksheet part presents them: `BrtWsProp` carries the fit-to-page flag before
+/// `BrtPageSetup` carries the dimensions, so the two are joined at the end, and a `BrtBrk` is a row
+/// or a column break only while its collection is open.
+#[derive(Default)]
+struct PageState {
+    fit_to_page: bool,
+    fit: Option<(u16, u16)>,
+    /// `Some(true)` between `BrtBeginRwBrk` and `BrtEndRwBrk`, `Some(false)` between the column pair.
+    breaks: Option<bool>,
+    /// Record kinds already warned about: one warning for each kind of damaged record.
+    warned: Vec<&'static str>,
+}
+impl PageState {
+    /// Parses one optional print record. A damaged record is skipped so it can neither abort the
+    /// import nor hide the other print settings.
+    fn read<T>(&mut self, report: &mut ReadReport, kind: &'static str, parse: impl FnOnce() -> Result<T, IoError>) -> Option<T> {
+        match parse() {
+            Ok(value) => Some(value),
+            Err(e) => {
+                if !self.warned.contains(&kind) {
+                    self.warned.push(kind);
+                    report.warn(format!("A damaged XLSB {kind} record was skipped: {e}"));
+                }
+                None
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)] // workbook-level tables the sheet decoder reads
 fn worksheet(
     bytes: &[u8],
@@ -961,6 +1129,7 @@ fn worksheet(
     let mut view_seen = false;
     let mut in_first_view = false;
     let mut groups = Groups::default();
+    let mut page = PageState::default();
     while let Some((id, payload)) = records.next(report)? {
         let mut b = Bytes::new(payload);
         match id {
@@ -970,6 +1139,10 @@ fn worksheet(
                 }
                 records.end(payload, report)?;
                 groups.resolve(&mut sheet, links, budget, report);
+                if page.fit_to_page {
+                    let (w, h) = page.fit.unwrap_or((1, 1));
+                    sheet.print.fit_to = Some((w, h));
+                }
                 return Ok(sheet);
             }
             145 => {
@@ -1081,6 +1254,10 @@ fn worksheet(
                 }
             }
             147 => {
+                // BrtWsProp ([MS-XLSB] 2.4.875): fFitToPage (bit 8) and the tab colour.
+                if let Some(flags) = page.read(report, "BrtWsProp", || Bytes::new(payload).u16()) {
+                    page.fit_to_page = flags & 0x0100 != 0;
+                }
                 if tab_color(&mut sheet, payload).is_err() {
                     report.warn("Malformed XLSB sheet property records were skipped.");
                 }
@@ -1097,6 +1274,43 @@ fn worksheet(
             494 => hyperlink(payload, rels, &mut sheet, budget, report),
             161 if !data => sheet_autofilter(&mut records, payload, &mut sheet, report)?,
             tables::LIST_PART => list_part(payload, list_parts, report),
+            476 => {
+                if let Some(m) = page.read(report, "BrtMargins", || read_margins(payload)) {
+                    sheet.print.margins = m;
+                }
+            }
+            477 => {
+                if let Some(o) = page.read(report, "BrtPrintOptions", || read_print_options(payload)) {
+                    o.store(&mut sheet.print);
+                }
+            }
+            478 => {
+                if let Some(p) = page.read(report, "BrtPageSetup", || read_page_setup(payload)) {
+                    page.fit = Some(p.store(&mut sheet.print));
+                }
+            }
+            479 => {
+                if let Some(hf) = page.read(report, "BrtBeginHeaderFooter", || read_header_footer(payload)) {
+                    hf.store(&mut sheet.print);
+                }
+            }
+            392 => page.breaks = Some(true),
+            393 => page.breaks = None,
+            394 => page.breaks = Some(false),
+            395 => page.breaks = None,
+            396 => {
+                let Some(row) = page.breaks else {
+                    // A BrtBrk outside its collection is not a page break; it is not an error either.
+                    continue;
+                };
+                if let Some(at) = page.read(report, "BrtBrk", || read_break(payload, row)) {
+                    let breaks = if row { &mut sheet.print.row_breaks } else { &mut sheet.print.col_breaks };
+                    if !breaks.contains(&at) {
+                        breaks.push(at);
+                        breaks.sort_unstable();
+                    }
+                }
+            }
             _ => {}
         }
     }

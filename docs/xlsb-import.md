@@ -17,6 +17,14 @@ zero display, right-to-left, zoom and RGB, indexed or theme tab colours, includi
 (split panes are not imported). Formula cells become their **last saved results**, not live formulas. Those results
 may be out of date if the source application did not recalculate before saving.
 
+Each sheet's print settings are imported, so a sheet prints as it did in Excel: page
+orientation, paper size, print scale or fit-to-pages, the six page margins, gridlines and
+headings, horizontal and vertical centring, the header and footer code strings (`&L&C&R`,
+`&P`, `&N`, `&"font"` … kept verbatim, including the different-odd/even and different-first
+page variants) and manual row and column page breaks. A damaged print record is skipped with
+one warning and the rest of the sheet's settings are kept. Print area and print titles are
+defined names, which are not imported yet, so a sheet with a saved print area prints its used
+range.
 The workbook theme's colours and major/minor fonts are imported. Without a theme relationship,
 the default Office theme is used. A missing, unreadable, oversized or malformed theme part
 uses the default theme with one warning; worksheet data still imports. Theme cell colours
