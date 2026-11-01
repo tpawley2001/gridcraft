@@ -5,7 +5,8 @@
 //! represent keep their saved result as a constant. Cell formatting (number formats, fonts, fills,
 //! borders, alignment and protection), column widths, row heights, hidden and outlined
 //! rows/columns, frozen panes, sheet view options, workbook theme colours and fonts, tab colours
-//! (including theme colours and tints), hyperlinks, notes, tables, AutoFilters, PivotTables and
+//! (including theme colours and tints), hyperlinks, notes, tables (with their calculated column
+//! and custom totals formulas, which like cell formulas may use structured references), AutoFilters, PivotTables and
 //! each sheet's page setup, print options, header/footer and manual page breaks are imported;
 //! gradient fills, cell style inheritance, differential formats, macros and other workbook features
 //! are not run or imported.
@@ -27,7 +28,7 @@ use quick_xml::name::ResolveResult;
 
 use crate::package::{Package, Rel, normalize, resolve, split_dir};
 use crate::tables::{col_width_to_px, pt_to_px};
-use crate::xls::formula::{Links, Mode, SupBook, Xti, decode_xlsb};
+use crate::xls::formula::{Links, Mode, Site, SupBook, Xti, decode_xlsb, decode_xlsb_at};
 use crate::xls::{
     BUILTIN_NAMES, FormulaGroups, Lbl, MAX_SHARED_ATTACHES, Parsed, Pending, add_defined_names, blank_array_followers, resolve_pending,
 };
@@ -122,10 +123,11 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut itab_cur: Option<u32> = None;
     let (sheets, names, mut links) = workbook(&book, &mut wb, &mut report, &mut itab_cur)?;
     let cache_ids = pivot::cache_ids(&book);
+    let rels = relationships(&mut package, &root.target)?;
+    links.lists = tables::scan_lists(&mut package, &types, &rels, &sheets);
     // Cells using a name the import drops would calculate to #NAME?: they keep their saved result.
     links.skipped =
         names.iter().map(|l| !l.rgce.is_empty() && decode_xlsb(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &links).is_err()).collect();
-    let rels = relationships(&mut package, &root.target)?;
     if let Some(rel) = rels.iter().find(|r| r.kind == "theme") {
         let theme = (|| -> Result<_, IoError> {
             if rel.external {
@@ -199,7 +201,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             &mut report,
         )?;
         sheet_comments(&mut package, &types, &sheet_rels, &mut sheet, &mut budget, &mut report);
-        tables::read_tables(&mut package, &types, &rel.target, &list_parts, &mut sheet, &mut table_names, &mut table_id, &mut report);
+        tables::read_tables(&mut package, &types, &rel.target, &list_parts, &links, &mut sheet, &mut table_names, &mut table_id, &mut report);
         sheet.pivots = pivot::read_pivots(&mut package, &types, &sheet_rels, &info.name, &mut caches, &mut report);
         sheet.visibility = info.visibility;
         if let Some(slot) = model_index.last_mut() {
@@ -906,7 +908,7 @@ impl FormulaGroups for Target<'_> {
     }
     fn attach_group(&mut self, pos: CellRef, p: &Parsed, _shared: bool, array: Option<RangeRef>) {
         // Shared formulas use PtgRefN / PtgAreaN, which the decoder resolves against `pos`.
-        let Ok(Some(mut f)) = formula(&p.rgce, &p.rgcb, pos, self.links) else { return };
+        let Ok(Some(mut f)) = formula(&p.rgce, &p.rgcb, pos, self.links, &self.sheet.name) else { return };
         f.array = array.filter(|r| !r.is_single());
         if let Some(cell) = self.sheet.cells.get_mut(pos) {
             cell.formula = Some(Arc::new(f));
@@ -948,8 +950,8 @@ fn value<'a>(id: u16, b: &mut Bytes<'a>, strings: &[Arc<str>], budget: &mut Budg
 
 /// The formula of `rgce` at `pos`: `Ok(None)` for a lone constant (`=1`), which calculates
 /// nothing and is kept as its saved value; `Err` when it can't be represented.
-fn formula(rgce: &[u8], rgcb: &[u8], pos: CellRef, links: &Links) -> Result<Option<Formula>, ()> {
-    let e = decode_xlsb(rgce, rgcb, pos, Mode::Cell, links).map_err(|_| ())?;
+fn formula(rgce: &[u8], rgcb: &[u8], pos: CellRef, links: &Links, sheet: &str) -> Result<Option<Formula>, ()> {
+    let e = decode_xlsb_at(rgce, rgcb, pos, Mode::Cell, links, Site { sheet, table: None }).map_err(|_| ())?;
     if matches!(e, Expr::Number(_) | Expr::Bool(_) | Expr::Error(_) | Expr::Text(_)) {
         return Ok(None);
     }
@@ -1224,7 +1226,7 @@ fn worksheet(
                     groups.pending.push((pos, anchor_row));
                 }
                 let formula = rgce.filter(|_| exp.is_none()).and_then(|(rgce, rgcb)| {
-                    formula(rgce, rgcb, pos, links).unwrap_or_else(|()| {
+                    formula(rgce, rgcb, pos, links, name).unwrap_or_else(|()| {
                         budget.formulas_kept += 1;
                         None
                     })

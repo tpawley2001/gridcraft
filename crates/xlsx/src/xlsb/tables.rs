@@ -2,15 +2,18 @@
 //! (Worksheet part) and the records of 2.4. A table part holds `BrtBeginList`, an optional
 //! AutoFilter block, `BrtBeginListCols` with one `BrtBeginListCol` per column and a
 //! `BrtTableStyleClient`; the worksheet lists its table parts with `BrtListPart` relationship ids.
-//! Formulas stored only as parsed tokens (calculated columns, custom totals) are not imported.
+//! Calculated column (`BrtListCCFmla`) and custom totals (`BrtListTrFmla`) formulas are parsed
+//! tokens; every table is scanned ahead ([`scan_lists`]) so they and cell formulas can resolve
+//! structured references by table id.
 
 use std::collections::HashSet;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS, RangeRef};
 use gridcraft_model::{AutoFilter, FilterCriterion, Sheet, Table, TableColumn, TotalsFn};
 
-use super::{Bytes, Entry, Records, check_type, invalid, relationships};
-use crate::package::Package;
+use super::{Bytes, Entry, Records, SheetInfo, check_type, invalid, relationships};
+use crate::package::{Package, Rel};
+use crate::xls::formula::{Links, List, Mode, Site, decode_xlsb_at};
 use crate::{IoError, ReadReport};
 
 const TABLE: &str = "application/vnd.ms-excel.table";
@@ -20,6 +23,8 @@ const MAX_FILTER_COLUMNS: usize = 16_384;
 const MAX_FILTER_VALUES: usize = 10_000;
 const MAX_TABLE_PART: u64 = 16 * 1024 * 1024;
 const MISSING: &str = "XLSB tables whose part is missing or malformed were skipped.";
+/// Tables scanned in the whole workbook for structured references.
+const MAX_LISTS: usize = 65_536;
 
 const BEGIN_AFILTER: u16 = 161;
 const END_AFILTER: u16 = 162;
@@ -243,8 +248,26 @@ fn list_col(payload: &[u8]) -> Result<TableColumn, IoError> {
     })
 }
 
-/// A table part. `Err` for a part that can't be decoded; the caller skips the table.
-fn table(bytes: &[u8], report: &mut ReadReport) -> Result<Table, IoError> {
+/// A `BrtListCCFmla` / `BrtListTrFmla` formula (fArray and reserved bits, then a
+/// `ListParsedFormula`: cce, rgce, cb, rgcb) at `base`, as formula text; `None` when it can't be
+/// decoded.
+fn list_formula(payload: &[u8], base: CellRef, links: &Links, site: Site<'_>) -> Option<String> {
+    let mut b = Bytes::new(payload);
+    b.u16().ok()?;
+    let cce = usize::try_from(b.u32().ok()?).ok()?;
+    let rgce = b.take(cce).ok()?;
+    let cb = b.u32().ok().and_then(|n| usize::try_from(n).ok()).unwrap_or(0);
+    let rgcb = b.take(cb).unwrap_or(&[]);
+    let e = decode_xlsb_at(rgce, rgcb, base, Mode::Cell, links, site).ok()?;
+    Some(gridcraft_formula::print(&e))
+}
+
+/// The links and sheet name formulas inside a table part are decoded with.
+type Context<'a> = Option<(&'a Links, &'a str)>;
+
+/// A table part and its `idList`. `Err` for a part that can't be decoded; the caller skips the
+/// table. Without a `ctx` (the scan ahead) column formulas are left out.
+fn table(bytes: &[u8], ctx: Context<'_>, report: &mut ReadReport) -> Result<(Table, u32), IoError> {
     let mut records = Records::new(bytes);
     let begin = loop {
         match records.next(report)? {
@@ -256,7 +279,7 @@ fn table(bytes: &[u8], report: &mut ReadReport) -> Result<Table, IoError> {
     let mut b = Bytes::new(begin);
     let range = rfx(&mut b)?.ok_or_else(|| invalid("table range is out of bounds"))?;
     let list_type = b.u32()?;
-    b.u32()?; // idList: ids are renumbered on import, like the .xlsx reader does.
+    let list_id = b.u32()?; // Ids are renumbered on import, like the .xlsx reader does.
     let header_row = b.u32()? != 0;
     let totals_row = b.u32()? != 0;
     b.take(4 + 6 * 4)?; // Flags and six DXF ids (differential formats aren't imported from XLSB).
@@ -289,7 +312,7 @@ fn table(bytes: &[u8], report: &mut ReadReport) -> Result<Table, IoError> {
     };
     while let Some((id, payload)) = records.next(report)? {
         match id {
-            END_LIST => return Ok(t),
+            END_LIST => return Ok((t, list_id)),
             BEGIN_AFILTER => {
                 if let Some(af) = autofilter(&mut records, payload, report)? {
                     t.filter_button = true;
@@ -302,10 +325,33 @@ fn table(bytes: &[u8], report: &mut ReadReport) -> Result<Table, IoError> {
                 }
                 t.columns.push(list_col(payload)?);
             }
-            LIST_CC_FMLA => report.warn("XLSB calculated column formulas in tables are not imported yet."),
-            LIST_TR_FMLA => {
-                if t.columns.last().is_some_and(|c| c.totals == TotalsFn::Custom) {
-                    report.warn("XLSB custom totals row formulas in tables are not imported yet.");
+            LIST_CC_FMLA | LIST_TR_FMLA => {
+                let Some((links, sheet)) = ctx else { continue };
+                let Some(i) = t.columns.len().checked_sub(1) else { continue };
+                let custom = t.columns.last().is_some_and(|c| c.totals == TotalsFn::Custom);
+                if id == LIST_TR_FMLA && !custom {
+                    continue;
+                }
+                // Calculated columns are relative to the column's first data cell, totals
+                // formulas to its totals row cell.
+                let row = if id == LIST_CC_FMLA { t.range.start.row.saturating_add(u32::from(t.header_row)) } else { t.range.end.row };
+                let col = u32::try_from(i).ok().and_then(|i| t.range.start.col.checked_add(i));
+                let site = Site { sheet, table: Some(list_id) };
+                let text = col.and_then(|col| list_formula(payload, CellRef::new(row, col), links, site));
+                let Some(text) = text else {
+                    report.warn(if id == LIST_CC_FMLA {
+                        "XLSB calculated column formulas that can't be decoded were skipped."
+                    } else {
+                        "XLSB custom totals row formulas that can't be decoded were skipped."
+                    });
+                    continue;
+                };
+                if let Some(c) = t.columns.last_mut() {
+                    if id == LIST_CC_FMLA {
+                        c.formula = Some(text);
+                    } else {
+                        c.totals_label = Some(text);
+                    }
                 }
             }
             TABLE_STYLE_CLIENT => {
@@ -338,6 +384,29 @@ fn check_table(t: &Table, sheet: &Sheet, names: &HashSet<String>) -> Result<(), 
     Ok(())
 }
 
+/// Every worksheet's tables as structured references name them, read ahead of the sheets so
+/// formulas anywhere can refer to them. Parts that can't be read are left out; the import of
+/// that sheet's tables warns about them.
+pub(super) fn scan_lists(package: &mut Package<'_>, types: &[Entry], book_rels: &[Rel], sheets: &[SheetInfo]) -> Vec<List> {
+    let mut out = vec![];
+    let mut scratch = ReadReport::default();
+    for info in sheets {
+        let Some(sheet) = info.rel.as_ref().and_then(|id| book_rels.iter().find(|r| &r.id == id && r.kind == "worksheet" && !r.external)) else {
+            continue;
+        };
+        let Ok(rels) = relationships(package, &sheet.target) else { continue };
+        for rel in rels.iter().filter(|r| r.kind == "table" && !r.external) {
+            if out.len() >= MAX_LISTS {
+                return out;
+            }
+            let bytes = check_type(types, &rel.target, TABLE).and_then(|()| package.read_limited(&rel.target, MAX_TABLE_PART));
+            let Some((t, id)) = bytes.ok().flatten().and_then(|bytes| table(&bytes, None, &mut scratch).ok()) else { continue };
+            out.push(List { id, name: t.name, columns: t.columns.into_iter().map(|c| c.name).collect(), sheet: info.name.clone(), range: t.range });
+        }
+    }
+    out
+}
+
 /// Adds the tables of a worksheet part (`sheet_path`, its `BrtListPart` relationship `ids`) to
 /// `sheet`. A table that is missing, malformed or invalid is skipped with one warning per kind;
 /// `names` (lower case) keeps table names unique in the workbook and `next_id` numbers them.
@@ -347,6 +416,7 @@ pub(super) fn read_tables(
     types: &[Entry],
     sheet_path: &str,
     ids: &[String],
+    links: &Links,
     sheet: &mut Sheet,
     names: &mut HashSet<String>,
     next_id: &mut u32,
@@ -365,7 +435,8 @@ pub(super) fn read_tables(
             continue;
         };
         let bytes = check_type(types, &rel.target, TABLE).and_then(|()| package.read_limited(&rel.target, MAX_TABLE_PART));
-        let Some(mut t) = bytes.ok().flatten().and_then(|bytes| table(&bytes, report).ok()) else {
+        let ctx = Some((links, sheet.name.as_str()));
+        let Some((mut t, _)) = bytes.ok().flatten().and_then(|bytes| table(&bytes, ctx, report).ok()) else {
             report.warn(MISSING);
             continue;
         };
