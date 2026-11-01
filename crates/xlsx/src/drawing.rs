@@ -199,6 +199,8 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                         } else {
                             cx.warn(format!("chart {target} is missing from the package and was skipped ({part}, object {n})"));
                         }
+                    } else if uri == "http://schemas.openxmlformats.org/drawingml/2006/diagram" {
+                        // SmartArt: kept as it is by the pass-through reader, which reports it.
                     } else if uri.contains("chartex") || uri.contains("chartEx") {
                         cx.warn(format!("a histogram, waterfall, treemap… chart without its chart part was skipped ({part}, object {n})"));
                     } else {

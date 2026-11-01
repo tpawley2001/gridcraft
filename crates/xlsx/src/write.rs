@@ -37,7 +37,7 @@ pub struct Rels {
 impl Rels {
     /// Adds a relationship of type `kind` (last segment, e.g. `worksheet`); returns its id.
     pub fn add(&mut self, kind: &str, target: &str) -> String {
-        let id = format!("rId{}", self.items.len() + 1);
+        let id = self.fresh_id();
         let ty = match kind {
             "core-properties" => "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties".to_string(),
             // The VBA project relationship lives in the Microsoft-documented namespace, not the
@@ -49,21 +49,42 @@ impl Rels {
         id
     }
     pub fn add_external(&mut self, kind: &str, target: &str) -> String {
-        let id = format!("rId{}", self.items.len() + 1);
+        let id = self.fresh_id();
         self.items.push((id.clone(), format!("{NS_REL}/{kind}"), target.to_string(), true));
         id
     }
     /// Adds a Microsoft extension relationship with its complete namespace URI.
     pub fn add_uri(&mut self, ty: &str, target: &str) -> String {
-        let id = format!("rId{}", self.items.len() + 1);
+        let id = self.fresh_id();
         self.items.push((id.clone(), ty.to_string(), target.to_string(), false));
         id
     }
     /// Adds a relationship with its complete type URI, internal or external (kept content).
     pub fn add_raw(&mut self, ty: &str, target: &str, external: bool) -> String {
-        let id = format!("rId{}", self.items.len() + 1);
+        let id = self.fresh_id();
         self.items.push((id.clone(), crate::xml::esc_attr(ty), target.to_string(), external));
         id
+    }
+    /// Adds a kept relationship under its id from the source file, or a new id when that one is
+    /// taken; returns the id used. Kept parts written byte for byte can name a relationship of
+    /// another part by id (a SmartArt data part names the diagram drawing relationship of the
+    /// sheet's drawing in `dsp:dataModelExt relId`), so renumbering would break them.
+    pub fn add_kept(&mut self, id: &str, ty: &str, target: &str, external: bool) -> String {
+        let plain = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+        let id = if !plain || self.items.iter().any(|(i, ..)| i == id) { self.fresh_id() } else { id.to_string() };
+        self.items.push((id.clone(), crate::xml::esc_attr(ty), target.to_string(), external));
+        id
+    }
+    /// The first `rIdN` from the number of relationships on that isn't in use.
+    fn fresh_id(&self) -> String {
+        let mut n = self.items.len().saturating_add(1);
+        loop {
+            let id = format!("rId{n}");
+            if !self.items.iter().any(|(i, ..)| *i == id) {
+                return id;
+            }
+            n = n.saturating_add(1);
+        }
     }
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()

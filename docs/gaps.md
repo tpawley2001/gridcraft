@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (`check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (§3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -37,7 +37,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - **Missing:** slicers and their caches, timelines, the data model, query tables attached to
   tables, unmodelled `extLst` entries, chart details. Pass-through (#330) keeps custom XML,
   external links, connections, sheet query tables, printer settings, form and ActiveX controls,
-  OLE objects and sheet backgrounds; never checked in Excel (repair prompts unknown).
+  OLE objects, sheet backgrounds and SmartArt graphics (diagram parts); never checked in Excel (repair prompts unknown).
 - **Evidence:** `crates/xlsx/src/passthrough.rs` (what is kept, and why the rest isn't).
 - **Impact:** open-edit-save still simplifies workbooks with slicers, timelines or Power Pivot.
 - **Estimate:** 6–10 h. [file-format-parity.md](file-format-parity.md)
@@ -151,7 +151,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 ### 17. Insert objects (F)
 - Ink strokes now survive XLSX save/reopen as editable polylines. Inserted icons still lose their
   identity/artwork on save (#551); native Office InkML import is not implemented.
-- SmartArt, WordArt, equations, signature line, objects, 3-D models, screenshot; 8 shape kinds vs
+- SmartArt is kept through XLSX open + save but not shown, printed or editable; WordArt, equations, signature line, objects, 3-D models, screenshot; 8 shape kinds vs
   ~170; pictures in cells (#61, PR #105). **Estimate:** 25–40 h.
 
 ### 18. Accessibility (U)
@@ -190,6 +190,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-01 | minor | §3, §17: XLSX keeps SmartArt graphics (the drawing anchor and its data, layout, style, colours and diagram drawing parts) on save; not shown yet |
 | 2026-11-01 | trivial | `gridcraft-cli check` treats fragment-only relationship targets as same-document references, avoiding false missing-part reports for internal drawing hyperlinks; duplicate ids and targets naming absent parts are still checked. |
 | 2026-11-01 | minor | XLSX `pageSetup scale="0"` keeps the default 100% and is omitted on save; nonzero scales keep the existing 10–400 clamp, and zero paper size keeps the default paper. |
 | 2026-10-31 | minor | G0004: closed XLSX object click hyperlink loss for shapes, text boxes and pictures; external URLs and workbook locations retained with tooltips |

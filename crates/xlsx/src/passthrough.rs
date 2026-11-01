@@ -7,12 +7,14 @@
 //! mapped to XML elements, form controls, ActiveX controls, OLE objects, the sheet background and
 //! printer settings, with the sheet's `<picture>`, `<oleObjects>` and `<controls>` XML, the `r:id`
 //! of `<pageSetup>`, the legacy VML shapes those controls need, the DrawingML anchors of the sheet's drawing
-//! wrapped in `mc:AlternateContent` that the drawing reader doesn't model (control shapes), and the
+//! wrapped in `mc:AlternateContent` that the drawing reader doesn't model (control shapes) and its SmartArt
+//! graphics with their diagram parts, and the
 //! pictures of the headers and footers, `&G`, with their `<legacyDrawingHF>`). The workbook also keeps its
 //! `<fileVersion>` and the calcFeatures extension, which Excel needs to trust the saved values.
 //!
 //! On write, kept parts get fresh part names where needed and new relationship ids; the `r:id`s in
-//! kept XML are rewritten to match. Kept content is conservative:
+//! kept XML are rewritten to match (the kept relationships of a sheet's drawing keep their ids: a
+//! SmartArt data part, written byte for byte, names one of them). Kept content is conservative:
 //! - Anything whose relationship graph reaches a part GridCraft reads and rewrites (worksheets,
 //!   drawings, charts, tables, PivotTables, comments, slicers…) is not kept: it would point at
 //!   content that no longer exists in the same form.

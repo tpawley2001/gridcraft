@@ -1,5 +1,5 @@
 use super::read::merge_vml;
-use super::write::{NameMap, attach, part_rels_xml, remap, write_parts};
+use super::write::{NameMap, attach, attach_kept, part_rels_xml, remap, write_parts};
 use super::*;
 
 /// A sheet's kept content being written.
@@ -45,13 +45,13 @@ impl<'a> SheetKept<'a> {
     }
 
     /// The kept anchors of the sheet's drawing part as (position, XML), their relationships added
-    /// to the drawing's `drels`.
+    /// to the drawing's `drels` under their source ids (kept diagram parts name them).
     pub fn drawing_anchors(&self, drels: &mut Rels) -> Vec<(usize, String)> {
         let Some(p) = self.p else { return vec![] };
         if p.anchors.is_empty() {
             return vec![];
         }
-        let ids = attach(drels, &p.drawing_rels, &self.names);
+        let ids = attach_kept(drels, &p.drawing_rels, &self.names);
         p.anchors.iter().filter_map(|a| Some((a.index, remap(&a.xml, &ids)?))).collect()
     }
 

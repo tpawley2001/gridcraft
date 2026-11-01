@@ -46,8 +46,7 @@ pub struct PreservedXml {
 }
 
 /// A drawing anchor of a sheet's drawing part that GridCraft does not model (a form or ActiveX
-/// control shape wrapped in `mc:AlternateContent`), written back verbatim with its relationship
-/// ids rewritten.
+/// control shape wrapped in `mc:AlternateContent`, a SmartArt graphic), written back verbatim.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PreservedAnchor {
     /// Its position among the drawing part's anchors in the source file.
