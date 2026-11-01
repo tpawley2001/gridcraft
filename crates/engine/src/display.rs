@@ -28,6 +28,40 @@ pub fn number_format(code: &str) -> NumberFormat {
     parsed(code)
 }
 
+/// Most characters a cell displays: Excel shows the first 1,024 characters of a cell's text
+/// ("Excel specifications and limits"); the rest is visible only in the formula bar, and printing
+/// shows what the cell displays. Layout that measures, wraps or overflows cell text looks at no
+/// more than this, so its cost per cell is bounded however long the stored value is.
+pub const MAX_DISPLAY_CHARS: usize = 1024;
+
+/// The first [`MAX_DISPLAY_CHARS`] characters of `text`: the part of a cell's text it displays.
+pub fn displayed_prefix(text: &str) -> &str {
+    // Byte length bounds the char count, so short text skips the scan.
+    if text.len() <= MAX_DISPLAY_CHARS {
+        return text;
+    }
+    match text.char_indices().nth(MAX_DISPLAY_CHARS) {
+        Some((end, _)) => text.get(..end).unwrap_or(text),
+        None => text,
+    }
+}
+
+/// Cuts `text` in place to what a cell displays (see [`displayed_prefix`]).
+pub fn truncate_displayed(text: &mut String) {
+    let end = displayed_prefix(text).len();
+    text.truncate(end);
+}
+
+/// A text value cut to what a cell displays; other values are returned as they are. Formatting
+/// the cut text gives the displayed prefix of the formatted full text (a text section only adds
+/// literals around it), without copying a huge string first.
+pub fn displayed_value(v: Value) -> Value {
+    match v {
+        Value::Text(t) if t.len() > MAX_DISPLAY_CHARS => Value::from(displayed_prefix(&t)),
+        v => v,
+    }
+}
+
 /// Formats a value with a format code.
 pub fn format(v: &Value, code: &str, wb: &Workbook) -> Formatted {
     format_value(v, &parsed(code), wb.date_system)

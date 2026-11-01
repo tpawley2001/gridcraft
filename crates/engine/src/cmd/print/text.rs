@@ -16,27 +16,26 @@ pub(super) fn wrap_lines(text: &str, font: Font, size: f32, width: f32) -> Vec<S
                 out.push(std::mem::take(&mut line));
                 line = word.to_string();
             }
-            // Break a single over-long word by characters. The cut that fits is found by binary
-            // search (each try measures one candidate prefix), so an over-long word costs
-            // O(n log n) measurements instead of re-measuring the whole cut per character for
-            // every emitted line (`a` × 100k pasted text would be cubic worst case).
-            while gridcraft_pdf::text_width(font, size, &line) > width && line.chars().count() > 1 {
-                let chars: Vec<char> = line.chars().collect();
-                let (mut lo, mut hi) = (1usize, chars.len());
-                while lo < hi {
-                    let mid = lo + (hi - lo).div_ceil(2);
-                    let cut: String = chars[..mid].iter().collect();
-                    if gridcraft_pdf::text_width(font, size, &cut) <= width {
-                        lo = mid;
-                    } else {
-                        hi = mid - 1;
+            // Break a single over-long word by characters: one pass that adds up character
+            // widths, so the cost is linear in the word (no prefix re-measuring or re-collecting
+            // the rest of the word per emitted line).
+            if gridcraft_pdf::text_width(font, size, &line) > width && line.chars().nth(1).is_some() {
+                let mut piece = String::new();
+                let mut units: u64 = 0;
+                let limit = width * 1000.0 / size.max(f32::MIN_POSITIVE);
+                for ch in std::mem::take(&mut line).chars() {
+                    let cw = u64::from(font.char_width(ch));
+                    if !piece.is_empty() && (units + cw) as f32 > limit {
+                        out.push(std::mem::take(&mut piece));
+                        units = 0;
+                        if out.len() > 2000 {
+                            return out;
+                        }
                     }
+                    piece.push(ch);
+                    units += cw;
                 }
-                if lo == chars.len() {
-                    break;
-                }
-                out.push(chars[..lo].iter().collect());
-                line = chars[lo..].iter().collect();
+                line = piece;
             }
             if out.len() > 2000 {
                 return out;
@@ -129,7 +128,8 @@ pub(super) fn draw_text(pg: &mut Page, b: &Block, placement: TextPlacement<'_>) 
     let (x, y, w, h) = rect;
     let sh = b.sh;
     let wb = b.wb;
-    let v = sh.value(c);
+    // Only the characters the cell displays are laid out and printed.
+    let v = crate::display::displayed_value(sh.value(c));
     if v.is_empty() || l.cf.as_ref().is_some_and(|cf| cf.hide_value) {
         return;
     }
@@ -162,6 +162,7 @@ pub(super) fn draw_text(pg: &mut Page, b: &Block, placement: TextPlacement<'_>) 
         // The look's code, which a conditional format can override (#1163).
         crate::display::value_text_as(wb, &v, code)
     };
+    crate::display::truncate_displayed(&mut text);
     if !wrap {
         text = text.replace(['\n', '\r'], " ");
     }

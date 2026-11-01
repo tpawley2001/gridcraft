@@ -581,3 +581,86 @@ fn checkbox_cells_print_as_boxes_not_true_false() {
     assert!(contains(&pdf, "0.063 0.486 0.255 rg"), "the checked box is not filled");
     assert!(contains(&pdf, "0.431 0.431 0.431 RG"), "the unchecked box is not outlined");
 }
+
+#[test]
+fn print_shows_first_1024_characters_of_a_cell() {
+    // 1,500 characters in 10-character runs: "aaaaaaaaaabbbbbbbbbb…", so run 102 (the 1,021st to
+    // 1,030th characters) is cut after its 4th character and run 149 holds the 1,500th.
+    let text: String = (0..1500).map(|i| char::from(b'a' + ((i / 10) % 26) as u8)).collect();
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": text})).unwrap();
+    let (pdf, pages) = pdf_of(&mut s, json!({}));
+    assert!(pages >= 1);
+    let shown: String = text.chars().take(crate::display::MAX_DISPLAY_CHARS).collect();
+    assert!(contains(&pdf, &format!("({shown})")), "the 1,024 displayed characters print as one run");
+    let more: String = text.chars().take(crate::display::MAX_DISPLAY_CHARS + 1).collect();
+    assert!(!contains(&pdf, &more), "nothing past the 1,024th character prints");
+    // The stored value keeps every character.
+    let d = s.doc().unwrap();
+    assert_eq!(d.wb.sheet(0).unwrap().value(CellRef::new(0, 0)), Value::from(text.as_str()));
+}
+
+#[test]
+fn wrapped_text_prints_only_its_first_1024_characters() {
+    let text = "word ".repeat(400);
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": text})).unwrap();
+    s.execute("home.wrapText", json!({"range": "A1", "on": true})).unwrap();
+    let (pdf, _) = pdf_of(&mut s, json!({}));
+    let printed = String::from_utf8_lossy(&pdf).matches("(word").count();
+    assert!(printed > 0 && printed <= 1024 / 5 + 1, "printed {printed} words");
+}
+
+#[test]
+fn over_long_word_breaks_into_lines_that_fit() {
+    let word = "m".repeat(5000);
+    let lines = wrap_lines(&word, Font::Helvetica, 11.0, 100.0);
+    assert!(lines.len() > 1);
+    assert_eq!(lines.concat(), word);
+    for l in &lines {
+        assert!(gridcraft_pdf::text_width(Font::Helvetica, 11.0, l) <= 100.0 + 0.01, "{l} too wide");
+    }
+}
+
+/// `rows` x `cols` cells, each holding the same `len`-character string made of 32-character runs.
+fn long_text_session(rows: u32, cols: u32, len: usize) -> Session {
+    let mut s = s();
+    let text: String = (0..len).map(|i| char::from(b'a' + ((i / 32) % 26) as u8)).collect();
+    let v = Value::from(text.as_str());
+    let d = s.doc_mut().unwrap();
+    let wb = std::sync::Arc::make_mut(&mut d.wb);
+    let sh = wb.sheet_mut(0).unwrap();
+    for r in 0..rows {
+        for c in 0..cols {
+            sh.set_value(CellRef::new(r, c), v.clone());
+        }
+    }
+    s
+}
+
+// Bound: generous for a debug build on a loaded machine; before the 1,024-character display
+// limit, laying out this sheet took minutes.
+const LONG_TEXT_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+#[test]
+#[allow(clippy::disallowed_methods)] // native test: reads the clock to time the export
+fn long_text_sheet_exports_quickly() {
+    let mut s = long_text_session(2_000, 3, 200_000);
+    let t = std::time::Instant::now();
+    let (_, pages) = pdf_of(&mut s, json!({}));
+    let took = t.elapsed();
+    assert!(pages >= 1, "no pages printed");
+    assert!(took < LONG_TEXT_LIMIT, "exporting 6,000 long cells took {took:?}");
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)] // native test: reads the clock to time the export
+fn wrapped_long_text_sheet_exports_quickly() {
+    let mut s = long_text_session(200, 3, 200_000);
+    s.execute("home.wrapText", json!({"range": "A1:C200", "on": true})).unwrap();
+    let t = std::time::Instant::now();
+    let (_, pages) = pdf_of(&mut s, json!({}));
+    let took = t.elapsed();
+    assert!(pages >= 1, "no pages printed");
+    assert!(took < LONG_TEXT_LIMIT, "exporting 600 wrapped long cells took {took:?}");
+}
