@@ -1,5 +1,6 @@
 # Importing Excel binary workbooks
 
+Last updated: 2026-11-01.
 > **Last updated:** 2026-11-01 · **Change:** minor (workbook themes and theme tab colours imported)
 
 Open an `.xlsb` file with File → Open, drag it onto GridCraft, or pass it to the CLI.
@@ -13,10 +14,20 @@ that can't be read are skipped with one warning each. Formula cells become their
 The import reads worksheet names, visibility, numbers, text, booleans, errors and merged
 cells. It also keeps the sheet layout: column widths, row heights, hidden and outlined
 rows and columns, default column width and row height, frozen panes, gridlines, headings,
+zero display, right-to-left, zoom and RGB or indexed tab colours (theme tab colours and split
+panes are not imported). Supported cell, shared, array and defined-name formulas stay live,
+including array constants (numbers, strings, booleans and errors) and range intersections
+preceded by a memory cache. Their saved results are retained until recalculation.
+Unsupported or malformed formulas keep only their last saved results with a warning; these
 zero display, right-to-left, zoom and RGB, indexed or theme tab colours, including theme tints
 (split panes are not imported). Formula cells become their **last saved results**, not live formulas. Those results
 may be out of date if the source application did not recalculate before saving.
+Links to other workbooks, external names and table formula tokens remain unsupported.
 
+Built-in and custom number formats, fonts, pattern fills, borders, alignment and protection
+are imported. Gradient fills, cell style inheritance and differential formats are omitted.
+The workbook's date system is retained. Defined names retain their scope and hidden flag.
+Charts, images and macros are not imported. GridCraft does not write XLSB files.
 Each sheet's print settings are imported, so a sheet prints as it did in Excel: page
 orientation, paper size, print scale or fit-to-pages, the six page margins, gridlines and
 headings, horizontal and vertical centring, the header and footer code strings (`&L&C&R`,
@@ -65,6 +76,8 @@ identifiers are 677 (workbook) and 678 (sheet).
 ## Revision history
 
 | Date | Change |
+|---|---|
+| 2026-11-01 | Array constants and PtgMemArea caches decode in cell, shared, array and defined-name formulas; malformed payloads retain saved results. Layouts follow [MS-XLSB] PtgArray, PtgExtraArray, SerAr and PtgExtraMem. |
 | --- | --- |
 | 2026-11-01 | Import sheet and workbook structure protection and calculation settings. |
 ## Revision history

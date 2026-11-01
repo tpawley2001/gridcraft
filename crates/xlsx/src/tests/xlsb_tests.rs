@@ -99,7 +99,7 @@ pub(super) fn sst() -> Vec<u8> {
     out.extend(record(160, &[]));
     out
 }
-fn package(book: &[u8], sheet: &[u8], strings: &[u8], roots: &str, rels: &str, types: &str) -> Vec<u8> {
+pub(super) fn package(book: &[u8], sheet: &[u8], strings: &[u8], roots: &str, rels: &str, types: &str) -> Vec<u8> {
     make_zip(&[
         ("[Content_Types].xml", types.as_bytes()),
         ("_rels/.rels", roots.as_bytes()),
@@ -110,7 +110,7 @@ fn package(book: &[u8], sheet: &[u8], strings: &[u8], roots: &str, rels: &str, t
         ("text/strings.bin", strings),
     ])
 }
-fn file(sheet: &[u8]) -> Vec<u8> {
+pub(super) fn file(sheet: &[u8]) -> Vec<u8> {
     package(&book(false), sheet, &sst(), ROOT, RELS, TYPES)
 }
 fn text(s: &str) -> Value {
@@ -346,7 +346,7 @@ fn ptg_ref(row: u32, col: u16, col_rel: bool, row_rel: bool) -> Vec<u8> {
     out
 }
 /// PtgArea (reference class), all corners relative.
-fn ptg_area(r1: u32, r2: u32, c1: u16, c2: u16) -> Vec<u8> {
+pub(super) fn ptg_area(r1: u32, r2: u32, c1: u16, c2: u16) -> Vec<u8> {
     let mut out = vec![0x25];
     out.extend(r1.to_le_bytes());
     out.extend(r2.to_le_bytes());
@@ -354,7 +354,7 @@ fn ptg_area(r1: u32, r2: u32, c1: u16, c2: u16) -> Vec<u8> {
     out.extend((c2 | 0xC000).to_le_bytes());
     out
 }
-fn ptg_int(n: u16) -> Vec<u8> {
+pub(super) fn ptg_int(n: u16) -> Vec<u8> {
     let mut out = vec![0x1E];
     out.extend(n.to_le_bytes());
     out
@@ -372,7 +372,7 @@ fn formula_book(cells: &[Vec<u8>]) -> gridcraft_model::Workbook {
     }
     read_xlsb(&file(&worksheet(&data, &[]))).unwrap().0
 }
-fn ftext(wb: &gridcraft_model::Workbook, a1: &str) -> Option<String> {
+pub(super) fn ftext(wb: &gridcraft_model::Workbook, a1: &str) -> Option<String> {
     wb.sheets[0].cell(CellRef::parse(a1).unwrap()).and_then(|c| c.formula.as_ref()).map(|f| f.text.clone())
 }
 fn cat(parts: &[&[u8]]) -> Vec<u8> {
@@ -443,13 +443,13 @@ fn xlsb_import_warning_no_longer_says_formulas_become_values_when_all_decode() {
 // ---- Shared (BrtShrFmla 427) and array (BrtArrFmla 426) formulas, referenced by PtgExp.
 
 /// PtgExp: the cell is part of the shared or array formula anchored in `row`.
-fn ptg_exp(row: u32) -> Vec<u8> {
+pub(super) fn ptg_exp(row: u32) -> Vec<u8> {
     let mut out = vec![0x01];
     out.extend(row.to_le_bytes());
     out
 }
 /// PtgRefN (reference class): row/column offsets (or absolute coordinates) with relative flags.
-fn ptg_ref_n(row: i32, col: i16, col_rel: bool, row_rel: bool) -> Vec<u8> {
+pub(super) fn ptg_ref_n(row: i32, col: i16, col_rel: bool, row_rel: bool) -> Vec<u8> {
     let mut out = vec![0x2C];
     out.extend(row.to_le_bytes());
     out.extend(((col as u16 & 0x3FFF) | if col_rel { 0x4000 } else { 0 } | if row_rel { 0x8000 } else { 0 }).to_le_bytes());
@@ -464,7 +464,7 @@ fn ptg_area_n(r1: i32, r2: i32, c1: i16, c2: i16) -> Vec<u8> {
     out.extend(((c2 as u16 & 0x3FFF) | 0xC000).to_le_bytes());
     out
 }
-fn rfx(r0: u32, r1: u32, c0: u32, c1: u32) -> Vec<u8> {
+pub(super) fn rfx(r0: u32, r1: u32, c0: u32, c1: u32) -> Vec<u8> {
     [r0, r1, c0, c1].iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 fn shr_fmla(range: &[u8], rgce: &[u8]) -> Vec<u8> {
