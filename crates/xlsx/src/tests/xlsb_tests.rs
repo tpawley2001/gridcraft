@@ -440,6 +440,173 @@ fn xlsb_import_warning_no_longer_says_formulas_become_values_when_all_decode() {
     assert!(!report.warnings.iter().any(|w| w.contains("formulas become their saved results")), "{:?}", report.warnings);
 }
 
+// ---- Shared (BrtShrFmla 427) and array (BrtArrFmla 426) formulas, referenced by PtgExp.
+
+/// PtgExp: the cell is part of the shared or array formula anchored in `row`.
+fn ptg_exp(row: u32) -> Vec<u8> {
+    let mut out = vec![0x01];
+    out.extend(row.to_le_bytes());
+    out
+}
+/// PtgRefN (reference class): row/column offsets (or absolute coordinates) with relative flags.
+fn ptg_ref_n(row: i32, col: i16, col_rel: bool, row_rel: bool) -> Vec<u8> {
+    let mut out = vec![0x2C];
+    out.extend(row.to_le_bytes());
+    out.extend(((col as u16 & 0x3FFF) | if col_rel { 0x4000 } else { 0 } | if row_rel { 0x8000 } else { 0 }).to_le_bytes());
+    out
+}
+/// PtgAreaN (reference class), all corners relative offsets.
+fn ptg_area_n(r1: i32, r2: i32, c1: i16, c2: i16) -> Vec<u8> {
+    let mut out = vec![0x2D];
+    out.extend(r1.to_le_bytes());
+    out.extend(r2.to_le_bytes());
+    out.extend(((c1 as u16 & 0x3FFF) | 0xC000).to_le_bytes());
+    out.extend(((c2 as u16 & 0x3FFF) | 0xC000).to_le_bytes());
+    out
+}
+fn rfx(r0: u32, r1: u32, c0: u32, c1: u32) -> Vec<u8> {
+    [r0, r1, c0, c1].iter().flat_map(|v| v.to_le_bytes()).collect()
+}
+fn shr_fmla(range: &[u8], rgce: &[u8]) -> Vec<u8> {
+    let mut data = range.to_vec();
+    data.extend((rgce.len() as u32).to_le_bytes());
+    data.extend(rgce);
+    data.extend(0u32.to_le_bytes());
+    record(427, &data)
+}
+fn arr_fmla(range: &[u8], rgce: &[u8]) -> Vec<u8> {
+    let mut data = range.to_vec();
+    data.push(0); // fAlwaysCalc
+    data.extend((rgce.len() as u32).to_le_bytes());
+    data.extend(rgce);
+    data.extend(0u32.to_le_bytes());
+    record(426, &data)
+}
+fn num(n: f64) -> Vec<u8> {
+    n.to_le_bytes().to_vec()
+}
+fn rows_book(rows: &[Vec<u8>]) -> (gridcraft_model::Workbook, crate::ReadReport) {
+    let mut data = vec![];
+    for (r, cells) in rows.iter().enumerate() {
+        data.extend(row(r as u32));
+        data.extend(cells);
+    }
+    read_xlsb(&file(&worksheet(&data, &[]))).unwrap()
+}
+fn val(wb: &gridcraft_model::Workbook, a1: &str) -> Value {
+    wb.sheets[0].value(CellRef::parse(a1).unwrap())
+}
+
+#[test]
+fn xlsb_shared_formula_filled_down_shifts_relative_references() {
+    // A1:A3 = 1,2,3; B1:B3 = A1*2 filled down: B1 holds the PtgExp, then BrtShrFmla B1:B3.
+    let times2 = cat(&[&ptg_ref_n(0, -1, true, true), &ptg_int(2), &[0x05]]);
+    let (wb, report) = rows_book(&[
+        cat(&[&cell(5, 0, &num(1.0)), &fmla(9, 1, &num(2.0), &ptg_exp(0)), &shr_fmla(&rfx(0, 2, 1, 1), &times2)]),
+        cat(&[&cell(5, 0, &num(2.0)), &fmla(9, 1, &num(4.0), &ptg_exp(0))]),
+        cat(&[&cell(5, 0, &num(3.0)), &fmla(9, 1, &num(6.0), &ptg_exp(0))]),
+    ]);
+    for (a1, text, cached) in [("B1", "A1*2", 2.0), ("B2", "A2*2", 4.0), ("B3", "A3*2", 6.0)] {
+        assert_eq!(ftext(&wb, a1).as_deref(), Some(text), "{a1}");
+        assert_eq!(val(&wb, a1), Value::Number(cached), "{a1} keeps its saved result");
+    }
+    assert!(!report.warnings.iter().any(|w| w.contains("formula")), "{:?}", report.warnings);
+}
+
+#[test]
+fn xlsb_shared_formula_filled_right_keeps_absolute_parts() {
+    // C1:E1 = C$5+$A1: the row of the first ref and the column of the second are absolute.
+    let rgce = cat(&[&ptg_ref_n(4, 0, true, false), &ptg_ref_n(0, 0, false, true), &[0x03]]);
+    let (wb, _) = rows_book(&[cat(&[
+        &fmla(9, 2, &num(0.0), &ptg_exp(0)),
+        &shr_fmla(&rfx(0, 0, 2, 4), &rgce),
+        &fmla(9, 3, &num(0.0), &ptg_exp(0)),
+        &fmla(9, 4, &num(0.0), &ptg_exp(0)),
+    ])]);
+    assert_eq!(ftext(&wb, "C1").as_deref(), Some("C$5+$A1"));
+    assert_eq!(ftext(&wb, "D1").as_deref(), Some("D$5+$A1"));
+    assert_eq!(ftext(&wb, "E1").as_deref(), Some("E$5+$A1"));
+}
+
+#[test]
+fn xlsb_shared_formula_area_shifts() {
+    // B1:B2 = SUM(A1:A2) filled down.
+    let rgce = cat(&[&ptg_area_n(0, 1, -1, -1), &[0x19, 0x10, 0, 0]]);
+    let (wb, _) = rows_book(&[cat(&[&fmla(9, 1, &num(0.0), &ptg_exp(0)), &shr_fmla(&rfx(0, 1, 1, 1), &rgce)]), fmla(9, 1, &num(0.0), &ptg_exp(0))]);
+    assert_eq!(ftext(&wb, "B1").as_deref(), Some("SUM(A1:A2)"));
+    assert_eq!(ftext(&wb, "B2").as_deref(), Some("SUM(A2:A3)"));
+}
+
+#[test]
+fn xlsb_array_formula_anchors_its_range_and_survives_xlsx_save() {
+    // {=A1:A3*2} over D1:D3: D1 holds the PtgExp, then BrtArrFmla; D2/D3 refer to it too.
+    let rgce = cat(&[&ptg_area(0, 2, 0, 0), &ptg_int(2), &[0x05]]);
+    let (wb, report) = rows_book(&[
+        cat(&[&cell(5, 0, &num(1.0)), &fmla(9, 3, &num(2.0), &ptg_exp(0)), &arr_fmla(&rfx(0, 2, 3, 3), &rgce)]),
+        cat(&[&cell(5, 0, &num(2.0)), &fmla(9, 3, &num(4.0), &ptg_exp(0))]),
+        cat(&[&cell(5, 0, &num(3.0)), &fmla(9, 3, &num(6.0), &ptg_exp(0))]),
+    ]);
+    let f = wb.sheets[0].cell(CellRef::parse("D1").unwrap()).and_then(|c| c.formula.clone()).unwrap();
+    assert_eq!((f.text.as_str(), f.array), ("A1:A3*2", Some(RangeRef::parse("D1:D3").unwrap())));
+    assert_eq!(val(&wb, "D1"), Value::Number(2.0));
+    // The other cells are the array's results: as for .xls and .xlsx, they hold no formula of
+    // their own and the array fills them when it calculates.
+    assert_eq!(ftext(&wb, "D2"), None);
+    assert_eq!(ftext(&wb, "D3"), None);
+    assert!(!report.warnings.iter().any(|w| w.contains("formula")), "{:?}", report.warnings);
+    let saved = write_xlsx(&wb).unwrap();
+    let xml = String::from_utf8(crate::package::Package::open(&saved).unwrap().read("xl/worksheets/sheet1.xml").unwrap().unwrap()).unwrap();
+    assert!(xml.contains(r#"<f t="array" ref="D1:D3">"#), "{xml}");
+    let (back, _) = read_xlsx(&saved).unwrap();
+    let f = back.sheets[0].cell(CellRef::parse("D1").unwrap()).and_then(|c| c.formula.clone()).unwrap();
+    assert_eq!((f.text.as_str(), f.array), ("A1:A3*2", Some(RangeRef::parse("D1:D3").unwrap())));
+}
+
+#[test]
+fn xlsb_ptg_exp_without_its_formula_keeps_the_saved_value() {
+    let (wb, report) = rows_book(&[cat(&[&fmla(9, 1, &num(7.0), &ptg_exp(0)), &fmla(9, 2, &num(3.0), &cat(&[&ptg_int(1), &ptg_int(2), &[0x03]]))])]);
+    assert_eq!(val(&wb, "B1"), Value::Number(7.0));
+    assert_eq!(ftext(&wb, "B1"), None);
+    assert_eq!(ftext(&wb, "C1").as_deref(), Some("1+2"));
+    let kept: Vec<_> = report.warnings.iter().filter(|w| w.contains("kept as their saved results")).collect();
+    assert_eq!(kept.len(), 1, "{:?}", report.warnings);
+    assert!(kept[0].starts_with("1 XLSB formula(s)"), "{kept:?}");
+    assert!(!kept[0].contains("shared or array"), "{kept:?}");
+}
+
+#[test]
+fn xlsb_malformed_or_huge_shared_ranges_are_handled_without_blowing_up() {
+    let times2 = cat(&[&ptg_ref_n(0, -1, true, true), &ptg_int(2), &[0x05]]);
+    // B1: a shared range with rwLast < rwFirst; C1: one past the grid; both refused.
+    // D1: a valid shared formula over the whole sheet from D1 expands only for the cells that
+    // exist (D1, D2), and E2 next to it imports normally.
+    let (wb, report) = rows_book(&[
+        cat(&[
+            &fmla(9, 1, &num(5.0), &ptg_exp(0)),
+            &shr_fmla(&rfx(3, 0, 1, 1), &times2),
+            &fmla(9, 2, &num(6.0), &ptg_exp(0)),
+            &shr_fmla(&rfx(0, 1 << 20, 2, 2), &times2),
+            &fmla(9, 3, &num(0.0), &ptg_exp(0)),
+            &shr_fmla(&rfx(0, (1 << 20) - 1, 3, 0x3FFF), &times2),
+        ]),
+        cat(&[&fmla(9, 3, &num(0.0), &ptg_exp(0)), &fmla(9, 4, &num(3.0), &cat(&[&ptg_int(1), &ptg_int(2), &[0x03]]))]),
+    ]);
+    assert_eq!((val(&wb, "B1"), ftext(&wb, "B1")), (Value::Number(5.0), None));
+    assert_eq!((val(&wb, "C1"), ftext(&wb, "C1")), (Value::Number(6.0), None));
+    assert_eq!(ftext(&wb, "D1").as_deref(), Some("C1*2"));
+    assert_eq!(ftext(&wb, "D2").as_deref(), Some("C2*2"));
+    assert_eq!(ftext(&wb, "E2").as_deref(), Some("1+2"));
+    assert_eq!(wb.sheets[0].cells.iter().count(), 5);
+    assert!(report.warnings.iter().any(|w| w.contains("Invalid XLSB shared or array formula ranges")), "{:?}", report.warnings);
+    assert!(report.warnings.iter().any(|w| w.starts_with("2 XLSB formula(s)")), "{:?}", report.warnings);
+    // A truncated BrtShrFmla is a damaged file, refused as such (no panic).
+    let short = record(427, &rfx(0, 0, 0, 0)[..10]);
+    let mut data = row(0);
+    data.extend(fmla(9, 1, &num(5.0), &ptg_exp(0)));
+    data.extend(short);
+    assert!(read_xlsb(&file(&worksheet(&data, &[]))).is_err());
+}
+
 // Number formats from the styles part ([MS-XLSB] 2.1.7.50): BrtFmt (44) in BrtBeginFmts (615)..BrtEndFmts (616),
 // BrtXF (47) in BrtBeginCellXFs (617)..BrtEndCellXFs (618); cell style XFs (626..627) are not cell XFs.
 const STYLES_RELS: &str = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="one" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="../data/one.bin"/><Relationship Id="two" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="../data/two.bin"/><Relationship Id="strings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="../text/strings.bin"/><Relationship Id="styles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="../text/styles.bin"/></Relationships>"#;

@@ -69,7 +69,7 @@ pub(crate) fn is_xls(bytes: &[u8]) -> bool {
 /// print however often that could never succeed, so each anchor is tried once and failed ones
 /// are skipped for the rest of the sheet. Beyond the cap the remaining references keep their
 /// cached values.
-const MAX_SHARED_ATTACHES: usize = 262_144;
+pub(crate) const MAX_SHARED_ATTACHES: usize = 262_144;
 const MAX_SHARED_TEMPLATE: usize = 8192;
 
 pub(crate) struct Budget {
@@ -395,15 +395,42 @@ fn shared_strings(c: &mut Cursor<'_, '_>, budget: &mut Budget) -> Result<Vec<Arc
 }
 
 /// A formula cell waiting for its shared or array formula (which follows it in the file).
-struct Pending {
-    pos: CellRef,
-    anchor: CellRef,
+pub(crate) struct Pending {
+    pub pos: CellRef,
+    pub anchor: CellRef,
 }
 
 /// A parsed formula: tokens and extra data.
-struct Parsed {
-    rgce: Vec<u8>,
-    rgcb: Vec<u8>,
+pub(crate) struct Parsed {
+    pub rgce: Vec<u8>,
+    pub rgcb: Vec<u8>,
+}
+
+/// A worksheet reader whose formula cells may refer to shared and array formulas (`.xls` and
+/// `.xlsb`), as used by [`resolve_pending`] and [`blank_array_followers`].
+pub(crate) trait FormulaGroups {
+    fn sheet(&self) -> &Sheet;
+    fn sheet_mut(&mut self) -> &mut Sheet;
+    /// Decodes `p` at `pos` (a shared formula's tokens when `shared`) and attaches it, as an
+    /// array formula over `array` if given, or records why it can't be.
+    fn attach_group(&mut self, pos: CellRef, p: &Parsed, shared: bool, array: Option<RangeRef>);
+    /// Records why a formula was kept as its value.
+    fn refuse(&mut self, why: &'static str);
+}
+
+impl FormulaGroups for SheetState<'_> {
+    fn sheet(&self) -> &Sheet {
+        &self.sheet
+    }
+    fn sheet_mut(&mut self) -> &mut Sheet {
+        &mut self.sheet
+    }
+    fn attach_group(&mut self, pos: CellRef, p: &Parsed, shared: bool, array: Option<RangeRef>) {
+        self.attach(pos, p, if shared { Mode::Shared } else { Mode::Cell }, array);
+    }
+    fn refuse(&mut self, why: &'static str) {
+        self.unsupported(why);
+    }
 }
 
 fn parsed(c: &mut Cursor<'_, '_>) -> Result<Parsed, IoError> {
@@ -499,8 +526,8 @@ fn rk(v: u32) -> Value {
 /// templates were expanded. An anchor whose template can't be imported is refused once:
 /// its followers re-decode the same template for nothing, so they are skipped instead (they
 /// keep their cached values).
-fn resolve_pending(
-    st: &mut SheetState<'_>,
+pub(crate) fn resolve_pending(
+    st: &mut impl FormulaGroups,
     arrays: &HashMap<CellRef, (RangeRef, Parsed)>,
     shared: &HashMap<CellRef, Parsed>,
     pending: &[Pending],
@@ -510,24 +537,24 @@ fn resolve_pending(
     for p in pending {
         if let Some((range, f)) = arrays.get(&p.anchor) {
             if p.pos == p.anchor {
-                st.attach(p.pos, f, Mode::Cell, Some(*range));
+                st.attach_group(p.pos, f, false, Some(*range));
             }
         } else if let Some(f) = shared.get(&p.anchor) {
             if failed.contains(&p.anchor) || shared_attaches >= MAX_SHARED_ATTACHES {
                 continue;
             }
             shared_attaches += 1;
-            st.attach(p.pos, f, Mode::Shared, None);
-            let imported = st.sheet.cell(p.pos).and_then(|c| c.formula.as_ref()).is_some_and(|f| f.text.chars().count() <= MAX_SHARED_TEMPLATE);
+            st.attach_group(p.pos, f, true, None);
+            let imported = st.sheet().cell(p.pos).and_then(|c| c.formula.as_ref()).is_some_and(|f| f.text.chars().count() <= MAX_SHARED_TEMPLATE);
             if !imported {
                 failed.insert(p.anchor);
             }
         } else {
-            st.unsupported("a shared formula that is missing from the file");
+            st.refuse("a shared formula that is missing from the file");
         }
     }
     if shared_attaches >= MAX_SHARED_ATTACHES {
-        st.unsupported("more shared formulas than the expansion cap; some formulas kept their values");
+        st.refuse("more shared formulas than the expansion cap; some formulas kept their values");
     }
     shared_attaches
 }
@@ -535,12 +562,12 @@ fn resolve_pending(
 /// The other cells of a legacy array formula hold only cached results: dropped, as when an
 /// .xlsx is read, so that the formula fills its range on recalculation. If the formula itself
 /// couldn't be imported, they keep their values.
-fn blank_array_followers(st: &mut SheetState<'_>, pending: &[Pending]) {
+pub(crate) fn blank_array_followers(st: &mut impl FormulaGroups, pending: &[Pending]) {
     for p in pending {
-        let filled = st.sheet.cell(p.anchor).and_then(|c| c.formula.as_ref()).and_then(|f| f.array).is_some_and(|r| r.contains(p.pos));
+        let filled = st.sheet().cell(p.anchor).and_then(|c| c.formula.as_ref()).and_then(|f| f.array).is_some_and(|r| r.contains(p.pos));
         if p.pos != p.anchor && filled {
-            let style = st.sheet.style_id(p.pos);
-            st.sheet.cells.set(p.pos, Cell { value: Value::Empty, formula: None, style });
+            let style = st.sheet().style_id(p.pos);
+            st.sheet_mut().cells.set(p.pos, Cell { value: Value::Empty, formula: None, style });
         }
     }
 }
