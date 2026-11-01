@@ -1,18 +1,21 @@
-//! Data-only XLSB import, implemented from Microsoft's public MS-XLSB specification:
+//! XLSB import of cell values and formulas, implemented from Microsoft's public MS-XLSB specification:
 //! <https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xlsb/acc8aa92-1f02-4167-99f5-84f9f676b95a>.
-//! Formula caches become constants. Styles, macros and other workbook features are not run or imported.
+//! Cell formulas are decoded with the shared BIFF token decoder; those it can't represent keep
+//! their saved result as a constant. Styles, macros and other workbook features are not run or imported.
 
 use std::sync::Arc;
 
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{Cell, Sheet, Visibility, Workbook};
+use gridcraft_model::{Cell, Formula, Sheet, Visibility, Workbook};
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
 
 use crate::package::{Package, Rel, normalize, resolve, split_dir};
+use crate::xls::formula::decode_xlsb;
 use crate::{IoError, ReadReport};
+use gridcraft_formula::Expr;
 
 const MAIN: &str = "application/vnd.ms-excel.main";
 const BINARY_MAIN: &str = "application/vnd.ms-excel.sheet.binary.macroEnabled.main";
@@ -38,6 +41,8 @@ fn invalid(msg: impl Into<String>) -> IoError {
 struct Budget {
     cells: usize,
     text: usize,
+    /// Formula cells kept as their saved result because their formula couldn't be decoded.
+    formulas_kept: usize,
 }
 impl Budget {
     fn text(&mut self, len: usize) -> Result<(), IoError> {
@@ -56,7 +61,7 @@ impl Budget {
     }
 }
 
-/// Imports worksheet scalar values and saved formula results. Number formats are omitted;
+/// Imports worksheet scalar values and cell formulas (with their saved results). Number formats are omitted;
 /// dates remain serial numbers with the workbook's original date system. Inspect warnings.
 pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut package = Package::open(bytes)?;
@@ -75,7 +80,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut wb = Workbook::new();
     wb.sheets.clear();
     let mut report = ReadReport::default();
-    report.warn("XLSB data-only import: formulas become their saved results and will not recalculate. Formatting, charts, images, macros and other features are not imported; dates, currency and percentages may display as numbers. Save a new .xlsx file; XLSB saving is not supported.");
+    report.warn("XLSB import: formatting, charts, images, macros and other features are not imported; dates, currency and percentages may display as numbers. Save a new .xlsx file; XLSB saving is not supported.");
     let sheets = workbook(&book, &mut wb, &mut report)?;
     let rels = relationships(&mut package, &root.target)?;
     let mut budget = Budget::default();
@@ -119,6 +124,12 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     }
     if wb.sheets.is_empty() {
         return Err(invalid("no supported worksheets"));
+    }
+    if budget.formulas_kept > 0 {
+        report.warn(format!(
+            "{} XLSB formula(s) use features that can't be imported yet (shared or array formulas, defined names, other sheets, text or array constants); they were kept as their saved results and will not recalculate.",
+            budget.formulas_kept
+        ));
     }
     wb.set_active_sheet(wb.sheets.iter().position(|s| s.visibility == Visibility::Visible).unwrap_or(0));
     Ok((wb, report))
@@ -540,18 +551,21 @@ fn boolean(b: &mut Bytes<'_>) -> Result<bool, IoError> {
         _ => Err(invalid("invalid boolean value")),
     }
 }
-fn cached_formula(b: &mut Bytes<'_>) -> Result<(), IoError> {
+/// The formula flags and `CellParsedFormula` after a formula cell's saved result: returns the
+/// tokens (`rgce`); the extra data (`rgcb`) is only used by tokens the decoder refuses.
+fn cached_formula<'a>(b: &mut Bytes<'a>) -> Result<&'a [u8], IoError> {
     b.take(2)?;
     let cce = b.u32()?;
     if !(1..=16384).contains(&cce) {
         return Err(invalid("invalid formula token length"));
     }
-    b.take(cce as usize)?;
+    let rgce = b.take(cce as usize)?;
     let extra = b.u32()?;
     b.take(extra as usize)?;
-    Ok(())
+    Ok(rgce)
 }
-fn value(id: u16, b: &mut Bytes<'_>, strings: &[Arc<str>], budget: &mut Budget) -> Result<Value, IoError> {
+/// A cell's value and, for formula cells, the formula's tokens.
+fn value<'a>(id: u16, b: &mut Bytes<'a>, strings: &[Arc<str>], budget: &mut Budget) -> Result<(Value, Option<&'a [u8]>), IoError> {
     let value = match id {
         1 => Value::Empty,
         2 => {
@@ -574,10 +588,22 @@ fn value(id: u16, b: &mut Bytes<'_>, strings: &[Arc<str>], budget: &mut Budget) 
         7 => Value::Text(strings.get(b.u32()? as usize).cloned().ok_or_else(|| invalid("shared-string index is out of bounds"))?),
         _ => return Err(invalid("unsupported cell record")),
     };
-    if (8..=11).contains(&id) {
-        cached_formula(b)?;
+    let rgce = if (8..=11).contains(&id) { Some(cached_formula(b)?) } else { None };
+    Ok((value, rgce))
+}
+
+/// The formula of `rgce` at `pos`: `Ok(None)` for a lone constant (`=1`), which calculates
+/// nothing and is kept as its saved value; `Err` when it can't be represented.
+fn formula(rgce: &[u8], pos: CellRef) -> Result<Option<Formula>, ()> {
+    let e = decode_xlsb(rgce, pos).map_err(|_| ())?;
+    if matches!(e, Expr::Number(_) | Expr::Bool(_) | Expr::Error(_) | Expr::Text(_)) {
+        return Ok(None);
     }
-    Ok(value)
+    let f = Formula::new(&gridcraft_formula::print(&e));
+    if f.expr.is_none() {
+        return Err(());
+    }
+    Ok(Some(f))
 }
 
 fn worksheet(bytes: &[u8], name: &str, strings: &[Arc<str>], budget: &mut Budget, report: &mut ReadReport) -> Result<Sheet, IoError> {
@@ -641,11 +667,20 @@ fn worksheet(bytes: &[u8], name: &str, strings: &[Arc<str>], budget: &mut Budget
                     return Err(invalid("column is out of bounds or unordered"));
                 }
                 b.u32()?; // Style index and phonetic flag; formatting is not imported.
-                let value = value(id, &mut b, strings, budget)?;
+                let (value, rgce) = value(id, &mut b, strings, budget)?;
                 b.finish()?;
-                if !value.is_empty() {
+                let pos = CellRef::new(r, c);
+                let formula = rgce.and_then(|rgce| {
+                    formula(rgce, pos).unwrap_or_else(|()| {
+                        budget.formulas_kept += 1;
+                        None
+                    })
+                });
+                if !value.is_empty() || formula.is_some() {
                     budget.cell()?;
-                    sheet.cells.set(CellRef::new(r, c), Cell::value(value));
+                    let mut cell = Cell::value(value);
+                    cell.formula = formula.map(Arc::new);
+                    sheet.cells.set(pos, cell);
                 }
                 col = Some(c);
             }
