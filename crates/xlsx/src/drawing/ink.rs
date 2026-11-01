@@ -179,12 +179,22 @@ pub(super) fn read(obj: &El, anchor: Anchor) -> Option<Shape> {
     let (path, w, h) = validate_cust_geom(sp)?;
     let (width, line) = validate_line(sp)?;
     let text = parse_points(path, &anchor, w, h)?;
-    Some(Shape { id: 0, kind: ShapeKind::Ink, anchor, fill: Color::Rgb((width as u32) << 16), line, text, format: Default::default() })
+    Some(Shape {
+        hyperlink: None,
+        name: None,
+        id: 0,
+        kind: ShapeKind::Ink,
+        anchor,
+        fill: Color::Rgb((width as u32) << 16),
+        line,
+        text,
+        format: Default::default(),
+    })
 }
 
 /// Invalid/native out-of-range data uses the existing rectangle fallback. A successful
 /// result is complete before it is appended, so malformed points never yield half a stroke.
-pub(super) fn write(shape: &Shape, theme: &Theme, id: usize) -> Option<String> {
+pub(super) fn write(shape: &Shape, theme: &Theme, id: usize, link: &str) -> Option<String> {
     if shape.kind != ShapeKind::Ink || shape.format.no_line {
         return None;
     }
@@ -217,8 +227,9 @@ pub(super) fn write(shape: &Shape, theme: &Theme, id: usize) -> Option<String> {
         return None;
     }
     let [r, g, b] = shape.line.resolve(theme)?;
+    let name = crate::xml::esc_attr(&shape.name.clone().unwrap_or_else(|| format!("Ink {id}")));
     let mut xml = format!(
-        "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"Ink {id}\"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr>{}<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:pathLst><a:path w=\"{w}\" h=\"{h}\" fill=\"none\">",
+        "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"{name}\">{link}</xdr:cNvPr><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr>{}<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:pathLst><a:path w=\"{w}\" h=\"{h}\" fill=\"none\">",
         xfrm(a, "a:xfrm")
     );
     for (i, (x, y)) in points.iter().enumerate() {

@@ -4,7 +4,9 @@
 use std::fmt::Write as _;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
-use gridcraft_model::{Anchor, AnchorMode, Color, Image, Shape, ShapeFormat, ShapeKind, ShapeTextAlign, ShapeTextAnchor, Sheet, Theme};
+use gridcraft_model::{
+    Anchor, AnchorMode, Color, DrawingHyperlink, Image, Shape, ShapeFormat, ShapeKind, ShapeTextAlign, ShapeTextAnchor, Sheet, Theme,
+};
 
 use crate::IoError;
 use crate::read::Ctx;
@@ -121,6 +123,13 @@ fn mime_for(name: &str) -> &'static str {
     }
 }
 
+fn read_hyperlink(props: Option<&El>, rels: &[crate::package::Rel]) -> Option<DrawingHyperlink> {
+    let link = props?.child("hlinkClick")?;
+    let rid = link.attr("id")?;
+    let rel = rels.iter().find(|r| r.id == rid && r.kind == "hyperlink" && (r.external || r.target.starts_with('#')))?;
+    Some(DrawingHyperlink { target: rel.target.clone(), tooltip: link.attr("tooltip").map(str::to_string) })
+}
+
 pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(), IoError> {
     let Some(x) = cx.optional_xml(part)? else { return Ok(()) };
     let rels = cx.pkg.rels(part)?;
@@ -157,7 +166,15 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                     };
                     let alt = obj.path(&["nvPicPr", "cNvPr"]).and_then(|c| c.attr("descr")).unwrap_or("").to_string();
                     let id = cx.next_object_id();
-                    sheet.images.push(Image { id, anchor, data: data.into(), mime: mime_for(&target).to_string(), alt });
+                    sheet.images.push(Image {
+                        hyperlink: read_hyperlink(obj.path(&["nvPicPr", "cNvPr"]), &rels),
+                        name: obj.path(&["nvPicPr", "cNvPr"]).and_then(|p| p.attr("name")).map(str::to_string),
+                        id,
+                        anchor,
+                        data: data.into(),
+                        mime: mime_for(&target).to_string(),
+                        alt,
+                    });
                 }
                 "graphicFrame" => {
                     let Some(gd) = obj.path(&["graphic", "graphicData"]) else { continue };
@@ -188,7 +205,13 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                     }
                 }
                 "sp" | "cxnSp" => {
-                    if let Some(s) = read_shape(obj, anchor) {
+                    if let Some(mut s) = read_shape(obj, anchor) {
+                        s.hyperlink = read_hyperlink(obj.path(&["nvSpPr", "cNvPr"]).or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"])), &rels);
+                        s.name = obj
+                            .path(&["nvSpPr", "cNvPr"])
+                            .or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"]))
+                            .and_then(|p| p.attr("name"))
+                            .map(str::to_string);
                         let id = cx.next_object_id();
                         sheet.shapes.push(Shape { id, ..s });
                     }
@@ -230,7 +253,7 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
         .unwrap_or_default();
     let mut format = read_text_format(obj.child("txBody"));
     format.no_line = ln.is_some_and(|l| l.child("noFill").is_some());
-    Some(Shape { id: 0, kind, anchor, fill, line, text, format })
+    Some(Shape { hyperlink: None, name: None, id: 0, kind, anchor, fill, line, text, format })
 }
 
 /// A shape's text formatting: vertical anchor (`a:bodyPr anchor`), the first paragraph's
@@ -320,8 +343,15 @@ pub enum Obj<'a> {
     Shape(&'a Shape),
 }
 
-/// The drawing part for a sheet's objects (relationship ids already assigned).
-pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>]) -> String {
+fn write_hyperlink(link: Option<&DrawingHyperlink>, rels: &mut crate::write::Rels) -> String {
+    let Some(link) = link else { return String::new() };
+    let rid = if link.target.starts_with('#') { rels.add("hyperlink", &link.target) } else { rels.add_external("hyperlink", &link.target) };
+    let tooltip = link.tooltip.as_ref().map(|t| format!(" tooltip=\"{}\"", esc_attr(t))).unwrap_or_default();
+    format!("<a:hlinkClick r:id=\"{rid}\"{tooltip}/>")
+}
+
+/// The drawing part for a sheet's objects; adds click hyperlink relationships.
+pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], rels: &mut crate::write::Rels) -> String {
     let mut s = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">",
     );
@@ -330,13 +360,14 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>]) -> String {
         let close_tag;
         match o {
             Obj::Image(img, rid) => {
+                let link = write_hyperlink(img.hyperlink.as_ref(), rels);
+                let name = esc_attr(&img.name.clone().unwrap_or_else(|| format!("Picture {}", id - 1)));
                 let (open, close) = anchor_open(sheet, &img.anchor);
                 close_tag = close;
                 s.push_str(&open);
                 let _ = write!(
                     s,
-                    "<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"{id}\" name=\"Picture {}\" descr=\"{}\"/><xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>",
-                    id - 1,
+                    "<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"{id}\" name=\"{name}\" descr=\"{}\">{link}</xdr:cNvPr><xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>",
                     esc_attr(&img.alt),
                     xfrm(&img.anchor, "a:xfrm")
                 );
@@ -367,10 +398,12 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>]) -> String {
                 );
             }
             Obj::Shape(sh) => {
+                let link = write_hyperlink(sh.hyperlink.as_ref(), rels);
+                let name = esc_attr(&sh.name.clone().unwrap_or_else(|| format!("Shape {}", id - 1)));
                 let (open, close) = anchor_open(sheet, &sh.anchor);
                 close_tag = close;
                 s.push_str(&open);
-                if let Some(xml) = ink::write(sh, theme, id) {
+                if let Some(xml) = ink::write(sh, theme, id, &link) {
                     s.push_str(&xml);
                     s.push_str("<xdr:clientData/>");
                     s.push_str(close_tag);
@@ -387,8 +420,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>]) -> String {
                 };
                 let _ = write!(
                     s,
-                    "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"Shape {}\"/><xdr:cNvSpPr{}/></xdr:nvSpPr><xdr:spPr>{}<a:prstGeom prst=\"{prst}\"><a:avLst/></a:prstGeom>",
-                    id - 1,
+                    "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"{name}\">{link}</xdr:cNvPr><xdr:cNvSpPr{}/></xdr:nvSpPr><xdr:spPr>{}<a:prstGeom prst=\"{prst}\"><a:avLst/></a:prstGeom>",
                     if tx { " txBox=\"1\"" } else { "" },
                     xfrm(&sh.anchor, "a:xfrm")
                 );
