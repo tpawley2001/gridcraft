@@ -323,6 +323,30 @@ impl NumberFormat {
         (Formatted { text: out.text, color: sec.color, fill: out.fill, numeric: true }, false)
     }
 
+    /// `TEXT` of a negative value whose section shows only an elapsed time (`[h]`, `[m]`, `[s]`
+    /// with minutes, seconds and fractions, no date or AM/PM codes): Excel formats the absolute
+    /// value and puts a minus in front. `None` for anything else; cell display is unchanged.
+    fn negative_elapsed(&self, n: f64, sys: DateSystem) -> Option<String> {
+        if n >= 0.0 {
+            return None;
+        }
+        let (sec, drop_sign) = self.select(n)?;
+        if drop_sign || sec.kind != SecKind::Date {
+            return None;
+        }
+        let parts = || sec.toks.iter().filter_map(|t| if let Tok::Date(d) = t { Some(*d) } else { None });
+        let elapsed = |d: DatePart| matches!(d, DatePart::ElapsedH(_) | DatePart::ElapsedM(_) | DatePart::ElapsedS(_));
+        let allowed = |d: DatePart| elapsed(d) || matches!(d, DatePart::Minute(_) | DatePart::Second(_) | DatePart::SubSec(_));
+        if !parts().any(elapsed) || !parts().all(allowed) {
+            return None;
+        }
+        let mut out = render::render_date(sec, n.abs(), sys)?;
+        if !out.zero {
+            out.prepend("-");
+        }
+        Some(out.text)
+    }
+
     fn format_text(&self, t: &str) -> Formatted {
         match self.inner.text_section.and_then(|i| self.inner.sections.get(i)) {
             Some(sec) => {
@@ -450,6 +474,9 @@ pub fn text_function(v: &Value, code: &str, sys: DateSystem) -> Result<String, C
     if fmt.is_general() {
         // TEXT counts 11 characters without the sign and prefers fixed notation (Excel).
         return decimal::format_general_text(n).ok_or(CellError::Value);
+    }
+    if let Some(text) = fmt.negative_elapsed(n, sys) {
+        return Ok(text);
     }
     let (f, overflow) = fmt.format_number(n, sys);
     if overflow { Err(CellError::Value) } else { Ok(f.text) }
