@@ -42,6 +42,7 @@ mod table_dxfs;
 mod table_ids;
 mod trendline_roundtrip;
 mod volatile_dependencies;
+mod xls_autofilter_tests;
 mod xls_cf12_tests;
 mod xls_print_tests;
 mod xls_protection_tests;

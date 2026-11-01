@@ -9,10 +9,11 @@
 //! (cell-value and formula rules, and the Excel 2007+ kinds: colour scales, data bars, icon sets,
 //! top/bottom, above average and text/date templates), page setup (paper, orientation, scale, fit
 //! to page, margins, headers and footers, print options, manual page breaks), the sheet tab
-//! colour, sheet protection and workbook structure protection. Everything else (fonts, fills,
+//! colour, sheet protection, workbook structure protection and the sheet AutoFilter (range and criteria). Everything else (fonts, fills,
 //! borders, charts, pictures, comments, macros) is skipped with a warning.
 //! Encrypted workbooks and pre-BIFF8 versions are refused.
 
+mod autofilter;
 mod cond_format;
 pub(crate) mod formula;
 mod ftab;
@@ -197,7 +198,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
 
     // BoundSheet8 index → model sheet index.
     let mut model_index: Vec<Option<usize>> = Vec::with_capacity(g.sheets.len());
-    for bs in &g.sheets {
+    for (bound, bs) in g.sheets.iter().enumerate() {
         if bs.kind != 0 {
             report.warn(match bs.kind {
                 2 => "Chart sheets in .xls files are not imported yet and were skipped.",
@@ -208,7 +209,8 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
             continue;
         }
         wb.check_sheet_name(&bs.name, None).map_err(invalid)?;
-        let Some((mut sheet, calc)) = worksheet(&stream, bs, &g, &styles, &mut budget, &mut report)? else {
+        let filter = filter_database(&g, bound);
+        let Some((mut sheet, calc)) = worksheet(&stream, bs, filter, &g, &styles, &mut budget, &mut report)? else {
             report.warn("Dialog sheets and unreadable sheets were skipped.");
             model_index.push(None);
             continue;
@@ -493,6 +495,9 @@ struct SheetState<'g> {
     /// Conditional formats read so far.
     cond: cond_format::CondState,
     page: page_setup::PageState,
+    /// The AutoFilter records read so far: built when the substream ends, with the range the
+    /// `_FilterDatabase` name gives.
+    autofilter: autofilter::State,
 }
 
 impl SheetState<'_> {
@@ -608,6 +613,7 @@ pub(crate) fn blank_array_followers(st: &mut impl FormulaGroups, pending: &[Pend
 fn worksheet(
     stream: &[u8],
     bs: &BoundSheet,
+    filter: Option<RangeRef>,
     g: &Globals,
     styles: &[StyleId],
     budget: &mut Budget,
@@ -637,6 +643,7 @@ fn worksheet(
         calc: CalcSettings::default(),
         cond: cond_format::CondState::default(),
         page: page_setup::PageState::default(),
+        autofilter: autofilter::State::default(),
     };
     let mut depth = 1usize;
     while let Some(rec) = recs.next_record()? {
@@ -669,6 +676,7 @@ fn worksheet(
     blank_array_followers(&mut st, &pending);
     st.page.finish(&mut st.sheet.print);
     st.cond.finish(report);
+    st.sheet.autofilter = std::mem::take(&mut st.autofilter).finish(filter, report);
     if st.dropped > 0 {
         report.warn(format!("{} cells outside the grid were skipped.", st.dropped));
     }
@@ -885,6 +893,9 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x087A => st.cond.cf12(&c.rest(), &st.g.links, &mut st.sheet),
         0x087B => st.cond.cf_ex(&c.rest(), &mut st.sheet),
         0x01B8 => report.warn("Hyperlinks in .xls files are not imported yet."),
+        0x009D => autofilter::State::info(&mut c, st, report),
+        0x009E => autofilter::State::criterion(&mut c, st, report),
+        0x087E => autofilter::State::filter12(report),
         0x00B0 => report.warn("PivotTables in .xls files are not imported yet; their values were kept."),
         _ => {}
     }
@@ -933,6 +944,13 @@ fn formula_cell(c: &mut Cursor<'_, '_>, st: &mut SheetState<'_>, budget: &mut Bu
     }
     st.attach(pos, &f, Mode::Cell, None);
     Ok(())
+}
+
+/// The range of one worksheet's `_FilterDatabase` built-in name ([MS-XLS] 2.4.150), which is the
+/// range its AutoFilter filters. `sheet` is the BoundSheet8 index (the name's sheet scope).
+fn filter_database(g: &Globals, sheet: usize) -> Option<RangeRef> {
+    let lbl = g.names.iter().find(|l| l.builtin == Some(13) && l.scope == Some(sheet))?;
+    autofilter::filter_database(&lbl.rgce, &lbl.rgcb, &g.links)
 }
 
 fn defined_names(names: &[Lbl], links: &Links, model_index: &[Option<usize>], wb: &mut Workbook, report: &mut ReadReport) {
