@@ -3,7 +3,7 @@ use super::*;
 /// A part's relationships with full type URIs (Strict types translated to Transitional, which is
 /// what is saved). `Ok(vec![])` when it has none; an error when the rels part is damaged or too
 /// large (its part then can't be kept faithfully).
-fn raw_rels(cx: &mut Ctx<'_>, part: &str) -> Result<Vec<PreservedRel>, String> {
+pub(crate) fn raw_rels(cx: &mut Ctx<'_>, part: &str) -> Result<Vec<PreservedRel>, String> {
     let mut rels = rels_as_written(cx, part)?;
     for r in &mut rels {
         if let Cow::Owned(t) = strict_rel_type_to_transitional(&r.rel_type) {
@@ -844,7 +844,7 @@ fn push_fragment(out: &mut SheetScan, frag: &str, local: &[u8], decls: &[(String
 }
 
 /// Adds the root's namespace declarations a fragment doesn't declare itself.
-fn with_decls(frag: &str, decls: &[(String, String)]) -> String {
+pub(crate) fn with_decls(frag: &str, decls: &[(String, String)]) -> String {
     let Some(name_end) = frag.char_indices().skip(1).find(|(_, c)| c.is_whitespace() || *c == '/' || *c == '>').map(|(i, _)| i) else {
         return frag.to_string();
     };

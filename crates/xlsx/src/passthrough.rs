@@ -54,6 +54,7 @@ mod strict;
 mod write;
 
 pub use read::KeptReader;
+pub(crate) use read::{map_rel_ids, raw_rels, with_decls};
 pub use rebase::{SheetKept, rebase_links};
 pub use strict::strict_rel_type_to_transitional;
 use strict::{Untranslatable, is_xml_part, to_transitional};

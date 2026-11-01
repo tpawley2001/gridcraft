@@ -330,7 +330,8 @@ fn write_sheet_drawing(
             out.default_type(ext, image_content_type(ext));
             let file = out.image_part(ext, &img.data);
             let rid = drels.add("image", &format!("../media/{file}"));
-            objs.push(Obj::Image(img, rid));
+            let ext_list = crate::drawing::write_blip_ext(&img.blip_ext, &mut drels, out);
+            objs.push(Obj::Image(img, rid, ext_list));
         }
         for ch in &sheet.charts {
             out.charts += 1;
