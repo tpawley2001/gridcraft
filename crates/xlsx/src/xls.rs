@@ -6,13 +6,15 @@
 //! shared and array formulas), number formats, the 1904 date system, merged cells, column
 //! widths, row heights, defined names, print areas, print titles and the calculation settings
 //! (mode, iteration, precision as displayed), data validation and conditional formats
-//! (cell-value and formula rules). Everything else (fonts, fills, borders, charts, pictures,
+//! (cell-value and formula rules), page setup (paper, orientation, scale, fit to page, margins,
+//! headers and footers, print options, manual page breaks) and the sheet tab colour. Everything else (fonts, fills, borders, charts, pictures,
 //! comments, macros) is skipped with a warning.
 //! Encrypted workbooks and pre-BIFF8 versions are refused.
 
 mod cond_format;
 pub(crate) mod formula;
 mod ftab;
+mod page_setup;
 mod records;
 mod validation;
 
@@ -49,6 +51,8 @@ const BIFF8: u16 = 0x0600;
 /// WsBool (MS-XLS 2.4.351): its first byte's `fDialog` bit marks a dialog sheet, whose BOF says worksheet.
 const WSBOOL: u16 = 0x0081;
 const WSBOOL_DIALOG: u8 = 0x10;
+/// WsBool's second byte: `fFitToPage`.
+const WSBOOL_FIT_TO_PAGE: u8 = 0x01;
 
 pub(crate) fn invalid(msg: impl Into<String>) -> IoError {
     IoError::Format(format!("XLS: {}", msg.into()))
@@ -467,6 +471,7 @@ struct SheetState<'g> {
     cond_ranges: Option<Vec<RangeRef>>,
     /// Whether a conditional formatting rule was skipped (warned once per sheet).
     cond_skipped: bool,
+    page: page_setup::PageState,
 }
 
 impl SheetState<'_> {
@@ -610,6 +615,7 @@ fn worksheet(
         calc: CalcSettings::default(),
         cond_ranges: None,
         cond_skipped: false,
+        page: page_setup::PageState::default(),
     };
     let mut depth = 1usize;
     while let Some(rec) = recs.next_record()? {
@@ -629,6 +635,7 @@ fn worksheet(
             }
             _ if depth > 1 => continue,
             WSBOOL if rec.parts.first().and_then(|p| p.first()).is_some_and(|b| b & WSBOOL_DIALOG != 0) => return Ok(None),
+            WSBOOL => st.page.fit_to_page = rec.parts.first().and_then(|p| p.get(1)).is_some_and(|b| b & WSBOOL_FIT_TO_PAGE != 0),
             _ => {}
         }
         sheet_record(&rec, &mut st, budget, report)?;
@@ -638,6 +645,7 @@ fn worksheet(
     let pending = std::mem::take(&mut st.pending);
     resolve_pending(&mut st, &arrays, &shared, &pending);
     blank_array_followers(&mut st, &pending);
+    st.page.finish(&mut st.sheet.print);
     if st.cond_skipped {
         report.warn("Some conditional formatting rules in this .xls sheet could not be read and were skipped.");
     }
@@ -662,6 +670,9 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
     // A CondFmt's rules are the CF records right after it.
     if rec.id != 0x01B1 {
         st.cond_ranges = None;
+    }
+    if page_setup::read(rec, &mut st.sheet.print, &mut st.sheet.tab_color, &mut st.page, report) {
+        return Ok(());
     }
     match rec.id {
         0x0203 => {
