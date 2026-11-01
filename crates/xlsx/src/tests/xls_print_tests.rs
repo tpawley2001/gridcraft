@@ -167,11 +167,12 @@ fn xls_sheet_tab_colour() {
     assert_eq!(via_xlsx(&records).1, sh.tab_color);
     // 0x7F: no tab colour.
     assert_eq!(sheet(&ext(0x7F, &[])).0.tab_color, None);
-    // SheetExtOptional with an RGB CFColor: the RGB wins over the palette index.
-    let rgb = cat(&[&10u32.to_le_bytes(), &[0], &2u32.to_le_bytes(), &[0x12, 0x34, 0x56, 0xFF], &0f64.to_le_bytes(), &[0; 3]]);
+    // SheetExtOptional (cb 0x28: 4 bytes of icvPlain12 and flags, then a 16-byte CFColor) with an
+    // RGB CFColor: the RGB wins over the palette index.
+    let rgb = cat(&[&10u32.to_le_bytes(), &2u32.to_le_bytes(), &[0x12, 0x34, 0x56, 0xFF], &0f64.to_le_bytes()]);
     assert_eq!(sheet(&ext(10, &rgb)).0.tab_color, Some(Color::Rgb(0x123456)));
     // A theme CFColor is skipped: the palette index stands.
-    let theme = cat(&[&10u32.to_le_bytes(), &[0], &3u32.to_le_bytes(), &4u32.to_le_bytes(), &0f64.to_le_bytes(), &[0; 3]]);
+    let theme = cat(&[&10u32.to_le_bytes(), &3u32.to_le_bytes(), &4u32.to_le_bytes(), &0f64.to_le_bytes()]);
     assert_eq!(sheet(&ext(12, &theme)).0.tab_color, Some(Color::Rgb(0x0000FF)));
 }
 

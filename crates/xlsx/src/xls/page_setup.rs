@@ -208,9 +208,9 @@ fn sheet_ext(c: &mut Cursor<'_, '_>) -> Option<Option<Color>> {
     c.skip(12).ok()?;
     let cb = c.u32().ok()?;
     let plain = c.u32().ok()? & 0x7F;
-    if cb > 0x14 && c.remaining() >= 13 {
-        // SheetExtOptional: icvPlain12 (4 bytes), flags (1 byte), then the CFColor.
-        c.skip(5).ok()?;
+    if cb > 0x14 && c.remaining() >= 12 {
+        // SheetExtOptional: icvPlain12 and its flags (4 bytes), then the CFColor.
+        c.skip(4).ok()?;
         let kind = c.u32().ok()?;
         if kind == 2 {
             let (r, g, b) = (c.u8().ok()?, c.u8().ok()?, c.u8().ok()?);
