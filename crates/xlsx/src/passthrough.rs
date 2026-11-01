@@ -4,9 +4,10 @@
 //! relationship graph, per owner: the package root (custom document properties, ribbon
 //! customisation, add-in task panes, the sensitivity label), the workbook (custom XML, links to external workbooks with
 //! their `<externalReferences>`, data connections, XML maps) and each sheet (query tables, cells
-//! mapped to XML elements, form controls, ActiveX controls, OLE objects, the sheet background and
-//! printer settings, with the sheet's `<picture>`, `<oleObjects>` and `<controls>` XML, the `r:id`
-//! of `<pageSetup>`, the legacy VML shapes those controls need, the DrawingML anchors of the sheet's drawing
+//! mapped to XML elements, form controls, ActiveX controls, OLE objects, the sheet background,
+//! printer settings and worksheet custom properties (add-in tags such as `ORB_SHEETNAME`), with the
+//! sheet's `<customProperties>`, `<picture>`, `<oleObjects>` and `<controls>` XML, the `r:id` of
+//! `<pageSetup>`, the legacy VML shapes those controls need, the DrawingML anchors of the sheet's drawing
 //! wrapped in `mc:AlternateContent` that the drawing reader doesn't model (control shapes) and its SmartArt
 //! graphics with their diagram parts, and the
 //! pictures of the headers and footers, `&G`, with their `<legacyDrawingHF>`). The workbook also keeps its
@@ -112,6 +113,10 @@ const CALC_FEATURES_URI: &str = "{B58B0392-4F1F-4190-BB64-5DF3571DCE5F}";
 const NS_CALC_FEATURES: &str = "http://schemas.microsoft.com/office/spreadsheetml/2018/calcfeatures";
 /// Kept sheet elements, in schema order (all after `<legacyDrawing>`, before `<tableParts>`).
 const SHEET_SLOTS: &[&str] = &["legacyDrawingHF", "picture", "oleObjects", "controls"];
+/// Kept sheet elements that come before `<drawing>` in CT_Worksheet (after `<pageSetup>`).
+const SHEET_SLOTS_EARLY: &[&str] = &["customProperties"];
+/// The content type of a worksheet custom property part (ECMA-376 Part 1 §18.3.1.23).
+const CT_CUSTOM_PROPERTY: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.customProperty";
 
 /// Relationship kinds GridCraft reads and rewrites, or that depend on content it rewrites:
 /// kept content whose graph reaches one of them is dropped.
