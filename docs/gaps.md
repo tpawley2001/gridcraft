@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (§19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (§7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -77,8 +77,9 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 ### 7. Legacy `.xls` only partly read; encrypted workbooks can't be saved with a password (FF)
 - **Evidence:** #121: Excel 97-2003 (BIFF8) `.xls` files now open (values, formulas, number
-  formats, merges, sizes, names, data validation); fonts, fills, borders, charts, pictures, comments, conditional
-  formats and BIFF5 files are not read, and `.xls` is never written. Password-encrypted
+  formats, merges, sizes, names, data validation, conditional formats (cell-value and formula rules)); fonts,
+  fills, borders, charts, pictures, comments, Excel 2007+ conditional formats (CF12/CFEx)
+  and BIFF5 files are not read, and `.xls` is never written. Password-encrypted
   `.xlsx` workbooks (Agile and Standard encryption) open with their password since #11, but are
   saved without it: GridCraft can't write an encrypted file yet. Encrypted `.xls` (FILEPASS) and
   RC4-encrypted files are still refused with a message.
@@ -196,6 +197,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 |---|---|---|
 | 2026-11-01 | minor | §19: XLSB imports built-in and custom number formats, including formatted blanks; fonts, fills, borders and alignment remain unsupported |
 | 2026-11-01 | minor | §7: `.xls` imports data validation from DV records, including lists, formulas, prompts and ranges; rules survive Save As `.xlsx`. |
+| 2026-11-01 | minor | §7: `.xls` import reads conditional formatting (CondFmt/CF cell-value and formula rules); CF12/CFEx still skipped |
 | 2026-11-01 | minor | §19: XLSB import decodes cell formulas instead of keeping only their saved results; unsupported tokens keep the value with one warning |
 | 2026-11-01 | minor | Hidden DrawingML shapes, connectors, pictures and charts keep `cNvPr hidden` on save and are excluded from drawing, hit-testing, printing and automatic print ranges |
 | 2026-11-01 | minor | §3: worksheet custom properties and their binary parts survive XLSX saves with remapped relationships and distinct content types from printer settings |
