@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (§7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas including text constants; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas including text constants; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -22,6 +22,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - **Evidence:** round-trip tests cover our own files only (`crates/xlsx/src/tests/`); PivotTable
   round-trip noted as "unverified in real Excel" since 10-07; #64 (dynamic-array flag) shows the
   class of bug.
+- **Progress (2026-11-01):** saved table ids never collide with kept single mapped XML cell ids (Excel repair prompt).
 - **Impact:** the main format; a repair prompt or silent loss destroys trust.
 - **Estimate:** 15–25 h, plus owner time in Excel. [file-format-parity.md](file-format-parity.md)
 
@@ -205,6 +206,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 | 2026-11-01 | minor | §3, §17: XLSX keeps SmartArt graphics (the drawing anchor and its data, layout, style, colours and diagram drawing parts) on save; not shown yet |
 | 2026-11-01 | trivial | `gridcraft-cli check` treats fragment-only relationship targets as same-document references, avoiding false missing-part reports for internal drawing hyperlinks; duplicate ids and targets naming absent parts are still checked. |
 | 2026-11-01 | minor | XLSX `pageSetup scale="0"` keeps the default 100% and is omitted on save; nonzero scales keep the existing 10–400 clamp, and zero paper size keeps the default paper. |
+| 2026-11-01 | minor | Saved table ids are unique and never reuse a single mapped XML cell id (Excel repair prompt). |
 | 2026-10-31 | minor | G0004: closed XLSX object click hyperlink loss for shapes, text boxes and pictures; external URLs and workbook locations retained with tooltips |
 | 2026-10-24 | minor | §8: PivotTable Enable show details: `pivot.options` `enableShowDetails` turns Show Details off for a PivotTable, read and written in XLSX as `enableDrill` |
 | 2026-10-23 | minor | §8: PivotTable Show Details: double-clicking a value cell lists its source records on a new sheet (#2364) |
