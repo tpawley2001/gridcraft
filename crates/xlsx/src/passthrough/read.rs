@@ -1,8 +1,20 @@
 use super::*;
 
-/// A part's relationships with full type URIs. `Ok(vec![])` when it has none; an error when the
-/// rels part is damaged or too large (its part then can't be kept faithfully).
+/// A part's relationships with full type URIs (Strict types translated to Transitional, which is
+/// what is saved). `Ok(vec![])` when it has none; an error when the rels part is damaged or too
+/// large (its part then can't be kept faithfully).
 fn raw_rels(cx: &mut Ctx<'_>, part: &str) -> Result<Vec<PreservedRel>, String> {
+    let mut rels = rels_as_written(cx, part)?;
+    for r in &mut rels {
+        if let Cow::Owned(t) = strict_rel_type_to_transitional(&r.rel_type) {
+            r.rel_type = t;
+        }
+    }
+    Ok(rels)
+}
+
+/// [`raw_rels`] with the relationship types as the package spells them.
+fn rels_as_written(cx: &mut Ctx<'_>, part: &str) -> Result<Vec<PreservedRel>, String> {
     let name = rels_part_name(part);
     let bytes = match cx.pkg.read_limited(&name, MAX_META) {
         Ok(Some(b)) => b,
@@ -57,7 +69,10 @@ fn sheet_kind_label(se: &xml::El, wb_rels: &[PreservedRel]) -> &'static str {
 /// Collects kept content while a package is read.
 pub struct KeptReader {
     on: bool,
+    /// A Strict package: kept XML is translated to Transitional.
     strict: bool,
+    /// The warning about a Strict namespace with no Transitional spelling was given.
+    warned_unknown_namespace: bool,
     defaults: HashMap<String, String>,
     overrides: HashMap<String, String>,
     budget: usize,
@@ -69,15 +84,15 @@ impl KeptReader {
         let mut k = KeptReader {
             on: true,
             strict: false,
+            warned_unknown_namespace: false,
             defaults: HashMap::new(),
             overrides: HashMap::new(),
             budget: kept_total(),
             parts_left: MAX_KEPT_PARTS,
         };
-        if let Ok(root) = raw_rels(cx, "")
+        if let Ok(root) = rels_as_written(cx, "")
             && root.iter().any(|r| r.rel_type.starts_with("http://purl.oclc.org/"))
         {
-            k.on = false;
             k.strict = true;
         }
         match cx.pkg.read_limited("[Content_Types].xml", MAX_META).ok().flatten().and_then(|b| xml::parse(&b).ok()) {
@@ -96,6 +111,59 @@ impl KeptReader {
             None => k.on = false,
         }
         k
+    }
+
+    /// Kept XML of a Strict package (`name` names it in warnings) as Transitional; other content
+    /// unchanged. An error when it holds values Transitional can't express (the part is dropped).
+    fn transitional(&mut self, cx: &mut Ctx<'_>, name: &str, xml: String) -> Result<String, String> {
+        if !self.strict {
+            return Ok(xml);
+        }
+        match to_transitional(&xml) {
+            Ok(Cow::Borrowed(_)) => Ok(xml),
+            Ok(Cow::Owned(x)) => Ok(x),
+            Err(Untranslatable::UnknownNamespace(ns)) => {
+                if !self.warned_unknown_namespace {
+                    self.warned_unknown_namespace = true;
+                    cx.warn(format!(
+                        "{name} uses the Strict Open XML namespace {ns}, which has no Transitional equivalent known here; it is kept unchanged"
+                    ));
+                }
+                Ok(xml)
+            }
+            Err(Untranslatable::StrictValue) => Err(format!("{name} holds Strict Open XML values that can't be saved as Transitional")),
+            Err(Untranslatable::Damaged) => Err(format!("{name} could not be translated from Strict Open XML")),
+        }
+    }
+
+    /// [`Self::transitional`] for a kept part's bytes; binary parts are kept byte for byte.
+    fn transitional_part(&mut self, cx: &mut Ctx<'_>, name: &str, content_type: &str, data: Vec<u8>) -> Result<Vec<u8>, String> {
+        if !self.strict || !is_xml_part(name, content_type) {
+            return Ok(data);
+        }
+        let (bom, body) = match data.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+            Some(rest) => (true, rest),
+            None => (false, data.as_slice()),
+        };
+        let Ok(text) = std::str::from_utf8(body) else {
+            // UTF-16 (or not text): only a part with no Strict namespace can be kept as it is.
+            let decoded = xml::to_utf8(&data);
+            return if String::from_utf8_lossy(&decoded).contains("http://purl.oclc.org/") {
+                Err(format!("{name} could not be translated from Strict Open XML"))
+            } else {
+                Ok(data)
+            };
+        };
+        if !text.contains("http://purl.oclc.org/") {
+            return Ok(data);
+        }
+        let out = self.transitional(cx, name, text.to_string())?;
+        let mut bytes = Vec::with_capacity(out.len() + 3);
+        if bom {
+            bytes.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+        }
+        bytes.extend_from_slice(out.as_bytes());
+        Ok(bytes)
     }
 
     fn content_type(&self, part: &str) -> Option<String> {
@@ -139,6 +207,7 @@ impl KeptReader {
                 Ok(None) => return Err(format!("{name} is missing")),
                 Err(e) => return Err(e.to_string()),
             };
+            let data = self.transitional_part(cx, &name, &content_type, data)?;
             bytes = bytes.saturating_add(data.len());
             if bytes > self.budget {
                 return Err("it is too large".into());
@@ -206,9 +275,6 @@ impl KeptReader {
             for (_, se) in kept_sheet_entries(wb_xml, &wb_rels, file_to_model) {
                 let what = sheet_kind_label(se, &wb_rels);
                 cx.warn(format!("{what} \"{}\" was skipped and is not kept on save", se.attr("name").unwrap_or("")));
-            }
-            if self.strict {
-                cx.warn("unmodelled content of a Strict Open XML workbook (custom XML, links, controls…) is not kept on save");
             }
             return None;
         }
@@ -388,6 +454,13 @@ impl KeptReader {
             }
         }
         for (slot, x) in frags {
+            let x = match self.transitional(cx, &format!("sheet \"{name}\": {slot}"), x) {
+                Ok(x) => x,
+                Err(why) => {
+                    cx.warn(format!("sheet \"{name}\": {slot} were dropped: {why}"));
+                    continue;
+                }
+            };
             let mut ids = vec![];
             let ok = map_rel_ids(&x, &mut |id| {
                 ids.push(id.to_string());
@@ -438,6 +511,13 @@ impl KeptReader {
         };
         let mut smartart = false;
         for (index, xml, kind) in anchors {
+            let xml = match self.transitional(cx, &drawing.target, xml) {
+                Ok(x) => x,
+                Err(why) => {
+                    cx.warn(format!("sheet \"{name}\": a drawing object in a markup-compatibility block or a SmartArt graphic was dropped: {why}"));
+                    continue;
+                }
+            };
             let mut ids = vec![];
             let ok = map_rel_ids(&xml, &mut |id| {
                 ids.push(id.to_string());
@@ -515,6 +595,7 @@ impl KeptReader {
         self.budget = self.budget.saturating_sub(data.len());
         let text = String::from_utf8(data).map_err(|_| "the VML drawing is not UTF-8".to_string())?;
         let text = strip_notes(&text);
+        let text = self.transitional(cx, &rel.target, text)?;
         let vrels = raw_rels(cx, &rel.target)?;
         let mut q = Preserved::default();
         let roots: Vec<PreservedRel> = vrels.iter().filter(|r| !r.external).cloned().collect();

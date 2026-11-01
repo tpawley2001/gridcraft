@@ -32,6 +32,7 @@ mod sheet_data_pin;
 mod sheet_names;
 mod smartart_passthrough;
 mod smooth_roundtrip;
+mod strict_passthrough;
 mod table_dxfs;
 mod trendline_roundtrip;
 mod xls_tests;

@@ -24,7 +24,9 @@
 //! - Sheet content lives on the sheet: deleting the sheet drops it, Copy Sheet doesn't copy it.
 //!   Cell references inside kept parts (a control's linked cell, a query table's range, a cell
 //!   mapped to an XML element) are kept as they were, not adjusted to inserted or deleted rows.
-//! - Strict Open XML files are not passed through (their namespaces differ from what we write).
+//! - Strict Open XML files are passed through as Transitional (what is saved): relationship types
+//!   and the namespace declarations of kept XML are translated on read, binary parts are kept byte
+//!   for byte, and a part holding values only Strict allows is dropped with a warning.
 //! - Sizes are bounded: per part and per workbook.
 
 use std::borrow::Cow;
@@ -47,10 +49,13 @@ use crate::xml::{self, esc_attr};
 
 mod read;
 mod rebase;
+mod strict;
 mod write;
 
 pub use read::KeptReader;
 pub use rebase::{SheetKept, rebase_links};
+pub use strict::strict_rel_type_to_transitional;
+use strict::{Untranslatable, is_xml_part, to_transitional};
 #[cfg(test)]
 pub(crate) use write::sheet_names_in;
 pub use write::{KeptOut, SheetIds, WorkbookKept, workbook_elements, write_package_rels, write_workbook};
