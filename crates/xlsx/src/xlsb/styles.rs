@@ -1,7 +1,8 @@
 //! [MS-XLSB] styles part (2.1.7.50): number formats, fonts, fills, borders and the cell XFs that
-//! combine them with alignment and protection. Cell style XFs (BrtBeginCellStyleXFs) are not cell
-//! XFs and never contribute to cell style indices; ixfeParent inheritance, dxfs and gradient fills
-//! are not imported.
+//! combine them with alignment and protection, plus the named cell styles (BrtStyle) and the cell
+//! style XFs (BrtBeginCellStyleXFs) they point at. Cell style XFs are a separate list and never
+//! contribute to cell style indices; ixfeParent inheritance, dxfs and gradient fills are not
+//! imported.
 
 use std::collections::HashMap;
 
@@ -35,6 +36,9 @@ pub(super) struct Parsed {
     fills: Vec<Fill>,
     borders: Vec<Borders>,
     xfs: Vec<Xf>,
+    style_xfs: Vec<Xf>,
+    /// BrtStyle records in file order: index into `style_xfs` and the style name.
+    styles: Vec<(u32, String)>,
 }
 
 fn count(n: &mut usize, what: &str) -> Result<(), IoError> {
@@ -52,7 +56,7 @@ pub(super) fn parse(bytes: &[u8], budget: &mut Budget) -> Result<Parsed, IoError
     records.first(278, &mut ignored_report)?; // BrtBeginStyleSheet
     let mut out = Parsed::default();
     let mut block = None;
-    let (mut fmts, mut fonts, mut fills, mut borders, mut xfs) = (0, 0, 0, 0, 0);
+    let (mut fmts, mut fonts, mut fills, mut borders, mut xfs, mut styles) = (0, 0, 0, 0, 0, 0);
     while let Some((id, payload)) = records.next(&mut ignored_report)? {
         let mut b = Bytes::new(payload);
         match id {
@@ -63,14 +67,14 @@ pub(super) fn parse(bytes: &[u8], budget: &mut Budget) -> Result<Parsed, IoError
                 records.end(payload, &mut ignored_report)?;
                 return Ok(out);
             }
-            // Begin records of the fills, fonts, borders, formats, cell XF and cell style XF lists.
-            603 | 611 | 613 | 615 | 617 | 626 => {
+            // Begin records of the fills, fonts, borders, formats, cell XF, cell style XF and style lists.
+            603 | 611 | 613 | 615 | 617 | 619 | 626 => {
                 if block.is_some() {
                     return Err(invalid("nested styles block"));
                 }
                 block = Some(id);
             }
-            604 | 612 | 614 | 616 | 618 | 627 => {
+            604 | 612 | 614 | 616 | 618 | 620 | 627 => {
                 if block.take() != Some(id - 1) {
                     return Err(invalid("mismatched styles block end"));
                 }
@@ -105,8 +109,24 @@ pub(super) fn parse(bytes: &[u8], budget: &mut Budget) -> Result<Parsed, IoError
             }
             47 => {
                 count(&mut xfs, "XF")?;
-                if block == Some(617) {
-                    out.xfs.push(xf(&mut b)?);
+                match block {
+                    Some(617) => out.xfs.push(xf(&mut b)?),
+                    Some(626) => out.style_xfs.push(xf(&mut b)?),
+                    _ => {}
+                }
+            }
+            // BrtStyle: ixf, grbitObj1 (fBuiltIn, fHidden, fCustom), iStyBuiltIn, iLevel, stName.
+            48 => {
+                count(&mut styles, "style")?;
+                if block == Some(619) {
+                    let ixf = b.u32()?;
+                    b.u16()?; // grbitObj1
+                    b.u8()?; // iStyBuiltIn
+                    b.u8()?; // iLevel
+                    let name = b.text(MAX_TEXT.saturating_sub(budget.text) as u32)?;
+                    b.finish()?;
+                    budget.text(name.len())?;
+                    out.styles.push((ixf, name));
                 }
             }
             _ => {}
@@ -115,27 +135,45 @@ pub(super) fn parse(bytes: &[u8], budget: &mut Budget) -> Result<Parsed, IoError
     Err(invalid("missing styles end record"))
 }
 
-/// One interned style per cell XF, in XF order. Font, fill and border indices past their lists
-/// keep the default part.
-pub(super) fn build(parsed: Parsed, wb: &mut Workbook) -> Vec<StyleId> {
-    parsed
+/// One interned style per cell XF, in XF order, and the named cell styles (every BrtStyle except
+/// Normal, in file order) into `wb.cell_styles`. Font, fill and border indices past their lists
+/// keep the default part; a BrtStyle whose ixf is past the cell style XFs is skipped.
+pub(super) fn build(parsed: Parsed, wb: &mut Workbook, report: &mut ReadReport) -> Vec<StyleId> {
+    let cell_xfs = parsed
         .xfs
         .iter()
         .map(|xf| {
-            let code = if xf.fmt < 164 { crate::tables::builtin_format(u32::from(xf.fmt)) } else { parsed.formats.get(&xf.fmt).map(String::as_str) }
-                .unwrap_or("General");
-            let style = Style {
-                font: parsed.fonts.get(usize::from(xf.font)).cloned().unwrap_or_default(),
-                fill: parsed.fills.get(usize::from(xf.fill)).copied().unwrap_or_default(),
-                borders: parsed.borders.get(usize::from(xf.border)).copied().unwrap_or_default(),
-                align: xf.align,
-                num_fmt: if code.eq_ignore_ascii_case("General") { NumFmt::default() } else { NumFmt::new(code) },
-                protection: xf.protection,
-                ..Style::default()
-            };
+            let style = style(&parsed, xf);
             if style == Style::default() { StyleId::DEFAULT } else { wb.styles.intern(style) }
         })
-        .collect()
+        .collect();
+    let mut skipped = false;
+    for (ixf, name) in &parsed.styles {
+        match usize::try_from(*ixf).ok().and_then(|i| parsed.style_xfs.get(i)) {
+            Some(_) if name == "Normal" => {}
+            Some(xf) => wb.cell_styles.push((name.clone(), style(&parsed, xf))),
+            None => skipped = true,
+        }
+    }
+    if skipped {
+        report.warn("XLSB cell styles that point past the cell style formats were skipped.");
+    }
+    cell_xfs
+}
+
+/// The style an XF describes, built from the parsed fonts, fills, borders and number formats.
+fn style(parsed: &Parsed, xf: &Xf) -> Style {
+    let code = if xf.fmt < 164 { crate::tables::builtin_format(u32::from(xf.fmt)) } else { parsed.formats.get(&xf.fmt).map(String::as_str) }
+        .unwrap_or("General");
+    Style {
+        font: parsed.fonts.get(usize::from(xf.font)).cloned().unwrap_or_default(),
+        fill: parsed.fills.get(usize::from(xf.fill)).copied().unwrap_or_default(),
+        borders: parsed.borders.get(usize::from(xf.border)).copied().unwrap_or_default(),
+        align: xf.align,
+        num_fmt: if code.eq_ignore_ascii_case("General") { NumFmt::default() } else { NumFmt::new(code) },
+        protection: xf.protection,
+        ..Style::default()
+    }
 }
 
 /// BrtXF (2.4.862).

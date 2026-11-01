@@ -756,7 +756,7 @@ fn import_styles(
         styles::parse(&required(package, &rel.target)?, budget)
     };
     match parse() {
-        Ok(parsed) => styles::build(parsed, wb),
+        Ok(parsed) => styles::build(parsed, wb, report),
         Err(e) => {
             budget.text = text_before;
             report.warn(format!("XLSB styles could not be imported; default styles were used: {e}"));
