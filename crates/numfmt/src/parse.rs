@@ -473,7 +473,7 @@ fn analyze(raw: Raw) -> Section {
 }
 
 fn analyze_date(mut toks: Vec<Tok>, mut sec: Section) -> Section {
-    // m/mm after hours or before seconds means minutes.
+    // m/mm after hours or seconds, or before seconds, means minutes.
     for i in 0..toks.len() {
         let Some(Tok::Date(DatePart::Month(n))) = toks.get(i) else { continue };
         let n = *n;
@@ -482,13 +482,26 @@ fn analyze_date(mut toks: Vec<Tok>, mut sec: Section) -> Section {
         }
         let prev = toks.get(..i).and_then(|s| s.iter().rev().find_map(date_part));
         let next = toks.get(i + 1..).and_then(|s| s.iter().find_map(date_part));
-        let after_h = matches!(prev, Some(DatePart::Hour(_) | DatePart::ElapsedH(_)));
+        let after_h_or_s = matches!(prev, Some(DatePart::Hour(_) | DatePart::ElapsedH(_) | DatePart::Second(_) | DatePart::ElapsedS(_)));
         let before_s = matches!(next, Some(DatePart::Second(_) | DatePart::ElapsedS(_)));
-        if (after_h || before_s)
+        if (after_h_or_s || before_s)
             && let Some(t) = toks.get_mut(i)
         {
             *t = Tok::Date(DatePart::Minute(n));
         }
+    }
+    // Resolve minutes first, then apply each elapsed unit throughout this section.
+    // Reusing elapsed tokens also keeps fractional-second rounding consistent.
+    let elapsed_h = toks.iter().any(|t| matches!(t, Tok::Date(DatePart::ElapsedH(_))));
+    let elapsed_m = toks.iter().any(|t| matches!(t, Tok::Date(DatePart::ElapsedM(_))));
+    let elapsed_s = toks.iter().any(|t| matches!(t, Tok::Date(DatePart::ElapsedS(_))));
+    for t in &mut toks {
+        *t = match t {
+            Tok::Date(DatePart::Hour(n)) if elapsed_h => Tok::Date(DatePart::ElapsedH(*n)),
+            Tok::Date(DatePart::Minute(n)) if elapsed_m => Tok::Date(DatePart::ElapsedM(*n)),
+            Tok::Date(DatePart::Second(n)) if elapsed_s => Tok::Date(DatePart::ElapsedS(*n)),
+            _ => continue,
+        };
     }
     let mut out = Vec::with_capacity(toks.len());
     let mut i = 0;
