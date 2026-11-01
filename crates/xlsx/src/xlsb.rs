@@ -2,21 +2,24 @@
 //! <https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xlsb/acc8aa92-1f02-4167-99f5-84f9f676b95a>.
 //! Cell formulas are decoded with the shared BIFF token decoder; those it can't represent keep
 //! their saved result as a constant. Cell formatting (number formats, fonts, fills, borders,
-//! alignment and protection) is imported from the styles part; gradient fills, cell style
-//! inheritance, differential formats, macros and other workbook features are not run or imported.
+//! alignment and protection), column widths, row heights, hidden and outlined rows/columns, frozen
+//! panes, sheet view options and tab colours are imported; gradient fills, cell style inheritance,
+//! differential formats, macros and other workbook features are not run or imported.
 
 mod styles;
 
 use std::sync::Arc;
 
+use gridcraft_core::color::INDEXED;
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{Cell, Formula, Sheet, StyleId, Visibility, Workbook};
+use gridcraft_model::{Cell, Color, Formula, LineInfo, Sheet, StyleId, Visibility, Workbook};
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
 
 use crate::package::{Package, Rel, normalize, resolve, split_dir};
+use crate::tables::{col_width_to_px, pt_to_px};
 use crate::xls::formula::decode_xlsb;
 use crate::{IoError, ReadReport};
 use gridcraft_formula::Expr;
@@ -38,6 +41,9 @@ const MAX_CELLS: usize = 1_000_000;
 const MAX_STRINGS: usize = 1_000_000;
 const MAX_SHEETS: usize = 1024;
 const MAX_RECORDS: usize = 5_000_000;
+/// Most column-information cells one worksheet expands: overlapping BrtColInfo records repeat
+/// work even when the column map stays small.
+const MAX_COL_ASSIGNMENTS: u64 = 1_000_000;
 
 fn invalid(msg: impl Into<String>) -> IoError {
     IoError::Format(format!("XLSB: {}", msg.into()))
@@ -658,6 +664,9 @@ fn worksheet(
     let mut data_seen = false;
     let mut row = None;
     let mut col = None;
+    let mut col_budget = MAX_COL_ASSIGNMENTS;
+    let mut view_seen = false;
+    let mut in_first_view = false;
     while let Some((id, payload)) = records.next(report)? {
         let mut b = Bytes::new(payload);
         match id {
@@ -691,13 +700,17 @@ fn worksheet(
                 if r >= MAX_ROWS || row.is_some_and(|previous| r <= previous) {
                     return Err(invalid("row is out of bounds or unordered"));
                 }
-                b.take(9)?;
+                let ixfe = b.u32()?;
+                let height = b.u16()?;
+                let flags = b.u16()?;
+                b.take(1)?;
                 let spans = b.u32()?;
                 if spans > 16 {
                     return Err(invalid("too many row spans"));
                 }
                 b.take(spans as usize * 8)?;
                 b.finish()?;
+                row_layout(&mut sheet, r, ixfe, height, flags, styles);
                 row = Some(r);
                 col = None;
             }
@@ -748,8 +761,174 @@ fn worksheet(
                 }
                 sheet.merges.push(RangeRef::new(CellRef::new(r0, c0), CellRef::new(r1, c1)));
             }
+            60 => {
+                if col_info(&mut sheet, payload, styles, &mut col_budget).is_err() {
+                    report.warn("Malformed XLSB column information records were skipped.");
+                }
+            }
+            485 => {
+                if sheet_format(&mut sheet, payload).is_err() {
+                    report.warn("Malformed XLSB default row height and column width records were skipped.");
+                }
+            }
+            147 => {
+                if tab_color(&mut sheet, payload).is_err() {
+                    report.warn("Malformed XLSB sheet property records were skipped.");
+                }
+            }
+            137 => match sheet_view(&mut sheet, payload, view_seen) {
+                Ok(first) => {
+                    view_seen = true;
+                    in_first_view = first;
+                }
+                Err(_) => report.warn("Malformed XLSB sheet view records were skipped."),
+            },
+            138 => in_first_view = false,
+            151 if in_first_view && pane(&mut sheet, payload).is_err() => report.warn("Malformed XLSB pane records were skipped."),
             _ => {}
         }
     }
     Err(invalid("missing worksheet end record"))
+}
+
+/// Row height, visibility, outline and style from the BrtRowHdr fields after `rw`.
+fn row_layout(sheet: &mut Sheet, r: u32, ixfe: u32, height: u16, flags: u16, styles: &[StyleId]) {
+    let on = |bit: u16| flags & bit != 0;
+    let mut info = LineInfo { custom: on(0x2000), hidden: on(0x1000), ..LineInfo::default() };
+    let px = pt_to_px(f64::from(height) / 20.0);
+    if px > 0.0 && (info.custom || info.hidden || (px - sheet.default_row_height).abs() > 0.5) {
+        info.size = Some(px);
+    }
+    info.outline = ((flags >> 8) & 7) as u8;
+    info.collapsed = on(0x0800);
+    // fGhostDirty: the row carries its own format.
+    if on(0x4000) {
+        let style = styles.get(ixfe as usize).copied().unwrap_or(StyleId::DEFAULT);
+        if style != StyleId::DEFAULT {
+            info.style = Some(style);
+        }
+    }
+    if info != LineInfo::default() {
+        sheet.rows.insert(r, info);
+    }
+}
+
+/// BrtColInfo: colFirst, colLast, coldx (1/256 characters), ixfe and flags.
+fn col_info(sheet: &mut Sheet, payload: &[u8], styles: &[StyleId], budget: &mut u64) -> Result<(), IoError> {
+    let mut b = Bytes::new(payload);
+    let first = b.u32()?;
+    let last = b.u32()?.min(MAX_COLS - 1);
+    let width = b.u32()?;
+    let ixfe = b.u32()?;
+    let flags = b.u16()?;
+    if first > last {
+        return Err(invalid("invalid column range"));
+    }
+    let mut info = LineInfo::default();
+    let px = col_width_to_px(f64::from(width) / 256.0);
+    // fUserSet: a custom width equal to the default still pins the column.
+    if flags & 0x0002 != 0 || px != sheet.default_col_width {
+        info.size = Some(px);
+    }
+    info.hidden = flags & 0x0001 != 0;
+    info.outline = ((flags >> 8) & 7) as u8;
+    info.collapsed = flags & 0x1000 != 0;
+    let style = styles.get(ixfe as usize).copied().unwrap_or(StyleId::DEFAULT);
+    if style != StyleId::DEFAULT {
+        info.style = Some(style);
+    }
+    if info == LineInfo::default() {
+        return Ok(());
+    }
+    *budget = budget.checked_sub(u64::from(last - first) + 1).ok_or_else(|| invalid("too many column assignments"))?;
+    for c in first..=last {
+        sheet.cols.insert(c, info);
+    }
+    Ok(())
+}
+
+/// BrtWsFmtInfo: default column width (dxGCol, else cchDefColWidth) and default row height.
+fn sheet_format(sheet: &mut Sheet, payload: &[u8]) -> Result<(), IoError> {
+    let mut b = Bytes::new(payload);
+    let width = b.u32()?;
+    let chars = b.u16()?;
+    let height = b.u16()?;
+    let px = pt_to_px(f64::from(height) / 20.0);
+    if px > 0.0 {
+        sheet.default_row_height = px;
+    }
+    if width != u32::MAX {
+        let px = col_width_to_px(f64::from(width) / 256.0);
+        if px > 0.0 {
+            sheet.default_col_width = px;
+        }
+    } else {
+        // A base width in characters gets the cell padding, rounded up to whole 8 px steps.
+        let px = ((f64::from(chars).min(255.0) * 7.0 + 5.0) / 8.0).ceil() * 8.0;
+        sheet.default_col_width = px as f32;
+    }
+    Ok(())
+}
+
+/// BrtWsProp: the tab colour (BrtColor) follows three bytes of flags.
+fn tab_color(sheet: &mut Sheet, payload: &[u8]) -> Result<(), IoError> {
+    let mut b = Bytes::new(payload);
+    b.take(3)?;
+    let kind = b.u8()? >> 1;
+    let index = b.u8()?;
+    b.u16()?;
+    let rgb = b.take(3)?;
+    let rgb = rgb.iter().fold(0u32, |acc, &c| (acc << 8) | u32::from(c));
+    sheet.tab_color = match kind {
+        1 => INDEXED.get(usize::from(index)).map(|&c| Color::Rgb(c)),
+        2 => Some(Color::Rgb(rgb)),
+        _ => None,
+    };
+    Ok(())
+}
+
+/// BrtBeginWsView: display options of the first workbook view's sheet view. `Ok(true)` when
+/// this view was applied (its pane applies too).
+fn sheet_view(sheet: &mut Sheet, payload: &[u8], seen: bool) -> Result<bool, IoError> {
+    let mut b = Bytes::new(payload);
+    let flags = b.u16()?;
+    b.take(16)?; // xlView, rwTop, colLeft, icvHdr and reserved fields.
+    let zoom = b.u16()?;
+    b.take(6)?; // wScaleNormal, wScaleSLV, wScalePLV.
+    let book_view = b.u32()?;
+    if seen || book_view != 0 {
+        return Ok(false);
+    }
+    let on = |bit: u16| flags & bit != 0;
+    sheet.show_formulas = on(0x0002);
+    sheet.show_gridlines = on(0x0004);
+    sheet.show_headings = on(0x0008);
+    sheet.show_zeros = on(0x0010);
+    sheet.right_to_left = on(0x0020);
+    sheet.show_outline_symbols = on(0x0100);
+    sheet.zoom = if zoom == 0 { 100 } else { zoom.clamp(10, 400) };
+    Ok(true)
+}
+
+/// BrtPane: frozen panes keep their counts of frozen rows and columns; split panes are ignored.
+fn pane(sheet: &mut Sheet, payload: &[u8]) -> Result<(), IoError> {
+    let mut b = Bytes::new(payload);
+    let x = b.f64()?;
+    let y = b.f64()?;
+    let top = b.u32()?;
+    let left = b.u32()?;
+    b.u32()?; // pnnAcct.
+    let flags = b.u8()?;
+    if flags & 0x01 == 0 {
+        return Ok(());
+    }
+    let cols = x.clamp(0.0, f64::from(MAX_COLS - 1)) as u32;
+    let rows = y.clamp(0.0, f64::from(MAX_ROWS - 1)) as u32;
+    if rows > 0 || cols > 0 {
+        sheet.freeze = Some((rows, cols));
+        if top < MAX_ROWS && left < MAX_COLS {
+            sheet.view_top_left = CellRef::new(top, left);
+        }
+    }
+    Ok(())
 }

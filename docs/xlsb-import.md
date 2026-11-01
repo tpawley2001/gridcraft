@@ -4,7 +4,10 @@ Open an `.xlsb` file with File → Open, drag it onto GridCraft, or pass it to t
 GridCraft imports worksheet data into a new workbook and shows the conversion limits.
 
 The import reads worksheet names, visibility, numbers, text, booleans, errors and merged
-cells. Formula cells become their **last saved results**, not live formulas. Those results
+cells. It also keeps the sheet layout: column widths, row heights, hidden and outlined
+rows and columns, default column width and row height, frozen panes, gridlines, headings,
+zero display, right-to-left, zoom and RGB or indexed tab colours (theme tab colours and split
+panes are not imported). Formula cells become their **last saved results**, not live formulas. Those results
 may be out of date if the source application did not recalculate before saving.
 
 Source formatting is omitted: dates, times, percentages and currencies initially display as
