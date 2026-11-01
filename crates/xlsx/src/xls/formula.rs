@@ -270,8 +270,9 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
     decode_in(rgce, rgcb, base, mode, links, Grid::Biff8)
 }
 
-/// Decodes an XLSB cell formula's `rgce` at `base`. Tokens that need workbook tables (names,
-/// other sheets), shared or array formulas, strings and array constants are refused.
+/// Decodes an XLSB cell, shared or array formula's `rgce` at `base` (shared formulas'
+/// `PtgRefN` / `PtgAreaN` hold offsets from it). Tokens that need workbook tables (names, other
+/// sheets), a `PtgExp` (resolved by the reader), strings and array constants are refused.
 pub(crate) fn decode_xlsb(rgce: &[u8], base: CellRef) -> Result<Expr, Unsupported> {
     decode_in(rgce, &[], base, Mode::Cell, &Links::default(), Grid::Biff12)
 }
@@ -289,7 +290,7 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
         let mut kids = 0usize;
         // Operand classes (reference / value / array) share one token number.
         let id = if ptg & 0x60 != 0 { 0x20 | (ptg & 0x1F) } else { ptg };
-        if wide && matches!(id, 0x20 | 0x23 | 0x26 | 0x2C | 0x2D | 0x39 | 0x3A | 0x3B) {
+        if wide && matches!(id, 0x20 | 0x23 | 0x26 | 0x39 | 0x3A | 0x3B) {
             // Unsupported BIFF12 array/reference payloads, or lookups in tables this import doesn't read.
             return Err(Unsupported("XLSB formula token"));
         }
@@ -623,6 +624,26 @@ mod tests {
         // PtgRefErr / PtgAreaErr carry 6 / 12 unused bytes.
         let err = [&[0x2Au8][..], &[0; 6], &[0x2B], &[0; 12], &[0x10]].concat();
         assert_eq!(xlsb(&err, CellRef::new(0, 0)).unwrap(), "#REF!,#REF!");
+    }
+
+    #[test]
+    fn decodes_xlsb_relative_ptg_ref_n_and_area_n() {
+        // RgceLocRel / RgceAreaRel: a signed 32-bit row offset and a 14-bit column offset with
+        // the relative flags, resolved against the formula's cell and wrapped into the grid.
+        let rel = |row: i32, col: i16| [&row.to_le_bytes()[..], &((col as u16 & 0x3FFF) | 0xC000).to_le_bytes()].concat();
+        // Reference, value and array classes: one row up, one column left of B2 is A1.
+        for ptg in [0x2Cu8, 0x4C, 0x6C] {
+            assert_eq!(xlsb(&[&[ptg][..], &rel(-1, -1)].concat(), CellRef::new(1, 1)).unwrap(), "A1");
+        }
+        // Negative offsets past the edge wrap like Excel: one row above row 1 is the last row.
+        assert_eq!(xlsb(&[&[0x2Cu8][..], &rel(-1, -1)].concat(), CellRef::new(0, 0)).unwrap(), "XFD1048576");
+        // Mixed: absolute row 5 ($ kept), relative column +2.
+        let mixed = [&[0x2Cu8][..], &4u32.to_le_bytes(), &(2u16 | 0x4000).to_le_bytes()].concat();
+        assert_eq!(xlsb(&mixed, CellRef::new(0, 3)).unwrap(), "F$5");
+        // PtgAreaN: rows 0..+1 and the column one left of C3: B3:B4.
+        let area = [&[0x2Du8][..], &0i32.to_le_bytes(), &1i32.to_le_bytes(), &rel(0, -1)[4..], &rel(0, -1)[4..]].concat();
+        assert_eq!(xlsb(&[area.as_slice(), &[0x19, 0x10, 0, 0]].concat(), CellRef::new(2, 2)).unwrap(), "SUM(B3:B4)");
+        assert_eq!(xlsb(&[0x2D, 0, 0, 0], CellRef::new(0, 0)), Err(TRUNC));
     }
 
     #[test]

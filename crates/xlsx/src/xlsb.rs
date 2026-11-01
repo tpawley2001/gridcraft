@@ -1,13 +1,15 @@
 //! XLSB import of cell values and formulas, implemented from Microsoft's public MS-XLSB specification:
 //! <https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xlsb/acc8aa92-1f02-4167-99f5-84f9f676b95a>.
-//! Cell formulas are decoded with the shared BIFF token decoder; those it can't represent keep
-//! their saved result as a constant. Cell formatting (number formats, fonts, fills, borders,
-//! alignment and protection), column widths, row heights, hidden and outlined rows/columns, frozen
-//! panes, sheet view options and tab colours are imported; gradient fills, cell style inheritance,
-//! differential formats, macros and other workbook features are not run or imported.
+//! Cell, shared and array formulas are decoded with the shared BIFF token decoder; those it can't
+//! represent keep their saved result as a constant. Cell formatting (number formats, fonts, fills,
+//! borders, alignment and protection), column widths, row heights, hidden and outlined
+//! rows/columns, frozen panes, sheet view options and tab colours are imported; gradient fills,
+//! cell style inheritance, differential formats, macros and other workbook features are not run or
+//! imported.
 
 mod styles;
 
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use gridcraft_core::color::INDEXED;
@@ -21,6 +23,7 @@ use quick_xml::name::ResolveResult;
 use crate::package::{Package, Rel, normalize, resolve, split_dir};
 use crate::tables::{col_width_to_px, pt_to_px};
 use crate::xls::formula::decode_xlsb;
+use crate::xls::{FormulaGroups, MAX_SHARED_ATTACHES, Parsed, Pending, blank_array_followers, resolve_pending};
 use crate::{IoError, ReadReport};
 use gridcraft_formula::Expr;
 
@@ -140,7 +143,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     }
     if budget.formulas_kept > 0 {
         report.warn(format!(
-            "{} XLSB formula(s) use features that can't be imported yet (shared or array formulas, defined names, other sheets, array constants); they were kept as their saved results and will not recalculate.",
+            "{} XLSB formula(s) use features that can't be imported yet (defined names, other sheets, array constants); they were kept as their saved results and will not recalculate.",
             budget.formulas_kept
         ));
     }
@@ -598,14 +601,124 @@ fn boolean(b: &mut Bytes<'_>) -> Result<bool, IoError> {
 /// tokens (`rgce`); the extra data (`rgcb`) is only used by tokens the decoder refuses.
 fn cached_formula<'a>(b: &mut Bytes<'a>) -> Result<&'a [u8], IoError> {
     b.take(2)?;
+    Ok(parsed_formula(b)?.0)
+}
+/// A parsed formula's `cce`, `rgce`, `cb` and `rgcb` (`CellParsedFormula`,
+/// `SharedParsedFormula`, `ArrayParsedFormula`): the tokens and their extra data.
+fn parsed_formula<'a>(b: &mut Bytes<'a>) -> Result<(&'a [u8], &'a [u8]), IoError> {
     let cce = b.u32()?;
     if !(1..=16384).contains(&cce) {
         return Err(invalid("invalid formula token length"));
     }
     let rgce = b.take(cce as usize)?;
     let extra = b.u32()?;
-    b.take(extra as usize)?;
-    Ok(rgce)
+    Ok((rgce, b.take(extra as usize)?))
+}
+/// The anchor row of a formula that is exactly a `PtgExp` (0x01 then a 4-byte row,
+/// [MS-XLSB] 2.5.98.40): the cell is part of the shared or array formula in that row.
+fn exp_row(rgce: &[u8]) -> Option<u32> {
+    match rgce {
+        [0x01, a, b, c, d] => Some(u32::from_le_bytes([*a, *b, *c, *d])),
+        _ => None,
+    }
+}
+/// An `RfX` range (rwFirst, rwLast, colFirst, colLast); `None` when it isn't a range of the grid.
+fn rfx(b: &mut Bytes<'_>) -> Result<Option<RangeRef>, IoError> {
+    let (r0, r1, c0, c1) = (b.u32()?, b.u32()?, b.u32()?, b.u32()?);
+    if r0 > r1 || c0 > c1 || r1 >= MAX_ROWS || c1 >= MAX_COLS {
+        return Ok(None);
+    }
+    Ok(Some(RangeRef::new(CellRef::new(r0, c0), CellRef::new(r1, c1))))
+}
+
+/// A worksheet's shared (`BrtShrFmla`) and array (`BrtArrFmla`) formulas, and the cells that
+/// refer to them through `PtgExp`. The records follow the first cell that uses them, so they
+/// are resolved once the sheet has been read, by the same code as `.xls`.
+#[derive(Default)]
+struct Groups {
+    pending: Vec<(CellRef, u32)>,
+    shared: HashMap<CellRef, Parsed>,
+    arrays: HashMap<CellRef, (RangeRef, Parsed)>,
+    /// Shared and array ranges by first row, then first column.
+    starts: HashMap<u32, BTreeMap<u32, RangeRef>>,
+    invalid: bool,
+}
+
+impl Groups {
+    fn add(&mut self, range: Option<RangeRef>, rgce: &[u8], rgcb: &[u8], array: bool) {
+        let Some(range) = range else {
+            self.invalid = true;
+            return;
+        };
+        let p = Parsed { rgce: rgce.to_vec(), rgcb: rgcb.to_vec() };
+        if array {
+            self.arrays.insert(range.start, (range, p));
+        } else {
+            self.shared.insert(range.start, p);
+        }
+        self.starts.entry(range.start.row).or_default().insert(range.start.col, range);
+    }
+
+    /// The anchor of a cell's `PtgExp`: the first cell of the range that starts in that row
+    /// and holds the cell (the cell's own row and column when there is none).
+    fn anchor(&self, pos: CellRef, row: u32) -> CellRef {
+        self.starts
+            .get(&row)
+            .and_then(|cols| cols.range(..=pos.col).next_back())
+            .map(|(_, r)| *r)
+            .filter(|r| r.contains(pos))
+            .map_or(CellRef::new(row, pos.col), |r| r.start)
+    }
+
+    /// Attaches the formulas the sheet's `PtgExp` cells refer to; the others keep their saved
+    /// values and count as kept.
+    fn resolve(self, sheet: &mut Sheet, budget: &mut Budget, report: &mut ReadReport) {
+        if self.invalid {
+            report.warn("Invalid XLSB shared or array formula ranges were skipped; their cells kept their saved results.");
+        }
+        let pending: Vec<Pending> = self.pending.iter().map(|&(pos, row)| Pending { pos, anchor: self.anchor(pos, row) }).collect();
+        let mut target = Target { sheet };
+        if resolve_pending(&mut target, &self.arrays, &self.shared, &pending) >= MAX_SHARED_ATTACHES {
+            report.warn("An XLSB sheet has more shared formulas than can be expanded; the rest kept their saved results.");
+        }
+        let sheet = target.sheet;
+        let array_of = |pos: CellRef| sheet.cell(pos).and_then(|c| c.formula.as_ref()).and_then(|f| f.array);
+        budget.formulas_kept += pending
+            .iter()
+            .filter(|p| {
+                let own = sheet.cell(p.pos).is_some_and(|c| c.formula.is_some());
+                !own && !array_of(p.anchor).is_some_and(|r| r.contains(p.pos))
+            })
+            .count();
+        blank_array_followers(&mut Target { sheet }, &pending);
+    }
+}
+
+/// The sheet shared and array formulas are attached to.
+struct Target<'a> {
+    sheet: &'a mut Sheet,
+}
+
+impl FormulaGroups for Target<'_> {
+    fn sheet(&self) -> &Sheet {
+        self.sheet
+    }
+    fn sheet_mut(&mut self) -> &mut Sheet {
+        self.sheet
+    }
+    fn attach_group(&mut self, pos: CellRef, p: &Parsed, _shared: bool, array: Option<RangeRef>) {
+        // Shared formulas use PtgRefN / PtgAreaN, which the decoder resolves against `pos`.
+        let Ok(Some(mut f)) = formula(&p.rgce, pos) else { return };
+        f.array = array.filter(|r| !r.is_single());
+        if let Some(cell) = self.sheet.cells.get_mut(pos) {
+            cell.formula = Some(Arc::new(f));
+        } else {
+            self.sheet.cells.set(pos, Cell { value: Value::Empty, formula: Some(Arc::new(f)), style: StyleId::DEFAULT });
+        }
+    }
+    fn refuse(&mut self, _why: &'static str) {
+        // Counted per cell once the sheet is resolved.
+    }
 }
 /// A cell's value and, for formula cells, the formula's tokens.
 fn value<'a>(id: u16, b: &mut Bytes<'a>, strings: &[Arc<str>], budget: &mut Budget) -> Result<(Value, Option<&'a [u8]>), IoError> {
@@ -667,6 +780,7 @@ fn worksheet(
     let mut col_budget = MAX_COL_ASSIGNMENTS;
     let mut view_seen = false;
     let mut in_first_view = false;
+    let mut groups = Groups::default();
     while let Some((id, payload)) = records.next(report)? {
         let mut b = Bytes::new(payload);
         match id {
@@ -675,6 +789,7 @@ fn worksheet(
                     return Err(invalid("incomplete worksheet data"));
                 }
                 records.end(payload, report)?;
+                groups.resolve(&mut sheet, budget, report);
                 return Ok(sheet);
             }
             145 => {
@@ -728,7 +843,11 @@ fn worksheet(
                 let (value, rgce) = value(id, &mut b, strings, budget)?;
                 b.finish()?;
                 let pos = CellRef::new(r, c);
-                let formula = rgce.and_then(|rgce| {
+                let exp = rgce.and_then(exp_row);
+                if let Some(anchor_row) = exp {
+                    groups.pending.push((pos, anchor_row));
+                }
+                let formula = rgce.filter(|_| exp.is_none()).and_then(|rgce| {
                     formula(rgce, pos).unwrap_or_else(|()| {
                         budget.formulas_kept += 1;
                         None
@@ -742,6 +861,16 @@ fn worksheet(
                     sheet.cells.set(pos, cell);
                 }
                 col = Some(c);
+            }
+            426 | 427 => {
+                // BrtArrFmla: RfX, flags, ArrayParsedFormula; BrtShrFmla: RfX, SharedParsedFormula.
+                let range = rfx(&mut b)?;
+                if id == 426 {
+                    b.u8()?;
+                }
+                let (rgce, rgcb) = parsed_formula(&mut b)?;
+                b.finish()?;
+                groups.add(range, rgce, rgcb, id == 426);
             }
             176 => {
                 if data {
