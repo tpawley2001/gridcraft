@@ -517,6 +517,7 @@ impl KeptReader {
             }
         };
         let mut smartart = false;
+        let mut group = false;
         for (index, xml, kind) in anchors {
             let xml = match self.transitional(cx, &drawing.target, xml) {
                 Ok(x) => x,
@@ -539,7 +540,9 @@ impl KeptReader {
             {
                 roots.push(r);
             }
+            let unsupported = if kind == AnchorKind::Group { group_unsupported(&xml) } else { None };
             let kept = match (ok, roots) {
+                _ if unsupported.is_some() => Err(unsupported.unwrap_or_default().to_string()),
                 (false, _) => Err("its XML is damaged".to_string()),
                 (_, None) => Err("it refers to a missing relationship".to_string()),
                 (true, Some(_)) if xml.len() > self.budget => Err("it is too large".to_string()),
@@ -556,15 +559,20 @@ impl KeptReader {
                     }
                     p.anchors.push(PreservedAnchor { index, xml });
                     smartart |= kind == AnchorKind::SmartArt;
+                    group |= kind == AnchorKind::Group;
                 }
                 Err(why) => match kind {
                     AnchorKind::Control => cx.warn(format!("sheet \"{name}\": a drawing object in a markup-compatibility block was dropped: {why}")),
                     AnchorKind::SmartArt => cx.warn(format!("sheet \"{name}\": a SmartArt graphic was dropped: {why}")),
+                    AnchorKind::Group => cx.warn(format!("sheet \"{name}\": a group of drawing objects was dropped: {why}")),
                 },
             }
         }
         if smartart {
             cx.warn(format!("sheet \"{name}\": SmartArt graphics are not shown; they are kept for saving"));
+        }
+        if group {
+            cx.warn(format!("sheet \"{name}\": grouped drawing objects are not shown; they are kept for saving"));
         }
     }
 
@@ -724,10 +732,15 @@ enum AnchorKind {
     Control,
     /// An anchor whose graphic frame is a SmartArt graphic (ECMA-376 Part 1 §21.4).
     SmartArt,
+    /// An anchor whose object is a group of drawing objects (`xdr:grpSp`, ECMA-376 Part 1 §20.5.2.17).
+    Group,
 }
 
 /// The `graphicData` URI of a SmartArt graphic.
 const URI_DIAGRAM: &str = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
+/// The `graphicData` URIs of charts.
+const URI_CHART: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+const URI_CHARTEX: &str = "http://schemas.microsoft.com/office/drawing/2014/chartex";
 
 /// Whether an anchor fragment (`twoCellAnchor`, `oneCellAnchor`, `absoluteAnchor`) holds a
 /// SmartArt graphic frame.
@@ -741,6 +754,33 @@ fn is_smartart_anchor(frag: &str) -> bool {
         .filter(|c| c.name == "graphicFrame")
         .filter_map(|c| c.path(&["graphic", "graphicData"]))
         .any(|gd| gd.attr("uri") == Some(URI_DIAGRAM))
+}
+
+/// Whether an anchor fragment's object (the child after `from`/`to`/`pos`/`ext`) is a group.
+fn is_group_anchor(frag: &str) -> bool {
+    if !frag.contains("grpSp") {
+        return false;
+    }
+    let Ok(el) = xml::parse(frag.as_bytes()) else { return false };
+    el.children.iter().find(|c| !matches!(c.name.as_str(), "from" | "to" | "pos" | "ext")).is_some_and(|c| c.name == "grpSp")
+}
+
+/// Why a kept group can't be kept as it is: it holds a chart or a SmartArt graphic, whose parts
+/// the writer would not know about. `None` when it holds neither.
+fn group_unsupported(frag: &str) -> Option<&'static str> {
+    let Ok(el) = xml::parse(frag.as_bytes()) else { return Some("its XML is damaged") };
+    let mut stack = vec![&el];
+    while let Some(e) = stack.pop() {
+        if e.name == "graphicData" {
+            match e.attr("uri") {
+                Some(URI_CHART) | Some(URI_CHARTEX) => return Some("it contains a chart"),
+                Some(URI_DIAGRAM) => return Some("it contains a SmartArt graphic"),
+                _ => {}
+            }
+        }
+        stack.extend(e.children.iter());
+    }
+    None
 }
 
 /// The `relId` of a diagram data part's `dsp:dataModelExt` (the diagram drawing relationship).
@@ -801,6 +841,7 @@ fn scan_drawing(bytes: &[u8]) -> Option<Vec<(usize, String, AnchorKind)>> {
                     let kind = match local.as_slice() {
                         b"AlternateContent" => Some(AnchorKind::Control),
                         b"twoCellAnchor" | b"oneCellAnchor" | b"absoluteAnchor" if is_smartart_anchor(frag) => Some(AnchorKind::SmartArt),
+                        b"twoCellAnchor" | b"oneCellAnchor" | b"absoluteAnchor" if is_group_anchor(frag) => Some(AnchorKind::Group),
                         _ => None,
                     };
                     if let Some(kind) = kind {
@@ -1016,4 +1057,32 @@ fn map_start(e: &BytesStart<'_>, prefixes: &mut HashSet<Vec<u8>>, map: &mut dyn 
         }
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+
+    const GROUP: &str =
+        r#"<xdr:twoCellAnchor xmlns:xdr="x" xmlns:a="a"><xdr:from/><xdr:to/><xdr:grpSp><xdr:sp/>{}</xdr:grpSp><xdr:clientData/></xdr:twoCellAnchor>"#;
+
+    fn group_with(inner: &str) -> String {
+        GROUP.replace("{}", inner)
+    }
+
+    #[test]
+    fn group_anchor_is_recognised_by_its_object() {
+        assert!(is_group_anchor(&group_with("")));
+        // A shape whose name mentions grpSp is not a group.
+        assert!(!is_group_anchor(r#"<xdr:oneCellAnchor xmlns:xdr="x"><xdr:from/><xdr:ext/><xdr:sp name="grpSp"/></xdr:oneCellAnchor>"#));
+    }
+
+    #[test]
+    fn group_with_chart_or_smartart_is_not_kept() {
+        assert_eq!(group_unsupported(&group_with("")), None);
+        let frame = |uri: &str| format!(r#"<xdr:graphicFrame><a:graphic><a:graphicData uri="{uri}"/></a:graphic></xdr:graphicFrame>"#);
+        assert_eq!(group_unsupported(&group_with(&frame(URI_CHART))), Some("it contains a chart"));
+        let nested = group_with(&format!("<xdr:grpSp>{}</xdr:grpSp>", frame(URI_DIAGRAM)));
+        assert_eq!(group_unsupported(&nested), Some("it contains a SmartArt graphic"));
+    }
 }
