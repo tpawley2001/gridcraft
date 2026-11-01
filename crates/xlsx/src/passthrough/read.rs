@@ -412,15 +412,18 @@ impl KeptReader {
         }
     }
 
-    /// The anchors of the sheet's drawing part wrapped in `mc:AlternateContent` (form and ActiveX
-    /// control shapes, which the drawing reader does not model), with the parts they refer to.
+    /// The anchors of the sheet's drawing part the drawing reader does not model (form and ActiveX
+    /// control shapes wrapped in `mc:AlternateContent`, SmartArt graphics), with the parts they
+    /// refer to.
     fn drawing_anchors(&mut self, cx: &mut Ctx<'_>, name: &str, drawing: &PreservedRel, p: &mut Preserved, seen: &mut HashSet<String>) {
         let anchors = match cx.pkg.read_limited(&drawing.target, MAX_META) {
             Ok(Some(bytes)) => scan_drawing(&bytes),
             _ => return,
         };
         let Some(anchors) = anchors else {
-            cx.warn(format!("sheet \"{name}\": drawing objects in markup-compatibility blocks could not be read and were dropped"));
+            cx.warn(format!(
+                "sheet \"{name}\": drawing objects in markup-compatibility blocks and SmartArt graphics could not be read and were dropped"
+            ));
             return;
         };
         if anchors.is_empty() {
@@ -429,18 +432,26 @@ impl KeptReader {
         let drels = match raw_rels(cx, &drawing.target) {
             Ok(r) => r,
             Err(e) => {
-                cx.warn(format!("sheet \"{name}\": drawing objects in markup-compatibility blocks were dropped ({e})"));
+                cx.warn(format!("sheet \"{name}\": drawing objects in markup-compatibility blocks and SmartArt graphics were dropped ({e})"));
                 return;
             }
         };
-        for (index, xml) in anchors {
+        let mut smartart = false;
+        for (index, xml, kind) in anchors {
             let mut ids = vec![];
             let ok = map_rel_ids(&xml, &mut |id| {
                 ids.push(id.to_string());
                 Some(id.to_string())
             })
             .is_some();
-            let roots: Option<Vec<PreservedRel>> = ids.iter().map(|id| drels.iter().find(|r| r.id == *id).cloned()).collect();
+            let mut roots: Option<Vec<PreservedRel>> = ids.iter().map(|id| drels.iter().find(|r| r.id == *id).cloned()).collect();
+            if kind == AnchorKind::SmartArt
+                && let Some(roots) = roots.as_mut()
+                && let Some(r) = self.diagram_drawing(cx, roots, &drels)
+                && !roots.iter().any(|x| x.id == r.id)
+            {
+                roots.push(r);
+            }
             let kept = match (ok, roots) {
                 (false, _) => Err("its XML is damaged".to_string()),
                 (_, None) => Err("it refers to a missing relationship".to_string()),
@@ -457,10 +468,26 @@ impl KeptReader {
                         }
                     }
                     p.anchors.push(PreservedAnchor { index, xml });
+                    smartart |= kind == AnchorKind::SmartArt;
                 }
-                Err(why) => cx.warn(format!("sheet \"{name}\": a drawing object in a markup-compatibility block was dropped: {why}")),
+                Err(why) => match kind {
+                    AnchorKind::Control => cx.warn(format!("sheet \"{name}\": a drawing object in a markup-compatibility block was dropped: {why}")),
+                    AnchorKind::SmartArt => cx.warn(format!("sheet \"{name}\": a SmartArt graphic was dropped: {why}")),
+                },
             }
         }
+        if smartart {
+            cx.warn(format!("sheet \"{name}\": SmartArt graphics are not shown; they are kept for saving"));
+        }
+    }
+
+    /// The drawing relationship of a SmartArt graphic's pre-rendered shapes (the diagram drawing
+    /// part): its id is not in the anchor but in the data part's `dsp:dataModelExt relId`.
+    fn diagram_drawing(&self, cx: &mut Ctx<'_>, roots: &[PreservedRel], drels: &[PreservedRel]) -> Option<PreservedRel> {
+        let data = roots.iter().find(|r| !r.external && is_kind(r, &["diagramData"]))?;
+        let bytes = cx.pkg.read_limited(&data.target, MAX_META).ok()??;
+        let id = data_model_ext_rel_id(&bytes)?;
+        drels.iter().find(|r| r.id == id && !r.external).cloned()
     }
 
     /// The sheet's VML drawing without its notes (GridCraft writes those), and the parts its
@@ -570,9 +597,57 @@ fn scan_sheet(bytes: &[u8]) -> Option<SheetScan> {
     Some(out)
 }
 
-/// The `mc:AlternateContent` children of a drawing part's root, each with its position among the
-/// root's children and the root's namespace declarations added. `None` when the XML is damaged.
-fn scan_drawing(bytes: &[u8]) -> Option<Vec<(usize, String)>> {
+/// What a kept drawing anchor holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AnchorKind {
+    /// An `mc:AlternateContent` block (form and ActiveX control shapes).
+    Control,
+    /// An anchor whose graphic frame is a SmartArt graphic (ECMA-376 Part 1 §21.4).
+    SmartArt,
+}
+
+/// The `graphicData` URI of a SmartArt graphic.
+const URI_DIAGRAM: &str = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
+
+/// Whether an anchor fragment (`twoCellAnchor`, `oneCellAnchor`, `absoluteAnchor`) holds a
+/// SmartArt graphic frame.
+fn is_smartart_anchor(frag: &str) -> bool {
+    if !frag.contains(URI_DIAGRAM) {
+        return false;
+    }
+    let Ok(el) = xml::parse(frag.as_bytes()) else { return false };
+    el.children
+        .iter()
+        .filter(|c| c.name == "graphicFrame")
+        .filter_map(|c| c.path(&["graphic", "graphicData"]))
+        .any(|gd| gd.attr("uri") == Some(URI_DIAGRAM))
+}
+
+/// The `relId` of a diagram data part's `dsp:dataModelExt` (the diagram drawing relationship).
+fn data_model_ext_rel_id(bytes: &[u8]) -> Option<String> {
+    let data = xml::to_utf8(bytes);
+    let text = std::str::from_utf8(&data).ok()?;
+    let mut reader = Reader::from_str(text);
+    loop {
+        match reader.read_event().ok()? {
+            Event::Eof => return None,
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"dataModelExt" => {
+                return e
+                    .attributes()
+                    .with_checks(false)
+                    .flatten()
+                    .find(|a| a.key.as_ref() == b"relId")
+                    .and_then(|a| String::from_utf8(a.value.to_vec()).ok());
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The children of a drawing part's root GridCraft keeps as they are (`mc:AlternateContent`
+/// blocks and SmartArt anchors), each with its position among the root's children and the root's
+/// namespace declarations added. `None` when the XML is damaged.
+fn scan_drawing(bytes: &[u8]) -> Option<Vec<(usize, String, AnchorKind)>> {
     let data = xml::to_utf8(bytes);
     let text = std::str::from_utf8(&data).ok()?;
     let mut reader = Reader::from_str(text);
@@ -601,8 +676,16 @@ fn scan_drawing(bytes: &[u8]) -> Option<Vec<(usize, String)>> {
                 let local = e.local_name().as_ref().to_vec();
                 reader.read_to_end(e.name()).ok()?;
                 let end = usize::try_from(reader.buffer_position()).ok()?;
-                if local == b"AlternateContent" && end.saturating_sub(start) <= MAX_FRAGMENT {
-                    out.push((index, with_decls(text.get(start..end)?, &decls)));
+                if end.saturating_sub(start) <= MAX_FRAGMENT {
+                    let frag = text.get(start..end)?;
+                    let kind = match local.as_slice() {
+                        b"AlternateContent" => Some(AnchorKind::Control),
+                        b"twoCellAnchor" | b"oneCellAnchor" | b"absoluteAnchor" if is_smartart_anchor(frag) => Some(AnchorKind::SmartArt),
+                        _ => None,
+                    };
+                    if let Some(kind) = kind {
+                        out.push((index, with_decls(frag, &decls), kind));
+                    }
                 }
                 index = index.saturating_add(1);
             }

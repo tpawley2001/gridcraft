@@ -30,6 +30,7 @@ mod shape_text_rtl;
 mod shared_media;
 mod sheet_data_pin;
 mod sheet_names;
+mod smartart_passthrough;
 mod smooth_roundtrip;
 mod table_dxfs;
 mod trendline_roundtrip;

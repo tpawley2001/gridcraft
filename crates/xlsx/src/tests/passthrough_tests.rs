@@ -13,6 +13,7 @@ use crate::xml;
 use crate::{read_xlsx, write_xlsx};
 
 mod alternate_content;
+mod smartart_ids;
 
 const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";

@@ -110,6 +110,18 @@ pub(super) fn attach(rels: &mut Rels, list: &[PreservedRel], names: &NameMap) ->
     ids
 }
 
+/// [`attach`] keeping the source ids (see [`Rels::add_kept`]).
+pub(super) fn attach_kept(rels: &mut Rels, list: &[PreservedRel], names: &NameMap) -> HashMap<String, String> {
+    let mut ids = HashMap::new();
+    for r in list {
+        if let Some(target) = rel_target(r, names) {
+            let id = rels.add_kept(&r.id, &r.rel_type, &target, r.external);
+            ids.insert(r.id.clone(), id);
+        }
+    }
+    ids
+}
+
 pub(super) fn remap(x: &str, ids: &HashMap<String, String>) -> Option<String> {
     map_rel_ids(x, &mut |id| ids.get(id).cloned())
 }
