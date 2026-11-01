@@ -26,8 +26,12 @@ fn package() -> Vec<u8> {
     let wb_rels = format!(
         r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{NS_R}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="{NS_R}/dialogsheet" Target="dialogsheets/sheet1.xml"/><Relationship Id="rId3" Type="{MACRO_REL}" Target="macrosheets/sheet1.xml"/><Relationship Id="rId4" Type="{NS_R}/worksheet" Target="worksheets/sheet2.xml"/></Relationships>"#
     );
-    let sheet1 = format!(r#"<?xml version="1.0"?><worksheet xmlns="{NS_MAIN}" xmlns:r="{NS_R}"><sheetData><row r="1"><c r="A1"><f>Macro1!A1</f><v>0</v></c></row></sheetData></worksheet>"#);
-    let sheet2 = format!(r#"<?xml version="1.0"?><worksheet xmlns="{NS_MAIN}" xmlns:r="{NS_R}"><sheetData><row r="1"><c r="A1"><v>4</v></c></row></sheetData></worksheet>"#);
+    let sheet1 = format!(
+        r#"<?xml version="1.0"?><worksheet xmlns="{NS_MAIN}" xmlns:r="{NS_R}"><sheetData><row r="1"><c r="A1"><f>Macro1!A1</f><v>0</v></c></row></sheetData></worksheet>"#
+    );
+    let sheet2 = format!(
+        r#"<?xml version="1.0"?><worksheet xmlns="{NS_MAIN}" xmlns:r="{NS_R}"><sheetData><row r="1"><c r="A1"><v>4</v></c></row></sheetData></worksheet>"#
+    );
     let dialog = format!(
         r#"<?xml version="1.0"?><dialogsheet xmlns="{NS_MAIN}" xmlns:r="{NS_R}"><sheetPr codeName="DIALOG-MARKER"/><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></dialogsheet>"#
     );
@@ -97,10 +101,7 @@ fn macro_enabled_save_keeps_both_in_place() {
     let (wb, _) = read_xlsx(&package()).unwrap();
     let out = write_xlsx_as(&wb, XlsxKind::MacroWorkbook).unwrap();
     let p = unpack(&out);
-    assert_eq!(
-        names_types(&p),
-        pairs(&[("Data", "worksheet"), ("Dialog1", "dialogsheet"), ("Macro1", "xlMacrosheet"), ("Last", "worksheet")])
-    );
+    assert_eq!(names_types(&p), pairs(&[("Data", "worksheet"), ("Dialog1", "dialogsheet"), ("Macro1", "xlMacrosheet"), ("Last", "worksheet")]));
     let all = sheets(&p);
     assert_eq!(all[2].1.as_deref(), Some("hidden"), "macro sheet keeps its hidden state");
     let ct = &p["[Content_Types].xml"];
