@@ -8,15 +8,16 @@
 //! (mode, iteration, precision as displayed), data validation and conditional formats
 //! (cell-value and formula rules, and the Excel 2007+ kinds: colour scales, data bars, icon sets,
 //! top/bottom, above average and text/date templates), page setup (paper, orientation, scale, fit
-//! to page, margins, headers and footers, print options, manual page breaks) and the sheet tab
-//! colour. Everything else (fonts, fills, borders, charts, pictures,
-//! comments, macros) is skipped with a warning.
+//! to page, margins, headers and footers, print options, manual page breaks), the sheet tab
+//! colour, sheet protection and workbook structure protection. Everything else (fonts, fills,
+//! borders, charts, pictures, comments, macros) is skipped with a warning.
 //! Encrypted workbooks and pre-BIFF8 versions are refused.
 
 mod cond_format;
 pub(crate) mod formula;
 mod ftab;
 mod page_setup;
+mod protection;
 mod records;
 mod validation;
 
@@ -151,6 +152,7 @@ struct Globals {
     links: Links,
     names: Vec<Lbl>,
     precision_as_displayed: bool,
+    protection: protection::Protection,
 }
 
 /// Reads an Excel 97-2003 workbook. Inspect the report's warnings for what was skipped.
@@ -175,6 +177,8 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
 
     let mut wb = Workbook::new();
     wb.sheets.clear();
+    wb.protected_structure = g.protection.locked;
+    wb.structure_password = g.protection.password.clone();
     wb.date_system = if g.date1904 { DateSystem::D1904 } else { DateSystem::D1900 };
     // One model style per XF: only the number format is imported.
     let styles: Vec<StyleId> = g
@@ -259,6 +263,8 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
         let mut c = Cursor::new(&rec.parts);
         match rec.id {
             EOF => break,
+            0x0012 => protection::protect(&mut c, &mut g.protection, report),
+            0x0013 => protection::password(&mut c, &mut g.protection, report),
             0x002F => return Err(invalid(ENCRYPTED)),
             0x0085 => {
                 if g.sheets.len() >= MAX_SHEETS {
@@ -454,6 +460,7 @@ fn parsed(c: &mut Cursor<'_, '_>) -> Result<Parsed, IoError> {
 }
 
 struct SheetState<'g> {
+    protection: protection::Protection,
     g: &'g Globals,
     styles: &'g [StyleId],
     sheet: Sheet,
@@ -600,6 +607,7 @@ fn worksheet(
         return Ok(None);
     }
     let mut st = SheetState {
+        protection: protection::Protection::default(),
         g,
         styles,
         sheet: Sheet::new(&bs.name),
@@ -637,6 +645,7 @@ fn worksheet(
         }
         sheet_record(&rec, &mut st, budget, report)?;
     }
+    st.sheet.protection = st.protection.sheet();
     // Shared and array formulas: their definitions follow the first cell that uses them.
     let (arrays, shared) = (std::mem::take(&mut st.arrays), std::mem::take(&mut st.shared));
     let pending = std::mem::take(&mut st.pending);
@@ -667,6 +676,9 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         return Ok(());
     }
     match rec.id {
+        0x0012 => protection::protect(&mut c, &mut st.protection, report),
+        0x0013 => protection::password(&mut c, &mut st.protection, report),
+        0x0867 => protection::feat_hdr(&mut c, &mut st.protection, report),
         0x0203 => {
             let (r, col, x) = (c.u16()?, c.u16()?, c.u16()?);
             let v = Value::number(c.f64()?);

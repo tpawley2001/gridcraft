@@ -43,6 +43,7 @@ mod trendline_roundtrip;
 mod volatile_dependencies;
 mod xls_cf12_tests;
 mod xls_print_tests;
+mod xls_protection_tests;
 mod xls_tests;
 mod xlsb_layout_tests;
 mod xlsb_links_tests;
