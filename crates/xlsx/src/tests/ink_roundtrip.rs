@@ -56,6 +56,7 @@ fn exported_ink_has_a_visible_unfilled_path_and_correct_stroke() {
     for (id, width) in [(1, 3), (2, 12)] {
         sheet.shapes.push(Shape {
             hyperlink: None,
+            name: None,
             id,
             kind: ShapeKind::Ink,
             anchor: Anchor { width: 100.0, height: 50.0, mode: AnchorMode::Absolute, ..Default::default() },

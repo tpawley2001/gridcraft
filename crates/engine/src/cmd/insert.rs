@@ -1048,6 +1048,7 @@ fn insert_picture(s: &mut Session, p: &Json) -> Result<Json> {
     let scale = (640.0 / w.max(1) as f32).min(1.0);
     let img = Image {
         hyperlink: None,
+        name: None,
         id,
         anchor: Anchor {
             cell: at,
@@ -1118,6 +1119,7 @@ fn insert_shape(s: &mut Session, p: &Json) -> Result<Json> {
     });
     let shape = Shape {
         hyperlink: None,
+        name: None,
         id,
         kind,
         anchor: Anchor {
@@ -1733,6 +1735,7 @@ fn insert_icon(s: &mut Session, p: &Json) -> Result<Json> {
     let color = super::format::color_param(p.get("color")).unwrap_or(Color::Theme(1, 0));
     let shape = Shape {
         hyperlink: None,
+        name: None,
         id,
         kind: ShapeKind::Icon,
         anchor: Anchor { cell: at, dx: 4.0, dy: 4.0, width: size, height: size, mode: anchor_mode_param(p).unwrap_or_default() },

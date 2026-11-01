@@ -613,6 +613,9 @@ pub struct DrawingHyperlink {
 pub struct Image {
     #[serde(default)]
     pub hyperlink: Option<DrawingHyperlink>,
+    /// Imported drawing object name (`xdr:cNvPr name`).
+    #[serde(default)]
+    pub name: Option<String>,
     pub id: u32,
     pub anchor: Anchor,
     /// Encoded bytes (PNG/JPEG), base64 in JSON. Shared, so a copy of the sheet (an undo step)
@@ -644,6 +647,9 @@ pub enum ShapeKind {
 pub struct Shape {
     #[serde(default)]
     pub hyperlink: Option<DrawingHyperlink>,
+    /// Imported drawing object name (`xdr:cNvPr name`).
+    #[serde(default)]
+    pub name: Option<String>,
     pub id: u32,
     pub kind: ShapeKind,
     pub anchor: Anchor,

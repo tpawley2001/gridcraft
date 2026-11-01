@@ -3491,6 +3491,7 @@ fn add_image(s: &mut Session, cell: &str, mode: gridcraft_model::AnchorMode) -> 
     let id = wb.next_object_id();
     wb.sheet_mut(0).unwrap().images.push(gridcraft_model::Image {
         hyperlink: None,
+        name: None,
         id,
         anchor: gridcraft_model::Anchor { cell: CellRef::parse(cell).unwrap(), dx: 0.0, dy: 0.0, width: 40.0, height: 40.0, mode },
         data: tiny_png().into(),

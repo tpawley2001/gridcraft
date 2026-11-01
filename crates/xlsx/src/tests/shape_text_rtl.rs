@@ -39,6 +39,7 @@ fn text_box(text: &str, format: ShapeFormat) -> Workbook {
     let mut sheet = Sheet::new("Sheet1");
     sheet.shapes.push(Shape {
         hyperlink: None,
+        name: None,
         id: 1,
         kind: ShapeKind::TextBox,
         anchor: Anchor { width: 120.0, height: 40.0, ..Default::default() },

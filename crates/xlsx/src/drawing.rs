@@ -168,6 +168,7 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                     let id = cx.next_object_id();
                     sheet.images.push(Image {
                         hyperlink: read_hyperlink(obj.path(&["nvPicPr", "cNvPr"]), &rels),
+                        name: obj.path(&["nvPicPr", "cNvPr"]).and_then(|p| p.attr("name")).map(str::to_string),
                         id,
                         anchor,
                         data: data.into(),
@@ -206,6 +207,11 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                 "sp" | "cxnSp" => {
                     if let Some(mut s) = read_shape(obj, anchor) {
                         s.hyperlink = read_hyperlink(obj.path(&["nvSpPr", "cNvPr"]).or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"])), &rels);
+                        s.name = obj
+                            .path(&["nvSpPr", "cNvPr"])
+                            .or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"]))
+                            .and_then(|p| p.attr("name"))
+                            .map(str::to_string);
                         let id = cx.next_object_id();
                         sheet.shapes.push(Shape { id, ..s });
                     }
@@ -247,7 +253,7 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
         .unwrap_or_default();
     let mut format = read_text_format(obj.child("txBody"));
     format.no_line = ln.is_some_and(|l| l.child("noFill").is_some());
-    Some(Shape { hyperlink: None, id: 0, kind, anchor, fill, line, text, format })
+    Some(Shape { hyperlink: None, name: None, id: 0, kind, anchor, fill, line, text, format })
 }
 
 /// A shape's text formatting: vertical anchor (`a:bodyPr anchor`), the first paragraph's
@@ -355,13 +361,13 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], rels: &mut 
         match o {
             Obj::Image(img, rid) => {
                 let link = write_hyperlink(img.hyperlink.as_ref(), rels);
+                let name = esc_attr(&img.name.clone().unwrap_or_else(|| format!("Picture {}", id - 1)));
                 let (open, close) = anchor_open(sheet, &img.anchor);
                 close_tag = close;
                 s.push_str(&open);
                 let _ = write!(
                     s,
-                    "<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"{id}\" name=\"Picture {}\" descr=\"{}\">{link}</xdr:cNvPr><xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>",
-                    id - 1,
+                    "<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"{id}\" name=\"{name}\" descr=\"{}\">{link}</xdr:cNvPr><xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>",
                     esc_attr(&img.alt),
                     xfrm(&img.anchor, "a:xfrm")
                 );
@@ -393,6 +399,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], rels: &mut 
             }
             Obj::Shape(sh) => {
                 let link = write_hyperlink(sh.hyperlink.as_ref(), rels);
+                let name = esc_attr(&sh.name.clone().unwrap_or_else(|| format!("Shape {}", id - 1)));
                 let (open, close) = anchor_open(sheet, &sh.anchor);
                 close_tag = close;
                 s.push_str(&open);
@@ -413,8 +420,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], rels: &mut 
                 };
                 let _ = write!(
                     s,
-                    "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"Shape {}\">{link}</xdr:cNvPr><xdr:cNvSpPr{}/></xdr:nvSpPr><xdr:spPr>{}<a:prstGeom prst=\"{prst}\"><a:avLst/></a:prstGeom>",
-                    id - 1,
+                    "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"{name}\">{link}</xdr:cNvPr><xdr:cNvSpPr{}/></xdr:nvSpPr><xdr:spPr>{}<a:prstGeom prst=\"{prst}\"><a:avLst/></a:prstGeom>",
                     if tx { " txBox=\"1\"" } else { "" },
                     xfrm(&sh.anchor, "a:xfrm")
                 );
