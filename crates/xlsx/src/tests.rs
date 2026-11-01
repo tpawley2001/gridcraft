@@ -12,6 +12,7 @@ mod drawing_hyperlinks;
 mod dxf_font_charset;
 mod encrypted_tests;
 mod fixtures;
+mod group_passthrough;
 mod hidden_drawings;
 mod ink_roundtrip;
 mod kept_macro_dialog_sheets;
