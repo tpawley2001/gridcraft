@@ -652,3 +652,210 @@ fn xls_short_window2_is_ignored() {
         assert_eq!(v(&wb, 0, "A1"), Value::Number(7.0));
     }
 }
+
+// ---------------------------------------------------------------- data validation (DVAL 0x01B2, DV 0x01BE)
+
+/// `XLUnicodeString` with 8-bit characters; Excel writes an empty string as one U+0000.
+fn dv_str(s: &str) -> Vec<u8> {
+    let s = if s.is_empty() { "\0" } else { s };
+    cat(&[&(s.len() as u16).to_le_bytes(), &[0], s.as_bytes()])
+}
+
+/// `XLUnicodeString` stored as UTF-16LE (fHighByte = 1).
+fn dv_wide(s: &str) -> Vec<u8> {
+    let units: Vec<u16> = s.encode_utf16().collect();
+    cat(&[&(units.len() as u16).to_le_bytes(), &[1], &u16s(&units)])
+}
+
+/// `DVParsedFormula`: cce, unused, rgce.
+fn dv_formula(rgce: &[u8]) -> Vec<u8> {
+    cat(&[&u16s(&[rgce.len() as u16, 0]), rgce])
+}
+
+/// dwDvFlags: valType, errStyle, fStrLookup, fAllowBlank, fSuppressCombo, fShowInputMsg, fShowErrorMsg, typOperator.
+#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
+fn dv_flags(kind: u32, err: u32, lookup: bool, blank: bool, no_combo: bool, input: bool, error: bool, op: u32) -> u32 {
+    kind | err << 4
+        | u32::from(lookup) << 7
+        | u32::from(blank) << 8
+        | u32::from(no_combo) << 9
+        | u32::from(input) << 18
+        | u32::from(error) << 19
+        | op << 20
+}
+
+/// A DV record: flags, the four strings (already encoded: prompt title, error title, prompt,
+/// error), formula1, formula2 and the ranges (rwFirst, rwLast, colFirst, colLast).
+fn dv(flags: u32, strings: [&[u8]; 4], f1: &[u8], f2: &[u8], ranges: &[[u16; 4]]) -> Vec<u8> {
+    let mut p = flags.to_le_bytes().to_vec();
+    for s in strings {
+        p.extend_from_slice(s);
+    }
+    p.extend(dv_formula(f1));
+    p.extend(dv_formula(f2));
+    p.extend((ranges.len() as u16).to_le_bytes());
+    for r in ranges {
+        p.extend(u16s(r));
+    }
+    rec(0x01BE, &p)
+}
+
+fn dval(count: u32) -> Vec<u8> {
+    rec(0x01B2, &cat(&[&0u16.to_le_bytes(), &0u32.to_le_bytes(), &0u32.to_le_bytes(), &u32::MAX.to_le_bytes(), &count.to_le_bytes()]))
+}
+
+fn ptg_num(x: f64) -> Vec<u8> {
+    cat(&[&[0x1F], &x.to_le_bytes()])
+}
+
+/// PtgStr with 8-bit characters.
+fn ptg_str(s: &str) -> Vec<u8> {
+    cat(&[&[0x17, s.len() as u8, 0], s.as_bytes()])
+}
+
+/// Absolute PtgArea (reference class).
+fn ptg_area_abs(r1: u16, r2: u16, c1: u16, c2: u16) -> Vec<u8> {
+    cat(&[&[0x25], &u16s(&[r1, r2, c1, c2])])
+}
+
+/// Absolute PtgRef (value class).
+fn ptg_ref_abs(r: u16, c: u16) -> Vec<u8> {
+    cat(&[&[0x44], &u16s(&[r, c])])
+}
+
+fn rr(a1: &str) -> RangeRef {
+    RangeRef::parse(a1).unwrap()
+}
+
+fn read_dv(records: &[u8]) -> (Vec<gridcraft_model::Validation>, Vec<String>) {
+    let (wb, report) = read_xls(&one_sheet_with(records)).unwrap();
+    (wb.sheets[0].validations.clone(), report.warnings)
+}
+
+#[test]
+fn xls_dv_explicit_list_reads_items_titles_and_ranges() {
+    let flags = dv_flags(3, 0, true, true, false, true, true, 0);
+    let strings: [&[u8]; 4] = [&dv_str("Pick"), &dv_str("Bad"), &dv_str("Choose one"), &dv_wide("Not in list: café")];
+    let records = cat(&[&dval(1), &dv(flags, strings, &ptg_str("a\0b\0c"), &[], &[[1, 4, 1, 1], [0, 0, 3, 3]])]);
+    let (vals, warnings) = read_dv(&records);
+    assert_eq!(vals.len(), 1, "{warnings:?}");
+    let v = &vals[0];
+    assert_eq!(v.kind, gridcraft_model::ValidationKind::List);
+    assert_eq!(v.f1, "\"a,b,c\"");
+    assert_eq!(v.f2, None);
+    assert_eq!(v.ranges, vec![rr("B2:B5"), rr("D1")]);
+    assert!(v.allow_blank && v.in_cell_dropdown && v.show_input && v.show_error);
+    assert_eq!(v.error_style, gridcraft_model::ErrorStyle::Stop);
+    assert_eq!(
+        (v.input_title.as_str(), v.error_title.as_str(), v.input_message.as_str(), v.error_message.as_str()),
+        ("Pick", "Bad", "Choose one", "Not in list: café")
+    );
+    assert!(!warnings.iter().any(|w| w.contains("Data validation")), "{warnings:?}");
+}
+
+#[test]
+fn xls_dv_whole_between_warning_style_and_empty_strings() {
+    let flags = dv_flags(1, 1, false, false, true, false, true, 0);
+    let e = dv_str("");
+    let records = cat(&[&dval(1), &dv(flags, [&e, &e, &e, &e], &ptg_int(1), &ptg_int(10), &[[0, 0, 2, 2]])]);
+    let (vals, warnings) = read_dv(&records);
+    assert_eq!(vals.len(), 1, "{warnings:?}");
+    let v = &vals[0];
+    assert_eq!(v.kind, gridcraft_model::ValidationKind::Whole);
+    assert_eq!(v.op, gridcraft_model::CfOperator::Between);
+    assert_eq!((v.f1.as_str(), v.f2.as_deref()), ("1", Some("10")));
+    assert_eq!(v.ranges, vec![rr("C1")]);
+    assert_eq!(v.error_style, gridcraft_model::ErrorStyle::Warning);
+    assert!(!v.allow_blank && !v.in_cell_dropdown && !v.show_input && v.show_error);
+    assert!(v.input_title.is_empty() && v.error_title.is_empty() && v.input_message.is_empty() && v.error_message.is_empty());
+}
+
+#[test]
+fn xls_dv_list_from_range_decimal_operator_and_custom_formula() {
+    let e = dv_str("");
+    let list = dv(dv_flags(3, 0, false, true, false, true, true, 0), [&e, &e, &e, &e], &ptg_area_abs(0, 2, 0, 0), &[], &[[0, 0, 4, 4]]);
+    let dec = dv(dv_flags(2, 2, false, true, false, true, true, 4), [&e, &e, &e, &e], &ptg_num(2.5), &[], &[[5, 9, 5, 5]]);
+    // $A$1>0
+    let custom_rgce = cat(&[&ptg_ref_abs(0, 0), &ptg_int(0), &[0x0D]]);
+    let custom = dv(dv_flags(7, 0, false, true, false, true, true, 0), [&e, &e, &e, &e], &custom_rgce, &[], &[[0, 0, 6, 6]]);
+    let (vals, warnings) = read_dv(&cat(&[&dval(3), &list, &dec, &custom]));
+    assert_eq!(vals.len(), 3, "{warnings:?}");
+    assert_eq!((vals[0].kind, vals[0].f1.as_str()), (gridcraft_model::ValidationKind::List, "=$A$1:$A$3"));
+    assert_eq!(vals[0].ranges, vec![rr("E1")]);
+    assert_eq!(
+        (vals[1].kind, vals[1].op, vals[1].f1.as_str()),
+        (gridcraft_model::ValidationKind::Decimal, gridcraft_model::CfOperator::Greater, "2.5")
+    );
+    assert_eq!(vals[1].error_style, gridcraft_model::ErrorStyle::Information);
+    assert_eq!(vals[1].ranges, vec![rr("F6:F10")]);
+    assert_eq!((vals[2].kind, vals[2].f1.as_str()), (gridcraft_model::ValidationKind::Custom, "$A$1>0"));
+}
+
+#[test]
+fn xls_dv_operators_map_like_excel() {
+    let e = dv_str("");
+    let ops = [
+        gridcraft_model::CfOperator::Between,
+        gridcraft_model::CfOperator::NotBetween,
+        gridcraft_model::CfOperator::Equal,
+        gridcraft_model::CfOperator::NotEqual,
+        gridcraft_model::CfOperator::Greater,
+        gridcraft_model::CfOperator::Less,
+        gridcraft_model::CfOperator::GreaterOrEqual,
+        gridcraft_model::CfOperator::LessOrEqual,
+    ];
+    let mut records = dval(8);
+    for (i, _) in ops.iter().enumerate() {
+        let f2 = if i < 2 { ptg_int(9) } else { vec![] };
+        records.extend(dv(
+            dv_flags(1, 0, false, true, false, true, true, i as u32),
+            [&e, &e, &e, &e],
+            &ptg_int(1),
+            &f2,
+            &[[i as u16, i as u16, 0, 0]],
+        ));
+    }
+    let (vals, warnings) = read_dv(&records);
+    assert_eq!(vals.iter().map(|v| v.op).collect::<Vec<_>>(), ops.to_vec(), "{warnings:?}");
+    assert_eq!(vals[1].f2.as_deref(), Some("9"));
+    assert_eq!(vals[2].f2, None);
+}
+
+#[test]
+fn xls_dv_damaged_record_is_skipped_and_the_rest_kept() {
+    let e = dv_str("");
+    let good = dv(dv_flags(1, 0, false, true, false, true, true, 0), [&e, &e, &e, &e], &ptg_int(1), &ptg_int(5), &[[0, 0, 1, 1]]);
+    // A string that claims 200 characters in a short record.
+    let truncated = rec(0x01BE, &cat(&[&dv_flags(1, 0, false, true, false, true, true, 0).to_le_bytes(), &200u16.to_le_bytes(), &[0], b"abc"]));
+    // No ranges at all.
+    let no_ranges = dv(dv_flags(1, 0, false, true, false, true, true, 0), [&e, &e, &e, &e], &ptg_int(1), &ptg_int(5), &[]);
+    let (vals, warnings) = read_dv(&cat(&[&dval(4), &truncated, &good, &no_ranges, &good]));
+    assert_eq!(vals.len(), 2, "{warnings:?}");
+    assert!(vals.iter().all(|v| v.f1 == "1" && v.ranges == vec![rr("B1")]));
+    assert!(!warnings.is_empty());
+}
+
+#[test]
+fn xls_dv_dval_without_dv_and_count_mismatch() {
+    let (vals, warnings) = read_dv(&dval(0));
+    assert!(vals.is_empty());
+    assert!(!warnings.iter().any(|w| w.contains("Data validation")), "{warnings:?}");
+    // idvMac says 5 but only one DV follows: read what is there.
+    let e = dv_str("");
+    let one = dv(dv_flags(6, 0, false, true, false, true, true, 6), [&e, &e, &e, &e], &ptg_int(3), &[], &[[0, 9, 0, 0]]);
+    let (vals, _) = read_dv(&cat(&[&dval(5), &one]));
+    assert_eq!(vals.len(), 1);
+    assert_eq!((vals[0].kind, vals[0].op), (gridcraft_model::ValidationKind::TextLength, gridcraft_model::CfOperator::GreaterOrEqual));
+    assert_eq!(vals[0].ranges, vec![rr("A1:A10")]);
+}
+
+#[test]
+fn xls_dv_survives_save_as_xlsx() {
+    let flags = dv_flags(3, 0, true, true, false, true, true, 0);
+    let strings: [&[u8]; 4] = [&dv_str("Pick"), &dv_str("Bad"), &dv_str("Choose one"), &dv_str("Not in list")];
+    let records = cat(&[&dval(1), &dv(flags, strings, &ptg_str("yes\0no"), &[], &[[1, 4, 1, 1]])]);
+    let (wb, _) = read_xls(&one_sheet_with(&records)).unwrap();
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(back.sheets[0].validations, wb.sheets[0].validations);
+    assert_eq!(back.sheets[0].validations[0].f1, "\"yes,no\"");
+}
