@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use gridcraft_core::CellRef;
 use gridcraft_model::{
-    Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartSheetPrint, Color, LegendPos, PreservedPart, PreservedRel, PreservedSheet, PrintSettings,
-    Series, Sheet, Visibility, Workbook,
+    Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, LegendPos, PreservedPart, PreservedRel, PreservedSheet,
+    PrintSettings, Series, Sheet, Visibility, Workbook,
 };
 
 use super::formula::{Links, Mode, decode};
@@ -169,7 +169,7 @@ impl Embedded {
     pub(super) fn chart(&mut self, recs: &mut Records<'_>, budget: &mut Budget, links: &Links, report: &mut ReadReport) -> Result<bool, IoError> {
         let anchor = self.pending.take();
         match read(recs, budget, links, report)? {
-            Read::Chart(ch) => self.charts.push((anchor, ch)),
+            Read::Chart(ch) => self.charts.push((anchor, *ch)),
             Read::Skipped => {}
             Read::CutOff => return Ok(false),
         }
@@ -219,14 +219,14 @@ pub(super) fn chart_sheet(stream: &[u8], pos: usize, budget: &mut Budget, links:
         return Ok(None);
     }
     Ok(match read(&mut recs, budget, links, report)? {
-        Read::Chart(ch) => Some(ch),
+        Read::Chart(ch) => Some(*ch),
         Read::Skipped | Read::CutOff => None,
     })
 }
 
 /// What reading a chart substream gave.
 enum Read {
-    Chart(Chart),
+    Chart(Box<Chart>),
     /// Not imported (a warning says why); the substream was read to its EOF.
     Skipped,
     /// The stream ends inside the substream (a warning says so).
@@ -274,7 +274,7 @@ fn read(recs: &mut Records<'_>, budget: &mut Budget, links: &Links, report: &mut
         return Ok(Read::Skipped);
     }
     match parse(&records, links, report) {
-        Ok(ch) => Ok(Read::Chart(ch)),
+        Ok(ch) => Ok(Read::Chart(Box::new(ch))),
         Err(Skip::Damaged) => {
             report.warn("A damaged chart was skipped.");
             Ok(Read::Skipped)
@@ -363,287 +363,309 @@ fn color(rgb: u32) -> Color {
     Color::rgb((rgb & 0xFF) as u8, ((rgb >> 8) & 0xFF) as u8, ((rgb >> 16) & 0xFF) as u8)
 }
 
-fn parse(records: &[Record<'_>], links: &Links, report: &mut ReadReport) -> Result<Chart, Skip> {
-    let mut stack: Vec<Block> = vec![];
-    let mut last = Block::Other;
-    let mut series: Vec<Ser> = vec![];
-    let mut series_seen = 0usize;
-    let mut groups: Vec<Group> = vec![];
-    let mut texts: Vec<TextBox> = vec![];
-    let mut legend: Option<LegendPos> = None;
-    let mut frame: Option<(f32, f32)> = None;
-    let mut scale = gridcraft_model::ChartScale::default();
-    let mut gridlines = false;
-    let mut cache_kind = 0u16;
-    let mut cache: HashMap<(u16, u16), Vec<(u16, Lit)>> = HashMap::new();
-    let mut cached = 0usize;
-    let mut unreadable = false;
-    let axis_parent = |stack: &[Block]| stack.iter().rev().find_map(|b| if let Block::AxisParent(i) = b { Some(*i) } else { None }).unwrap_or(0);
-    for rec in records {
+/// The state of one chart substream as its records are read.
+#[derive(Default)]
+struct Parser {
+    /// What each open Begin block belongs to.
+    stack: Vec<Block>,
+    /// What the previous record would open if a Begin followed it.
+    last: Option<Block>,
+    series: Vec<Ser>,
+    series_seen: usize,
+    groups: Vec<Group>,
+    texts: Vec<TextBox>,
+    legend: Option<LegendPos>,
+    frame: Option<(f32, f32)>,
+    scale: ChartScale,
+    gridlines: bool,
+    cache_kind: u16,
+    cache: HashMap<(u16, u16), Vec<(u16, Lit)>>,
+    cached: usize,
+    unreadable: bool,
+}
+
+impl Parser {
+    fn top(&self) -> Option<Block> {
+        self.stack.last().copied()
+    }
+
+    /// The `iax` of the AxisParent block the reader is in (0, the primary axes, outside any).
+    fn axis_parent(&self) -> u16 {
+        self.stack.iter().rev().find_map(|b| if let Block::AxisParent(i) = b { Some(*i) } else { None }).unwrap_or(0)
+    }
+
+    fn top_series(&mut self) -> Option<&mut Ser> {
+        match self.top() {
+            Some(Block::Series(i)) => self.series.get_mut(i),
+            _ => None,
+        }
+    }
+
+    /// The series whose whole-series DataFormat block the reader is in.
+    fn formatted_series(&mut self) -> Option<&mut Ser> {
+        match self.top() {
+            Some(Block::DataFormat(Some(i))) => self.series.get_mut(i),
+            _ => None,
+        }
+    }
+
+    fn record(&mut self, rec: &Record<'_>, links: &Links, report: &mut ReadReport) -> Result<(), Skip> {
         let mut c = Cursor::new(&rec.parts);
-        let top = stack.last().copied();
-        let mut opens = Block::Other;
-        match rec.id {
+        let opens = match rec.id {
             BEGIN => {
-                if stack.len() >= MAX_DEPTH {
+                if self.stack.len() >= MAX_DEPTH {
                     return Err(Skip::Damaged);
                 }
-                stack.push(last);
+                self.stack.push(self.last.take().unwrap_or(Block::Other));
+                return Ok(());
             }
             END => {
-                stack.pop();
+                self.stack.pop();
+                None
             }
             CHART => {
                 let (_x, _y, dx, dy) = (c.u32()?, c.u32()?, c.u32()?, c.u32()?);
                 // FixedPoint points → sheet units.
                 let px = |v: u32| (f64::from(v) / 65_536.0 * 4.0 / 3.0) as f32;
-                frame = Some((px(dx), px(dy)));
+                self.frame = Some((px(dx), px(dy)));
+                None
             }
-            SERIES => {
-                let index = series_seen;
-                series_seen += 1;
-                if series.len() < MAX_SERIES {
-                    series.push(Ser { index, ..Ser::default() });
-                    opens = Block::Series(series.len() - 1);
-                } else if series.len() == MAX_SERIES && index == MAX_SERIES {
-                    report.warn(format!("Only the first {MAX_SERIES} series of a chart were imported."));
-                }
-            }
+            SERIES => self.series_record(report),
             BRAI => {
-                if let Some(Block::Series(i)) = top {
-                    let id = c.u8()?;
-                    let rt = c.u8()?;
-                    c.skip(4)?;
-                    let cce = usize::from(c.u16()?);
-                    if rt == 2 && cce > 0 {
-                        if cce > c.remaining() {
-                            return Err(Skip::Damaged);
-                        }
-                        let rgce = c.rest();
-                        let rgce = rgce.get(..cce).unwrap_or(&rgce);
-                        match decode(rgce, &[], CellRef::new(0, 0), Mode::Cell, links) {
-                            Ok(e) => {
-                                let text = gridcraft_formula::print(&e);
-                                if let Some(s) = series.get_mut(i) {
-                                    match id {
-                                        0 => s.name = Some(text),
-                                        1 => s.values = Some(text),
-                                        2 => s.categories = Some(text),
-                                        3 => s.bubbles = Some(text),
-                                        _ => {}
-                                    }
-                                }
-                            }
-                            Err(_) => unreadable = true,
-                        }
-                    }
-                }
+                self.brai(&mut c, links)?;
+                None
             }
             SERIES_TEXT => {
-                c.u16()?;
-                let text = c.short_string()?;
-                match top {
-                    Some(Block::Series(i)) => {
-                        if let Some(s) = series.get_mut(i)
-                            && s.name.is_none()
-                        {
-                            s.name = Some(text);
-                        }
-                    }
-                    Some(Block::Text(i)) => {
-                        if let Some(t) = texts.get_mut(i) {
-                            t.text = Some(text);
-                        }
-                    }
-                    _ => {}
-                }
+                self.series_text(&mut c)?;
+                None
             }
             TEXT => {
-                texts.push(TextBox::default());
-                opens = Block::Text(texts.len() - 1);
+                self.texts.push(TextBox::default());
+                Some(Block::Text(self.texts.len() - 1))
             }
             OBJECT_LINK => {
-                if let Some(Block::Text(i)) = top
-                    && let Some(t) = texts.get_mut(i)
+                if let Some(Block::Text(i)) = self.top()
+                    && let Some(t) = self.texts.get_mut(i)
                 {
                     t.link = Some(c.u16()?);
                 }
+                None
             }
             SER_TO_CRT => {
-                if let Some(Block::Series(i)) = top
-                    && let Some(s) = series.get_mut(i)
-                {
+                if let Some(s) = self.top_series() {
                     s.group = c.u16()?;
                 }
+                None
             }
             SER_PARENT => {
-                if let Some(Block::Series(i)) = top
-                    && let Some(s) = series.get_mut(i)
-                {
+                if let Some(s) = self.top_series() {
                     s.aux = true;
                 }
+                None
             }
             DATA_FORMAT => {
                 let xi = c.u16()?;
-                let whole = match top {
+                Some(Block::DataFormat(match self.top() {
                     Some(Block::Series(i)) if xi == 0xFFFF => Some(i),
                     _ => None,
-                };
-                opens = Block::DataFormat(whole);
+                }))
             }
-            LINE_FORMAT => {
-                if let Some(Block::DataFormat(Some(i))) = top {
-                    let rgb = c.u32()?;
-                    let lns = c.u16()?;
-                    c.u16()?;
-                    let auto = c.u16()? & 0x0001 != 0;
-                    if let Some(s) = series.get_mut(i) {
-                        s.line = Some(((!auto && lns != 5).then(|| color(rgb)), lns != 5));
-                    }
-                }
+            LINE_FORMAT | AREA_FORMAT | MARKER_FORMAT => {
+                self.format(rec.id, &mut c)?;
+                None
             }
-            AREA_FORMAT => {
-                if let Some(Block::DataFormat(Some(i))) = top {
-                    let fore = c.u32()?;
-                    c.u32()?;
-                    let fls = c.u16()?;
-                    let auto = c.u16()? & 0x0001 != 0;
-                    if !auto
-                        && fls == 1
-                        && let Some(s) = series.get_mut(i)
-                    {
-                        s.fill = Some(color(fore));
-                    }
-                }
-            }
-            MARKER_FORMAT => {
-                if let Some(Block::DataFormat(Some(i))) = top {
-                    c.u32()?;
-                    c.u32()?;
-                    let imk = c.u16()?;
-                    let auto = c.u16()? & 0x0001 != 0;
-                    if let Some(s) = series.get_mut(i) {
-                        s.marker = Some(auto || imk != 0);
-                    }
-                }
-            }
-            AXIS_PARENT => opens = Block::AxisParent(c.u16()?),
-            AXIS => opens = Block::Axis(c.u16()?),
+            AXIS_PARENT => Some(Block::AxisParent(c.u16()?)),
+            AXIS => Some(Block::Axis(c.u16()?)),
             AXIS_LINE => {
-                if top == Some(Block::Axis(1)) && axis_parent(&stack) == 0 && c.u16()? == 1 {
-                    gridlines = true;
+                if self.top() == Some(Block::Axis(1)) && self.axis_parent() == 0 && c.u16()? == 1 {
+                    self.gridlines = true;
                 }
+                None
             }
             VALUE_RANGE => {
-                if let Some(Block::Axis(w)) = top
-                    && w < 2
-                    && axis_parent(&stack) == 0
-                {
-                    let nums = [c.f64()?, c.f64()?, c.f64()?, c.f64()?, c.f64()?];
-                    let flags = c.u16()?;
-                    let auto = |bit: u16| flags & (1 << bit) != 0;
-                    let num = |i: usize, bit: u16| nums.get(i).copied().filter(|v| v.is_finite() && !auto(bit));
-                    let log = auto(5);
-                    let mut s = AxisScale { reverse: auto(6), ..AxisScale::default() };
-                    if log {
-                        s.log_base = Some(10.0);
-                    } else {
-                        s.min = num(0, 0);
-                        s.max = num(1, 1);
-                        s.major_unit = num(2, 2).filter(|v| *v > 0.0);
-                        s.minor_unit = num(3, 3).filter(|v| *v > 0.0);
-                        if let (Some(a), Some(b)) = (s.min, s.max)
-                            && a >= b
-                        {
-                            s.min = None;
-                            s.max = None;
-                        }
-                    }
-                    if w == 1 {
-                        scale.y = s;
-                    } else {
-                        scale.x = s;
-                    }
-                }
+                self.value_range(&mut c)?;
+                None
             }
             CHART_FORMAT => {
                 c.skip(18)?;
                 let icrt = c.u16()?;
-                groups.push(Group { icrt, ty: None, secondary: axis_parent(&stack) == 1 });
-                opens = Block::Group(groups.len() - 1);
+                let secondary = self.axis_parent() == 1;
+                self.groups.push(Group { icrt, ty: None, secondary });
+                Some(Block::Group(self.groups.len() - 1))
             }
             BAR | LINE | PIE | AREA | SCATTER | RADAR | RADAR_AREA | BOP_POP | SURF => {
-                if let Some(Block::Group(g)) = top {
-                    let ty = match rec.id {
-                        BAR => {
-                            c.u32()?;
-                            let f = c.u16()?;
-                            GroupType::Bar { transpose: f & 1 != 0, stacked: f & 2 != 0, percent: f & 4 != 0 }
-                        }
-                        LINE | AREA => {
-                            let f = c.u16()?;
-                            let (stacked, percent) = (f & 1 != 0, f & 2 != 0);
-                            if rec.id == LINE { GroupType::Line { stacked, percent } } else { GroupType::Area { stacked, percent } }
-                        }
-                        PIE => {
-                            c.u16()?;
-                            GroupType::Pie { donut: c.u16()? != 0 }
-                        }
-                        SCATTER => {
-                            c.u32()?;
-                            GroupType::Scatter { bubbles: c.u16()? & 1 != 0 }
-                        }
-                        // Pie of pie and bar of pie: drawn as a pie.
-                        BOP_POP => GroupType::Pie { donut: false },
-                        SURF => GroupType::Unsupported("surface"),
-                        _ => GroupType::Radar,
-                    };
-                    if let Some(gr) = groups.get_mut(g)
+                if let Some(Block::Group(g)) = self.top() {
+                    let ty = group_type(rec.id, &mut c)?;
+                    if let Some(gr) = self.groups.get_mut(g)
                         && gr.ty.is_none()
                     {
                         gr.ty = Some(ty);
                     }
                 }
+                None
             }
             LEGEND => {
-                if legend.is_none() {
-                    let (x, y, dx, dy) = (c.u32()?, c.u32()?, c.u32()?, c.u32()?);
-                    c.u16()?;
-                    let vertical = c.u16()? & 0x0010 != 0;
-                    // Position and size in 1/4000 of the chart area: the side is the one the
-                    // legend's centre is nearest, along the way its entries run.
-                    let (cx, cy) = (u64::from(x) + u64::from(dx) / 2, u64::from(y) + u64::from(dy) / 2);
-                    legend = Some(match (vertical, cx >= 2000, cy >= 2000) {
-                        (true, true, _) => LegendPos::Right,
-                        (true, false, _) => LegendPos::Left,
-                        (false, _, true) => LegendPos::Bottom,
-                        (false, _, false) => LegendPos::Top,
-                    });
+                if self.legend.is_none() {
+                    self.legend = Some(legend_side(&mut c)?);
                 }
+                None
             }
-            SI_INDEX => cache_kind = c.u16()?,
-            NUMBER | LABEL if (1..=3).contains(&cache_kind) && cached < MAX_CACHED => {
+            SI_INDEX => {
+                self.cache_kind = c.u16()?;
+                None
+            }
+            NUMBER | LABEL if (1..=3).contains(&self.cache_kind) && self.cached < MAX_CACHED => {
                 let (row, col) = (c.u16()?, c.u16()?);
                 c.u16()?;
                 let v = if rec.id == NUMBER { Lit::Num(c.f64()?) } else { Lit::Str(c.string()?) };
-                cache.entry((cache_kind, col)).or_default().push((row, v));
-                cached += 1;
+                self.cache.entry((self.cache_kind, col)).or_default().push((row, v));
+                self.cached += 1;
+                None
+            }
+            _ => None,
+        };
+        self.last = opens;
+        Ok(())
+    }
+
+    fn series_record(&mut self, report: &mut ReadReport) -> Option<Block> {
+        let index = self.series_seen;
+        self.series_seen += 1;
+        if self.series.len() < MAX_SERIES {
+            self.series.push(Ser { index, ..Ser::default() });
+            return Some(Block::Series(self.series.len() - 1));
+        }
+        if index == MAX_SERIES {
+            report.warn(format!("Only the first {MAX_SERIES} series of a chart were imported."));
+        }
+        None
+    }
+
+    /// BRAI: a series' name, values, categories or bubble sizes as a reference.
+    fn brai(&mut self, c: &mut Cursor<'_, '_>, links: &Links) -> Result<(), Skip> {
+        if self.top_series().is_none() {
+            return Ok(());
+        }
+        let id = c.u8()?;
+        let rt = c.u8()?;
+        c.skip(4)?;
+        let cce = usize::from(c.u16()?);
+        if rt != 2 || cce == 0 {
+            return Ok(());
+        }
+        if cce > c.remaining() {
+            return Err(Skip::Damaged);
+        }
+        let rgce = c.rest();
+        let rgce = rgce.get(..cce).unwrap_or(&rgce);
+        let Ok(e) = decode(rgce, &[], CellRef::new(0, 0), Mode::Cell, links) else {
+            self.unreadable = true;
+            return Ok(());
+        };
+        let text = gridcraft_formula::print(&e);
+        if let Some(s) = self.top_series() {
+            match id {
+                0 => s.name = Some(text),
+                1 => s.values = Some(text),
+                2 => s.categories = Some(text),
+                3 => s.bubbles = Some(text),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// SeriesText: a literal series name, or a title's text.
+    fn series_text(&mut self, c: &mut Cursor<'_, '_>) -> Result<(), Skip> {
+        c.u16()?;
+        let text = c.short_string()?;
+        match self.top() {
+            Some(Block::Series(i)) => {
+                if let Some(s) = self.series.get_mut(i)
+                    && s.name.is_none()
+                {
+                    s.name = Some(text);
+                }
+            }
+            Some(Block::Text(i)) => {
+                if let Some(t) = self.texts.get_mut(i) {
+                    t.text = Some(text);
+                }
             }
             _ => {}
         }
-        if rec.id != BEGIN {
-            last = opens;
-        }
+        Ok(())
     }
 
-    let primary = groups.first().ok_or_else(|| Skip::Why("it has no chart type".into()))?;
-    for g in &groups {
-        if let Some(GroupType::Unsupported(name)) = g.ty {
-            return Err(Skip::Why(format!("{name} charts can't be imported yet")));
+    /// LineFormat, AreaFormat and MarkerFormat of a whole series.
+    fn format(&mut self, id: u16, c: &mut Cursor<'_, '_>) -> Result<(), Skip> {
+        let Some(s) = self.formatted_series() else { return Ok(()) };
+        match id {
+            LINE_FORMAT => {
+                let rgb = c.u32()?;
+                let lns = c.u16()?;
+                c.u16()?;
+                let auto = c.u16()? & 0x0001 != 0;
+                s.line = Some(((!auto && lns != 5).then(|| color(rgb)), lns != 5));
+            }
+            AREA_FORMAT => {
+                let fore = c.u32()?;
+                c.u32()?;
+                let fls = c.u16()?;
+                let auto = c.u16()? & 0x0001 != 0;
+                if !auto && fls == 1 {
+                    s.fill = Some(color(fore));
+                }
+            }
+            _ => {
+                c.u32()?;
+                c.u32()?;
+                let imk = c.u16()?;
+                let auto = c.u16()? & 0x0001 != 0;
+                s.marker = Some(auto || imk != 0);
+            }
         }
+        Ok(())
     }
-    let literal = |kind: u16, s: &Ser| -> Option<String> {
-        let mut pts: Vec<&(u16, Lit)> = cache.get(&(kind, u16::try_from(s.index).ok()?))?.iter().collect();
+
+    /// ValueRange of a primary axis: its fixed bounds and units.
+    fn value_range(&mut self, c: &mut Cursor<'_, '_>) -> Result<(), Skip> {
+        let Some(Block::Axis(w)) = self.top() else { return Ok(()) };
+        if w >= 2 || self.axis_parent() != 0 {
+            return Ok(());
+        }
+        let nums = [c.f64()?, c.f64()?, c.f64()?, c.f64()?, c.f64()?];
+        let flags = c.u16()?;
+        let on = |bit: u16| flags & (1 << bit) != 0;
+        // fAutoMin, fAutoMax, fAutoMajor, fAutoMinor are bits 0-3; fLog 5; fReversed 6.
+        let num = |i: usize| nums.get(i).copied().filter(|v| v.is_finite() && !on(i as u16));
+        let mut s = AxisScale { reverse: on(6), ..AxisScale::default() };
+        if on(5) {
+            s.log_base = Some(10.0);
+        } else {
+            s.min = num(0);
+            s.max = num(1);
+            s.major_unit = num(2).filter(|v| *v > 0.0);
+            s.minor_unit = num(3).filter(|v| *v > 0.0);
+            if let (Some(a), Some(b)) = (s.min, s.max)
+                && a >= b
+            {
+                s.min = None;
+                s.max = None;
+            }
+        }
+        if w == 1 {
+            self.scale.y = s;
+        } else {
+            self.scale.x = s;
+        }
+        Ok(())
+    }
+
+    /// A series' cached literal points of `kind` (1 values, 2 categories, 3 bubble sizes) as an
+    /// array constant.
+    fn literal(&self, kind: u16, s: &Ser) -> Option<String> {
+        let mut pts: Vec<&(u16, Lit)> = self.cache.get(&(kind, u16::try_from(s.index).ok()?))?.iter().collect();
         pts.sort_by_key(|(r, _)| *r);
         let items: Vec<String> = pts
             .iter()
@@ -653,71 +675,15 @@ fn parse(records: &[Record<'_>], links: &Links, report: &mut ReadReport) -> Resu
             })
             .collect();
         (!items.is_empty()).then(|| format!("{{{}}}", items.join(",")))
-    };
-    let kind_of = |g: &Group, members: &[&Ser]| -> ChartKind {
-        match g.ty {
-            Some(GroupType::Bar { transpose, stacked, percent }) => match (transpose, percent, stacked) {
-                (true, true, _) => ChartKind::BarStacked100,
-                (true, false, true) => ChartKind::BarStacked,
-                (true, false, false) => ChartKind::BarClustered,
-                (false, true, _) => ChartKind::ColumnStacked100,
-                (false, false, true) => ChartKind::ColumnStacked,
-                (false, false, false) => ChartKind::ColumnClustered,
-            },
-            Some(GroupType::Line { stacked, percent }) => {
-                if stacked || percent {
-                    ChartKind::LineStacked
-                } else if members.iter().any(|s| s.marker == Some(true)) {
-                    ChartKind::LineMarkers
-                } else {
-                    ChartKind::Line
-                }
-            }
-            Some(GroupType::Area { stacked, percent }) => match (percent, stacked) {
-                (true, _) => ChartKind::AreaStacked100,
-                (false, true) => ChartKind::AreaStacked,
-                (false, false) => ChartKind::Area,
-            },
-            Some(GroupType::Pie { donut }) => {
-                if donut {
-                    ChartKind::Doughnut
-                } else {
-                    ChartKind::Pie
-                }
-            }
-            Some(GroupType::Scatter { bubbles: true }) => ChartKind::Bubble,
-            Some(GroupType::Scatter { bubbles: false }) => {
-                if members.iter().any(|s| s.line.is_some_and(|(_, drawn)| drawn)) {
-                    ChartKind::ScatterLines
-                } else {
-                    ChartKind::Scatter
-                }
-            }
-            Some(GroupType::Radar) => ChartKind::Radar,
-            Some(GroupType::Unsupported(_)) | None => ChartKind::ColumnClustered,
-        }
-    };
-    let data: Vec<&Ser> = series.iter().filter(|s| !s.aux).collect();
-    let group_of = |s: &Ser| groups.iter().position(|g| g.icrt == s.group).unwrap_or(0);
-    let kinds: Vec<ChartKind> = groups
-        .iter()
-        .enumerate()
-        .map(|(gi, g)| {
-            let members: Vec<&Ser> = data.iter().copied().filter(|s| group_of(s) == gi).collect();
-            kind_of(g, &members)
-        })
-        .collect();
-    let used: Vec<usize> = {
-        let mut u: Vec<usize> = data.iter().map(|s| group_of(s)).collect();
-        u.sort_unstable();
-        u.dedup();
-        u
-    };
-    let combo = used.len() > 1;
-    let mut out = vec![];
-    for s in &data {
-        let Some(values) = s.values.clone().or_else(|| literal(1, s)) else { continue };
-        let gi = group_of(s);
+    }
+
+    fn group_of(&self, s: &Ser) -> usize {
+        self.groups.iter().position(|g| g.icrt == s.group).unwrap_or(0)
+    }
+
+    fn series_out(&self, s: &Ser, kinds: &[ChartKind], combo: bool) -> Option<Series> {
+        let values = s.values.clone().or_else(|| self.literal(1, s))?;
+        let gi = self.group_of(s);
         let kind = kinds.get(gi).copied().unwrap_or_default();
         let line_like = matches!(
             kind,
@@ -725,48 +691,146 @@ fn parse(records: &[Record<'_>], links: &Links, report: &mut ReadReport) -> Resu
         );
         let line_color = s.line.and_then(|(c, _)| c);
         let color = if line_like { line_color.or(s.fill) } else { s.fill.or(line_color) };
-        out.push(Series {
+        Some(Series {
             name: s.name.clone(),
-            categories: s.categories.clone().or_else(|| literal(2, s)),
+            categories: s.categories.clone().or_else(|| self.literal(2, s)),
             values,
-            bubble_sizes: s.bubbles.clone().or_else(|| literal(3, s)),
+            bubble_sizes: s.bubbles.clone().or_else(|| self.literal(3, s)),
             color,
-            secondary: combo && groups.get(gi).is_some_and(|g| g.secondary),
+            secondary: combo && self.groups.get(gi).is_some_and(|g| g.secondary),
             kind: combo.then_some(kind),
             ..Series::default()
-        });
+        })
     }
-    if unreadable {
-        report.warn("Some chart series refer to data in a way that can't be imported; those references were left out.");
+
+    fn finish(mut self, report: &mut ReadReport) -> Result<Chart, Skip> {
+        if self.groups.is_empty() {
+            return Err(Skip::Why("it has no chart type".into()));
+        }
+        if let Some(name) = self.groups.iter().find_map(|g| if let Some(GroupType::Unsupported(n)) = g.ty { Some(n) } else { None }) {
+            return Err(Skip::Why(format!("{name} charts can't be imported yet")));
+        }
+        let data: Vec<&Ser> = self.series.iter().filter(|s| !s.aux).collect();
+        let kinds: Vec<ChartKind> = (0..self.groups.len())
+            .map(|gi| {
+                let members: Vec<&Ser> = data.iter().copied().filter(|s| self.group_of(s) == gi).collect();
+                self.groups.get(gi).map(|g| kind_of(g, &members)).unwrap_or_default()
+            })
+            .collect();
+        let mut used: Vec<usize> = data.iter().map(|s| self.group_of(s)).collect();
+        used.sort_unstable();
+        used.dedup();
+        let combo = used.len() > 1;
+        let out: Vec<Series> = data.iter().filter_map(|s| self.series_out(s, &kinds, combo)).collect();
+        if self.unreadable {
+            report.warn("Some chart series refer to data in a way that can't be imported; those references were left out.");
+        }
+        if out.is_empty() {
+            return Err(Skip::Why("it has no data series that can be imported".into()));
+        }
+        let text = |link: u16| self.texts.iter().find(|t| t.link == Some(link)).and_then(|t| t.text.clone()).filter(|t| !t.is_empty());
+        let kind = if combo { ChartKind::Combo } else { used.first().and_then(|g| kinds.get(*g)).copied().unwrap_or_default() };
+        let (width, height) = self.frame.filter(|(w, h)| *w > 0.0 && *h > 0.0).unwrap_or((480.0, 288.0));
+        if !matches!(kind, ChartKind::Scatter | ChartKind::ScatterLines | ChartKind::Bubble) {
+            self.scale.x = AxisScale::default();
+        }
+        Ok(Chart {
+            hidden: false,
+            id: 0,
+            kind,
+            anchor: Anchor { width, height, ..Anchor::default() },
+            title: text(1),
+            series: out,
+            legend: self.legend.unwrap_or(LegendPos::None),
+            data_labels: false,
+            gridlines: self.gridlines,
+            style: 2,
+            x_title: text(3),
+            y_title: text(2),
+            source: None,
+            by_rows: false,
+            pivot: None,
+            scale: self.scale,
+        })
     }
-    if out.is_empty() {
-        return Err(Skip::Why("it has no data series that can be imported".into()));
-    }
-    let text = |link: u16| texts.iter().find(|t| t.link == Some(link)).and_then(|t| t.text.clone()).filter(|t| !t.is_empty());
-    let kind = if combo { ChartKind::Combo } else { used.first().and_then(|g| kinds.get(*g)).copied().unwrap_or_else(|| kind_of(primary, &data)) };
-    let (width, height) = frame.filter(|(w, h)| *w > 0.0 && *h > 0.0).unwrap_or((480.0, 288.0));
-    let scatter = matches!(kind, ChartKind::Scatter | ChartKind::ScatterLines | ChartKind::Bubble);
-    if !scatter {
-        scale.x = AxisScale::default();
-    }
-    Ok(Chart {
-        hidden: false,
-        id: 0,
-        kind,
-        anchor: Anchor { width, height, ..Anchor::default() },
-        title: text(1),
-        series: out,
-        legend: legend.unwrap_or(LegendPos::None),
-        data_labels: false,
-        gridlines,
-        style: 2,
-        x_title: text(3),
-        y_title: text(2),
-        source: None,
-        by_rows: false,
-        pivot: None,
-        scale,
+}
+
+/// A chart group type record (Bar, Line, Pie, Area, Scatter, Radar, RadarArea, BopPop, Surf).
+fn group_type(id: u16, c: &mut Cursor<'_, '_>) -> Result<GroupType, Skip> {
+    Ok(match id {
+        BAR => {
+            c.u32()?;
+            let f = c.u16()?;
+            GroupType::Bar { transpose: f & 1 != 0, stacked: f & 2 != 0, percent: f & 4 != 0 }
+        }
+        LINE | AREA => {
+            let f = c.u16()?;
+            let (stacked, percent) = (f & 1 != 0, f & 2 != 0);
+            if id == LINE { GroupType::Line { stacked, percent } } else { GroupType::Area { stacked, percent } }
+        }
+        PIE => {
+            c.u16()?;
+            GroupType::Pie { donut: c.u16()? != 0 }
+        }
+        SCATTER => {
+            c.u32()?;
+            GroupType::Scatter { bubbles: c.u16()? & 1 != 0 }
+        }
+        // Pie of pie and bar of pie: drawn as a pie.
+        BOP_POP => GroupType::Pie { donut: false },
+        SURF => GroupType::Unsupported("surface"),
+        _ => GroupType::Radar,
     })
+}
+
+/// Legend: the side its centre is nearest, along the way its entries run. Position and size are
+/// in 1/4000 of the chart area.
+fn legend_side(c: &mut Cursor<'_, '_>) -> Result<LegendPos, Skip> {
+    let (x, y, dx, dy) = (c.u32()?, c.u32()?, c.u32()?, c.u32()?);
+    c.u16()?;
+    let vertical = c.u16()? & 0x0010 != 0;
+    let (cx, cy) = (u64::from(x) + u64::from(dx) / 2, u64::from(y) + u64::from(dy) / 2);
+    Ok(match (vertical, cx >= 2000, cy >= 2000) {
+        (true, true, _) => LegendPos::Right,
+        (true, false, _) => LegendPos::Left,
+        (false, _, true) => LegendPos::Bottom,
+        (false, _, false) => LegendPos::Top,
+    })
+}
+
+/// The model kind of a chart group drawing `members`.
+fn kind_of(g: &Group, members: &[&Ser]) -> ChartKind {
+    match g.ty {
+        Some(GroupType::Bar { transpose, stacked, percent }) => match (transpose, percent, stacked) {
+            (true, true, _) => ChartKind::BarStacked100,
+            (true, false, true) => ChartKind::BarStacked,
+            (true, false, false) => ChartKind::BarClustered,
+            (false, true, _) => ChartKind::ColumnStacked100,
+            (false, false, true) => ChartKind::ColumnStacked,
+            (false, false, false) => ChartKind::ColumnClustered,
+        },
+        Some(GroupType::Line { stacked, percent }) if stacked || percent => ChartKind::LineStacked,
+        Some(GroupType::Line { .. }) if members.iter().any(|s| s.marker == Some(true)) => ChartKind::LineMarkers,
+        Some(GroupType::Line { .. }) => ChartKind::Line,
+        Some(GroupType::Area { percent: true, .. }) => ChartKind::AreaStacked100,
+        Some(GroupType::Area { stacked: true, .. }) => ChartKind::AreaStacked,
+        Some(GroupType::Area { .. }) => ChartKind::Area,
+        Some(GroupType::Pie { donut: true }) => ChartKind::Doughnut,
+        Some(GroupType::Pie { donut: false }) => ChartKind::Pie,
+        Some(GroupType::Scatter { bubbles: true }) => ChartKind::Bubble,
+        Some(GroupType::Scatter { .. }) if members.iter().any(|s| s.line.is_some_and(|(_, drawn)| drawn)) => ChartKind::ScatterLines,
+        Some(GroupType::Scatter { .. }) => ChartKind::Scatter,
+        Some(GroupType::Radar) => ChartKind::Radar,
+        Some(GroupType::Unsupported(_)) | None => ChartKind::ColumnClustered,
+    }
+}
+
+fn parse(records: &[Record<'_>], links: &Links, report: &mut ReadReport) -> Result<Chart, Skip> {
+    let mut p = Parser::default();
+    for rec in records {
+        p.record(rec, links, report)?;
+    }
+    p.finish(report)
 }
 
 /// A chart sheet read from the file: its name, state, how many worksheets come before it, and
