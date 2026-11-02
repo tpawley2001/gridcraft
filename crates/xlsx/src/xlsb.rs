@@ -361,8 +361,6 @@ fn relationships(package: &mut Package<'_>, path: &str) -> Result<Vec<Rel>, IoEr
     parse_relationships(&data, path)
 }
 
-/// A worksheet's relationships (hyperlink targets, comments): none when the part has no
-/// relationships, and none with one warning when they can't be read.
 /// Reads the DrawingML part named by a worksheet's BrtDrawing relationship `id` into `sheet`
 /// (pictures, shapes, text boxes and charts), with the .xlsx drawing reader. A drawing that can't
 /// be found or read is skipped with a warning; the sheet's cells are kept either way.
@@ -393,6 +391,8 @@ fn drawing_rel(mut b: Bytes<'_>) -> Result<Option<String>, IoError> {
     Ok(id.filter(|id| !id.is_empty()))
 }
 
+/// A worksheet's relationships (hyperlink targets, comments): none when the part has no
+/// relationships, and none with one warning when they can't be read.
 fn sheet_relationships(package: &mut Package<'_>, path: &str, report: &mut ReadReport) -> Vec<Rel> {
     let rels = match package.read_limited(&rels_path(path), MAX_META) {
         Ok(None) => return vec![],
