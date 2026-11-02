@@ -751,6 +751,7 @@ impl Parser {
             by_rows: false,
             pivot: None,
             scale: self.scale,
+            data_table: None,
         })
     }
 }
