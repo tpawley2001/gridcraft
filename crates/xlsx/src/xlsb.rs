@@ -122,7 +122,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     crate::read::read_doc_props(&mut package, &root_rels, &mut wb.props);
     wb.sheets.clear();
     let mut report = ReadReport::default();
-    report.warn("XLSB import: charts, images, macros and other features are not imported. Save a new .xlsx file; XLSB saving is not supported.");
+    report.warn("XLSB import: charts, images and other features are not imported. Save a new .xlsx file; XLSB saving is not supported.");
     let mut itab_cur: Option<u32> = None;
     let (sheets, names, mut links) = workbook(&book, &mut wb, &mut report, &mut itab_cur)?;
     let cache_ids = pivot::cache_ids(&book);
@@ -143,6 +143,20 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         match theme {
             Ok(theme) => wb.theme = theme,
             Err(_) => report.warn("The XLSB workbook theme could not be read; theme colours and fonts use the default Office theme."),
+        }
+    }
+    // The VBA project is the same Compound File in .xlsb and .xlsm, so it is carried through
+    // unchanged (never run or parsed). Its signature part is not kept: it would not match the
+    // macro-enabled XML package the workbook is saved as.
+    if let Some(rel) = rels.iter().find(|r| r.kind == "vbaProject" && !r.external) {
+        match package.read(&rel.target) {
+            Ok(Some(data)) => {
+                wb.vba_project = Some(data.into());
+                report.warn("macros (VBA project) were kept but not executed");
+            }
+            Ok(None) => report.warn("macros (VBA project) reference a missing part and were dropped"),
+            Err(IoError::TooLarge(m)) => return Err(IoError::TooLarge(m)),
+            Err(e) => report.warn(format!("macros (VBA project) could not be read and were dropped: {e}")),
         }
     }
     let mut budget = Budget::default();
