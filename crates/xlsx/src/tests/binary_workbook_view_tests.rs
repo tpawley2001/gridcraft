@@ -1,4 +1,6 @@
 //! Synthetic workbook windows from the public [MS-XLS] and [MS-XLSB] layouts.
+//! Window1: <https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xls/5e7b0663-0af0-4ff5-83fb-b3c42a7ed54f>
+//! BrtBookView: <https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xlsb/05c70c7a-ed20-4888-bfed-bff2237aca88>
 use super::xls_tests::{cat, compound, rec, u16s};
 use super::xlsb_tests::{RELS, ROOT, TYPES, book, package, record, sst, worksheet};
 use crate::{read_xls, read_xlsb, read_xlsx, write_xlsx};
@@ -66,6 +68,22 @@ fn xlsb_window_display_options_and_ratio() {
     ] {
         assert_eq!(xlsb(&[&book_view(flags, ratio)]).view, expected);
     }
+}
+
+#[test]
+fn display_flags_are_independent_of_other_window_bits() {
+    for (flags, expected) in [
+        (0x30, WorkbookView { show_horizontal_scroll: false, ..WorkbookView::default() }),
+        (0x28, WorkbookView { show_vertical_scroll: false, ..WorkbookView::default() }),
+        (0, WorkbookView { show_sheet_tabs: false, show_horizontal_scroll: false, show_vertical_scroll: false, ..WorkbookView::default() }),
+        (0xff, WorkbookView::default()),
+    ] {
+        assert_eq!(xls(&[&window(u16::from(flags), 600)]).view, expected);
+        assert_eq!(xlsb(&[&book_view(flags, 600)]).view, expected);
+    }
+    let expected = WorkbookView { tab_ratio: 1000, ..WorkbookView::default() };
+    assert_eq!(xls(&[&window(0x38, 1000)]).view, expected);
+    assert_eq!(xlsb(&[&book_view(0x38, 1000)]).view, expected);
 }
 
 #[test]
