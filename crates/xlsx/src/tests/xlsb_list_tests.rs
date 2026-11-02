@@ -175,7 +175,7 @@ fn xlsb_calculated_column_and_custom_total_formulas() {
     assert_eq!(t.columns[1].totals, TotalsFn::Custom);
     assert_eq!(t.columns[1].totals_label.as_deref(), Some("SUBTOTAL(109,[Qty])*2"));
     assert!(!report.warnings.iter().any(|w| w.contains("calculated column") || w.contains("totals row")), "{:?}", report.warnings);
-    // The totals cell is inside the table: its reference to its own table drops the name too.
+    // The totals cell holds a data-rows reference, which keeps the table name like in .xlsx.
     assert_eq!(formula(&wb, "B5").as_deref(), Some("SUBTOTAL(109,Sales[Qty])*2"));
 
     // The .xlsx reader stores the same texts for the same table.
