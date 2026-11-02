@@ -1,5 +1,6 @@
 //! Cell formatting in a BIFF8 Workbook stream, from [MS-XLS]: Font (2.4.122), XF (2.4.353) with
-//! CellXF (2.5.91), Palette (2.4.188) and Style (2.4.269). Every XF is
+//! CellXF (2.5.91), Palette (2.4.188), Style (2.4.269), XFExt (2.4.355) with FullColorExt
+//! (2.5.155) and Theme (2.4.326). Every XF is
 //! decoded on its own: a cell XF stores its complete formatting (the fAtr* bits only say whether
 //! later changes to the parent style propagate), so nothing is inherited from `ixfParent`.
 
@@ -7,11 +8,14 @@ use std::collections::HashMap;
 
 use gridcraft_model::style::Protection;
 use gridcraft_model::{
-    Alignment, BorderLine, BorderStyle, Borders, Color, Fill, Font, HAlign, NumFmt, PatternType, Style, StyleId, StyleTable, Underline, VAlign,
-    VertAlign, Workbook,
+    Alignment, BorderLine, BorderStyle, Borders, Color, Fill, Font, HAlign, NumFmt, PatternType, Style, StyleId, StyleTable, Theme, Underline,
+    VAlign, VertAlign, Workbook,
 };
 
+use super::invalid;
 use super::records::Cursor;
+use crate::IoError;
+use crate::package::Package;
 use crate::tables::{INDEXED, builtin_format};
 
 /// Font records kept at most ([MS-XLS] FontIndex allows indexes up to 1022).
@@ -25,6 +29,54 @@ const MAX_STYLE_NAME: usize = 255;
 const ICV_FONT_AUTO: u16 = 0x7FFF;
 const ICV_DEFAULT_FG: u16 = 0x40;
 const ICV_DEFAULT_BG: u16 = 0x41;
+
+/// XFExt colours replacing an XF's palette colours ([MS-XLS] 2.5.108 ExtPropType values).
+#[derive(Clone, Copy, Debug)]
+enum ExtColor {
+    /// A colour-table index, resolved once the palette is known.
+    Indexed(u16),
+    Color(Color),
+}
+
+impl ExtColor {
+    fn resolve(self, table: &[u32; 64]) -> Color {
+        match self {
+            ExtColor::Indexed(icv) => color(icv, table),
+            ExtColor::Color(c) => c,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct XfExt {
+    fill_fg: Option<ExtColor>,
+    fill_bg: Option<ExtColor>,
+    top: Option<ExtColor>,
+    bottom: Option<ExtColor>,
+    left: Option<ExtColor>,
+    right: Option<ExtColor>,
+    diag: Option<ExtColor>,
+    text: Option<ExtColor>,
+}
+
+/// The Theme record's data (an OPC package) gathered with its ContinueFrt12 records.
+#[derive(Debug, Default)]
+pub(super) struct ThemeData {
+    /// dwThemeVersion: 0 for a custom theme stored in the data.
+    version: u32,
+    bytes: Vec<u8>,
+    /// More than `MAX_THEME` bytes, or a record too short for its header.
+    bad: bool,
+}
+
+/// The `dwThemeVersion` of the built-in Office theme, which stores no data.
+const THEME_BUILTIN: u32 = 124_226;
+/// Bytes of theme package kept at most.
+const MAX_THEME: usize = 16 * 1024 * 1024;
+/// Largest theme part read from the package.
+const MAX_THEME_PART: u64 = 1024 * 1024;
+/// Length of FrtHeader (2.5.135).
+const FRT_HEADER: usize = 12;
 
 /// One XF record, decoded as far as its bytes allow.
 #[derive(Clone, Debug, Default)]
@@ -57,6 +109,12 @@ pub(super) struct StyleRecords {
     /// Palette entries for colour indexes 8 and up (RRGGBB), when a Palette record is present.
     palette: Option<Vec<u32>>,
     styles: Vec<NamedStyle>,
+    /// XFExt colours by the index of the XF they extend.
+    exts: HashMap<u16, XfExt>,
+    /// An XFExt record that was malformed or names a missing XF.
+    pub(super) bad_ext: bool,
+    /// The Theme record, when present.
+    pub(super) theme: Option<ThemeData>,
     /// Records that were shorter than their structure; the parts present were used.
     pub(super) short: bool,
 }
@@ -181,6 +239,42 @@ impl StyleRecords {
         }
     }
 
+    /// An XFExt record: full-fidelity colours of the XF `ixfe`. Malformed records are dropped.
+    pub(super) fn xf_ext(&mut self, c: &mut Cursor<'_, '_>) {
+        if self.exts.len() >= MAX_STYLES {
+            return;
+        }
+        match read_xf_ext(c) {
+            Some((ixfe, ext)) => {
+                self.exts.insert(ixfe, ext);
+            }
+            None => self.bad_ext = true,
+        }
+    }
+
+    /// A Theme record: starts the theme data.
+    pub(super) fn theme(&mut self, c: &mut Cursor<'_, '_>) {
+        let mut t = ThemeData::default();
+        match (c.skip(FRT_HEADER), c.u32()) {
+            (Ok(()), Ok(version)) => {
+                t.version = version;
+                t.append(c.rest());
+            }
+            _ => t.bad = true,
+        }
+        self.theme = Some(t);
+    }
+
+    /// A ContinueFrt12 record following the Theme record: more theme data.
+    pub(super) fn theme_continue(&mut self, c: &mut Cursor<'_, '_>) {
+        let Some(t) = self.theme.as_mut() else { return };
+        if c.skip(FRT_HEADER).is_err() {
+            t.bad = true;
+            return;
+        }
+        t.append(c.rest());
+    }
+
     /// The 64-entry colour table: the built-in eight, then the palette (or the default one).
     pub(super) fn color_table(&self) -> [u32; 64] {
         let mut table = INDEXED;
@@ -190,6 +284,107 @@ impl StyleRecords {
             }
         }
         table
+    }
+}
+
+impl ThemeData {
+    fn append(&mut self, data: Vec<u8>) {
+        if self.bytes.len().saturating_add(data.len()) > MAX_THEME {
+            self.bad = true;
+            return;
+        }
+        self.bytes.extend_from_slice(&data);
+    }
+
+    /// The workbook theme: `Ok(None)` for the built-in Office theme, an error when the data
+    /// can't be read.
+    pub(super) fn read(&self) -> Result<Option<Theme>, IoError> {
+        if self.bad {
+            return Err(invalid("theme data too large or truncated"));
+        }
+        if self.version == THEME_BUILTIN && self.bytes.is_empty() {
+            return Ok(None);
+        }
+        let mut package = Package::open(&self.bytes)?;
+        let part = theme_part(&mut package)?.ok_or_else(|| invalid("missing theme part"))?;
+        let data = package.read_limited(&part, MAX_THEME_PART)?.ok_or_else(|| invalid("missing theme part"))?;
+        let xml = crate::xml::parse(&data)?;
+        Ok(Some(crate::theme::read_theme(&xml)))
+    }
+}
+
+/// The theme part of a theme package: the package's own theme relationship, else the theme
+/// relationship of the part it points at (the theme manager part), else the usual part name.
+fn theme_part(package: &mut Package<'_>) -> Result<Option<String>, IoError> {
+    let root = package.rels("")?;
+    if let Some(rel) = root.iter().find(|r| r.kind == "theme" && !r.external) {
+        return Ok(Some(rel.target.clone()));
+    }
+    for rel in root.iter().filter(|r| !r.external) {
+        if let Some(theme) = package.rels(&rel.target)?.into_iter().find(|r| r.kind == "theme" && !r.external) {
+            return Ok(Some(theme.target));
+        }
+    }
+    Ok(package.has("theme/theme/theme1.xml").then(|| "theme/theme/theme1.xml".to_string()))
+}
+
+/// XFExt fields: the XF index and the colours of the ExtProp entries GridCraft keeps.
+fn read_xf_ext(c: &mut Cursor<'_, '_>) -> Option<(u16, XfExt)> {
+    c.skip(FRT_HEADER + 2).ok()?;
+    let ixfe = c.u16().ok()?;
+    c.skip(2).ok()?;
+    let cexts = c.u16().ok()?;
+    let mut ext = XfExt::default();
+    for _ in 0..cexts {
+        let ty = c.u16().ok()?;
+        let cb = usize::from(c.u16().ok()?);
+        // cb counts the whole ExtProp, its four-byte head included.
+        let data_len = cb.checked_sub(4)?;
+        if data_len > c.remaining() {
+            return None;
+        }
+        let slot = match ty {
+            0x04 => &mut ext.fill_fg,
+            0x05 => &mut ext.fill_bg,
+            0x07 => &mut ext.top,
+            0x08 => &mut ext.bottom,
+            0x09 => &mut ext.left,
+            0x0A => &mut ext.right,
+            0x0B => &mut ext.diag,
+            0x0D => &mut ext.text,
+            _ => {
+                c.skip(data_len).ok()?;
+                continue;
+            }
+        };
+        if data_len < 8 {
+            return None;
+        }
+        let kind = c.u16().ok()?;
+        let tint = i16::from_le_bytes(c.u16().ok()?.to_le_bytes());
+        let value = c.u32().ok()?;
+        c.skip(data_len - 8).ok()?;
+        *slot = full_color(kind, tint, value);
+    }
+    Some((ixfe, ext))
+}
+
+/// A FullColorExt colour (2.5.155): `None` for automatic and unset, so the XF's colour stays.
+/// Indexed colours are resolved with the palette when the styles are built.
+fn full_color(kind: u16, tint: i16, value: u32) -> Option<ExtColor> {
+    match kind {
+        // XColorType: indexed; kept as an index until the palette is known.
+        1 => Some(ExtColor::Indexed(value.min(u32::from(u16::MAX)) as u16)),
+        // LongRGBA: red, green, blue, reserved bytes.
+        2 => {
+            let [r, g, b, _] = value.to_le_bytes();
+            Some(ExtColor::Color(Color::Rgb(u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b))))
+        }
+        3 if value <= 11 => {
+            let tint = (f64::from(tint) * 1000.0 / 32767.0).round().clamp(-1000.0, 1000.0) as i16;
+            Some(ExtColor::Color(Color::Theme(value as u8, tint)))
+        }
+        _ => None,
     }
 }
 
@@ -316,7 +511,56 @@ fn num_fmt(ifmt: u16, formats: &HashMap<u16, String>) -> NumFmt {
 }
 
 /// The model style of one XF.
-fn xf_style(xf: &Xf, fonts: &[Font], formats: &HashMap<u16, String>, table: &[u32; 64]) -> Style {
+fn xf_style(xf: &Xf, ext: Option<&XfExt>, fonts: &[Font], formats: &HashMap<u16, String>, table: &[u32; 64]) -> Style {
+    let mut s = xf_palette_style(xf, fonts, formats, table);
+    if let Some(ext) = ext {
+        apply_ext(&mut s, ext, table);
+    }
+    s
+}
+
+/// Replaces the palette colours of a style with an XFExt's colours. Borders and fills keep
+/// their XF line styles and pattern; only sides that have a line take a colour.
+fn apply_ext(s: &mut Style, ext: &XfExt, table: &[u32; 64]) {
+    if let Some(c) = ext.text {
+        let c = c.resolve(table);
+        // Text 1 (dk1) is what "automatic" font colour means in practice.
+        s.font.color = if c == Color::Theme(1, 0) { Color::Auto } else { c };
+    }
+    let sides = [
+        (ext.top, &mut s.borders.top),
+        (ext.bottom, &mut s.borders.bottom),
+        (ext.left, &mut s.borders.left),
+        (ext.right, &mut s.borders.right),
+        (ext.diag, &mut s.borders.diag_down),
+    ];
+    for (c, side) in sides {
+        if let Some(c) = c
+            && side.style != BorderStyle::None
+        {
+            side.color = c.resolve(table);
+        }
+    }
+    if let Some(c) = ext.diag
+        && s.borders.diag_up.style != BorderStyle::None
+    {
+        s.borders.diag_up.color = c.resolve(table);
+    }
+    if s.fill.pattern != PatternType::None {
+        if let Some(c) = ext.fill_fg {
+            s.fill.fg = c.resolve(table);
+        }
+        // A solid fill shows only its foreground colour.
+        if let Some(c) = ext.fill_bg
+            && s.fill.pattern != PatternType::Solid
+        {
+            s.fill.bg = c.resolve(table);
+        }
+    }
+}
+
+/// The model style of one XF from its own (palette) fields.
+fn xf_palette_style(xf: &Xf, fonts: &[Font], formats: &HashMap<u16, String>, table: &[u32; 64]) -> Style {
     let mut s = Style {
         font: xf_font(xf.ifnt, fonts),
         num_fmt: num_fmt(xf.ifmt, formats),
@@ -388,6 +632,16 @@ fn xf_style(xf: &Xf, fonts: &[Font], formats: &HashMap<u16, String>, table: &[u3
     s
 }
 
+/// The XFExt colours of XF `i`, if any.
+fn ext_of(r: &StyleRecords, i: usize) -> Option<&XfExt> {
+    u16::try_from(i).ok().and_then(|i| r.exts.get(&i))
+}
+
+/// Whether an XFExt record was malformed or extends an XF the workbook doesn't have.
+pub(super) fn ext_ignored(r: &StyleRecords) -> bool {
+    r.bad_ext || r.exts.keys().any(|i| usize::from(*i) >= r.xfs.len())
+}
+
 /// Imports the formatting: sets the workbook's default (Normal) font and named cell styles, and
 /// returns the model style of every XF in file order.
 pub(super) fn build(r: &StyleRecords, formats: &HashMap<u16, String>, wb: &mut Workbook) -> Vec<StyleId> {
@@ -399,7 +653,7 @@ pub(super) fn build(r: &StyleRecords, formats: &HashMap<u16, String>, wb: &mut W
     if let Some(font) = normal_font {
         wb.styles = StyleTable::with_default(Style { font, ..Style::default() });
     }
-    let out = r.xfs.iter().map(|xf| wb.styles.intern(xf_style(xf, &fonts, formats, &table))).collect();
+    let out = r.xfs.iter().enumerate().map(|(i, xf)| wb.styles.intern(xf_style(xf, ext_of(r, i), &fonts, formats, &table))).collect();
     // User-defined named styles. Excel 2007 and later write every built-in style into each .xls
     // (about fifty, their colours approximated to the palette); GridCraft defines those itself.
     let mut named: Vec<(String, Style)> = Vec::new();
@@ -415,7 +669,7 @@ pub(super) fn build(r: &StyleRecords, formats: &HashMap<u16, String>, wb: &mut W
         }
         if let Some(xf) = r.xfs.get(usize::from(ns.ixf)) {
             seen.insert(key);
-            named.push((ns.name.clone(), xf_style(xf, &fonts, formats, &table)));
+            named.push((ns.name.clone(), xf_style(xf, ext_of(r, usize::from(ns.ixf)), &fonts, formats, &table)));
         }
     }
     wb.cell_styles = named;

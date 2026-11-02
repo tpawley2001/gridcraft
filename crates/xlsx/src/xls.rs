@@ -7,7 +7,8 @@
 //!
 //! Read: worksheets, shared strings, cell values, formulas (text and cached results, including
 //! shared and array formulas), cell formatting (number formats, fonts, fills, borders,
-//! alignment, protection, the colour palette and user-defined cell styles), the 1904 date
+//! alignment, protection, the colour palette, theme and RGB cell colours from XFExt records and
+//! user-defined cell styles), the workbook theme (Theme record), the 1904 date
 //! system, merged cells, column widths, row heights, document properties, defined names, print areas, print titles,
 //! the calculation settings (mode, iteration, precision as displayed), data validation and
 //! conditional formats (cell-value and formula rules, and the Excel 2007+ kinds: colour scales,
@@ -231,10 +232,20 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     wb.protected_structure = g.protection.locked;
     wb.structure_password = g.protection.password.clone();
     wb.date_system = if g.date1904 { DateSystem::D1904 } else { DateSystem::D1900 };
+    if let Some(theme) = &g.styles.theme {
+        match theme.read() {
+            Ok(Some(theme)) => wb.theme = theme,
+            Ok(None) => {}
+            Err(_) => report.warn("The .xls workbook theme could not be read; theme colours and fonts use the default Office theme."),
+        }
+    }
     // One model style per XF.
     let styles = styles::build(&g.styles, &g.formats, &mut wb);
     if g.styles.short {
         report.warn("Some cell formatting records were shorter than expected; the formatting present was kept.");
+    }
+    if styles::ext_ignored(&g.styles) {
+        report.warn("Some extended cell colours (XFExt records) could not be read; the palette colours were kept.");
     }
 
     let mut pivots = pivot::Loader::new(&cf, &g.pivot_caches, &g.formats, wb.date_system);
@@ -371,9 +382,12 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
     let mut window_seen = false;
     let mut offsets = std::collections::HashSet::new();
     let mut drawing_group = vec![];
+    // Whether the previous record was the Theme record or one of its ContinueFrt12 records.
+    let mut in_theme = false;
     while let Some(rec) = recs.next_record()? {
         budget.record()?;
         let mut c = Cursor::new(&rec.parts);
+        let after_theme = std::mem::replace(&mut in_theme, matches!(rec.id, 0x0896 | 0x087F));
         if let Some(b5) = g.biff5.as_mut()
             && biff5_global(&rec, &mut c, b5, &mut g.formats, &mut g.styles, budget, report)?
         {
@@ -455,6 +469,10 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
             0x0031 => g.styles.font(&mut c),
             0x0092 => g.styles.palette(&mut c),
             0x0293 => g.styles.style(&mut c),
+            0x087D => g.styles.xf_ext(&mut c),
+            0x0896 => g.styles.theme(&mut c),
+            0x087F if after_theme => g.styles.theme_continue(&mut c),
+            0x087F => in_theme = false,
             0x00FC => g.sst = shared_strings(&mut c, budget)?,
             0x01AE => {
                 let _ctab = c.u16()?;
