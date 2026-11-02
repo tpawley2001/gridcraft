@@ -6,11 +6,13 @@
 //! borders, alignment and protection), column widths, row heights, hidden and outlined
 //! rows/columns, frozen panes, sheet view options, workbook theme colours and fonts, tab colours
 //! (including theme colours and tints), hyperlinks, notes, tables (with their calculated column
-//! and custom totals formulas, which like cell formulas may use structured references), AutoFilters, PivotTables and
+//! and custom totals formulas, which like cell formulas may use structured references), AutoFilters, PivotTables,
+//! sparklines and
 //! each sheet's page setup, print options, header/footer and manual page breaks are imported;
 //! gradient fills, cell style inheritance, differential formats, macros and other workbook features
 //! are not run or imported.
 
+mod sparklines;
 mod styles;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -493,7 +495,7 @@ impl<'a> Records<'a> {
                         return Err(invalid("mismatched extension block end"));
                     }
                 }
-                _ if !self.blocks.is_empty() => {}
+                _ if !self.blocks.is_empty() && !sparklines::is_record(id) => {}
                 _ => return Ok(Some((id, payload))),
             }
         }
@@ -1156,6 +1158,7 @@ fn worksheet(
     let mut groups = Groups::default();
     let mut page = PageState::default();
     let mut rules = rules::Rules::default();
+    let mut sparks = sparklines::Sparklines::default();
     while let Some((id, payload)) = records.next(report)? {
         let mut b = Bytes::new(payload);
         match id {
@@ -1341,6 +1344,7 @@ fn worksheet(
             }
             64 | 573 | 574 => rules.validation(id, payload, &mut sheet, budget)?,
             461..=471 | 564 => rules.cond_format(id, payload, &mut sheet, dxfs),
+            _ if sparklines::is_record(id) => sparks.record(id, payload, links, &mut sheet, report),
             _ => {}
         }
     }
