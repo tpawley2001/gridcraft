@@ -120,6 +120,9 @@ pub(crate) struct Links {
     pub xti: Vec<Xti>,
     /// XLSB tables (ListObjects) structured references can name.
     pub lists: Vec<List>,
+    /// For a calculated PivotTable field's formula: the names of the cache fields its
+    /// `PtgSxName` tokens refer to, in `BrtBeginPName` order (empty: none can be referred to).
+    pub pivot_fields: Vec<String>,
 }
 
 /// An XLSB table as `PtgList` names it: by `idList`, and its columns by index.
@@ -442,6 +445,19 @@ fn list_ref(t: &mut Bytes<'_>, base: CellRef, links: &Links, site: Site<'_>) -> 
     Ok(Expr::Struct(StructRef { table, specifiers, col_start, col_end }))
 }
 
+/// `PtgSxName` ([MS-XLSB] 2.5.98.16: first byte 0x18, eptg 0x1D, then a 4-byte `sxIndex`): a
+/// field in a calculated PivotTable field's formula, by its index in the field's `PNAMES`
+/// collection. Written as the field name, in single quotes when a sheet name would need them
+/// (`'Unit Price'`).
+fn sx_name(t: &mut Bytes<'_>, links: &Links) -> Result<Expr, Unsupported> {
+    let i = usize::try_from(t.u32()?).map_err(|_| TRUNC)?;
+    let name = links.pivot_fields.get(i).filter(|n| !n.is_empty()).ok_or(Unsupported("reference to a missing PivotTable field"))?;
+    if name.contains('!') {
+        return Err(Unsupported("PivotTable field names with '!'"));
+    }
+    Ok(Expr::Name(gridcraft_core::quote_sheet(name)))
+}
+
 /// BIFF5 3-D tokens: `ixals`, 8 reserved bytes, then the first and last sheet index.
 const BIFF5_3D_HEADER: usize = 14;
 
@@ -466,6 +482,11 @@ fn decode_in(
     while t.pos < rgce.len() {
         let ptg = t.u8()?;
         let mut kids = 0usize;
+        if wide && ptg & 0x1F == 0x18 && rgce.get(t.pos) == Some(&0x1D) {
+            t.u8()?;
+            push(&mut stack, kids, sx_name(&mut t, links)?)?;
+            continue;
+        }
         if wide && ptg & 0x1F == 0x18 {
             // PtgList, whichever operand class its first byte carries.
             push(&mut stack, kids, list_ref(&mut t, base, links, site)?)?;
@@ -843,6 +864,7 @@ mod tests {
                 Xti { book: 0, first: -1, last: -1 },
             ],
             lists: vec![],
+            pivot_fields: vec![],
         }
     }
 
