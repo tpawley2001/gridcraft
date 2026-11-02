@@ -577,6 +577,15 @@ fn workbook(
                 if payload.len() == 29 {
                     *itab_cur = b.take(24).and_then(|_| b.u32()).ok();
                 }
+                // [MS-XLSB] BrtBookView: iTabRatio at byte 16, display flags at 28.
+                if let Some(bytes) = payload.get(16..20).and_then(|bytes| <[u8; 4]>::try_from(bytes).ok()) {
+                    wb.view.tab_ratio = u32::from_le_bytes(bytes).min(1000);
+                }
+                if let Some(flags) = payload.get(28) {
+                    wb.view.show_horizontal_scroll = flags & 0x08 != 0;
+                    wb.view.show_vertical_scroll = flags & 0x10 != 0;
+                    wb.view.show_sheet_tabs = flags & 0x20 != 0;
+                }
             }
             157 => calc_prop(payload, wb, report),
             534 | 677 => book_protection(id, payload, wb, report),
