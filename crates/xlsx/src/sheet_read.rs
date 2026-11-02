@@ -24,7 +24,8 @@ mod parts;
 mod rules;
 
 pub use parts::{read_autofilter, read_table};
-use parts::{read_comments, read_hyperlinks, read_note_shapes, read_threaded};
+use parts::{read_comments, read_hyperlinks};
+pub(crate) use parts::{read_note_shapes, read_threaded};
 use rules::{read_cf, read_validation};
 
 struct Shared {
@@ -246,7 +247,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
     }
     for rel in rels.iter().filter(|r| r.kind == "threadedComment") {
         if let Some(x) = cx.optional_xml(&rel.target)? {
-            read_threaded(cx, &x, &mut sheet);
+            read_threaded(&cx.persons, &x, &mut sheet);
         }
     }
     // Which notes are displayed (`<x:Visible/>`) and where their boxes sit live in the VML shapes.

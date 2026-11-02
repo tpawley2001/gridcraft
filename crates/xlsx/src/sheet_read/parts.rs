@@ -198,7 +198,7 @@ pub(super) fn read_comments(x: &El, sheet: &mut Sheet) {
 
 /// Reads the notes' VML shapes: a shape carrying `<x:Visible/>` marks its note as shown, and its
 /// `<x:Anchor>` and style size become the note's box. Shapes may sit in groups.
-pub(super) fn read_note_shapes(x: &El, sheet: &mut Sheet, depth: usize) {
+pub(crate) fn read_note_shapes(x: &El, sheet: &mut Sheet, depth: usize) {
     if depth > xml::MAX_DEPTH {
         return;
     }
@@ -247,12 +247,13 @@ fn note_box(anchor: &str, style: &str, cell: CellRef) -> Option<NoteBox> {
     Some(NoteBox { from: corner(c1, dx1, r1, dy1), to: corner(c2, dx2, r2, dy2), size_pt: pt("width").zip(pt("height")) })
 }
 
-pub(super) fn read_threaded(cx: &Ctx<'_>, x: &El, sheet: &mut Sheet) {
+/// Reads a threaded comments part; authors are looked up in `persons` (person id → name).
+pub(crate) fn read_threaded(persons: &HashMap<String, String>, x: &El, sheet: &mut Sheet) {
     let mut by_id: HashMap<String, CellRef> = HashMap::new();
     let mut replies: Vec<(String, String, String, String)> = vec![];
     for t in x.kids("threadedComment") {
         let Some(cell) = t.attr("ref").and_then(CellRef::parse) else { continue };
-        let author = t.attr("personId").and_then(|p| cx.persons.get(p)).cloned().unwrap_or_default();
+        let author = t.attr("personId").and_then(|p| persons.get(p)).cloned().unwrap_or_default();
         let text = t.child("text").map(|e| e.text.clone()).unwrap_or_default();
         let date = t.attr("dT").unwrap_or("").to_string();
         match t.attr("parentId") {
