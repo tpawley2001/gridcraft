@@ -150,15 +150,15 @@ pub(super) fn u16s(v: &[u16]) -> Vec<u8> {
 }
 
 /// Cell header: row, column, XF index.
-fn cell(r: u16, c: u16, xf: u16) -> Vec<u8> {
+pub(super) fn cell(r: u16, c: u16, xf: u16) -> Vec<u8> {
     u16s(&[r, c, xf])
 }
 
-fn bof(dt: u16) -> Vec<u8> {
+pub(super) fn bof(dt: u16) -> Vec<u8> {
     rec(0x0809, &cat(&[&u16s(&[0x0600, dt, 0x0DBB, 0x07CC]), &[0; 8]]))
 }
 
-fn eof() -> Vec<u8> {
+pub(super) fn eof() -> Vec<u8> {
     rec(0x000A, &[])
 }
 
