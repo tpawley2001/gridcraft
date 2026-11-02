@@ -6,7 +6,7 @@ use std::io::{Cursor, Read};
 use super::xls_tests::compound;
 use crate::{ReadReport, read_xls, read_xlsx, write_xlsx};
 
-fn rec(id: u16, data: &[u8]) -> Vec<u8> {
+pub(super) fn rec(id: u16, data: &[u8]) -> Vec<u8> {
     [id.to_le_bytes().as_slice(), &(data.len() as u16).to_le_bytes(), data].concat()
 }
 
@@ -24,7 +24,7 @@ fn feat(isf: u16, presence: u32, data: &[u8]) -> Vec<u8> {
     rec(0x0867, &[header.as_slice(), &isf.to_le_bytes(), &[1], &presence.to_le_bytes(), data].concat())
 }
 
-fn read(globals: &[u8], sheets: &[Vec<u8>]) -> (gridcraft_model::Workbook, ReadReport) {
+pub(super) fn read(globals: &[u8], sheets: &[Vec<u8>]) -> (gridcraft_model::Workbook, ReadReport) {
     let boundsheet = |offset: u32, index: usize| {
         let name = format!("Sheet{index}");
         rec(0x0085, &[offset.to_le_bytes().as_slice(), &[0, 0, name.len() as u8, 0], name.as_bytes()].concat())

@@ -1,6 +1,7 @@
 //! Protection records from [MS-XLS] 2.4.112 (FeatHdr), 2.4.191 (Password),
 //! 2.4.207 (Protect), and the action flags in 2.5.104 (EnhancedProtection).
-use gridcraft_model::{PasswordHash, SheetProtection};
+use gridcraft_core::{CellRef, RangeRef};
+use gridcraft_model::{EditRange, PasswordHash, Sheet, SheetProtection};
 
 use super::{Cursor, invalid};
 use crate::{IoError, ReadReport};
@@ -82,4 +83,59 @@ fn enhanced(c: &mut Cursor<'_, '_>) -> Result<Option<u32>, IoError> {
         u32::MAX if c.remaining() == 4 => c.u32().map(Some),
         _ => Err(invalid("invalid EnhancedProtection payload")),
     }
+}
+
+// Feat ([MS-XLS] 2.4.111), FeatProtection (2.5.124) and SDContainer (2.5.234).
+pub(super) fn feat(c: &mut Cursor<'_, '_>, sheet: &mut Sheet, report: &mut ReadReport) {
+    match edit_range(c) {
+        Ok(Some((range, permissions))) => {
+            sheet.edit_ranges.push(range);
+            if permissions {
+                report.warn("Windows user permissions on Allow Edit Ranges were not kept; their passwords still apply.");
+            }
+        }
+        Ok(None) => {}
+        Err(_) => report.warn("An invalid .xls Feat Allow Edit Ranges record was skipped."),
+    }
+}
+
+fn edit_range(c: &mut Cursor<'_, '_>) -> Result<Option<(EditRange, bool)>, IoError> {
+    c.skip(12)?; // FrtHeader
+    if c.u16()? != 2 {
+        return Ok(None);
+    }
+    c.skip(5)?; // reserved1, reserved2
+    let count = usize::from(c.u16()?);
+    c.skip(6)?; // cbFeatData is ignored for ISFPROTECTION; reserved3
+    if count == 0 {
+        return Ok(None);
+    }
+    if count > c.remaining() / 8 {
+        return Err(invalid("truncated edit range references"));
+    }
+    let mut ranges = Vec::with_capacity(count);
+    for _ in 0..count {
+        let (r0, r1, c0, c1) = (c.u16()?, c.u16()?, c.u16()?, c.u16()?);
+        if r0 > r1 || c0 > c1 || c1 >= 256 {
+            return Err(invalid("invalid edit range reference"));
+        }
+        ranges.push(RangeRef::new(CellRef::new(u32::from(r0), u32::from(c0)), CellRef::new(u32::from(r1), u32::from(c1))));
+    }
+    let permissions = c.u32()? & 1 != 0;
+    let password = c.u32()? as u16;
+    let title = c.string()?;
+    if permissions {
+        let size = c.u32()? as usize;
+        if size > c.remaining() {
+            return Err(invalid("truncated edit range security descriptor"));
+        }
+        c.skip(size)?;
+    }
+    if c.remaining() != 0 {
+        return Err(invalid("unexpected edit range bytes"));
+    }
+    Ok(Some((
+        EditRange { title, ranges, password: (password != 0).then_some(PasswordHash::Legacy(password)), security_descriptor: None },
+        permissions,
+    )))
 }

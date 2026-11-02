@@ -14,7 +14,7 @@
 //! data bars, icon sets, top/bottom, above average and text/date templates), tables (name,
 //! range, header and totals rows, columns and table style), page setup (paper, orientation,
 //! scale, fit to page, margins, headers and footers, print options, manual page breaks), the
-//! sheet tab colour, sheet protection, workbook structure protection, the sheet AutoFilter
+//! sheet tab colour, sheet protection, Allow Edit Ranges (titles, references and legacy passwords), workbook structure protection, the sheet AutoFilter
 //! (range and criteria), charts: embedded charts and chart sheets become live charts whose
 //! series refer to the cells (see `chart`), and PivotTables on worksheet-range or defined-name
 //! sources (cache streams in `_SX_DB_CUR` and the SxView views, in `xls/pivot.rs`). Everything else (pictures, comments, macros) is
@@ -920,6 +920,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x0012 => protection::protect(&mut c, &mut st.protection, report),
         0x0013 => protection::password(&mut c, &mut st.protection, report),
         0x0867 => protection::feat_hdr(&mut c, &mut st.protection, report),
+        0x0868 => protection::feat(&mut c, &mut st.sheet, report),
         0x0203 => {
             let (r, col, x) = (c.u16()?, c.u16()?, c.u16()?);
             let v = Value::number(c.f64()?);
