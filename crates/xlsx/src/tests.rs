@@ -62,6 +62,7 @@ mod xls_protection_tests;
 mod xls_style_tests;
 mod xls_table_tests;
 mod xls_tests;
+mod xls_vba_tests;
 mod xlsb_array_const_tests;
 mod xlsb_block_warning_tests;
 mod xlsb_cell_style_tests;
