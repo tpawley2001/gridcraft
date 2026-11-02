@@ -9,6 +9,7 @@
 //! rows/columns, frozen panes, sheet view options, workbook theme colours and fonts, tab colours
 //! (including theme colours and tints), hyperlinks, notes, tables (with their calculated column
 //! and custom totals formulas, which like cell formulas may use structured references), AutoFilters, PivotTables,
+//! Allow Edit Ranges (titles, references and legacy or iterated passwords),
 //! sparklines, drawings (pictures, shapes, text boxes and charts, read with the .xlsx drawing reader) and
 //! each sheet's page setup, print options, header/footer and manual page breaks are imported;
 //! gradient fills, cell style inheritance, differential formats, macros and other workbook features
@@ -22,8 +23,8 @@ use std::sync::Arc;
 
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_model::{
-    CalcMode, Cell, Color, Comment, Formula, Hyperlink, LineInfo, Orientation, PasswordHash, PrintSettings, Sheet, SheetProtection, StyleId,
-    Visibility, Workbook,
+    CalcMode, Cell, Color, Comment, EditRange, Formula, Hyperlink, LineInfo, Orientation, PasswordHash, PrintSettings, Sheet, SheetProtection,
+    StyleId, Visibility, Workbook,
 };
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
@@ -1419,6 +1420,7 @@ fn worksheet(
                 groups.add(range, rgce, rgcb, id == 426);
             }
             535 | 678 => sheet_protection(id, payload, &mut sheet, report),
+            536 | 680 => range_protection(id, payload, &mut sheet, report),
             176 => {
                 if data {
                     return Err(invalid("merge inside worksheet data"));
@@ -2072,5 +2074,51 @@ fn sheet_protection(id: u16, payload: &[u8], sheet: &mut Sheet, report: &mut Rea
             }
         }
         Err(_) => report.warn(format!("Invalid XLSB sheet protection record {id} was skipped.")),
+    }
+}
+
+// BrtRangeProtection / BrtRangeProtectionIso ([MS-XLSB] 2.4.763 / 2.4.765).
+fn range_protection(id: u16, payload: &[u8], sheet: &mut Sheet, report: &mut ReadReport) {
+    let parse = || -> Result<_, IoError> {
+        let mut b = Bytes::new(payload);
+        let spin = if id == 680 { Some(b.u32()?) } else { None };
+        let legacy = if spin.is_none() { legacy_password(b.u16()?) } else { None };
+        // UncheckedSqRfX (2.5.156): count followed by 16-byte UncheckedRfX values.
+        let count = b.u32()? as usize;
+        if count == 0 || count >= 8192 || count > b.rest.len() / 16 {
+            return Err(invalid("invalid edit range count"));
+        }
+        let mut ranges = Vec::with_capacity(count);
+        for _ in 0..count {
+            ranges.push(range(&mut b)?.ok_or_else(|| invalid("invalid edit range reference"))?);
+        }
+        // RangeProtectionTitleSDRel (2.5.113).
+        let title = b.text(255)?;
+        if title.is_empty() {
+            return Err(invalid("empty edit range title"));
+        }
+        let size = b.u32()? as usize;
+        b.take(size)?;
+        let password =
+            if let Some(spin) = spin { Some(iso_password(&mut b, spin)?.ok_or_else(|| invalid("empty edit range ISO password"))?) } else { legacy };
+        b.finish()?;
+        Ok((EditRange { title, ranges, password, security_descriptor: None }, size != 0))
+    };
+    match parse() {
+        Ok((edit, permissions)) => {
+            // ISO records precede a passwordless legacy duplicate. Keep the stronger hash.
+            let duplicate = id == 536
+                && edit.password.is_none()
+                && sheet.edit_ranges.last().is_some_and(|previous| {
+                    previous.title == edit.title && previous.ranges == edit.ranges && matches!(previous.password, Some(PasswordHash::Iterated { .. }))
+                });
+            if !duplicate {
+                sheet.edit_ranges.push(edit);
+            }
+            if permissions {
+                report.warn("Windows user permissions on Allow Edit Ranges were not kept; their passwords still apply.");
+            }
+        }
+        Err(_) => report.warn("An invalid XLSB Allow Edit Ranges record was skipped."),
     }
 }
