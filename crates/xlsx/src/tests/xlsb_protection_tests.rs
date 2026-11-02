@@ -1,7 +1,7 @@
 use crate::{read_xlsb, read_xlsx, write_xlsx};
 use gridcraft_model::{CalcMode, PasswordHash};
 #[path = "xlsb_protection_fixture.rs"]
-mod fixture;
+pub(super) mod fixture;
 use fixture::{file, record, sheet_payload, wide};
 
 fn iso_data(hash: &[u8], salt: &[u8], algorithm: &str) -> Vec<u8> {

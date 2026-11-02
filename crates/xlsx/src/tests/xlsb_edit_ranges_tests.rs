@@ -1,6 +1,5 @@
 //! Synthetic BrtRangeProtection / BrtRangeProtectionIso ([MS-XLSB] 2.4.763 / 765).
-#[path = "xlsb_protection_fixture.rs"]
-mod fixture;
+use super::xlsb_protection_tests::fixture;
 use crate::{read_xlsb, read_xlsx, write_xlsx};
 use fixture::{file, record, wide};
 use gridcraft_core::{CellRef, RangeRef};
