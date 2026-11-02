@@ -12,8 +12,9 @@
 //! range, header and totals rows, columns and table style), page setup (paper, orientation,
 //! scale, fit to page, margins, headers and footers, print options, manual page breaks), the
 //! sheet tab colour, sheet protection, workbook structure protection, the sheet AutoFilter
-//! (range and criteria), and charts: embedded charts and chart sheets become live charts whose
-//! series refer to the cells (see `chart`). Everything else (pictures, comments, macros) is
+//! (range and criteria), charts: embedded charts and chart sheets become live charts whose
+//! series refer to the cells (see `chart`), and PivotTables on worksheet-range or defined-name
+//! sources (cache streams in `_SX_DB_CUR` and the SxView views, in `xls/pivot.rs`). Everything else (pictures, comments, macros) is
 //! skipped with a warning.
 //! Encrypted workbooks and pre-BIFF8 versions are refused.
 
@@ -24,6 +25,7 @@ mod doc_props;
 pub(crate) mod formula;
 mod ftab;
 mod page_setup;
+mod pivot;
 mod protection;
 mod records;
 mod styles;
@@ -166,6 +168,7 @@ struct Globals {
     names: Vec<Lbl>,
     precision_as_displayed: bool,
     protection: protection::Protection,
+    pivot_caches: pivot::Caches,
 }
 
 /// Reads an Excel 97-2003 workbook. Inspect the report's warnings for what was skipped.
@@ -201,6 +204,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         report.warn("Some cell formatting records were shorter than expected; the formatting present was kept.");
     }
 
+    let mut pivots = pivot::Loader::new(&cf, &g.pivot_caches, &g.formats, wb.date_system);
     // BoundSheet8 index → model sheet index.
     let mut model_index: Vec<Option<usize>> = Vec::with_capacity(g.sheets.len());
     let mut chart_sheets: Vec<chart::ChartSheet> = vec![];
@@ -225,12 +229,13 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         }
         wb.check_sheet_name(&bs.name, None).map_err(invalid)?;
         let filter = filter_database(&g, bound);
-        let Some((mut sheet, calc)) = worksheet(&stream, bs, filter, &g, &styles, &mut budget, &mut report)? else {
+        let Some((mut sheet, calc, views)) = worksheet(&stream, bs, filter, &g, &styles, &mut budget, &mut report)? else {
             report.warn("Dialog sheets and unreadable sheets were skipped.");
             model_index.push(None);
             continue;
         };
         sheet.visibility = bs.visibility;
+        sheet.pivots = pivots.build(views, &mut report);
         // Every worksheet repeats the workbook's calculation settings; Excel applies the first.
         if wb.sheets.is_empty() {
             wb.calc = calc;
@@ -389,6 +394,11 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
                     g.links.xti.push(Xti { book: u32::from(book), first: i32::from(first), last: i32::from(last) });
                 }
             }
+            0x00D5 => g.pivot_caches.stream_id(&mut c),
+            0x00E3 => g.pivot_caches.source_type(&mut c),
+            0x0051 => g.pivot_caches.dcon_ref(&mut c),
+            0x0052 => g.pivot_caches.dcon_name(&mut c),
+            0x01B5 => g.pivot_caches.dcon_bin(),
             0x0018 => {
                 if g.names.len() >= MAX_NAMES {
                     continue;
@@ -540,6 +550,8 @@ struct SheetState<'g> {
     tables: tables::SheetTables,
     /// Embedded charts read so far, placed on the sheet when the substream ends.
     charts: chart::Embedded,
+    /// The PivotTable views read so far: built into model PivotTables once every sheet is read.
+    pivots: pivot::Views,
 }
 
 impl SheetState<'_> {
@@ -660,7 +672,7 @@ fn worksheet(
     styles: &[StyleId],
     budget: &mut Budget,
     report: &mut ReadReport,
-) -> Result<Option<(Sheet, CalcSettings)>, IoError> {
+) -> Result<Option<(Sheet, CalcSettings, pivot::Views)>, IoError> {
     if bs.pos >= stream.len() {
         return Err(invalid(format!("sheet '{}' points outside the Workbook stream", bs.name)));
     }
@@ -688,6 +700,7 @@ fn worksheet(
         autofilter: autofilter::State::default(),
         tables: tables::SheetTables::default(),
         charts: chart::Embedded::default(),
+        pivots: pivot::Views::default(),
     };
     let mut depth = 1usize;
     while let Some(rec) = recs.next_record()? {
@@ -735,7 +748,7 @@ fn worksheet(
     for why in &st.unsupported {
         report.warn(format!("Some formulas use {why}; their saved results were kept as values."));
     }
-    Ok(Some((st.sheet, st.calc)))
+    Ok(Some((st.sheet, st.calc, st.pivots)))
 }
 
 /// The shortest WINDOW2 a file holds (the chart-sheet form); a shorter one is truncated.
@@ -954,7 +967,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x0872 | 0x0878 => st.tables.feature(c.rest()),
         0x0875 => st.tables.continue_frt(&c.rest()),
         0x0877 => st.tables.list12(&c.rest()),
-        0x00B0 => report.warn("PivotTables in .xls files are not imported yet; their values were kept."),
+        id if st.pivots.record(id, &mut c) => {}
         _ => {}
     }
     Ok(())
