@@ -73,6 +73,7 @@ mod xlsb_sparkline_tests;
 mod xlsb_tables_tests;
 mod xlsb_tests;
 mod xlsb_theme_tests;
+mod xlsb_vba_tests;
 mod zip_order;
 
 use std::io::Write;
