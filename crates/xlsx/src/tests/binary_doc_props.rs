@@ -25,7 +25,7 @@ fn stream(fmtid: [u8; 16], properties: &[(u32, Vec<u8>)]) -> Vec<u8> {
         set[8 + i * 8..12 + i * 8].copy_from_slice(&pid.to_le_bytes());
         set[12 + i * 8..16 + i * 8].copy_from_slice(&offset.to_le_bytes());
         set.extend(value);
-        while set.len() % 4 != 0 {
+        while !set.len().is_multiple_of(4) {
             set.push(0);
         }
     }

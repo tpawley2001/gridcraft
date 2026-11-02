@@ -49,7 +49,9 @@ fn read_stream(data: &[u8], fmtid: &[u8; 16], summary: bool, props: &mut DocProp
         set.get(offset..)
     };
     let codepage = entries
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .find_map(|entry| {
             if u32_at(entry, 0)? != 1 {
                 return None;
@@ -61,7 +63,7 @@ fn read_stream(data: &[u8], fmtid: &[u8; 16], summary: bool, props: &mut DocProp
             Some(u16::from_le_bytes(bytes(v, 4)?))
         })
         .unwrap_or(1252);
-    for entry in entries.chunks_exact(8) {
+    for entry in entries.as_chunks::<8>().0.iter() {
         let Some(pid) = u32_at(entry, 0) else { continue };
         let Some(v) = value(entry) else { continue };
         let field = match (summary, pid) {
@@ -97,7 +99,7 @@ fn string(v: &[u8], codepage: u16) -> Option<String> {
         if data.len() % 2 != 0 {
             return None;
         }
-        char::decode_utf16(data.chunks_exact(2).filter_map(|c| Some(u16::from_le_bytes(c.try_into().ok()?))))
+        char::decode_utf16(data.as_chunks::<2>().0.iter().copied().map(u16::from_le_bytes))
             .map(|c| c.unwrap_or('\u{fffd}'))
             .take(MAX_CHARS + 1)
             .collect()
