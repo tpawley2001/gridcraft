@@ -51,6 +51,7 @@ mod volatile_dependencies;
 mod webextension_passthrough;
 mod xls_autofilter_tests;
 mod xls_cf12_tests;
+mod xls_chart_tests;
 mod xls_print_tests;
 mod xls_protection_tests;
 mod xls_style_tests;
