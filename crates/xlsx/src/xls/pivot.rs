@@ -311,7 +311,7 @@ impl Views {
             0x00B6 => {
                 if let Some(v) = self.views.last_mut() {
                     let list = i16s(c);
-                    v.pages = list.chunks_exact(3).filter_map(|p| Some((*p.first()?, *p.get(1)?))).collect();
+                    v.pages = list.as_chunks::<3>().0.iter().map(|[field, item, _]| (*field, *item)).collect();
                 }
                 Ok(())
             }
