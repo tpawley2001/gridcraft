@@ -2,6 +2,7 @@
 
 mod array_export;
 mod axis_scale_roundtrip;
+mod binary_custom_props_tests;
 mod binary_doc_props;
 mod binary_workbook_view_tests;
 mod cellmetadata;

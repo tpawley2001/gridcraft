@@ -213,6 +213,25 @@ const OWN_DIRS: &[&str] = &[
     "xl/printersettings/",
 ];
 
+/// The package-root relationship type of the custom document properties part.
+pub(crate) const REL_CUSTOM_PROPERTIES: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties";
+/// The content type of the custom document properties part (ECMA-376 Part 1 §22.3).
+pub(crate) const CT_CUSTOM_PROPERTIES: &str = "application/vnd.openxmlformats-officedocument.custom-properties+xml";
+
+/// Keeps a package-root part with no relationships of its own (custom document properties read
+/// from a binary workbook) the way the .xlsx reader keeps it, added to what the workbook already
+/// keeps. A part of the same name already kept wins.
+pub(crate) fn keep_package_root_part(wb: &mut Workbook, rel: PreservedRel, content_type: &str, data: Vec<u8>) {
+    let mut p = wb.preserved.as_deref().cloned().unwrap_or_default();
+    let key = normalize(&rel.target);
+    if p.parts.iter().any(|q| normalize(&q.name) == key) {
+        return;
+    }
+    p.parts.push(PreservedPart { name: rel.target.clone(), content_type: content_type.to_string(), data: Arc::from(data), rels: vec![] });
+    p.package_rels.push(rel);
+    wb.preserved = Some(Arc::new(p));
+}
+
 fn kind(rel_type: &str) -> &str {
     rel_type.rsplit('/').next().unwrap_or("")
 }

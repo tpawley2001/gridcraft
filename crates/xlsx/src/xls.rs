@@ -206,7 +206,9 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     };
 
     let mut wb = Workbook::new();
-    doc_props::read(&cf, &mut wb.props);
+    if let Some(custom) = doc_props::read(&cf, &mut wb.props, &mut report) {
+        keep_custom_properties(&mut wb, custom);
+    }
     wb.sheets.clear();
     wb.view = g.view;
     wb.protected_structure = g.protection.locked;
@@ -295,6 +297,19 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         .into(),
     );
     Ok((wb, report))
+}
+
+/// Keeps the custom document properties as `docProps/custom.xml`, the part an .xlsx package holds
+/// them in, so saving as .xlsx writes them.
+fn keep_custom_properties(wb: &mut Workbook, xml: String) {
+    use crate::passthrough::{CT_CUSTOM_PROPERTIES, REL_CUSTOM_PROPERTIES, keep_package_root_part};
+    let rel = gridcraft_model::PreservedRel {
+        id: "rIdCustomProperties".into(),
+        rel_type: REL_CUSTOM_PROPERTIES.into(),
+        target: "docProps/custom.xml".into(),
+        external: false,
+    };
+    keep_package_root_part(wb, rel, CT_CUSTOM_PROPERTIES, xml.into_bytes());
 }
 
 fn bof(rec: &Record<'_>) -> Result<(u16, u16), IoError> {
