@@ -6,7 +6,7 @@ use gridcraft_model::Workbook;
 use super::make_zip;
 use crate::{ReadReport, read_xlsb, read_xlsx, write_xlsx};
 
-fn record(id: u16, bytes: &[u8]) -> Vec<u8> {
+pub(super) fn record(id: u16, bytes: &[u8]) -> Vec<u8> {
     let mut out = vec![];
     if id < 128 {
         out.push(id as u8);
@@ -81,7 +81,7 @@ fn ref3d(ixti: u16, row: u32, col: u16, relative: bool) -> Vec<u8> {
     out
 }
 /// PtgArea3d (reference class): ixti, then RgceArea with u32 rows.
-fn area3d(ixti: u16, r0: u32, r1: u32, c0: u16, c1: u16, relative: bool) -> Vec<u8> {
+pub(super) fn area3d(ixti: u16, r0: u32, r1: u32, c0: u16, c1: u16, relative: bool) -> Vec<u8> {
     let flag = if relative { 0xC000 } else { 0 };
     let mut out = vec![0x3B];
     out.extend(ixti.to_le_bytes());
@@ -92,7 +92,7 @@ fn area3d(ixti: u16, r0: u32, r1: u32, c0: u16, c1: u16, relative: bool) -> Vec<
     out
 }
 /// PtgName (value class) with a one-based name index.
-fn name_ptg(index: u32) -> Vec<u8> {
+pub(super) fn name_ptg(index: u32) -> Vec<u8> {
     let mut out = vec![0x43];
     out.extend(index.to_le_bytes());
     out
@@ -106,7 +106,7 @@ const MUL: u8 = 0x05;
 const SUM: [u8; 4] = [0x22, 1, 4, 0];
 
 /// BrtName: flags, chKey, itab, name, NameParsedFormula, then a null comment.
-fn name_record(flags: u32, itab: u32, name: &str, rgce: &[u8]) -> Vec<u8> {
+pub(super) fn name_record(flags: u32, itab: u32, name: &str, rgce: &[u8]) -> Vec<u8> {
     let mut data = flags.to_le_bytes().to_vec();
     data.push(0);
     data.extend(itab.to_le_bytes());
@@ -121,7 +121,7 @@ const WORKBOOK: u32 = u32::MAX;
 
 /// The EXTERNALS block: BrtSupSelf (book 0), BrtSupBookSrc (book 1, another workbook), then
 /// BrtExternSheet with XTIs 0 Data, 1 Calc, 2 the other book's first sheet, 3 `My Data`.
-fn externals() -> Vec<u8> {
+pub(super) fn externals() -> Vec<u8> {
     let mut out = record(353, &[]);
     out.extend(record(357, &[]));
     out.extend(record(355, &wide("rId9")));
@@ -136,7 +136,7 @@ fn externals() -> Vec<u8> {
     out
 }
 
-fn book(sheets: &[&str], externals: &[u8], names: &[Vec<u8>]) -> Vec<u8> {
+pub(super) fn book(sheets: &[&str], externals: &[u8], names: &[Vec<u8>]) -> Vec<u8> {
     let mut out = record(131, &[]);
     let mut props = 0u32.to_le_bytes().to_vec();
     props.extend(0u32.to_le_bytes());
@@ -159,7 +159,7 @@ fn book(sheets: &[&str], externals: &[u8], names: &[Vec<u8>]) -> Vec<u8> {
     out
 }
 
-fn package(book: &[u8], sheets: &[Vec<u8>]) -> Vec<u8> {
+pub(super) fn package(book: &[u8], sheets: &[Vec<u8>]) -> Vec<u8> {
     let root = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="book" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.bin"/></Relationships>"#;
     let mut rels = String::from(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#);
     let mut types = String::from(
