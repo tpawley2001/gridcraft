@@ -957,6 +957,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         st.pending_string = None;
     }
     st.cond.next_record(rec.id);
+    st.autofilter.next_record(rec.id, report);
     if page_setup::read(rec, &mut st.sheet.print, &mut st.sheet.tab_color, &mut st.page, report) {
         return Ok(());
     }
@@ -1159,7 +1160,8 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x01B8 => report.warn("Hyperlinks in .xls files are not imported yet."),
         0x009D => autofilter::State::info(&mut c, st, report),
         0x009E => autofilter::State::criterion(&mut c, st, report),
-        0x087E => autofilter::State::filter12(report),
+        0x087E => autofilter::State::filter12(&mut c, st, report),
+        0x087F => autofilter::State::continue_frt12(&mut c, st),
         // Tables: FeatHdr11 (nothing to import), Feature11/Feature12, ContinueFrt11, List12.
         0x0871 => {}
         0x0872 | 0x0878 => st.tables.feature(c.rest()),

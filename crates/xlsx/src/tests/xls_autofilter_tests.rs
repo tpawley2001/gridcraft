@@ -3,7 +3,8 @@
 //! gives.
 
 use gridcraft_core::RangeRef;
-use gridcraft_model::{AutoFilter, FilterCriterion};
+use gridcraft_core::color::INDEXED;
+use gridcraft_model::{AutoFilter, Color, FilterCriterion};
 
 use crate::tests::minimal;
 use crate::{read_xls, read_xlsx, write_xlsx};
@@ -173,13 +174,13 @@ fn xls_autofilter_needs_its_range_and_skips_excel_2007_filters() {
     let (af, warnings) = autofilter(&xls_file(&filter_database(1, A1_C10), &[]));
     assert!(af.is_none());
     assert!(!warnings.iter().any(|w| w.contains("AutoFilter")), "{warnings:?}");
-    // An AutoFilter12 column keeps no criterion, with one warning.
+    // A truncated AutoFilter12 column keeps no criterion, with one warning.
     let good = auto_filter(1, 0, &num_doper(4, 5.0), &no_doper(), &[]);
     let filter12 = rec(0x087E, &cat(&[&[0; 12], &u16s(&[0]), &[0; 4], &[0; 24]]));
     let (af, warnings) = autofilter(&xls_file(&filter_database(1, A1_C10), &cat(&[&filter_info(3), &good, &filter12])));
     let want = FilterCriterion::Custom { a: (">".into(), "5".into()), b: None, and: false };
     assert_eq!(af.expect("the sheet has an AutoFilter").criteria, vec![(1, want)]);
-    assert!(warnings.iter().any(|w| w.contains("Excel 2007 value lists")), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.contains("could not be read")), "{warnings:?}");
 }
 
 #[test]
@@ -253,5 +254,157 @@ fn xls_autofilter_bool_and_error_conditions_are_skipped() {
     let record = auto_filter(0, 0, &boolean, &no_doper(), &[]);
     let (af, warnings) = autofilter(&xls_file(&filter_database(1, A1_C10), &cat(&[&filter_info(3), &record])));
     assert!(af.expect("the sheet has an AutoFilter").criteria.is_empty());
-    assert!(warnings.iter().any(|w| w.contains("Excel 2007 value lists")), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.contains("Boolean or error values")), "{warnings:?}");
+}
+
+/// AutoFilter12 (2.4.7) for column `entry`: ft, cft, cCriteria and cDateGroupings, a sheet
+/// AutoFilter (fWorksheetAutoFilter, idList 0xFFFFFFFF), then `rgb`.
+fn filter12(entry: u16, ft: u32, cft: u32, criteria: u32, dates: u32, rgb: &[u8]) -> Vec<u8> {
+    let counts: Vec<u8> = [ft, cft, criteria, dates].iter().flat_map(|x| x.to_le_bytes()).collect();
+    let header = cat(&[&u16s(&[0x087E, 1]), &[0; 8], &u16s(&[entry]), &[0; 4], &counts]);
+    rec(0x087E, &cat(&[&header, &u16s(&[0x0008]), &[0; 4], &u32::MAX.to_le_bytes(), &[0; 16], rgb]))
+}
+
+/// ContinueFrt12 (2.4.62) carrying one AF12Criteria (2.5.3).
+fn continue12(item: &[u8]) -> Vec<u8> {
+    rec(0x087F, &cat(&[&u16s(&[0x087F, 0]), &[0; 8], item]))
+}
+
+/// AF12Criteria "equals `s`": the AFDOper, then the string.
+fn equals(s: &str) -> Vec<u8> {
+    cat(&[&str_doper(2, s), &[0], s.as_bytes()])
+}
+
+/// A value-list AutoFilter12 for `entry` with its items in ContinueFrt12 records.
+fn value_list(entry: u16, items: &[Vec<u8>]) -> Vec<u8> {
+    let mut v = filter12(entry, 0, 0, items.len() as u32, 0, &[]);
+    for item in items {
+        v.extend(continue12(item));
+    }
+    v
+}
+
+/// DXFN12NoCB with a solid fill whose background is automatic, and an XFExtNoFRT giving the
+/// cell interior background as RGB `r g b` (FullColorExt, xclrType 2).
+fn rgb_fill(r: u8, g: u8, b: u8) -> Vec<u8> {
+    let dxfn = cat(&[&(1u32 << 29).to_le_bytes(), &u16s(&[0, 1 << 10, 0x40 << 7 | 0x40])]);
+    let ext = cat(&[&u16s(&[0x0005, 20, 2, 0]), &[r, g, b, 0], &[0; 8]]);
+    cat(&[&dxfn, &u16s(&[0, 0xFFFF, 0, 1]), &ext])
+}
+
+/// DXFN12NoCB with a font whose icvFore is palette index `icv`.
+fn font_color(icv: u32) -> Vec<u8> {
+    let mut font = [0u8; 118];
+    font[80..84].copy_from_slice(&icv.to_le_bytes());
+    cat(&[&(1u32 << 26).to_le_bytes(), &u16s(&[0]), &font])
+}
+
+fn criteria(records: &[&[u8]]) -> (Vec<(u32, FilterCriterion)>, Vec<String>) {
+    let mut sheet = filter_info(3);
+    for r in records {
+        sheet.extend_from_slice(r);
+    }
+    let (af, warnings) = autofilter(&xls_file(&filter_database(1, A1_C10), &sheet));
+    (af.expect("the sheet has an AutoFilter").criteria, warnings)
+}
+
+fn values(v: &[&str], blanks: bool) -> FilterCriterion {
+    FilterCriterion::Values { values: v.iter().map(|s| s.to_string()).collect(), blanks }
+}
+
+#[test]
+fn xls_autofilter12_value_list() {
+    let (got, warnings) = criteria(&[&value_list(1, &[equals("North"), equals("South"), equals("West")])]);
+    assert_eq!(got, vec![(1, values(&["North", "South", "West"], false))]);
+    assert!(!warnings.iter().any(|w| w.contains("AutoFilter")), "{warnings:?}");
+    // "Equals empty" is the (Blanks) item.
+    let (got, _) = criteria(&[&value_list(0, &[equals("North"), doper(0x0C, 2, &[0; 8])])]);
+    assert_eq!(got, vec![(0, values(&["North"], true))]);
+    let want = from_xlsx(
+        r#"<autoFilter ref="A1:C10"><filterColumn colId="0"><filters blank="1"><filter val="North"/></filters></filterColumn></autoFilter>"#,
+    );
+    assert_eq!(Some(got), want.map(|a| a.criteria));
+}
+
+#[test]
+fn xls_autofilter12_colour_filters() {
+    let (got, warnings) = criteria(&[&filter12(0, 1, 0, 0, 0, &rgb_fill(0xFF, 0, 0))]);
+    assert_eq!(got, vec![(0, FilterCriterion::FillColor(Color::Rgb(0xFF0000)))], "{warnings:?}");
+    let (got, warnings) = criteria(&[&filter12(2, 2, 0, 0, 0, &font_color(12))]);
+    assert_eq!(got, vec![(2, FilterCriterion::FontColor(Color::Rgb(INDEXED[12])))], "{warnings:?}");
+}
+
+#[test]
+fn xls_autofilter12_font_colour_uses_the_workbook_palette() {
+    // Palette record: 56 entries for indexes 8 onwards; index 12 is the fifth.
+    let mut palette = u16s(&[56]);
+    for i in 0..56u8 {
+        palette.extend_from_slice(&if i == 4 { [0x12, 0x34, 0x56, 0] } else { [0, 0, 0, 0] });
+    }
+    let sheet = cat(&[&filter_info(3), &filter12(0, 2, 0, 0, 0, &font_color(12))]);
+    let (af, _) = autofilter(&xls_file(&cat(&[&rec(0x0092, &palette), &filter_database(1, A1_C10)]), &sheet));
+    assert_eq!(af.expect("the sheet has an AutoFilter").criteria, vec![(0, FilterCriterion::FontColor(Color::Rgb(0x123456)))]);
+}
+
+#[test]
+fn xls_autofilter12_icon_filter() {
+    // AF12CellIcon: KPI3TRAFFICLIGHTS1 (3), icon 2.
+    let (got, warnings) = criteria(&[&filter12(1, 3, 0, 0, 0, &cat(&[&3u32.to_le_bytes(), &2u32.to_le_bytes()]))]);
+    assert_eq!(got, vec![(1, FilterCriterion::Icon { set: "3TrafficLights1".into(), id: Some(2) })], "{warnings:?}");
+}
+
+#[test]
+fn xls_autofilter12_dynamic_filters() {
+    let (got, _) = criteria(&[&filter12(0, 0, 1, 0, 0, &[]), &filter12(1, 0, 2, 0, 0, &[])]);
+    assert_eq!(got, vec![(0, FilterCriterion::AboveAverage(true)), (1, FilterCriterion::AboveAverage(false))]);
+    // "This month" (cft 0x0F): no criterion, one date-filter warning.
+    let (got, warnings) = criteria(&[&filter12(0, 0, 0x0F, 0, 0, &[])]);
+    assert!(got.is_empty());
+    assert_eq!(warnings.iter().filter(|w| w.contains("date filters in AutoFilters are not supported")).count(), 1, "{warnings:?}");
+}
+
+#[test]
+fn xls_autofilter12_replaces_the_autofilter_record_for_its_column() {
+    let old = auto_filter(1, 0x0001, &str_doper(2, "North"), &str_doper(2, "South"), &["North", "South"]);
+    let list = value_list(1, &[equals("North"), equals("South"), equals("West")]);
+    let other = auto_filter(2, 0, &num_doper(4, 5.0), &no_doper(), &[]);
+    let want =
+        vec![(2, FilterCriterion::Custom { a: (">".into(), "5".into()), b: None, and: false }), (1, values(&["North", "South", "West"], false))];
+    let (got, _) = criteria(&[&old, &list, &other]);
+    assert_eq!(got, want);
+    // Whichever comes first.
+    let (got, _) = criteria(&[&list, &old, &other]);
+    assert_eq!(got, want);
+}
+
+#[test]
+fn xls_autofilter12_truncated_record_keeps_the_others() {
+    let good = auto_filter(2, 0, &num_doper(4, 5.0), &no_doper(), &[]);
+    let mut short = filter12(0, 1, 0, 0, 0, &rgb_fill(0xFF, 0, 0));
+    short.truncate(short.len() - 10);
+    let len = (short.len() - 4) as u16;
+    short[2..4].copy_from_slice(&len.to_le_bytes());
+    let header_only = rec(0x087E, &[0; 40]);
+    // A value list missing one of its ContinueFrt12 records.
+    let missing = filter12(1, 0, 0, 3, 0, &[]);
+    let missing = cat(&[&missing, &continue12(&equals("North"))]);
+    for damaged in [&short, &header_only, &missing] {
+        let (got, warnings) = criteria(&[damaged, &good]);
+        assert_eq!(got, vec![(2, FilterCriterion::Custom { a: (">".into(), "5".into()), b: None, and: false })]);
+        assert_eq!(warnings.iter().filter(|w| w.contains("could not be read")).count(), 1, "{warnings:?}");
+    }
+}
+
+#[test]
+fn xls_autofilter12_saved_as_xlsx_keeps_its_criteria() {
+    let sheet = cat(&[
+        &filter_info(3),
+        &value_list(0, &[equals("North"), equals("South"), equals("West")]),
+        &filter12(1, 1, 0, 0, 0, &rgb_fill(0xFF, 0, 0)),
+        &filter12(2, 2, 0, 0, 0, &font_color(12)),
+    ]);
+    let (wb, _) = read_xls(&xls_file(&filter_database(1, A1_C10), &sheet)).unwrap();
+    assert_eq!(wb.sheets[0].autofilter.as_ref().map(|a| a.criteria.len()), Some(3));
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(back.sheets[0].autofilter, wb.sheets[0].autofilter);
 }
