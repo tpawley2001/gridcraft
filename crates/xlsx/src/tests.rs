@@ -3,6 +3,7 @@
 mod array_export;
 mod axis_scale_roundtrip;
 mod binary_doc_props;
+mod binary_workbook_view_tests;
 mod cellmetadata;
 mod chart_book_names;
 mod chart_bool_default;

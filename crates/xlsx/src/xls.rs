@@ -32,7 +32,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gridcraft_core::{CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{CalcMode, CalcSettings, Cell, DefinedName, Formula, LineInfo, Sheet, StyleId, Visibility, Workbook};
+use gridcraft_model::{CalcMode, CalcSettings, Cell, DefinedName, Formula, LineInfo, Sheet, StyleId, Visibility, Workbook, WorkbookView};
 
 use crate::cfb::Compound;
 use crate::tables::{col_width_to_px, pt_to_px};
@@ -154,6 +154,7 @@ struct Globals {
     sheets: Vec<BoundSheet>,
     date1904: bool,
     itab_cur: Option<u32>,
+    view: WorkbookView,
     formats: HashMap<u16, String>,
     styles: styles::StyleRecords,
     sst: Vec<Arc<str>>,
@@ -186,6 +187,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     let mut wb = Workbook::new();
     doc_props::read(&cf, &mut wb.props);
     wb.sheets.clear();
+    wb.view = g.view;
     wb.protected_structure = g.protection.locked;
     wb.structure_password = g.protection.password.clone();
     wb.date_system = if g.date1904 { DateSystem::D1904 } else { DateSystem::D1900 };
@@ -282,6 +284,16 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
                 // [MS-XLS] Window1: the first window's selected tab is at byte 10.
                 if c.remaining() == 18 {
                     g.itab_cur = c.skip(10).and_then(|()| c.u16()).ok().map(u32::from);
+                }
+                // Window1 display flags are at byte 8; wTabRatio is at byte 16.
+                let mut view = Cursor::new(&rec.parts);
+                if let Ok(flags) = view.skip(8).and_then(|()| view.u16()) {
+                    g.view.show_horizontal_scroll = flags & 0x0008 != 0;
+                    g.view.show_vertical_scroll = flags & 0x0010 != 0;
+                    g.view.show_sheet_tabs = flags & 0x0020 != 0;
+                    if let Ok(ratio) = view.skip(6).and_then(|()| view.u16()) {
+                        g.view.tab_ratio = u32::from(ratio).min(1000);
+                    }
                 }
             }
             0x0085 => {
