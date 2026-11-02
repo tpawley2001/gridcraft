@@ -9,7 +9,7 @@ use crate::{read_xls, read_xlsx, write_xlsx};
 
 /// Setup (0x00A1): iPaperSize, iScale, iPageStart, iFitWidth, iFitHeight, flags, iRes, iVRes,
 /// numHdr, numFtr, iCopies.
-fn setup(paper: u16, scale: u16, fit: (u16, u16), flags: u16, hdr: f64, ftr: f64) -> Vec<u8> {
+pub(super) fn setup(paper: u16, scale: u16, fit: (u16, u16), flags: u16, hdr: f64, ftr: f64) -> Vec<u8> {
     rec(0x00A1, &cat(&[&u16s(&[paper, scale, 1, fit.0, fit.1, flags, 600, 600]), &hdr.to_le_bytes(), &ftr.to_le_bytes(), &u16s(&[1])]))
 }
 

@@ -67,8 +67,10 @@ const BIFF5: u16 = 0x0500;
 /// WsBool (MS-XLS 2.4.351): its first byte's `fDialog` bit marks a dialog sheet, whose BOF says worksheet.
 const WSBOOL: u16 = 0x0081;
 const WSBOOL_DIALOG: u8 = 0x10;
-/// WsBool's second byte: `fFitToPage`.
-const WSBOOL_FIT_TO_PAGE: u8 = 0x01;
+/// WsBool as a little-endian u16: `fRowSumsBelow`, `fColSumsRight` and `fFitToPage`.
+const WSBOOL_ROW_SUMS_BELOW: u16 = 0x0040;
+const WSBOOL_COL_SUMS_RIGHT: u16 = 0x0080;
+const WSBOOL_FIT_TO_PAGE: u16 = 0x0100;
 
 pub(crate) fn invalid(msg: impl Into<String>) -> IoError {
     IoError::Format(format!("XLS: {}", msg.into()))
@@ -854,7 +856,14 @@ fn worksheet(
             }
             _ if depth > 1 => continue,
             WSBOOL if rec.parts.first().and_then(|p| p.first()).is_some_and(|b| b & WSBOOL_DIALOG != 0) => return Ok(None),
-            WSBOOL => st.page.fit_to_page = rec.parts.first().and_then(|p| p.get(1)).is_some_and(|b| b & WSBOOL_FIT_TO_PAGE != 0),
+            WSBOOL => {
+                if let Some(&[lo, hi]) = rec.parts.first().and_then(|p| p.get(..2)) {
+                    let flags = u16::from_le_bytes([lo, hi]);
+                    st.page.fit_to_page = flags & WSBOOL_FIT_TO_PAGE != 0;
+                    st.sheet.summary_below = flags & WSBOOL_ROW_SUMS_BELOW != 0;
+                    st.sheet.summary_right = flags & WSBOOL_COL_SUMS_RIGHT != 0;
+                }
+            }
             _ => {}
         }
         sheet_record(&rec, &mut st, budget, report)?;

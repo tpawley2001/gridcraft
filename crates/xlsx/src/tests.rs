@@ -21,6 +21,7 @@ mod hidden_drawings;
 mod ink_roundtrip;
 mod kept_macro_dialog_sheets;
 mod legacy_active_sheet_tests;
+mod legacy_outline_settings;
 mod literal_category_roundtrip;
 mod locale_numfmt;
 mod malformed;

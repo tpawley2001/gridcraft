@@ -10,7 +10,7 @@ const ROOT: &str = r#"<Relationships xmlns="http://schemas.openxmlformats.org/pa
 const RELS: &str = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="one" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="../data/one.bin"/></Relationships>"#;
 const TYPES: &str = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/records/book.bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/data/one.bin" ContentType="application/vnd.ms-excel.worksheet"/></Types>"#;
 
-fn record(id: u16, bytes: &[u8]) -> Vec<u8> {
+pub(super) fn record(id: u16, bytes: &[u8]) -> Vec<u8> {
     let mut out = vec![];
     if id < 128 {
         out.push(id as u8);
@@ -60,7 +60,7 @@ fn book() -> Vec<u8> {
 
 /// A worksheet part whose body holds `body` outside the cell table, so print records read like
 /// the ones Excel writes after `BrtEndSheetData`.
-fn worksheet(body: &[u8]) -> Vec<u8> {
+pub(super) fn worksheet(body: &[u8]) -> Vec<u8> {
     let mut out = record(129, &[]);
     out.extend(record(145, &[]));
     out.extend(record(146, &[]));
@@ -69,7 +69,7 @@ fn worksheet(body: &[u8]) -> Vec<u8> {
     out
 }
 
-fn package(sheet: &[u8]) -> Vec<u8> {
+pub(super) fn package(sheet: &[u8]) -> Vec<u8> {
     make_zip(&[
         ("[Content_Types].xml", TYPES.as_bytes()),
         ("_rels/.rels", ROOT.as_bytes()),
@@ -89,7 +89,7 @@ fn margins(left: f64, right: f64, top: f64, bottom: f64, header: f64, footer: f6
 
 /// `BrtPageSetup`: paper, scale, resolution, copies, first page, fit width/height, flags, printer
 /// settings relationship.
-fn page_setup(paper: u32, scale: u32, first_page: u32, fit: (u32, u32), flags: u16) -> Vec<u8> {
+pub(super) fn page_setup(paper: u32, scale: u32, first_page: u32, fit: (u32, u32), flags: u16) -> Vec<u8> {
     let mut out = paper.to_le_bytes().to_vec();
     for value in [scale, 600, 600, 1, first_page, fit.0, fit.1] {
         out.extend(value.to_le_bytes());
