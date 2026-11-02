@@ -1351,8 +1351,8 @@ fn worksheet(
                     }
                 }
             }
-            64 | 573 | 574 => rules.validation(id, payload, &mut sheet, budget)?,
-            461..=471 | 564 => rules.cond_format(id, payload, &mut sheet, dxfs),
+            64 | 573 | 574 => rules.validation(id, payload, &mut sheet, budget, links)?,
+            461..=471 | 564 => rules.cond_format(id, payload, &mut sheet, dxfs, links),
             _ if sparklines::is_record(id) => sparks.record(id, payload, links, &mut sheet, report),
             _ => {}
         }

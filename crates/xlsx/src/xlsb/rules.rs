@@ -68,8 +68,8 @@ struct Pending {
     bottom: bool,
     percent: bool,
     text: String,
-    f1: Option<Vec<u8>>,
-    f2: Option<Vec<u8>>,
+    f1: Option<Formula>,
+    f2: Option<Formula>,
     /// BrtBeginDatabar `fShowValue`, or BrtBeginIconSet `iSet` and flags.
     show_value: bool,
     icon_set: Option<u32>,
@@ -78,9 +78,11 @@ struct Pending {
     colors: Vec<Color>,
 }
 
+type Formula = (Vec<u8>, Vec<u8>);
+
 impl Rules {
     /// BrtDVal (64); the BrtBeginDVals / BrtEndDVals brackets carry nothing this import uses.
-    pub(super) fn validation(&mut self, id: u16, payload: &[u8], sheet: &mut Sheet, budget: &mut Budget) -> Result<(), IoError> {
+    pub(super) fn validation(&mut self, id: u16, payload: &[u8], sheet: &mut Sheet, budget: &mut Budget, links: &Links) -> Result<(), IoError> {
         if id != 64 {
             return Ok(());
         }
@@ -88,7 +90,7 @@ impl Rules {
             self.dv_skipped.add(format!("more than {MAX_VALIDATIONS} validations"));
             return Ok(());
         }
-        let v = match dval(payload) {
+        let v = match dval(payload, links) {
             Ok(v) => v,
             Err(e) => {
                 self.dv_skipped.add(e);
@@ -109,7 +111,7 @@ impl Rules {
     }
 
     /// The conditional-formatting records: 461..=471 and BrtColor (564).
-    pub(super) fn cond_format(&mut self, id: u16, payload: &[u8], sheet: &mut Sheet, dxfs: &[Style]) {
+    pub(super) fn cond_format(&mut self, id: u16, payload: &[u8], sheet: &mut Sheet, dxfs: &[Style], links: &Links) {
         match id {
             461 => {
                 if self.rule.take().is_some() {
@@ -140,7 +142,7 @@ impl Rules {
                 });
             }
             464 => match self.rule.take() {
-                Some(Ok(p)) => match build(p, dxfs) {
+                Some(Ok(p)) => match build(p, dxfs, links) {
                     Ok(f) => self.push(sheet, f),
                     Err(e) => self.cf_skipped.add(e),
                 },
@@ -164,7 +166,7 @@ impl Rules {
             }),
             471 => self.update(|p| {
                 let base = p.ranges.first().map_or(CellRef::new(0, 0), |r| r.start);
-                let v = cfvo(payload, base)?;
+                let v = cfvo(payload, base, links)?;
                 if p.cfvos.len() >= MAX_CFVOS {
                     return Err(invalid("too many value objects"));
                 }
@@ -241,28 +243,28 @@ fn sqrfx(b: &mut Bytes<'_>) -> Result<Vec<RangeRef>, IoError> {
     Ok(out)
 }
 
-/// A parsed formula (`cce`, `rgce`, `cb`, `rgcb`): its tokens; the extra data is not used.
-fn parsed<'a>(b: &mut Bytes<'a>) -> Result<&'a [u8], IoError> {
+/// A parsed formula (`cce`, `rgce`, `cb`, `rgcb`): tokens and their extra data.
+fn parsed<'a>(b: &mut Bytes<'a>) -> Result<(&'a [u8], &'a [u8]), IoError> {
     let cce = b.u32()?;
     if cce > MAX_RGCE {
         return Err(invalid("formula too long"));
     }
     let rgce = b.take(cce as usize)?;
     let cb = b.u32()?;
-    b.take(cb as usize)?;
-    Ok(rgce)
+    let rgcb = b.take(cb as usize)?;
+    Ok((rgce, rgcb))
 }
 
 /// Decodes `rgce` at `base` as formula text (no leading `=`), or says why it can't be kept.
-fn decode(rgce: &[u8], base: CellRef) -> Result<Expr, String> {
-    let e = decode_xlsb(rgce, &[], base, Mode::Cell, &Links::default()).map_err(|_| "a formula uses a token this import can't decode".to_string())?;
+fn decode((rgce, rgcb): (&[u8], &[u8]), base: CellRef, links: &Links) -> Result<Expr, String> {
+    let e = decode_xlsb(rgce, rgcb, base, Mode::Cell, links).map_err(|_| "a formula uses a token this import can't decode".to_string())?;
     if gridcraft_formula::parse(&gridcraft_formula::print(&e)).is_err() {
         return Err("a formula can't be represented".into());
     }
     Ok(e)
 }
-fn text(rgce: &[u8], base: CellRef) -> Result<String, String> {
-    decode(rgce, base).map(|e| gridcraft_formula::print(&e))
+fn text(formula: (&[u8], &[u8]), base: CellRef, links: &Links) -> Result<String, String> {
+    decode(formula, base, links).map(|e| gridcraft_formula::print(&e))
 }
 
 /// The value comparisons shared by BrtDVal `typOperator` (from 0) and CFOper (from 1).
@@ -282,7 +284,7 @@ fn operator(n: u32) -> Option<CfOperator> {
 
 /// BrtDVal: flags, sqrfx, DValStrings (error title, error, prompt title, prompt) and two
 /// DVParsedFormula.
-fn dval(payload: &[u8]) -> Result<Validation, String> {
+fn dval(payload: &[u8], links: &Links) -> Result<Validation, String> {
     let mut b = Bytes::new(payload);
     let fields = (|| -> Result<_, IoError> {
         let flags = b.u32()?;
@@ -320,10 +322,10 @@ fn dval(payload: &[u8]) -> Result<Validation, String> {
         operator((flags >> 20) & 0xF).ok_or("unknown validation operator")?
     };
     let base = ranges.first().map_or(CellRef::new(0, 0), |r| r.start);
-    let f1 = if f1.is_empty() || kind == ValidationKind::Any {
+    let f1 = if f1.0.is_empty() || kind == ValidationKind::Any {
         String::new()
     } else {
-        match decode(f1, base)? {
+        match decode(f1, base, links)? {
             // A literal list is one string whose items are separated by NUL characters.
             Expr::Text(t) if kind == ValidationKind::List => gridcraft_formula::print(&Expr::Text(t.replace('\0', ",").into())),
             e if kind == ValidationKind::List => format!("={}", gridcraft_formula::print(&e)),
@@ -332,7 +334,7 @@ fn dval(payload: &[u8]) -> Result<Validation, String> {
     };
     let two = matches!(op, CfOperator::Between | CfOperator::NotBetween)
         && !matches!(kind, ValidationKind::Any | ValidationKind::List | ValidationKind::Custom);
-    let f2 = if two && !f2.is_empty() { Some(text(f2, base)?) } else { None };
+    let f2 = if two && !f2.0.is_empty() { Some(text(f2, base, links)?) } else { None };
     Ok(Validation {
         ranges,
         kind,
@@ -365,8 +367,18 @@ fn header(payload: &[u8], ranges: Vec<RangeRef>) -> Result<Pending, IoError> {
     let flags = b.u16()?;
     let sizes = [b.u32()?, b.u32()?, b.u32()?];
     let text = b.string(32_767, true)?.unwrap_or_default();
-    let f1 = if sizes[0] != 0 { Some(parsed(&mut b)?.to_vec()) } else { None };
-    let f2 = if sizes[1] != 0 { Some(parsed(&mut b)?.to_vec()) } else { None };
+    let f1 = if sizes[0] != 0 {
+        let (rgce, rgcb) = parsed(&mut b)?;
+        Some((rgce.to_vec(), rgcb.to_vec()))
+    } else {
+        None
+    };
+    let f2 = if sizes[1] != 0 {
+        let (rgce, rgcb) = parsed(&mut b)?;
+        Some((rgce.to_vec(), rgcb.to_vec()))
+    } else {
+        None
+    };
     if sizes[2] != 0 {
         parsed(&mut b)?; // The display condition of scales, bars and icon sets is not imported.
     }
@@ -392,13 +404,13 @@ fn header(payload: &[u8], ranges: Vec<RangeRef>) -> Result<Pending, IoError> {
 }
 
 /// BrtCFVO: iType, numParam, fSaveGTE, fGTE, cbFmla and, when cbFmla is nonzero, the formula.
-fn cfvo(payload: &[u8], base: CellRef) -> Result<CfValueKind, IoError> {
+fn cfvo(payload: &[u8], base: CellRef, links: &Links) -> Result<CfValueKind, IoError> {
     let mut b = Bytes::new(payload);
     let kind = b.u32()?;
     let n = f64::from_le_bytes(b.take(8)?.try_into().map_err(|_| invalid("truncated number"))?);
     b.u32()?; // fSaveGTE
     b.u32()?; // fGTE
-    let formula = if b.u32()? != 0 { Some(text(parsed(&mut b)?, base).map_err(invalid)?) } else { None };
+    let formula = if b.u32()? != 0 { Some(text(parsed(&mut b)?, base, links).map_err(invalid)?) } else { None };
     let number = |f: fn(f64) -> CfValueKind| match &formula {
         Some(t) => Ok(CfValueKind::Formula(t.clone())),
         None if n.is_finite() => Ok(f(n)),
@@ -457,10 +469,11 @@ fn time_period(template: u32) -> Option<&'static str> {
 }
 
 /// The rule a complete BrtBeginCFRule .. BrtEndCFRule collection describes (CFType × CFTemp).
-fn build(p: Pending, dxfs: &[Style]) -> Result<CondFormat, String> {
+fn build(p: Pending, dxfs: &[Style], links: &Links) -> Result<CondFormat, String> {
     let base = p.ranges.first().map_or(CellRef::new(0, 0), |r| r.start);
     let style = || Box::new(dxfs.get(p.dxf as usize).cloned().unwrap_or_default());
-    let formula = |f: &Option<Vec<u8>>| f.as_deref().ok_or_else(|| "a formula is missing".to_string()).and_then(|f| text(f, base));
+    let formula =
+        |f: &Option<Formula>| f.as_ref().ok_or_else(|| "a formula is missing".to_string()).and_then(|(rgce, rgcb)| text((rgce, rgcb), base, links));
     let rule = match (p.kind, p.template) {
         (1, _) => {
             let op = p.param.checked_sub(1).and_then(operator).ok_or("unknown comparison")?;

@@ -56,7 +56,7 @@ fn book() -> Vec<u8> {
     out
 }
 /// A worksheet with one value (A1 = 1) and `tail` after its cell table.
-fn sheet(tail: &[u8]) -> Vec<u8> {
+pub(super) fn sheet(tail: &[u8]) -> Vec<u8> {
     let mut out = record(129, &[]);
     out.extend(record(145, &[]));
     let mut row = 0u32.to_le_bytes().to_vec();
@@ -97,7 +97,7 @@ fn read(tail: &[u8], dxfs: &[Vec<u8>]) -> (Workbook, ReadReport) {
 }
 
 /// UncheckedSqRfX of (first row, last row, first column, last column) ranges.
-fn sqrfx(ranges: &[(u32, u32, u32, u32)]) -> Vec<u8> {
+pub(super) fn sqrfx(ranges: &[(u32, u32, u32, u32)]) -> Vec<u8> {
     let mut out = (ranges.len() as u32).to_le_bytes().to_vec();
     for (r0, r1, c0, c1) in ranges {
         for n in [r0, r1, c0, c1] {
@@ -208,7 +208,7 @@ fn cf_rule(r: &Rule<'_>) -> Vec<u8> {
     out
 }
 /// A BrtBeginConditionalFormatting collection on `ranges` with the given rule collections.
-fn cond_format(ranges: &[(u32, u32, u32, u32)], rules: &[Vec<u8>]) -> Vec<u8> {
+pub(super) fn cond_format(ranges: &[(u32, u32, u32, u32)], rules: &[Vec<u8>]) -> Vec<u8> {
     let mut head = (rules.len() as u32).to_le_bytes().to_vec();
     head.extend(0u32.to_le_bytes()); // fPivot
     head.extend(sqrfx(ranges));

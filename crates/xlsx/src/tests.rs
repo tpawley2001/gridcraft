@@ -66,6 +66,7 @@ mod xlsb_names_tests;
 mod xlsb_pivot_tests;
 mod xlsb_print_tests;
 mod xlsb_protection_tests;
+mod xlsb_rule_links_tests;
 mod xlsb_rules_tests;
 mod xlsb_sparkline_tests;
 mod xlsb_tables_tests;
