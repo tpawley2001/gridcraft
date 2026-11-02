@@ -7,8 +7,9 @@
 //! Read: the chart group type (Bar, Line, Pie, Area, Scatter, Radar and their stacked, 100%,
 //! doughnut and bubble forms), each series' name, values, categories and bubble sizes (BRAI
 //! references, or the literal values the substream caches), the chart and axis titles (Text +
-//! ObjectLink + SeriesText), the legend's side, value axis bounds (ValueRange), major gridlines
-//! and series colours that aren't automatic (LineFormat, AreaFormat). A chart whose group type
+//! ObjectLink + SeriesText), the legend's side, value axis bounds (ValueRange), major gridlines,
+//! series colours that aren't automatic (LineFormat, AreaFormat) and value data labels
+//! (AttachedLabel `fShowValue` in a whole-series DataFormat). A chart whose group type
 //! has no model kind (surface) is skipped with a warning.
 
 use std::collections::HashMap;
@@ -48,6 +49,7 @@ const DATA_FORMAT: u16 = 0x1006;
 const LINE_FORMAT: u16 = 0x1007;
 const MARKER_FORMAT: u16 = 0x1009;
 const AREA_FORMAT: u16 = 0x100A;
+const ATTACHED_LABEL: u16 = 0x100C;
 const SERIES_TEXT: u16 = 0x100D;
 const CHART_FORMAT: u16 = 0x1014;
 const LEGEND: u16 = 0x1015;
@@ -378,6 +380,8 @@ struct Parser {
     frame: Option<(f32, f32)>,
     scale: ChartScale,
     gridlines: bool,
+    /// A whole-series AttachedLabel shows values.
+    value_labels: bool,
     cache_kind: u16,
     cache: HashMap<(u16, u16), Vec<(u16, Lit)>>,
     cached: usize,
@@ -472,6 +476,13 @@ impl Parser {
             }
             LINE_FORMAT | AREA_FORMAT | MARKER_FORMAT => {
                 self.format(rec.id, &mut c)?;
+                None
+            }
+            ATTACHED_LABEL => {
+                // fShowValue ([MS-XLS] 2.4.10); point labels and a short payload are ignored.
+                if self.formatted_series().is_some() && c.u16().is_ok_and(|flags| flags & 0x0001 != 0) {
+                    self.value_labels = true;
+                }
                 None
             }
             AXIS_PARENT => Some(Block::AxisParent(c.u16()?)),
@@ -742,7 +753,7 @@ impl Parser {
             title: text(1),
             series: out,
             legend: self.legend.unwrap_or(LegendPos::None),
-            data_labels: false,
+            data_labels: self.value_labels,
             gridlines: self.gridlines,
             style: 2,
             x_title: text(3),

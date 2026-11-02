@@ -353,3 +353,38 @@ fn xls_chart_literal_values_come_from_the_cache() {
     assert_eq!(ch.series[0].values, "{1,2.5}");
     assert_eq!(ch.series[0].name.as_deref(), Some("Fixed"));
 }
+
+/// AttachedLabel ([MS-XLS] 2.4.10) with `flags`.
+fn attached_label(flags: u16) -> Vec<u8> {
+    rec(0x100C, &u16s(&[flags]))
+}
+
+fn labelled(series_extra: &[u8]) -> (Workbook, Vec<String>) {
+    read(&embedded(&chart(&series(1, series_extra), &bar(0), &[])))
+}
+
+#[test]
+fn xls_chart_series_value_labels_are_read() {
+    let (wb, warnings) = labelled(&data_format(&attached_label(0x0001)));
+    assert!(wb.sheets[0].charts.first().unwrap_or_else(|| panic!("{warnings:?}")).data_labels);
+    // Percent only: no value labels.
+    let (wb, _) = labelled(&data_format(&attached_label(0x0002)));
+    assert!(!wb.sheets[0].charts[0].data_labels);
+    // A label on one data point (xi 0) only.
+    let point = cat(&[&rec(0x1006, &u16s(&[0, 0, 0, 0])), &begin(), &attached_label(0x0001), &end()]);
+    let (wb, _) = labelled(&point);
+    assert!(!wb.sheets[0].charts[0].data_labels);
+    // An empty payload: the chart is still read, without labels.
+    let (wb, warnings) = labelled(&data_format(&rec(0x100C, &[])));
+    assert!(!wb.sheets[0].charts.first().unwrap_or_else(|| panic!("{warnings:?}")).data_labels);
+    // No AttachedLabel.
+    let (wb, _) = read(&embedded(&column_chart()));
+    assert!(!wb.sheets[0].charts[0].data_labels);
+}
+
+#[test]
+fn xls_chart_value_labels_survive_saving_as_xlsx() {
+    let (wb, _) = labelled(&data_format(&attached_label(0x0001)));
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert!(back.sheets[0].charts[0].data_labels);
+}
