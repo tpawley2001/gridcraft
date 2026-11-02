@@ -9,8 +9,9 @@
 use std::collections::HashSet;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS, RangeRef};
-use gridcraft_model::{AutoFilter, FilterCriterion, Sheet, Table, TableColumn, TotalsFn};
+use gridcraft_model::{AutoFilter, FilterCriterion, Sheet, Style, Table, TableColumn, TotalsFn};
 
+use super::rules::icon_set;
 use super::{Bytes, Entry, Records, SheetInfo, check_type, invalid, relationships};
 use crate::package::{Package, Rel};
 use crate::xls::formula::{Links, List, Mode, Site, decode_xlsb_at};
@@ -105,8 +106,9 @@ fn custom_filter(payload: &[u8]) -> Result<(String, String), IoError> {
 }
 
 /// Builds the criteria of one AutoFilter block while its records are read.
-#[derive(Default)]
-struct FilterBuilder {
+struct FilterBuilder<'a> {
+    /// The workbook's differential formats, which colour filters refer to.
+    dxfs: &'a [Style],
     criteria: Vec<(u32, FilterCriterion)>,
     col: Option<u32>,
     crit: Option<FilterCriterion>,
@@ -114,7 +116,7 @@ struct FilterBuilder {
     custom: Option<(bool, Vec<(String, String)>)>,
 }
 
-impl FilterBuilder {
+impl FilterBuilder<'_> {
     fn record(&mut self, id: u16, payload: &[u8], report: &mut ReadReport) -> Result<(), IoError> {
         let mut b = Bytes::new(payload);
         match id {
@@ -177,7 +179,25 @@ impl FilterBuilder {
                 _ => report.warn("XLSB date filters in AutoFilters are not imported."),
             },
             DATE_GROUP_ITEM => report.warn("XLSB date filters in AutoFilters are not imported."),
-            COLOR_FILTER | ICON_FILTER => report.warn("XLSB colour and icon filters in AutoFilters are not imported."),
+            COLOR_FILTER => {
+                // BrtColorFilter: dxfId, then fCellColor (fill colour when non-zero, else font
+                // colour). A missing format drops the criterion, like the .xlsx reader.
+                let dxf = usize::try_from(b.u32()?).ok().and_then(|i| self.dxfs.get(i));
+                let cell = b.u32()? != 0;
+                self.crit = dxf.map(|d| if cell { FilterCriterion::FillColor(d.fill.fg) } else { FilterCriterion::FontColor(d.font.color) });
+            }
+            ICON_FILTER => {
+                // BrtIconFilter: iIconSet (KPISets), then iIcon; -1 selects cells with no icon.
+                let set = b.u32()?;
+                let icon = b.u32()?;
+                match icon_set(set) {
+                    Some(name) => self.crit = Some(FilterCriterion::Icon { set: name.to_string(), id: (icon != u32::MAX).then_some(icon) }),
+                    None => {
+                        self.crit = None;
+                        report.warn("XLSB colour and icon filters in AutoFilters are not imported.");
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -186,10 +206,10 @@ impl FilterBuilder {
 
 /// Reads an AutoFilter block from its `BrtBeginAFilter` payload through `BrtEndAFilter`. A bad
 /// range drops the whole filter and a malformed criterion drops that column, each with a warning.
-pub(super) fn autofilter(records: &mut Records<'_>, begin: &[u8], report: &mut ReadReport) -> Result<Option<AutoFilter>, IoError> {
+pub(super) fn autofilter(records: &mut Records<'_>, begin: &[u8], dxfs: &[Style], report: &mut ReadReport) -> Result<Option<AutoFilter>, IoError> {
     let mut b = Bytes::new(begin);
     let range = rfx(&mut b).ok().flatten();
-    let mut filter = FilterBuilder::default();
+    let mut filter = FilterBuilder { dxfs, criteria: vec![], col: None, crit: None, custom: None };
     loop {
         let (id, payload) = records.next(report)?.ok_or_else(|| invalid("unterminated AutoFilter"))?;
         if id == END_AFILTER {
@@ -267,7 +287,7 @@ type Context<'a> = Option<(&'a Links, &'a str)>;
 
 /// A table part and its `idList`. `Err` for a part that can't be decoded; the caller skips the
 /// table. Without a `ctx` (the scan ahead) column formulas are left out.
-fn table(bytes: &[u8], ctx: Context<'_>, report: &mut ReadReport) -> Result<(Table, u32), IoError> {
+fn table(bytes: &[u8], ctx: Context<'_>, dxfs: &[Style], report: &mut ReadReport) -> Result<(Table, u32), IoError> {
     let mut records = Records::new(bytes);
     let begin = loop {
         match records.next(report)? {
@@ -314,7 +334,7 @@ fn table(bytes: &[u8], ctx: Context<'_>, report: &mut ReadReport) -> Result<(Tab
         match id {
             END_LIST => return Ok((t, list_id)),
             BEGIN_AFILTER => {
-                if let Some(af) = autofilter(&mut records, payload, report)? {
+                if let Some(af) = autofilter(&mut records, payload, dxfs, report)? {
                     t.filter_button = true;
                     t.filter = af.criteria;
                 }
@@ -400,7 +420,7 @@ pub(super) fn scan_lists(package: &mut Package<'_>, types: &[Entry], book_rels: 
                 return out;
             }
             let bytes = check_type(types, &rel.target, TABLE).and_then(|()| package.read_limited(&rel.target, MAX_TABLE_PART));
-            let Some((t, id)) = bytes.ok().flatten().and_then(|bytes| table(&bytes, None, &mut scratch).ok()) else { continue };
+            let Some((t, id)) = bytes.ok().flatten().and_then(|bytes| table(&bytes, None, &[], &mut scratch).ok()) else { continue };
             out.push(List { id, name: t.name, columns: t.columns.into_iter().map(|c| c.name).collect(), sheet: info.name.clone(), range: t.range });
         }
     }
@@ -417,6 +437,7 @@ pub(super) fn read_tables(
     sheet_path: &str,
     ids: &[String],
     links: &Links,
+    dxfs: &[Style],
     sheet: &mut Sheet,
     names: &mut HashSet<String>,
     next_id: &mut u32,
@@ -436,7 +457,7 @@ pub(super) fn read_tables(
         };
         let bytes = check_type(types, &rel.target, TABLE).and_then(|()| package.read_limited(&rel.target, MAX_TABLE_PART));
         let ctx = Some((links, sheet.name.as_str()));
-        let Some((mut t, _)) = bytes.ok().flatten().and_then(|bytes| table(&bytes, ctx, report).ok()) else {
+        let Some((mut t, _)) = bytes.ok().flatten().and_then(|bytes| table(&bytes, ctx, dxfs, report).ok()) else {
             report.warn(MISSING);
             continue;
         };

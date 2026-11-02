@@ -243,7 +243,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         }
         sheet_comments(&mut package, &types, &sheet_rels, &mut sheet, &mut budget, &mut report);
         comment_parts(&mut package, &sheet_rels, parts.legacy_drawing.as_deref(), &persons, &mut sheet, &mut report);
-        tables::read_tables(&mut package, &types, &rel.target, &parts.lists, &links, &mut sheet, &mut table_names, &mut table_id, &mut report);
+        tables::read_tables(&mut package, &types, &rel.target, &parts.lists, &links, &dxfs, &mut sheet, &mut table_names, &mut table_id, &mut report);
         sheet.pivots = pivot::read_pivots(&mut package, &types, &sheet_rels, &info.name, &mut caches, &mut report);
         sheet.visibility = info.visibility;
         if let Some(slot) = model_index.last_mut() {
@@ -1469,7 +1469,7 @@ fn worksheet(
             138 => in_first_view = false,
             151 if in_first_view && pane(&mut sheet, payload).is_err() => report.warn("Malformed XLSB pane records were skipped."),
             494 => hyperlink(payload, rels, &mut sheet, budget, report),
-            161 if !data => sheet_autofilter(&mut records, payload, &mut sheet, report)?,
+            161 if !data => sheet_autofilter(&mut records, payload, dxfs, &mut sheet, report)?,
             tables::LIST_PART => list_part(payload, &mut parts.lists, report),
             550 => match drawing_rel(b) {
                 Ok(id) => *drawing = id,
@@ -1896,8 +1896,14 @@ fn comments(bytes: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
 }
 
 /// The worksheet AutoFilter block (`BrtBeginAFilter` ... `BrtEndAFilter`); only the first is kept.
-fn sheet_autofilter(records: &mut Records<'_>, payload: &[u8], sheet: &mut Sheet, report: &mut ReadReport) -> Result<(), IoError> {
-    let af = tables::autofilter(records, payload, report)?;
+fn sheet_autofilter(
+    records: &mut Records<'_>,
+    payload: &[u8],
+    dxfs: &[gridcraft_model::Style],
+    sheet: &mut Sheet,
+    report: &mut ReadReport,
+) -> Result<(), IoError> {
+    let af = tables::autofilter(records, payload, dxfs, report)?;
     if sheet.autofilter.is_none() {
         sheet.autofilter = af;
     }

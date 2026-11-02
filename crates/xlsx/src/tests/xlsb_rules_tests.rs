@@ -72,7 +72,7 @@ pub(super) fn sheet(tail: &[u8]) -> Vec<u8> {
     out
 }
 /// A styles part whose differential formats are `dxfs` (BrtDXF payloads).
-fn styles(dxfs: &[Vec<u8>]) -> Vec<u8> {
+pub(super) fn styles(dxfs: &[Vec<u8>]) -> Vec<u8> {
     let mut out = record(278, &[]);
     out.extend(record(505, &(dxfs.len() as u32).to_le_bytes()));
     for d in dxfs {
@@ -82,7 +82,7 @@ fn styles(dxfs: &[Vec<u8>]) -> Vec<u8> {
     out.extend(record(279, &[]));
     out
 }
-fn file(tail: &[u8], dxfs: &[Vec<u8>]) -> Vec<u8> {
+pub(super) fn file(tail: &[u8], dxfs: &[Vec<u8>]) -> Vec<u8> {
     make_zip(&[
         ("[Content_Types].xml", TYPES.as_bytes()),
         ("_rels/.rels", ROOT.as_bytes()),
@@ -92,7 +92,7 @@ fn file(tail: &[u8], dxfs: &[Vec<u8>]) -> Vec<u8> {
         ("xl/styles.bin", &styles(dxfs)),
     ])
 }
-fn read(tail: &[u8], dxfs: &[Vec<u8>]) -> (Workbook, ReadReport) {
+pub(super) fn read(tail: &[u8], dxfs: &[Vec<u8>]) -> (Workbook, ReadReport) {
     read_xlsb(&file(tail, dxfs)).unwrap()
 }
 
@@ -236,11 +236,11 @@ fn cfvo(kind: u32, n: f64) -> Vec<u8> {
     record(471, &out)
 }
 /// An RGB BrtColor / XFPropColor.
-fn rgb(c: u32) -> Vec<u8> {
+pub(super) fn rgb(c: u32) -> Vec<u8> {
     vec![(2 << 1) | 1, 0, 0, 0, (c >> 16) as u8, (c >> 8) as u8, c as u8, 0xff]
 }
 /// A BrtDXF stating a solid fill with background colour `c`.
-fn fill_dxf(c: u32) -> Vec<u8> {
+pub(super) fn fill_dxf(c: u32) -> Vec<u8> {
     let mut out = vec![0, 0, 0, 0];
     out.extend(2u16.to_le_bytes());
     out.extend([0, 0, 5, 0, 1]); // FillPattern solid

@@ -61,7 +61,7 @@ pub(super) fn number_cell(col: u32, n: f64) -> Vec<u8> {
 pub(super) fn worksheet(data: &[u8], tail: &[u8]) -> Vec<u8> {
     [record(129, &[]), record(145, &[]), data.to_vec(), record(146, &[]), tail.to_vec(), record(130, &[])].concat()
 }
-fn book() -> Vec<u8> {
+pub(super) fn book() -> Vec<u8> {
     let mut sheet = u32s(&[0, 1]);
     sheet.extend(wide("rId1"));
     sheet.extend(wide("Data"));
@@ -144,10 +144,10 @@ pub(super) fn style_client(name: &str, flags: u16) -> Vec<u8> {
     record(513, &data)
 }
 /// An AutoFilter block over `range` with filter-column blocks `columns`.
-fn autofilter(range: [u32; 4], columns: &[Vec<u8>]) -> Vec<u8> {
+pub(super) fn autofilter(range: [u32; 4], columns: &[Vec<u8>]) -> Vec<u8> {
     [record(161, &u32s(&range)), columns.concat(), record(162, &[])].concat()
 }
-fn filter_column(col: u32, body: &[u8]) -> Vec<u8> {
+pub(super) fn filter_column(col: u32, body: &[u8]) -> Vec<u8> {
     let mut data = u32s(&[col]);
     data.extend([0, 0]);
     [record(163, &data), body.to_vec(), record(164, &[])].concat()
@@ -167,7 +167,7 @@ fn custom_number(and: bool, sign: u8, n: f64) -> Vec<u8> {
 }
 /// The "Sales" table part over `range`, columns Region/Units/Price, with `af` and `cols_extra`
 /// spliced in (`cols_extra` replaces the plain columns when given).
-fn sales_table(name: &str, range: [u32; 4], totals: bool, af: &[u8], cols: Option<Vec<u8>>) -> Vec<u8> {
+pub(super) fn sales_table(name: &str, range: [u32; 4], totals: bool, af: &[u8], cols: Option<Vec<u8>>) -> Vec<u8> {
     let cols = cols
         .unwrap_or_else(|| [list_col(1, "Region", 0, None, &[]), list_col(2, "Units", 0, None, &[]), list_col(3, "Price", 0, None, &[])].concat());
     [
@@ -181,7 +181,7 @@ fn sales_table(name: &str, range: [u32; 4], totals: bool, af: &[u8], cols: Optio
     ]
     .concat()
 }
-fn sales_cells() -> Vec<u8> {
+pub(super) fn sales_cells() -> Vec<u8> {
     let mut data = [row(0), text_cell(0, "Region"), text_cell(1, "Units"), text_cell(2, "Price")].concat();
     for (r, (region, units, price)) in [("East", 5.0, 1.5), ("West", 7.0, 2.0), ("East", 2.0, 3.25)].into_iter().enumerate() {
         data.extend([row(r as u32 + 1), text_cell(0, region), number_cell(1, units), number_cell(2, price)].concat());
