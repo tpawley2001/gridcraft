@@ -67,6 +67,13 @@ const MAX_LINKS: usize = 65_536;
 /// Per-sheet caps, matching the .xlsx reader's hyperlink cell cap.
 const MAX_LINK_CELLS: usize = 10_000;
 const MAX_COMMENTS: usize = 65_536;
+/// BrtLegacyDrawing ([MS-XLSB]): the relationship id of the sheet's VML drawing part.
+const LEGACY_DRAWING: u16 = 551;
+/// Longest relationship id read from a record.
+const MAX_REL_ID: u32 = 255;
+/// Relationship types of the threaded comments and persons parts ([MS-XLSX]).
+const THREADED_REL: &str = "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment";
+const PERSON_REL: &str = "http://schemas.microsoft.com/office/2017/10/relationships/person";
 
 mod dxf;
 mod rules;
@@ -176,6 +183,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     } else {
         vec![]
     };
+    let persons = persons(&mut package, &rels, &mut report);
     let mut model_index: Vec<Option<usize>> = Vec::with_capacity(sheets.len());
     let mut table_names = HashSet::new();
     let mut table_id = 1u32;
@@ -204,7 +212,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         let sheet_rels = sheet_relationships(&mut package, &rel.target, &mut report);
         budget.links = 0;
         budget.comments = 0;
-        let mut list_parts = vec![];
+        let mut parts = SheetParts::default();
         let mut drawing = None;
         let mut sheet = worksheet(
             &required(&mut package, &rel.target)?,
@@ -215,7 +223,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             &links,
             &sheet_rels,
             &mut budget,
-            &mut list_parts,
+            &mut parts,
             &mut drawing,
             &mut report,
         )?;
@@ -226,7 +234,8 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             package = cx.pkg;
         }
         sheet_comments(&mut package, &types, &sheet_rels, &mut sheet, &mut budget, &mut report);
-        tables::read_tables(&mut package, &types, &rel.target, &list_parts, &links, &mut sheet, &mut table_names, &mut table_id, &mut report);
+        comment_parts(&mut package, &sheet_rels, parts.legacy_drawing.as_deref(), &persons, &mut sheet, &mut report);
+        tables::read_tables(&mut package, &types, &rel.target, &parts.lists, &links, &mut sheet, &mut table_names, &mut table_id, &mut report);
         sheet.pivots = pivot::read_pivots(&mut package, &types, &sheet_rels, &info.name, &mut caches, &mut report);
         sheet.visibility = info.visibility;
         if let Some(slot) = model_index.last_mut() {
@@ -1203,7 +1212,7 @@ fn worksheet(
     links: &Links,
     rels: &[Rel],
     budget: &mut Budget,
-    list_parts: &mut Vec<String>,
+    parts: &mut SheetParts,
     drawing: &mut Option<String>,
     report: &mut ReadReport,
 ) -> Result<Sheet, IoError> {
@@ -1369,13 +1378,15 @@ fn worksheet(
             151 if in_first_view && pane(&mut sheet, payload).is_err() => report.warn("Malformed XLSB pane records were skipped."),
             494 => hyperlink(payload, rels, &mut sheet, budget, report),
             161 if !data => sheet_autofilter(&mut records, payload, &mut sheet, report)?,
-            tables::LIST_PART => list_part(payload, list_parts, report),
+            tables::LIST_PART => list_part(payload, &mut parts.lists, report),
             550 => match drawing_rel(b) {
                 Ok(id) => *drawing = id,
                 Err(_) => report.warn("An unreadable XLSB drawing record was skipped."),
             },
-            // BrtLegacyDrawing: VML (comments, form controls), not imported.
-            551 => {}
+            LEGACY_DRAWING => match b.string(MAX_REL_ID, true) {
+                Ok(id) => parts.legacy_drawing = id,
+                Err(_) => report.warn("A damaged XLSB legacy drawing record was skipped; its notes stay hidden with their default box."),
+            },
             476 => {
                 if let Some(m) = page.read(report, "BrtMargins", || read_margins(payload)) {
                     sheet.print.margins = m;
@@ -1641,6 +1652,71 @@ fn sheet_comments(package: &mut Package<'_>, types: &[Entry], rels: &[Rel], shee
             }
         }
         Err(_) => report.warn("Damaged XLSB comments were skipped."),
+    }
+}
+
+/// Relationship ids a worksheet's records name, resolved once the sheet is read.
+#[derive(Default)]
+struct SheetParts {
+    /// BrtListPart ids, one per table.
+    lists: Vec<String>,
+    /// The BrtLegacyDrawing id: the VML drawing holding the notes' shapes.
+    legacy_drawing: Option<String>,
+}
+
+/// The workbook's persons part (authors of threaded comments), by person id. None without the
+/// part; none with one warning when it can't be read.
+fn persons(package: &mut Package<'_>, rels: &[Rel], report: &mut ReadReport) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let Some(rel) = rels.iter().find(|r| r.kind.strip_prefix("unsupported:") == Some(PERSON_REL)) else { return out };
+    match xml_part(package, rel) {
+        Ok(x) => {
+            for p in x.kids("person") {
+                if let (Some(id), Some(n)) = (p.attr("id"), p.attr("displayName")) {
+                    out.insert(id.to_string(), n.to_string());
+                }
+            }
+        }
+        Err(_) => report.warn("The XLSB persons part could not be read; threaded comments were imported without their authors."),
+    }
+    out
+}
+
+/// An internal XML part named by a relationship; an error when it is external, missing or damaged.
+fn xml_part(package: &mut Package<'_>, rel: &Rel) -> Result<crate::xml::El, IoError> {
+    if rel.external {
+        return Err(invalid("external relationship"));
+    }
+    package.read_xml(&rel.target)?.ok_or_else(|| invalid("missing part"))
+}
+
+/// The sheet's XML comment parts, read after its binary notes the way the .xlsx reader reads
+/// them: threaded comments replace their flattened placeholder notes, then the VML drawing named
+/// by BrtLegacyDrawing gives the notes their Show Note state and box. A part that is missing or
+/// damaged keeps the plain notes, with one warning.
+fn comment_parts(
+    package: &mut Package<'_>,
+    rels: &[Rel],
+    legacy_drawing: Option<&str>,
+    persons: &HashMap<String, String>,
+    sheet: &mut Sheet,
+    report: &mut ReadReport,
+) {
+    for rel in rels.iter().filter(|r| r.kind.strip_prefix("unsupported:") == Some(THREADED_REL)) {
+        match xml_part(package, rel) {
+            Ok(x) => crate::sheet_read::read_threaded(persons, &x, sheet),
+            Err(_) => report.warn("Damaged XLSB threaded comments were skipped; their cells keep the plain notes."),
+        }
+    }
+    let Some(id) = legacy_drawing.filter(|_| !sheet.comments.is_empty()) else { return };
+    let vml = rels
+        .iter()
+        .find(|r| r.id == id && r.kind == "vmlDrawing")
+        .ok_or_else(|| invalid("missing legacy drawing relationship"))
+        .and_then(|rel| xml_part(package, rel));
+    match vml {
+        Ok(x) => crate::sheet_read::read_note_shapes(&x, sheet, 0),
+        Err(_) => report.warn("The XLSB notes drawing could not be read; notes stay hidden with their default box."),
     }
 }
 
