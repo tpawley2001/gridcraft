@@ -11,7 +11,8 @@
 //! and custom totals formulas, which like cell formulas may use structured references), AutoFilters, PivotTables,
 //! Allow Edit Ranges (titles, references and legacy or iterated passwords),
 //! sparklines, drawings (pictures, shapes, text boxes and charts, read with the .xlsx drawing reader) and
-//! each sheet's page setup, print options, header/footer and manual page breaks are imported;
+//! each sheet's page setup, print options, header/footer and manual page breaks are imported; data
+//! connections and query tables are kept for saving as .xlsx ([`connections`]);
 //! gradient fills, cell style inheritance, differential formats, macros and other workbook features
 //! are not run or imported.
 
@@ -40,6 +41,7 @@ use crate::xls::{
 use crate::{IoError, ReadReport};
 use gridcraft_formula::Expr;
 
+mod connections;
 mod pivot;
 mod tables;
 
@@ -177,6 +179,8 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let (styles, formats) = import_styles(&mut package, &types, &rels, &mut wb, &mut budget, &mut report);
     let dxfs = dxf::import(&mut package, &types, &rels, &mut budget, &mut report);
     let mut caches = pivot::Caches::new(&cache_ids, &rels, formats, wb.date_system);
+    let mut kept_connections = connections::read_connections(&mut package, &types, &rels, &mut report);
+    crate::passthrough::merge_preserved(&mut wb.preserved, kept_connections.preserved.take());
     let sst_rels: Vec<_> = rels.iter().filter(|r| r.kind == "sharedStrings").collect();
     if sst_rels.len() > 1 {
         return Err(invalid("multiple shared-string relationships"));
@@ -246,6 +250,8 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         comment_parts(&mut package, &sheet_rels, parts.legacy_drawing.as_deref(), &persons, &mut sheet, &mut report);
         tables::read_tables(&mut package, &types, &rel.target, &parts.lists, &links, &dxfs, &mut sheet, &mut table_names, &mut table_id, &mut report);
         sheet.pivots = pivot::read_pivots(&mut package, &types, &sheet_rels, &info.name, &mut caches, &mut report);
+        let query_tables = connections::read_query_tables(&mut package, &types, &sheet_rels, &mut kept_connections, &mut report);
+        crate::passthrough::merge_preserved(&mut sheet.preserved, query_tables);
         sheet.visibility = info.visibility;
         if let Some(slot) = model_index.last_mut() {
             *slot = Some(wb.sheets.len());
