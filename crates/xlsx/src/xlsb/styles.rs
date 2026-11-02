@@ -31,7 +31,7 @@ struct Xf {
 
 #[derive(Default)]
 pub(super) struct Parsed {
-    formats: HashMap<u16, String>,
+    pub(super) formats: HashMap<u16, String>,
     fonts: Vec<Font>,
     fills: Vec<Fill>,
     borders: Vec<Borders>,

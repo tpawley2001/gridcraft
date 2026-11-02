@@ -5,7 +5,7 @@
 //! represent keep their saved result as a constant. Cell formatting (number formats, fonts, fills,
 //! borders, alignment and protection), column widths, row heights, hidden and outlined
 //! rows/columns, frozen panes, sheet view options, workbook theme colours and fonts, tab colours
-//! (including theme colours and tints), hyperlinks, notes, tables, AutoFilters and
+//! (including theme colours and tints), hyperlinks, notes, tables, AutoFilters, PivotTables and
 //! each sheet's page setup, print options, header/footer and manual page breaks are imported;
 //! gradient fills, cell style inheritance, differential formats, macros and other workbook features
 //! are not run or imported.
@@ -34,6 +34,7 @@ use crate::xls::{
 use crate::{IoError, ReadReport};
 use gridcraft_formula::Expr;
 
+mod pivot;
 mod tables;
 
 const MAIN: &str = "application/vnd.ms-excel.main";
@@ -120,6 +121,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     report.warn("XLSB import: charts, images, macros and other features are not imported. Save a new .xlsx file; XLSB saving is not supported.");
     let mut itab_cur: Option<u32> = None;
     let (sheets, names, mut links) = workbook(&book, &mut wb, &mut report, &mut itab_cur)?;
+    let cache_ids = pivot::cache_ids(&book);
     // Cells using a name the import drops would calculate to #NAME?: they keep their saved result.
     links.skipped =
         names.iter().map(|l| !l.rgce.is_empty() && decode_xlsb(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &links).is_err()).collect();
@@ -139,8 +141,9 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         }
     }
     let mut budget = Budget::default();
-    let styles = import_styles(&mut package, &types, &rels, &mut wb, &mut budget, &mut report);
+    let (styles, formats) = import_styles(&mut package, &types, &rels, &mut wb, &mut budget, &mut report);
     let dxfs = dxf::import(&mut package, &types, &rels, &mut budget, &mut report);
+    let mut caches = pivot::Caches::new(&cache_ids, &rels, formats, wb.date_system);
     let sst_rels: Vec<_> = rels.iter().filter(|r| r.kind == "sharedStrings").collect();
     if sst_rels.len() > 1 {
         return Err(invalid("multiple shared-string relationships"));
@@ -197,6 +200,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         )?;
         sheet_comments(&mut package, &types, &sheet_rels, &mut sheet, &mut budget, &mut report);
         tables::read_tables(&mut package, &types, &rel.target, &list_parts, &mut sheet, &mut table_names, &mut table_id, &mut report);
+        sheet.pivots = pivot::read_pivots(&mut package, &types, &sheet_rels, &info.name, &mut caches, &mut report);
         sheet.visibility = info.visibility;
         if let Some(slot) = model_index.last_mut() {
             *slot = Some(wb.sheets.len());
@@ -744,9 +748,9 @@ fn import_styles(
     wb: &mut Workbook,
     budget: &mut Budget,
     report: &mut ReadReport,
-) -> Vec<StyleId> {
+) -> (Vec<StyleId>, HashMap<u16, String>) {
     let mut rels = rels.iter().filter(|r| r.kind == "styles");
-    let Some(rel) = rels.next() else { return vec![] };
+    let Some(rel) = rels.next() else { return (vec![], HashMap::new()) };
     let text_before = budget.text;
     let mut parse = || -> Result<_, IoError> {
         if rel.external || rels.next().is_some() {
@@ -756,11 +760,14 @@ fn import_styles(
         styles::parse(&required(package, &rel.target)?, budget)
     };
     match parse() {
-        Ok(parsed) => styles::build(parsed, wb, report),
+        Ok(parsed) => {
+            let formats = parsed.formats.clone();
+            (styles::build(parsed, wb, report), formats)
+        }
         Err(e) => {
             budget.text = text_before;
             report.warn(format!("XLSB styles could not be imported; default styles were used: {e}"));
-            vec![]
+            (vec![], HashMap::new())
         }
     }
 }

@@ -41,9 +41,9 @@ const MAX_SOURCE_CELLS: u64 = 10_000_000;
 /// Largest records snapshot written (cells); bigger caches are written without records.
 const MAX_RECORD_CELLS: u64 = 2_000_000;
 /// Most shared items kept per field (Excel's limit is 1,048,576 unique items).
-const MAX_ITEMS: usize = 1_048_576;
+pub(crate) const MAX_ITEMS: usize = 1_048_576;
 /// Most cache fields read.
-const MAX_FIELDS: usize = 16_384;
+pub(crate) const MAX_FIELDS: usize = 16_384;
 /// The `x14:dataField` extension (Excel 2010 show-values-as additions such as rank).
 const EXT_X14_DATA_FIELD: &str = "{E15A36E0-9728-4e99-A89B-3F7291B0FE68}";
 const EXT_X14_PIVOT_TABLE: &str = "{962EF5D1-5CA2-4c93-8EF4-DBF5C05439D2}";
@@ -65,7 +65,7 @@ fn label(v: &Value) -> String {
     }
 }
 
-fn same(a: &str, b: &str) -> bool {
+pub(crate) fn same(a: &str, b: &str) -> bool {
     a.to_lowercase() == b.to_lowercase()
 }
 
@@ -102,7 +102,7 @@ fn func_from(s: &str) -> Option<PivotFunc> {
     })
 }
 
-fn func_caption(f: PivotFunc) -> &'static str {
+pub(crate) fn func_caption(f: PivotFunc) -> &'static str {
     match f {
         PivotFunc::Sum => "Sum",
         PivotFunc::Count => "Count",

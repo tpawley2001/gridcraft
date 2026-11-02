@@ -13,6 +13,8 @@ use crate::crypto::{
     SEGMENT, derive, hmac, iterated_hash, standard_key,
 };
 
+pub mod xlsb_pivot;
+
 /// The spin count `encrypt_workbook` uses: Excel's default.
 pub const SPIN_COUNT: u32 = 100_000;
 

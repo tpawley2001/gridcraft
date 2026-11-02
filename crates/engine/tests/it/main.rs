@@ -38,3 +38,4 @@ mod workbook_author;
 mod wrap_row_height;
 mod xlsb_arrays_recalc;
 mod xlsb_names_recalc;
+mod xlsb_pivot_refresh;
