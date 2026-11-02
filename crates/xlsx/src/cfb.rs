@@ -99,6 +99,8 @@ fn directory_names(b: &[u8]) -> Option<Vec<String>> {
 
 /// Directory entry type of a stream object ([MS-CFB] 2.6.1).
 const STREAM_OBJECT: u8 = 2;
+/// Directory entry type of a storage object ([MS-CFB] 2.6.1).
+const STORAGE_OBJECT: u8 = 1;
 /// "No entry" in the directory tree (NOSTREAM).
 const NO_STREAM: u32 = 0xFFFF_FFFF;
 /// Streams larger than this are refused (the format allows more, a workbook never needs it).
@@ -271,14 +273,11 @@ impl<'a> Compound<'a> {
         Ok(out)
     }
 
-    /// The contents of the stream called `name` (case-insensitive) directly under the root
-    /// storage, or `None` when there is no such stream.
-    /// The directory entry of the stream called `name` (case-insensitive) directly under the
-    /// root storage.
-    fn root_entry(&self, name: &str) -> Result<Option<&DirEntry>, String> {
-        let Some(root) = self.entries.first() else { return Ok(None) };
-        // Walk the root's children (a red-black tree through left/right siblings), bounded.
-        let mut stack = vec![root.child];
+    /// The directory entry called `name` (case-insensitive) of type `kind` directly under the
+    /// storage `parent`.
+    fn child_entry(&self, parent: &DirEntry, name: &str, kind: u8) -> Result<Option<&DirEntry>, String> {
+        // Walk the children (a red-black tree through left/right siblings), bounded.
+        let mut stack = vec![parent.child];
         let mut seen = 0usize;
         while let Some(i) = stack.pop() {
             if i == NO_STREAM {
@@ -289,13 +288,20 @@ impl<'a> Compound<'a> {
                 return Err("damaged compound file: directory tree loops".into());
             }
             let Some(e) = self.entries.get(i as usize) else { continue };
-            if e.kind == STREAM_OBJECT && e.name.eq_ignore_ascii_case(name) {
+            if e.kind == kind && e.name.eq_ignore_ascii_case(name) {
                 return Ok(Some(e));
             }
             stack.push(e.left);
             stack.push(e.right);
         }
         Ok(None)
+    }
+
+    /// The directory entry of the stream called `name` (case-insensitive) directly under the
+    /// root storage.
+    fn root_entry(&self, name: &str) -> Result<Option<&DirEntry>, String> {
+        let Some(root) = self.entries.first() else { return Ok(None) };
+        self.child_entry(root, name, STREAM_OBJECT)
     }
 
     /// Whether the root storage holds a stream called `name`, without reading it.
@@ -306,9 +312,26 @@ impl<'a> Compound<'a> {
     /// The contents of the stream called `name` (case-insensitive) directly under the root
     /// storage, or `None` when there is no such stream.
     pub(crate) fn root_stream(&self, name: &str) -> Result<Option<Vec<u8>>, String> {
+        match self.root_entry(name)? {
+            Some(e) => self.read_entry(e).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// The contents of the stream `name` inside the storage `storage`, both directly under the
+    /// root and matched case-insensitively, or `None` when either is missing.
+    pub(crate) fn storage_stream(&self, storage: &str, name: &str) -> Result<Option<Vec<u8>>, String> {
         let Some(root) = self.entries.first() else { return Ok(None) };
-        let found = self.root_entry(name)?;
-        let Some(e) = found else { return Ok(None) };
+        let Some(dir) = self.child_entry(root, storage, STORAGE_OBJECT)? else { return Ok(None) };
+        match self.child_entry(dir, name, STREAM_OBJECT)? {
+            Some(e) => self.read_entry(e).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// A stream's contents, from the mini stream or regular sectors by its size.
+    fn read_entry(&self, e: &DirEntry) -> Result<Vec<u8>, String> {
+        let Some(root) = self.entries.first() else { return Err("damaged compound file: missing root entry".into()) };
         if e.size > MAX_STREAM {
             return Err("the workbook stream is larger than 1 GiB".into());
         }
@@ -323,7 +346,7 @@ impl<'a> Compound<'a> {
             return Err("damaged compound file: a stream is shorter than its declared size (the file may be truncated)".into());
         }
         data.truncate(size);
-        Ok(Some(data))
+        Ok(data)
     }
 }
 

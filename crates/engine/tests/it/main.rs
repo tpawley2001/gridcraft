@@ -36,6 +36,7 @@ mod table_total_row_last_row;
 mod trace_error;
 mod workbook_author;
 mod wrap_row_height;
+mod xls_pivot_refresh;
 mod xlsb_arrays_recalc;
 mod xlsb_list_recalc;
 mod xlsb_names_recalc;

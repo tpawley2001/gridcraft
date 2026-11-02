@@ -6,6 +6,8 @@
 //! use: a fixed key protects nothing.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+pub mod xls_pivot;
+
 use aes::cipher::{BlockCipherEncrypt, KeyInit};
 
 use crate::crypto::{
@@ -46,7 +48,8 @@ pub fn encrypt_workbook_standard(package: &[u8], password: &str) -> Vec<u8> {
 
 /// A version 3 compound file (512-byte sectors) holding `streams` under the root, laid out as
 /// Excel lays it out: streams under 4096 bytes in the mini stream, larger ones in regular
-/// sectors. Up to 109 FAT sectors (about 7 MB of streams).
+/// sectors. Up to 109 FAT sectors (about 7 MB of streams). A name `Storage/Stream` puts the
+/// stream inside a storage of that name under the root.
 pub fn compound_file(streams: &[(&str, &[u8])]) -> Vec<u8> {
     const SECTOR: usize = 512;
     const MINI: usize = 64;
@@ -75,8 +78,17 @@ pub fn compound_file(streams: &[(&str, &[u8])]) -> Vec<u8> {
         container.resize((first + n) * MINI, 0);
     }
 
+    // Storages named by `Storage/Stream` paths, after the streams in the directory.
+    let mut storages: Vec<&str> = vec![];
+    for (name, _) in streams {
+        if let Some((st, _)) = name.split_once('/')
+            && !storages.contains(&st)
+        {
+            storages.push(st);
+        }
+    }
     // Regular-sector blobs, in order: directory, mini FAT, mini stream, then each large stream.
-    let dir_len = (streams.len() + 1).div_ceil(4) * SECTOR;
+    let dir_len = (streams.len() + storages.len() + 1).div_ceil(4) * SECTOR;
     let mut blobs: Vec<Vec<u8>> = vec![vec![0; dir_len], mini_fat.iter().flat_map(|v| v.to_le_bytes()).collect(), container.clone()];
     blobs.extend(streams.iter().map(|(_, d)| if is_mini(d) { vec![] } else { d.to_vec() }));
     let counts: Vec<usize> = blobs.iter().map(|b| b.len().div_ceil(SECTOR)).collect();
@@ -118,19 +130,34 @@ pub fn compound_file(streams: &[(&str, &[u8])]) -> Vec<u8> {
         put16(dir, e + 64, units.len() as u16 + 2);
         dir[e + 66] = kind;
         dir[e + 67] = 1; // black
-        if kind == 5 && !streams.is_empty() {
-            put32(dir, e + 76, 1);
-        }
-        if kind == 2 && k < streams.len() {
-            put32(dir, e + 72, k as u32 + 1);
-        }
         put32(dir, e + 116, start);
         put32(dir, e + 120, size as u32);
     };
     entry(0, "Root Entry", 5, starts[2], container.len());
+    // Each storage's children (0 = the root), chained as right siblings under its child link.
+    let mut children: Vec<Vec<usize>> = vec![vec![]; storages.len() + 1];
     for (k, (name, data)) in streams.iter().enumerate() {
         let start = if is_mini(data) { mini_starts[k] } else { starts[3 + k] };
-        entry(k + 1, name, 2, start, data.len());
+        let (parent, leaf) = match name.split_once('/') {
+            Some((st, leaf)) => (1 + storages.iter().position(|s| *s == st).unwrap(), leaf),
+            None => (0, *name),
+        };
+        entry(k + 1, leaf, 2, start, data.len());
+        children[parent].push(k + 1);
+    }
+    for (i, st) in storages.iter().enumerate() {
+        let k = streams.len() + 1 + i;
+        entry(k, st, 1, 0, 0);
+        children[0].push(k);
+    }
+    for (parent, kids) in children.iter().enumerate() {
+        let parent = if parent == 0 { 0 } else { streams.len() + parent };
+        if let Some(first) = kids.first() {
+            put32(dir, parent * 128 + 76, *first as u32);
+        }
+        for pair in kids.windows(2) {
+            put32(dir, pair[0] * 128 + 72, pair[1] as u32);
+        }
     }
 
     let mut out = vec![0u8; SECTOR * (1 + fat_sectors + body)];
