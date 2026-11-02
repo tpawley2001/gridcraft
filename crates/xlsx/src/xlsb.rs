@@ -2,7 +2,9 @@
 //! MS-XLSB specification:
 //! <https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xlsb/acc8aa92-1f02-4167-99f5-84f9f676b95a>.
 //! Cell, shared and array formulas are decoded with the shared BIFF token decoder; those it can't
-//! represent keep their saved result as a constant. Cell formatting (number formats, fonts, fills,
+//! represent keep their saved result as a constant. Array formulas whose anchor carries cell
+//! metadata of the dynamic-array type (`BrtCellMeta` and the metadata part) import as
+//! dynamic-array formulas whose other cells are left for the spill to fill. Cell formatting (number formats, fonts, fills,
 //! borders, alignment and protection), column widths, row heights, hidden and outlined
 //! rows/columns, frozen panes, sheet view options, workbook theme colours and fonts, tab colours
 //! (including theme colours and tints), hyperlinks, notes, tables (with their calculated column
@@ -58,6 +60,8 @@ const MAX_CELLS: usize = 1_000_000;
 const MAX_STRINGS: usize = 1_000_000;
 const MAX_SHEETS: usize = 1024;
 const MAX_RECORDS: usize = 5_000_000;
+/// Most stale cached results emptied inside the spill ranges of one sheet's dynamic arrays.
+const MAX_SPILL_CELLS: usize = 1_000_000;
 /// Most column-information cells one worksheet expands: overlapping BrtColInfo records repeat
 /// work even when the column map stays small.
 const MAX_COL_ASSIGNMENTS: u64 = 1_000_000;
@@ -75,6 +79,7 @@ const MAX_REL_ID: u32 = 255;
 const THREADED_REL: &str = "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment";
 const PERSON_REL: &str = "http://schemas.microsoft.com/office/2017/10/relationships/person";
 
+mod cell_meta;
 mod dxf;
 mod rules;
 
@@ -184,6 +189,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         vec![]
     };
     let persons = persons(&mut package, &rels, &mut report);
+    let cell_meta = cell_meta::read(&mut package, &rels, &mut report);
     let mut model_index: Vec<Option<usize>> = Vec::with_capacity(sheets.len());
     let mut table_names = HashSet::new();
     let mut table_id = 1u32;
@@ -221,6 +227,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             &styles,
             &dxfs,
             &links,
+            &cell_meta,
             &sheet_rels,
             &mut budget,
             &mut parts,
@@ -501,10 +508,16 @@ struct Records<'a> {
     bytes: Bytes<'a>,
     count: usize,
     blocks: Vec<u16>,
+    /// Future-record and alternate-content markers are returned like other records, for parts
+    /// whose content lives inside them.
+    raw: bool,
 }
 impl<'a> Records<'a> {
     fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes: Bytes::new(bytes), count: 0, blocks: vec![] }
+        Self { bytes: Bytes::new(bytes), count: 0, blocks: vec![], raw: false }
+    }
+    fn raw(bytes: &'a [u8]) -> Self {
+        Self { raw: true, ..Self::new(bytes) }
     }
     fn next(&mut self, report: &mut ReadReport) -> Result<Option<(u16, &'a [u8])>, IoError> {
         while !self.bytes.rest.is_empty() {
@@ -533,7 +546,7 @@ impl<'a> Records<'a> {
             }
             let payload = self.bytes.take(size)?;
             match id {
-                35 | 37 => {
+                35 | 37 if !self.raw => {
                     let mut b = Bytes::new(payload);
                     if id == 35 {
                         b.take(4)?;
@@ -551,7 +564,7 @@ impl<'a> Records<'a> {
                     self.blocks.push(id + 1);
                     report.warn("Unsupported XLSB future-record and alternate-content blocks were skipped.");
                 }
-                36 | 38 => {
+                36 | 38 if !self.raw => {
                     if self.blocks.pop() != Some(id) || !payload.is_empty() {
                         return Err(invalid("mismatched extension block end"));
                     }
@@ -914,6 +927,8 @@ struct Groups {
     arrays: HashMap<CellRef, (RangeRef, Parsed)>,
     /// Shared and array ranges by first row, then first column.
     starts: HashMap<u32, BTreeMap<u32, RangeRef>>,
+    /// `PtgExp` cells whose cell metadata marks a dynamic array.
+    dynamic: HashSet<CellRef>,
     invalid: bool,
 }
 
@@ -964,6 +979,33 @@ impl Groups {
             })
             .count();
         blank_array_followers(&mut Target { sheet, links }, &pending);
+        spill_dynamic(sheet, &self.dynamic);
+    }
+}
+
+/// Turns the array formulas whose anchors carry dynamic-array cell metadata into dynamic-array
+/// formulas: their range is the spill range, whose other cells import empty (as `in_dynamic`
+/// does for .xlsx) so the formula refills them. Legacy arrays are left as they are.
+fn spill_dynamic(sheet: &mut Sheet, anchors: &HashSet<CellRef>) {
+    let mut budget = MAX_SPILL_CELLS;
+    for &pos in anchors {
+        let Some(f) = sheet.cells.get_mut(pos).and_then(|c| c.formula.as_mut()) else { continue };
+        let f = Arc::make_mut(f);
+        f.dynamic = true;
+        let Some(range) = f.array.take() else { continue };
+        let stale: Vec<CellRef> = sheet
+            .cells
+            .iter_range(range)
+            .filter(|(p, c)| *p != pos && c.formula.is_none() && !c.value.is_empty())
+            .map(|(p, _)| p)
+            .take(budget)
+            .collect();
+        budget = budget.saturating_sub(stale.len());
+        for p in stale {
+            if let Some(cell) = sheet.cells.get_mut(p) {
+                cell.value = Value::Empty;
+            }
+        }
     }
 }
 
@@ -1210,6 +1252,7 @@ fn worksheet(
     styles: &[StyleId],
     dxfs: &[gridcraft_model::Style],
     links: &Links,
+    cell_meta: &cell_meta::CellMeta,
     rels: &[Rel],
     budget: &mut Budget,
     parts: &mut SheetParts,
@@ -1230,6 +1273,8 @@ fn worksheet(
     let mut page = PageState::default();
     let mut rules = rules::Rules::default();
     let mut sparks = sparklines::Sparklines::default();
+    // The `icmb` of a BrtCellMeta, for the cell record that follows it.
+    let mut meta: Option<u32> = None;
     while let Some((id, payload)) = records.next(report)? {
         let mut b = Bytes::new(payload);
         match id {
@@ -1282,8 +1327,15 @@ fn worksheet(
                 row_layout(&mut sheet, r, ixfe, height, flags, styles);
                 row = Some(r);
                 col = None;
+                meta = None;
+            }
+            49 => {
+                // BrtCellMeta ([MS-XLSB] 2.4.325): a damaged one still marks the next cell as
+                // having cell metadata, with an index no block has.
+                meta = Some(page.read(report, "BrtCellMeta", || Bytes::new(payload).u32()).unwrap_or(0));
             }
             1..=11 | 62 => {
+                let cm = meta.take();
                 if !data {
                     return Err(invalid("cell outside worksheet data"));
                 }
@@ -1301,12 +1353,19 @@ fn worksheet(
                 if let Some(anchor_row) = exp {
                     groups.pending.push((pos, anchor_row));
                 }
+                // Cell metadata of the dynamic-array type marks the formula as a dynamic array,
+                // as `cm` does in .xlsx: an array formula's range becomes its spill range.
+                let dynamic = rgce.is_some() && cm.is_some_and(|i| cell_meta.dynamic(i));
+                if dynamic && exp.is_some() {
+                    groups.dynamic.insert(pos);
+                }
                 let formula = rgce.filter(|_| exp.is_none()).and_then(|(rgce, rgcb)| {
                     formula(rgce, rgcb, pos, links, name).unwrap_or_else(|()| {
                         budget.formulas_kept += 1;
                         None
                     })
                 });
+                let formula = formula.map(|f| Formula { dynamic, ..f });
                 if !value.is_empty() || formula.is_some() || style != StyleId::DEFAULT {
                     budget.cell()?;
                     let mut cell = Cell::value(value);
