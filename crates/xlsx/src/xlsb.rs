@@ -106,7 +106,8 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut package = Package::open(bytes)?;
     let types = content_types(&mut package)?;
     let roots = relationships(&mut package, "")?;
-    let roots: Vec<_> = roots.iter().filter(|r| r.kind == "officeDocument").collect();
+    let root_rels = roots;
+    let roots: Vec<_> = root_rels.iter().filter(|r| r.kind == "officeDocument").collect();
     if roots.len() != 1 {
         return Err(invalid("expected one workbook relationship"));
     }
@@ -117,6 +118,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     check_type(&types, &root.target, MAIN)?;
     let book = required(&mut package, &root.target)?;
     let mut wb = Workbook::new();
+    crate::read::read_doc_props(&mut package, &root_rels, &mut wb.props);
     wb.sheets.clear();
     let mut report = ReadReport::default();
     report.warn("XLSB import: charts, images, macros and other features are not imported. Save a new .xlsx file; XLSB saving is not supported.");

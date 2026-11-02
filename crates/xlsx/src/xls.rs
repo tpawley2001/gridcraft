@@ -5,7 +5,7 @@
 //! Read: worksheets, shared strings, cell values, formulas (text and cached results, including
 //! shared and array formulas), cell formatting (number formats, fonts, fills, borders,
 //! alignment, protection, the colour palette and user-defined cell styles), the 1904 date
-//! system, merged cells, column widths, row heights, defined names, print areas, print titles,
+//! system, merged cells, column widths, row heights, document properties, defined names, print areas, print titles,
 //! the calculation settings (mode, iteration, precision as displayed), data validation and
 //! conditional formats (cell-value and formula rules, and the Excel 2007+ kinds: colour scales,
 //! data bars, icon sets, top/bottom, above average and text/date templates), tables (name,
@@ -18,6 +18,7 @@
 
 mod autofilter;
 mod cond_format;
+mod doc_props;
 pub(crate) mod formula;
 mod ftab;
 mod page_setup;
@@ -183,6 +184,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     let g = globals(&stream, &mut budget, &mut report)?;
 
     let mut wb = Workbook::new();
+    doc_props::read(&cf, &mut wb.props);
     wb.sheets.clear();
     wb.protected_structure = g.protection.locked;
     wb.structure_password = g.protection.password.clone();
