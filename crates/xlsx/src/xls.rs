@@ -41,7 +41,7 @@ use std::sync::Arc;
 use gridcraft_core::{CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_model::{CalcMode, CalcSettings, Cell, DefinedName, Formula, LineInfo, Sheet, StyleId, Visibility, Workbook, WorkbookView};
 
-use crate::cfb::Compound;
+use crate::cfb::{self, Compound};
 use crate::tables::{col_width_to_px, pt_to_px};
 use crate::{IoError, ReadReport};
 use formula::{Biff5, Extern, ExternKind, Links, Mode, SupBook, Unsupported, Xti, cell_error, decode, decode_version};
@@ -286,6 +286,18 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         .or_else(|| wb.sheets.iter().position(|s| s.visibility == Visibility::Visible))
         .unwrap_or(0);
     wb.set_active_sheet(active);
+    // Macros: the `_VBA_PROJECT_CUR` storage holds what an .xlsm's vbaProject.bin root holds
+    // ([MS-XLS] 2.1.7, [MS-OVBA] 2.2.1), so it is repackaged as its own compound file and
+    // carried through unchanged. Signatures at the file's root are left behind: they can't
+    // stay valid.
+    match cf.root_storage("_VBA_PROJECT_CUR").and_then(|tree| tree.map(|nodes| cfb::write_compound(&nodes)).transpose()) {
+        Ok(Some(bin)) => {
+            wb.vba_project = Some(Arc::new(bin));
+            report.warn("macros (VBA project) were kept but not executed");
+        }
+        Ok(None) => {}
+        Err(e) => report.warn(format!("macros (VBA project) could not be read and were dropped: {e}")),
+    }
     // The overview comes first.
     report.warnings.insert(
         0,
