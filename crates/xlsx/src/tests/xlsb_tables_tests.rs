@@ -8,9 +8,9 @@ use super::{make_zip, minimal};
 use crate::{ReadReport, read_xlsb, read_xlsx};
 use gridcraft_model::Workbook;
 
-const NULL: [u8; 4] = [0xff; 4];
+pub(super) const NULL: [u8; 4] = [0xff; 4];
 
-fn record(id: u16, bytes: &[u8]) -> Vec<u8> {
+pub(super) fn record(id: u16, bytes: &[u8]) -> Vec<u8> {
     let mut out = vec![];
     if id < 128 {
         out.push(id as u8);
@@ -29,7 +29,7 @@ fn record(id: u16, bytes: &[u8]) -> Vec<u8> {
     out.extend(bytes);
     out
 }
-fn wide(text: &str) -> Vec<u8> {
+pub(super) fn wide(text: &str) -> Vec<u8> {
     let units: Vec<_> = text.encode_utf16().collect();
     let mut out = (units.len() as u32).to_le_bytes().to_vec();
     for unit in units {
@@ -40,25 +40,25 @@ fn wide(text: &str) -> Vec<u8> {
 fn nullable(text: Option<&str>) -> Vec<u8> {
     text.map(wide).unwrap_or(NULL.to_vec())
 }
-fn u32s(values: &[u32]) -> Vec<u8> {
+pub(super) fn u32s(values: &[u32]) -> Vec<u8> {
     values.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
-fn row(r: u32) -> Vec<u8> {
+pub(super) fn row(r: u32) -> Vec<u8> {
     let mut out = r.to_le_bytes().to_vec();
     out.extend([0; 13]);
     record(0, &out)
 }
-fn text_cell(col: u32, s: &str) -> Vec<u8> {
+pub(super) fn text_cell(col: u32, s: &str) -> Vec<u8> {
     let mut data = u32s(&[col, 0]);
     data.extend(wide(s));
     record(6, &data)
 }
-fn number_cell(col: u32, n: f64) -> Vec<u8> {
+pub(super) fn number_cell(col: u32, n: f64) -> Vec<u8> {
     let mut data = u32s(&[col, 0]);
     data.extend(n.to_le_bytes());
     record(5, &data)
 }
-fn worksheet(data: &[u8], tail: &[u8]) -> Vec<u8> {
+pub(super) fn worksheet(data: &[u8], tail: &[u8]) -> Vec<u8> {
     [record(129, &[]), record(145, &[]), data.to_vec(), record(146, &[]), tail.to_vec(), record(130, &[])].concat()
 }
 fn book() -> Vec<u8> {
@@ -68,7 +68,7 @@ fn book() -> Vec<u8> {
     [record(131, &[]), record(143, &[]), record(156, &sheet), record(144, &[]), record(132, &[])].concat()
 }
 /// `BrtBeginListParts`, one `BrtListPart` per relationship id, `BrtEndListParts`.
-fn list_parts(ids: &[&str]) -> Vec<u8> {
+pub(super) fn list_parts(ids: &[&str]) -> Vec<u8> {
     let mut out = record(660, &u32s(&[ids.len() as u32]));
     for id in ids {
         out.extend(record(661, &wide(id)));
@@ -79,7 +79,7 @@ fn list_parts(ids: &[&str]) -> Vec<u8> {
 
 /// A one-sheet XLSB package: the worksheet, its relationships (when given) and the table parts
 /// `xl/tables/table{n}.bin` (n from 1), each with a typed override.
-fn package(sheet: &[u8], sheet_rels: Option<&str>, tables: &[Vec<u8>]) -> Vec<u8> {
+pub(super) fn package(sheet: &[u8], sheet_rels: Option<&str>, tables: &[Vec<u8>]) -> Vec<u8> {
     let mut types = String::from(
         r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/worksheets/sheet1.bin" ContentType="application/vnd.ms-excel.worksheet"/>"#,
     );
@@ -107,7 +107,7 @@ fn package(sheet: &[u8], sheet_rels: Option<&str>, tables: &[Vec<u8>]) -> Vec<u8
     make_zip(&parts)
 }
 /// Sheet relationships naming `rIdT{n}` → `../tables/table{n}.bin` for n in 1..=count.
-fn table_rels(count: usize) -> String {
+pub(super) fn table_rels(count: usize) -> String {
     let mut s = String::from(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#);
     for n in 1..=count {
         s.push_str(&format!(r#"<Relationship Id="rIdT{n}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table{n}.bin"/>"#));
@@ -128,7 +128,7 @@ fn begin_list(range: [u32; 4], name: &str, header: bool, totals: bool) -> Vec<u8
     record(343, &data)
 }
 /// `BrtBeginListCol` … `BrtEndListCol`, with `extra` records inside.
-fn list_col(id: u32, name: &str, ilta: u32, total: Option<&str>, extra: &[u8]) -> Vec<u8> {
+pub(super) fn list_col(id: u32, name: &str, ilta: u32, total: Option<&str>, extra: &[u8]) -> Vec<u8> {
     let mut data = u32s(&[id, ilta]);
     data.extend(NULL.repeat(3));
     data.extend(u32s(&[0]));
@@ -138,7 +138,7 @@ fn list_col(id: u32, name: &str, ilta: u32, total: Option<&str>, extra: &[u8]) -
     data.extend(NULL.repeat(3));
     [record(347, &data), extra.to_vec(), record(348, &[])].concat()
 }
-fn style_client(name: &str, flags: u16) -> Vec<u8> {
+pub(super) fn style_client(name: &str, flags: u16) -> Vec<u8> {
     let mut data = flags.to_le_bytes().to_vec();
     data.extend(wide(name));
     record(513, &data)

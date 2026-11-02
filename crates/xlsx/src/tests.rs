@@ -58,6 +58,7 @@ mod xlsb_array_const_tests;
 mod xlsb_cell_style_tests;
 mod xlsb_layout_tests;
 mod xlsb_links_tests;
+mod xlsb_list_tests;
 mod xlsb_names_tests;
 mod xlsb_pivot_tests;
 mod xlsb_print_tests;

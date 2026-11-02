@@ -1,12 +1,13 @@
 //! BIFF8 parsed formulas ([MS-XLS] 2.2.2, 2.5.198): reverse-Polish `Ptg` tokens back to an
 //! expression tree. Anything outside the common token set is reported as unsupported, and the
 //! caller keeps the cell's cached value instead. XLSB ([MS-XLSB] 2.2.2, 2.5.97) cell formulas
-//! use the same token ids with wider cell coordinates; see [`Grid`].
+//! use the same token ids with wider cell coordinates; see [`Grid`]. XLSB structured references
+//! (`PtgList`) resolve their table and columns through [`Links::lists`].
 
 use std::sync::Arc;
 
-use gridcraft_core::{CellError, CellRef};
-use gridcraft_formula::{Anchor, BinOp, Expr, RefKind, Reference, SheetSel, UnOp};
+use gridcraft_core::{CellError, CellRef, RangeRef};
+use gridcraft_formula::{Anchor, BinOp, Expr, RefKind, Reference, SheetSel, StructItem, StructRef, UnOp};
 
 use super::ftab::FTAB;
 
@@ -102,6 +103,27 @@ pub(crate) struct Links {
     pub skipped: Vec<bool>,
     pub books: Vec<SupBook>,
     pub xti: Vec<Xti>,
+    /// XLSB tables (ListObjects) structured references can name.
+    pub lists: Vec<List>,
+}
+
+/// An XLSB table as `PtgList` names it: by `idList`, and its columns by index.
+pub(crate) struct List {
+    pub id: u32,
+    pub name: String,
+    pub columns: Vec<String>,
+    /// The sheet holding the table, and its range there.
+    pub sheet: String,
+    pub range: RangeRef,
+}
+
+/// Where an XLSB formula lives, for the structured references that leave out their table name.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Site<'a> {
+    /// The sheet holding the formula (empty for defined names).
+    pub sheet: &'a str,
+    /// The table (`idList`) whose calculated column or totals row formula this is.
+    pub table: Option<u32>,
 }
 
 pub(super) fn function(iftab: u16) -> Option<(&'static str, i8)> {
@@ -267,7 +289,7 @@ fn push(stack: &mut Stack, kids: usize, e: Expr) -> Result<(), Unsupported> {
 /// Decodes `rgce` (tokens) with `rgcb` (the extra data for array constants) evaluated at
 /// `base`. Returns the expression or why it can't be represented.
 pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links) -> Result<Expr, Unsupported> {
-    decode_in(rgce, rgcb, base, mode, links, Grid::Biff8)
+    decode_in(rgce, rgcb, base, mode, links, Grid::Biff8, Site::default())
 }
 
 /// Decodes an XLSB cell, shared, array or name formula's `rgce` and `rgcb` at `base`. Shared
@@ -275,10 +297,60 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
 /// through `links`. `PtgArray` and `PtgMemArea` consume their corresponding extra data.
 /// A `PtgExp` (resolved by the reader) and names in other workbooks (`PtgNameX`) are refused.
 pub(crate) fn decode_xlsb(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links) -> Result<Expr, Unsupported> {
-    decode_in(rgce, rgcb, base, mode, links, Grid::Biff12)
+    decode_xlsb_at(rgce, rgcb, base, mode, links, Site::default())
 }
 
-fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, grid: Grid) -> Result<Expr, Unsupported> {
+/// [`decode_xlsb`] for a formula at `site`: structured references from inside their own table
+/// are written without the table name (`[@Qty]`), as the .xlsx reader gives them.
+pub(crate) fn decode_xlsb_at(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, site: Site<'_>) -> Result<Expr, Unsupported> {
+    decode_in(rgce, rgcb, base, mode, links, Grid::Biff12, site)
+}
+
+/// `PtgList` ([MS-XLSB] 2.5.98, after its first byte): eptg 0x19, ixti, flags (columns: 2 bits,
+/// rowType: 5 bits, spacing and data type bits, then invalid and nonresident), listIndex,
+/// colFirst and colLast. A table or column the workbook doesn't have is refused.
+fn list_ref(t: &mut Bytes<'_>, base: CellRef, links: &Links, site: Site<'_>) -> Result<Expr, Unsupported> {
+    if t.u8()? != 0x19 {
+        return Err(Unsupported("XLSB extended formula token"));
+    }
+    let ixti = t.u16()?;
+    let flags = t.u16()?;
+    let id = t.u32()?;
+    let (c0, c1) = (t.u16()?, t.u16()?);
+    if flags & 0x3000 != 0 {
+        return Err(Unsupported("invalid structured references or ones to other workbooks"));
+    }
+    let book = links.xti.get(usize::from(ixti)).and_then(|x| usize::try_from(x.book).ok()).and_then(|b| links.books.get(b));
+    if book.is_some_and(|b| !b.internal) {
+        return Err(Unsupported("references to other workbooks (external links)"));
+    }
+    let list = links.lists.iter().find(|l| l.id == id).ok_or(Unsupported("reference to a missing table"))?;
+    let specifiers = match (flags >> 2) & 0x1F {
+        0x00 => vec![],
+        0x01 => vec![StructItem::All],
+        0x02 => vec![StructItem::Headers],
+        0x04 => vec![StructItem::Data],
+        0x06 => vec![StructItem::Headers, StructItem::Data],
+        0x08 => vec![StructItem::Totals],
+        0x0C => vec![StructItem::Data, StructItem::Totals],
+        0x10 => vec![StructItem::ThisRow],
+        _ => return Err(Unsupported("unknown structured reference rows")),
+    };
+    let col = |c: u16| list.columns.get(usize::from(c)).cloned().ok_or(Unsupported("reference to a missing table column"));
+    let (col_start, col_end) = match flags & 0x3 {
+        0 => (None, None),
+        1 | 2 => {
+            let (a, b) = (col(c0)?, col(c1)?);
+            if flags & 0x3 == 1 || c0 == c1 { (Some(a), None) } else { (Some(a), Some(b)) }
+        }
+        _ => return Err(Unsupported("unknown structured reference columns")),
+    };
+    let own = site.table == Some(id) || (specifiers == [StructItem::ThisRow] && list.sheet == site.sheet && list.range.contains(base));
+    let table = if own { String::new() } else { list.name.clone() };
+    Ok(Expr::Struct(StructRef { table, specifiers, col_start, col_end }))
+}
+
+fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, grid: Grid, site: Site<'_>) -> Result<Expr, Unsupported> {
     let wide = grid == Grid::Biff12;
     if rgce.len() > MAX_RGCE {
         return Err(Unsupported("formula too long"));
@@ -289,6 +361,11 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
     while t.pos < rgce.len() {
         let ptg = t.u8()?;
         let mut kids = 0usize;
+        if wide && ptg & 0x1F == 0x18 {
+            // PtgList, whichever operand class its first byte carries.
+            push(&mut stack, kids, list_ref(&mut t, base, links, site)?)?;
+            continue;
+        }
         // Operand classes (reference / value / array) share one token number.
         let id = if ptg & 0x60 != 0 { 0x20 | (ptg & 0x1F) } else { ptg };
         if wide && id == 0x39 {
@@ -613,6 +690,7 @@ mod tests {
                 Xti { book: 2, first: 0, last: 0 },
                 Xti { book: 0, first: -1, last: -1 },
             ],
+            lists: vec![],
         }
     }
 

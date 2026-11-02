@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (§19: XLSB imports data validation and conditional formatting; §7: `.xls` import reads tables; §4: chart data tables implemented with XLSX round-trip and print/PDF; §13: Solver Options, Load/Save Model and Reset All; §19: XLSB array constants and memory caches import as live formulas; §3: Office add-in content (web extension anchors and task panes) survives XLSX saves; §3, §17: XLSX grouped drawing objects kept on save; §7: `.xls` imports the sheet AutoFilter; XLSB imports sheet and workbook structure protection and calculation settings; XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §19: XLSB imports print setup, margins, print options, headers/footers and page breaks; XLSB workbook themes and theme tab colours imported; §19: XLSB imports tables and AutoFilters; `.xls` and `.xlsb` restore the saved active visible sheet; §7: `.xls` imports sheet protection, allowed actions and workbook structure protection; §7: `.xls` import reads Excel 2007+ conditional formats (CF12/CFEx); §7: `.xls` import reads page setup, margins, headers/footers, print options, page breaks and the tab colour; §19: XLSB imports hyperlinks and notes; §19: XLSB imports defined names and other-sheet references; §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas; §19: XLSB imports shared and array formulas; §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas; §19: XLSB imports column widths, row heights, hidden and outlined rows/columns, default sizes, frozen panes, sheet view options and tab colours; §3: XLSX keeps the volatile dependencies part (RTD and CUBE topics) on save; §19: XLSB imports fonts, fills, borders, alignment and protection; XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas including text constants; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (§19: XLSB structured references, table calculated column and custom totals formulas imported; §19: XLSB imports data validation and conditional formatting; §7: `.xls` import reads tables; §4: chart data tables implemented with XLSX round-trip and print/PDF; §13: Solver Options, Load/Save Model and Reset All; §19: XLSB array constants and memory caches import as live formulas; §3: Office add-in content (web extension anchors and task panes) survives XLSX saves; §3, §17: XLSX grouped drawing objects kept on save; §7: `.xls` imports the sheet AutoFilter; XLSB imports sheet and workbook structure protection and calculation settings; XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §19: XLSB imports print setup, margins, print options, headers/footers and page breaks; XLSB workbook themes and theme tab colours imported; §19: XLSB imports tables and AutoFilters; `.xls` and `.xlsb` restore the saved active visible sheet; §7: `.xls` imports sheet protection, allowed actions and workbook structure protection; §7: `.xls` import reads Excel 2007+ conditional formats (CF12/CFEx); §7: `.xls` import reads page setup, margins, headers/footers, print options, page breaks and the tab colour; §19: XLSB imports hyperlinks and notes; §19: XLSB imports defined names and other-sheet references; §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas; §19: XLSB imports shared and array formulas; §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas; §19: XLSB imports column widths, row heights, hidden and outlined rows/columns, default sizes, frozen panes, sheet view options and tab colours; §3: XLSX keeps the volatile dependencies part (RTD and CUBE topics) on save; §19: XLSB imports fonts, fills, borders, alignment and protection; XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas including text constants; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -180,38 +180,18 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   [ui-parity.md](ui-parity.md#accessibility)
 
 ### 19. XLSB/ODS beyond values; minor formats (FF)
-- XLSB imports values, sheet layout, built-in/custom number formats, fonts, pattern fills,
-  borders, alignment, protection, defined names and cell/shared/array formulas, including
-  text and array constants, same-workbook sheet references and PtgMemArea caches.
-  External workbook references and unsupported or malformed formula tokens keep saved results.
-  Gradient fills, cell style inheritance and differential formats remain unimported. ODS
-- XLSB imports values, built-in/custom number formats, cell formulas (references, operators,
-  functions, text constants; shared and array
-  formulas, names, 3-D references and array constants still become their saved results) and each
-  sheet's print setup (orientation, paper, scale or fit-to-pages, margins, print options,
-  headers/footers, manual page breaks); print area and print titles are defined names and stay
-  unimported, and fonts,
-- XLSB imports workbook theme colours and major/minor fonts, and preserves theme tab colours with tints. Missing or damaged theme parts use defaults; damaged or missing referenced parts produce one warning.
-- XLSB imports values, built-in/custom number formats and cell formulas (references, operators, functions, text constants; shared and array
-  formulas, names, 3-D references and array constants still become their saved results), data
-  validation and conditional formatting with their differential formats; fonts,
-  formulas, names, 3-D references and array constants still become their saved results), tables
-  and AutoFilters (calculated column and custom totals formulas not yet); fonts,
-- XLSB imports values, built-in/custom number formats, hyperlinks, notes (author and plain text) and cell formulas (references, operators, functions, text constants; shared and array
-- XLSB imports values, built-in/custom number formats, defined names and cell formulas (references, operators, functions,
-  other sheets, names; shared and array formulas, text constants and links to other workbooks still become their saved results); fonts,
-- XLSB imports values, built-in/custom number formats and cell formulas (references, operators, functions, shared and array
-  formulas; names, 3-D references and text constants still become their saved results); fonts,
-- XLSB imports values, built-in/custom number formats, sheet layout (column widths, row heights, hidden and outlined rows/columns, default sizes, frozen panes, sheet view options and tab colours) and cell formulas (references, operators, functions, text constants; shared and array
-  formulas, names, 3-D references and array constants still become their saved results); fonts,
-  fills, borders and alignment remain unimported. ODS
-- XLSB imports values, built-in/custom number formats, fonts, pattern fills, borders, alignment, protection and cell
-  formulas (references, operators, functions, text constants; shared and array formulas, names, 3-D references and
-  array constants still become their saved results); gradient fills, cell style (ixfeParent) inheritance and dxfs are
-  not imported. Sheet and workbook structure protection (legacy and ISO passwords), calculation mode,
-  iterative calculation and precision as displayed are imported. ODS
-  values only, no write; no `.prn`, `.dif`, `.slk`, XML Spreadsheet 2003; CSV
-  writes raw instead of displayed values; templates saved with the workbook content type.
+- XLSB imports values; cell, shared, array and defined-name formulas (references, operators,
+  functions, text and array constants, PtgMemArea caches, other sheets, defined names, structured
+  references) with their saved results; defined names; number formats, named cell styles, fonts,
+  pattern fills, borders, alignment and protection; sheet layout (column widths, row heights, hidden
+  and outlined rows/columns, frozen panes, view options, tab colours); workbook theme colours and
+  fonts; hyperlinks and notes; tables (with calculated column and custom totals formulas) and
+  AutoFilters; data validation and conditional formatting with their differential formats;
+  PivotTables; print setup; sheet and workbook structure protection and calculation settings. Left:
+  links to other workbooks (kept as saved results), gradient fills, cell style (ixfeParent)
+  inheritance, date/colour/icon filters, charts, pictures; no XLSB write.
+- ODS values only, no write; no `.prn`, `.dif`, `.slk`, XML Spreadsheet 2003; CSV writes raw
+  instead of displayed values; templates saved with the workbook content type.
   **Estimate:** 14–22 h.
 
 ### 20. Multiple windows; pen pressure (H)
@@ -241,6 +221,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-01 | minor | §19: XLSB imports structured references (`PtgList`) in formulas and tables' calculated column and custom totals formulas; the duplicated §19 bullets are merged into one list |
 | 2026-11-01 | minor | §19: XLSB imports data validation (BrtDVal) and conditional formatting (cell value, formula, text, blanks/errors, duplicates, top/bottom, average, dates, colour scales, data bars, icon sets) with their differential formats; rules with formulas the decoder can't read are skipped with one warning |
 | 2026-11-01 | minor | §7: `.xls` import reads tables (name, range, header/totals rows, columns, table style) from Feature11/Feature12/List12 records |
 | 2026-11-01 | minor | §4: chart data tables implemented for column, bar, line, area and compatible combo charts, with legend keys and border settings, live source values, XLSX round-trip and print/PDF; other chart gaps remain. |
