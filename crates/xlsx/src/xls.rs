@@ -11,12 +11,14 @@
 //! data bars, icon sets, top/bottom, above average and text/date templates), tables (name,
 //! range, header and totals rows, columns and table style), page setup (paper, orientation,
 //! scale, fit to page, margins, headers and footers, print options, manual page breaks), the
-//! sheet tab colour, sheet protection, workbook structure protection and the sheet AutoFilter
-//! (range and criteria). Everything else (charts, pictures, comments, macros) is skipped with a
-//! warning.
+//! sheet tab colour, sheet protection, workbook structure protection, the sheet AutoFilter
+//! (range and criteria), and charts: embedded charts and chart sheets become live charts whose
+//! series refer to the cells (see `chart`). Everything else (pictures, comments, macros) is
+//! skipped with a warning.
 //! Encrypted workbooks and pre-BIFF8 versions are refused.
 
 mod autofilter;
+mod chart;
 mod cond_format;
 mod doc_props;
 pub(crate) mod formula;
@@ -90,11 +92,13 @@ pub(crate) struct Budget {
     text: usize,
     records: usize,
     max_records: usize,
+    /// Charts read so far.
+    charts: usize,
 }
 
 impl Default for Budget {
     fn default() -> Self {
-        Budget { cells: 0, text: 0, records: 0, max_records: MAX_RECORDS }
+        Budget { cells: 0, text: 0, records: 0, max_records: MAX_RECORDS, charts: 0 }
     }
 }
 
@@ -199,10 +203,20 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
 
     // BoundSheet8 index → model sheet index.
     let mut model_index: Vec<Option<usize>> = Vec::with_capacity(g.sheets.len());
+    let mut chart_sheets: Vec<chart::ChartSheet> = vec![];
     for (bound, bs) in g.sheets.iter().enumerate() {
+        if bs.kind == 2 {
+            match chart::chart_sheet(&stream, bs.pos, &mut budget, &g.links, &mut report)? {
+                Some(chart) => {
+                    chart_sheets.push(chart::ChartSheet { name: bs.name.clone(), visibility: bs.visibility, before: wb.sheets.len(), chart })
+                }
+                None => report.warn(format!("Chart sheets that can't be read were skipped ('{}').", bs.name)),
+            }
+            model_index.push(None);
+            continue;
+        }
         if bs.kind != 0 {
             report.warn(match bs.kind {
-                2 => "Chart sheets in .xls files are not imported yet and were skipped.",
                 1 => "Excel 4.0 macro sheets were skipped.",
                 _ => "VBA modules and other non-worksheet sheets were skipped.",
             });
@@ -228,6 +242,19 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         return Err(invalid("the workbook has no worksheets that can be read"));
     }
     wb.calc.precision_as_displayed = g.precision_as_displayed;
+    // Chart ids are unique in the workbook.
+    let mut next_id = 1u32;
+    for sheet in wb.sheets.iter_mut().filter(|s| !s.charts.is_empty()) {
+        for ch in Arc::make_mut(sheet).charts.iter_mut() {
+            ch.id = next_id;
+            next_id = next_id.saturating_add(1);
+        }
+    }
+    for cs in &mut chart_sheets {
+        cs.chart.id = next_id;
+        next_id = next_id.saturating_add(1);
+    }
+    chart::add_chart_sheets(&mut wb, chart_sheets);
     defined_names(&g.names, &g.links, &model_index, &mut wb, &mut report);
     tables::finish_workbook(&mut wb);
     let active = g
@@ -241,7 +268,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     // The overview comes first.
     report.warnings.insert(
         0,
-        "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights and defined names were read. Charts, pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported.".into(),
+        "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights, defined names and charts were read. Pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported.".into(),
     );
     Ok((wb, report))
 }
@@ -511,6 +538,8 @@ struct SheetState<'g> {
     /// `_FilterDatabase` name gives.
     autofilter: autofilter::State,
     tables: tables::SheetTables,
+    /// Embedded charts read so far, placed on the sheet when the substream ends.
+    charts: chart::Embedded,
 }
 
 impl SheetState<'_> {
@@ -658,13 +687,20 @@ fn worksheet(
         page: page_setup::PageState::default(),
         autofilter: autofilter::State::default(),
         tables: tables::SheetTables::default(),
+        charts: chart::Embedded::default(),
     };
     let mut depth = 1usize;
     while let Some(rec) = recs.next_record()? {
         budget.record()?;
         match rec.id {
+            BOF if depth == 1 && chart::is_chart_bof(&rec) => {
+                // An embedded chart's substream, read to its EOF.
+                if !st.charts.chart(&mut recs, budget, &g.links, report)? {
+                    break;
+                }
+                continue;
+            }
             BOF => {
-                // An embedded chart's substream.
                 depth += 1;
                 continue;
             }
@@ -692,6 +728,7 @@ fn worksheet(
     st.page.finish(&mut st.sheet.print);
     st.cond.finish(report);
     st.sheet.autofilter = std::mem::take(&mut st.autofilter).finish(filter, report);
+    std::mem::take(&mut st.charts).finish(&mut st.sheet);
     if st.dropped > 0 {
         report.warn(format!("{} cells outside the grid were skipped.", st.dropped));
     }
@@ -900,7 +937,8 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
             st.sheet.right_to_left = on(0x0040);
         }
         0x001C => report.warn("Cell comments in .xls files are not imported yet."),
-        0x00EC => report.warn("Pictures, charts and shapes in .xls files are not imported yet."),
+        0x00EC => st.charts.drawing(rec),
+        0x005D => st.charts.obj(rec, report),
         // DVAL is only a header; import actual DV records regardless of its declared count.
         0x01BE => validation::read(&mut c, st, budget, report)?,
         0x01B0 | 0x0879 => st.cond.header(&c.rest(), rec.id == 0x0879),
