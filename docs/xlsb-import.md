@@ -1,7 +1,7 @@
 # Importing Excel binary workbooks
 
 Last updated: 2026-11-01.
-> **Last updated:** 2026-11-01 · **Change:** minor (workbook themes and theme tab colours imported)
+> **Last updated:** 2026-11-01 · **Change:** minor (PivotTables imported; workbook themes and theme tab colours imported)
 
 Open an `.xlsb` file with File → Open, drag it onto GridCraft, or pass it to the CLI.
 GridCraft imports worksheet data into a new workbook and shows the conversion limits.
@@ -59,6 +59,13 @@ imported yet, nor are date, colour and icon filters; each gives one warning. A t
 part is missing or damaged, whose range doesn't fit its columns, or whose name repeats
 another table's is skipped with one warning per kind.
 
+PivotTables keep their cache source (a sheet range, a defined name or a table), location,
+row, column and page fields (with the selected page item), data fields with their functions and
+number formats, grand totals and PivotTable style with its options, so they refresh, can be
+edited and save to XLSX as PivotTables. PivotTables over external, OLAP or consolidation
+sources, with a missing cache part or a damaged part keep their last rendered values as plain
+cells with one warning; calculated fields and grouping the model can't hold also warn.
+
 Save opens Save As and suggests a new `.xlsx` file. The source XLSB file is not used as the
 workbook's save destination; requests to save to `.xlsb` return an error.
 
@@ -85,6 +92,7 @@ identifiers are 677 (workbook) and 678 (sheet).
 |---|---|
 | 2026-11-01 | Array constants and PtgMemArea caches decode in cell, shared, array and defined-name formulas; malformed payloads retain saved results. Layouts follow [MS-XLSB] PtgArray, PtgExtraArray, SerAr and PtgExtraMem. |
 | --- | --- |
+| 2026-11-01 | Import PivotTables (cache definitions and PivotTable parts). |
 | 2026-11-01 | Import sheet and workbook structure protection and calculation settings. |
 ## Revision history
 
