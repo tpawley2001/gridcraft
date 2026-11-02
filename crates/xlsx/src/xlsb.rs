@@ -7,7 +7,7 @@
 //! rows/columns, frozen panes, sheet view options, workbook theme colours and fonts, tab colours
 //! (including theme colours and tints), hyperlinks, notes, tables (with their calculated column
 //! and custom totals formulas, which like cell formulas may use structured references), AutoFilters, PivotTables,
-//! sparklines and
+//! sparklines, drawings (pictures, shapes, text boxes and charts, read with the .xlsx drawing reader) and
 //! each sheet's page setup, print options, header/footer and manual page breaks are imported;
 //! gradient fills, cell style inheritance, differential formats, macros and other workbook features
 //! are not run or imported.
@@ -122,7 +122,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     crate::read::read_doc_props(&mut package, &root_rels, &mut wb.props);
     wb.sheets.clear();
     let mut report = ReadReport::default();
-    report.warn("XLSB import: charts, images and other features are not imported. Save a new .xlsx file; XLSB saving is not supported.");
+    report.warn("XLSB import: some workbook features are not imported. Save a new .xlsx file; XLSB saving is not supported.");
     let mut itab_cur: Option<u32> = None;
     let (sheets, names, mut links) = workbook(&book, &mut wb, &mut report, &mut itab_cur)?;
     let cache_ids = pivot::cache_ids(&book);
@@ -205,6 +205,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         budget.links = 0;
         budget.comments = 0;
         let mut list_parts = vec![];
+        let mut drawing = None;
         let mut sheet = worksheet(
             &required(&mut package, &rel.target)?,
             &info.name,
@@ -215,8 +216,15 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             &sheet_rels,
             &mut budget,
             &mut list_parts,
+            &mut drawing,
             &mut report,
         )?;
+        if let Some(id) = drawing {
+            // Drawing parts are DrawingML XML, as in .xlsx: read them with the .xlsx reader's state.
+            let mut cx = crate::read::Ctx::new(package);
+            sheet_drawing(&mut cx, &sheet_rels, &id, &mut sheet, &mut report);
+            package = cx.pkg;
+        }
         sheet_comments(&mut package, &types, &sheet_rels, &mut sheet, &mut budget, &mut report);
         tables::read_tables(&mut package, &types, &rel.target, &list_parts, &links, &mut sheet, &mut table_names, &mut table_id, &mut report);
         sheet.pivots = pivot::read_pivots(&mut package, &types, &sheet_rels, &info.name, &mut caches, &mut report);
@@ -351,6 +359,36 @@ fn rels_path(path: &str) -> String {
 fn relationships(package: &mut Package<'_>, path: &str) -> Result<Vec<Rel>, IoError> {
     let data = package.read_limited(&rels_path(path), MAX_META)?.ok_or_else(|| invalid(format!("missing relationships for {path}")))?;
     parse_relationships(&data, path)
+}
+
+/// Reads the DrawingML part named by a worksheet's BrtDrawing relationship `id` into `sheet`
+/// (pictures, shapes, text boxes and charts), with the .xlsx drawing reader. A drawing that can't
+/// be found or read is skipped with a warning; the sheet's cells are kept either way.
+fn sheet_drawing(cx: &mut crate::read::Ctx<'_>, sheet_rels: &[Rel], id: &str, sheet: &mut Sheet, report: &mut ReadReport) {
+    let Some(target) = sheet_rels.iter().find(|r| r.id == id && r.kind == "drawing" && !r.external).map(|r| r.target.clone()) else {
+        report.warn(format!("The drawing of XLSB sheet '{}' has no drawing relationship and was skipped.", sheet.name));
+        return;
+    };
+    let kept = (sheet.images.len(), sheet.shapes.len(), sheet.charts.len());
+    let result = crate::drawing::read_drawing(cx, &target, sheet);
+    let warnings = std::mem::take(&mut cx.report.warnings);
+    match result {
+        Ok(()) => warnings.into_iter().for_each(|w| report.warn(w)),
+        Err(e) => {
+            sheet.images.truncate(kept.0);
+            sheet.shapes.truncate(kept.1);
+            sheet.charts.truncate(kept.2);
+            report.warn(format!("The drawing {target} of XLSB sheet '{}' could not be read ({e}) and was skipped.", sheet.name));
+        }
+    }
+}
+
+/// The relationship id of a BrtDrawing record ([MS-XLSB] 2.4.385): a RelID, a nullable wide
+/// string. `None` for a null or empty id.
+fn drawing_rel(mut b: Bytes<'_>) -> Result<Option<String>, IoError> {
+    let id = b.string(255, true)?;
+    b.finish()?;
+    Ok(id.filter(|id| !id.is_empty()))
 }
 
 /// A worksheet's relationships (hyperlink targets, comments): none when the part has no
@@ -1166,6 +1204,7 @@ fn worksheet(
     rels: &[Rel],
     budget: &mut Budget,
     list_parts: &mut Vec<String>,
+    drawing: &mut Option<String>,
     report: &mut ReadReport,
 ) -> Result<Sheet, IoError> {
     let mut records = Records::new(bytes);
@@ -1328,6 +1367,12 @@ fn worksheet(
             494 => hyperlink(payload, rels, &mut sheet, budget, report),
             161 if !data => sheet_autofilter(&mut records, payload, &mut sheet, report)?,
             tables::LIST_PART => list_part(payload, list_parts, report),
+            550 => match drawing_rel(b) {
+                Ok(id) => *drawing = id,
+                Err(_) => report.warn("An unreadable XLSB drawing record was skipped."),
+            },
+            // BrtLegacyDrawing: VML (comments, form controls), not imported.
+            551 => {}
             476 => {
                 if let Some(m) = page.read(report, "BrtMargins", || read_margins(payload)) {
                     sheet.print.margins = m;
