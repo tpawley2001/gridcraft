@@ -25,6 +25,9 @@ pub(crate) struct Unsupported(pub &'static str);
 pub(crate) enum Grid {
     /// BIFF8 (.xls): u16 rows, 8-bit columns (65,536 × 256).
     Biff8,
+    /// BIFF5 (Excel 5.0/95 .xls): 14-bit rows whose top two bits are the column and row
+    /// relative flags, then an 8-bit column (16,384 × 256).
+    Biff5,
     /// BIFF12 (.xlsb): u32 rows, 14-bit columns (1,048,576 × 16,384), `RgceLoc` / `RgceArea`.
     Biff12,
 }
@@ -33,33 +36,45 @@ impl Grid {
     fn last_row(self) -> u32 {
         match self {
             Grid::Biff8 => 0xFFFF,
+            Grid::Biff5 => 0x3FFF,
             Grid::Biff12 => 0xF_FFFF,
         }
     }
     fn last_col(self) -> u32 {
         match self {
-            Grid::Biff8 => 0xFF,
+            Grid::Biff8 | Grid::Biff5 => 0xFF,
             Grid::Biff12 => 0x3FFF,
         }
     }
     fn row(self, t: &mut Bytes<'_>) -> Result<u32, Unsupported> {
         match self {
-            Grid::Biff8 => t.u16().map(u32::from),
+            Grid::Biff8 | Grid::Biff5 => t.u16().map(u32::from),
             Grid::Biff12 => t.u32(),
         }
     }
-    /// A cell: row then column.
+    /// A cell: row then column. BIFF5's relative flags move into a BIFF8-style column field.
     fn loc(self, t: &mut Bytes<'_>) -> Result<(u32, u16), Unsupported> {
+        if self == Grid::Biff5 {
+            let rw = t.u16()?;
+            let col = t.u8()?;
+            return Ok((u32::from(rw & 0x3FFF), u16::from(col) | (rw & 0xC000)));
+        }
         Ok((self.row(t)?, t.u16()?))
     }
     /// An area: first and last row, then first and last column.
     fn area(self, t: &mut Bytes<'_>) -> Result<(u32, u32, u16, u16), Unsupported> {
+        if self == Grid::Biff5 {
+            let (r0, r1) = (t.u16()?, t.u16()?);
+            let (c0, c1) = (t.u8()?, t.u8()?);
+            return Ok((u32::from(r0 & 0x3FFF), u32::from(r1 & 0x3FFF), u16::from(c0) | (r0 & 0xC000), u16::from(c1) | (r1 & 0xC000)));
+        }
         Ok((self.row(t)?, self.row(t)?, t.u16()?, t.u16()?))
     }
     /// Bytes of a `loc` (`area` is twice that).
     fn loc_len(self) -> usize {
         match self {
             Grid::Biff8 => 4,
+            Grid::Biff5 => 3,
             Grid::Biff12 => 6,
         }
     }
@@ -124,6 +139,77 @@ pub(crate) struct Site<'a> {
     pub sheet: &'a str,
     /// The table (`idList`) whose calculated column or totals row formula this is.
     pub table: Option<u32>,
+}
+
+/// What a BIFF5 EXTERNSHEET entry points at.
+#[derive(Clone, PartialEq)]
+pub(super) enum ExternKind {
+    /// A sheet of this workbook, by name.
+    Sheet(String),
+    /// This workbook (3-D refs give the sheets by index; names are its own).
+    OwnBook,
+    /// Add-in functions.
+    AddIn,
+    /// Another workbook.
+    Other,
+}
+
+/// A BIFF5 EXTERNSHEET entry and the EXTERNNAME records after it.
+pub(super) struct Extern {
+    pub kind: ExternKind,
+    pub names: Vec<String>,
+}
+
+/// BIFF5 (Excel 5.0/95) workbook tables: the code page of its 8-bit text, and the
+/// EXTERNSHEET entries that 3-D references and external names go through (BIFF8 uses XTI).
+#[derive(Default)]
+pub(super) struct Biff5 {
+    pub codepage: u16,
+    pub externs: Vec<Extern>,
+}
+
+impl Biff5 {
+    /// 8-bit text in the workbook's code page.
+    pub fn text(&self, bytes: &[u8]) -> String {
+        crate::csv::decode_codepage(bytes, self.codepage)
+    }
+
+    fn entry(&self, ixals: i16) -> Option<&Extern> {
+        usize::from(ixals.unsigned_abs()).checked_sub(1).and_then(|i| self.externs.get(i))
+    }
+
+    /// The sheets of a BIFF5 3-D reference: a negative `ixals` is a reference into this
+    /// workbook by sheet index; a positive one names its sheet through an EXTERNSHEET entry.
+    fn sheet_sel(&self, links: &Links, ixals: i16, first: i16, last: i16) -> Result<Option<SheetSel>, Unsupported> {
+        let entry = self.entry(ixals);
+        if ixals > 0 {
+            match entry.map(|e| &e.kind) {
+                Some(ExternKind::Sheet(name)) => {
+                    let sheet = links.sheets.iter().find(|s| s.eq_ignore_ascii_case(name)).ok_or(Unsupported("reference to a missing sheet link"))?;
+                    return Ok(Some(SheetSel::Named(sheet.clone())));
+                }
+                Some(ExternKind::OwnBook) => {}
+                Some(_) => return Err(Unsupported("references to other workbooks (external links)")),
+                None => return Err(Unsupported("reference to a missing sheet link")),
+            }
+        }
+        let name = |i: i16| usize::try_from(i).ok().and_then(|i| links.sheets.get(i)).cloned();
+        Ok(match (name(first), name(last)) {
+            (Some(a), Some(_)) if first == last => Some(SheetSel::Named(a)),
+            (Some(a), Some(b)) => Some(SheetSel::Span(a, b)),
+            // A deleted sheet: the reference is #REF!.
+            _ => None,
+        })
+    }
+
+    fn extern_name(&self, ixals: i16, index: u16) -> Result<String, Unsupported> {
+        let entry = self.entry(ixals).ok_or(Unsupported("reference to a missing name link"))?;
+        if !matches!(entry.kind, ExternKind::OwnBook | ExternKind::AddIn) {
+            return Err(Unsupported("names in other workbooks (external links)"));
+        }
+        let i = usize::from(index).checked_sub(1).ok_or(Unsupported("invalid name index"))?;
+        entry.names.get(i).cloned().ok_or(Unsupported("reference to a missing name"))
+    }
 }
 
 pub(super) fn function(iftab: u16) -> Option<(&'static str, i8)> {
@@ -289,7 +375,13 @@ fn push(stack: &mut Stack, kids: usize, e: Expr) -> Result<(), Unsupported> {
 /// Decodes `rgce` (tokens) with `rgcb` (the extra data for array constants) evaluated at
 /// `base`. Returns the expression or why it can't be represented.
 pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links) -> Result<Expr, Unsupported> {
-    decode_in(rgce, rgcb, base, mode, links, Grid::Biff8, Site::default())
+    decode_in(rgce, rgcb, base, mode, links, Grid::Biff8, Site::default(), None)
+}
+
+/// [`decode`] for a BIFF8 workbook (`biff5` is `None`) or a BIFF5 one.
+pub(super) fn decode_version(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, biff5: Option<&Biff5>) -> Result<Expr, Unsupported> {
+    let grid = if biff5.is_some() { Grid::Biff5 } else { Grid::Biff8 };
+    decode_in(rgce, rgcb, base, mode, links, grid, Site::default(), biff5)
 }
 
 /// Decodes an XLSB cell, shared, array or name formula's `rgce` and `rgcb` at `base`. Shared
@@ -303,7 +395,7 @@ pub(crate) fn decode_xlsb(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, l
 /// [`decode_xlsb`] for a formula at `site`: structured references from inside their own table
 /// are written without the table name (`[@Qty]`), as the .xlsx reader gives them.
 pub(crate) fn decode_xlsb_at(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, site: Site<'_>) -> Result<Expr, Unsupported> {
-    decode_in(rgce, rgcb, base, mode, links, Grid::Biff12, site)
+    decode_in(rgce, rgcb, base, mode, links, Grid::Biff12, site, None)
 }
 
 /// `PtgList` ([MS-XLSB] 2.5.98, after its first byte): eptg 0x19, ixti, flags (columns: 2 bits,
@@ -350,7 +442,20 @@ fn list_ref(t: &mut Bytes<'_>, base: CellRef, links: &Links, site: Site<'_>) -> 
     Ok(Expr::Struct(StructRef { table, specifiers, col_start, col_end }))
 }
 
-fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, grid: Grid, site: Site<'_>) -> Result<Expr, Unsupported> {
+/// BIFF5 3-D tokens: `ixals`, 8 reserved bytes, then the first and last sheet index.
+const BIFF5_3D_HEADER: usize = 14;
+
+#[allow(clippy::too_many_arguments)]
+fn decode_in(
+    rgce: &[u8],
+    rgcb: &[u8],
+    base: CellRef,
+    mode: Mode,
+    links: &Links,
+    grid: Grid,
+    site: Site<'_>,
+    biff5: Option<&Biff5>,
+) -> Result<Expr, Unsupported> {
     let wide = grid == Grid::Biff12;
     if rgce.len() > MAX_RGCE {
         return Err(Unsupported("formula too long"));
@@ -409,6 +514,13 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
                 push(&mut stack, kids, Expr::Paren(Box::new(x)))?;
             }
             0x16 => push(&mut stack, kids, Expr::Missing)?,
+            0x17 if biff5.is_some() => {
+                // BIFF5: a count and 8-bit characters in the workbook's code page.
+                let cch = usize::from(t.u8()?);
+                let bytes = t.take(cch)?;
+                let text = biff5.map(|b5| b5.text(bytes)).unwrap_or_default();
+                push(&mut stack, kids, Expr::Text(Arc::from(text)))?;
+            }
             0x17 => {
                 let (cch, high) = if wide {
                     let cch = usize::from(t.u16()?);
@@ -452,7 +564,7 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
             }
             0x20 => {
                 t.take(if wide { 14 } else { 7 })?;
-                let array = if wide { array_constant_xlsb(&mut extra)? } else { array_constant(&mut extra)? };
+                let array = if wide { array_constant_xlsb(&mut extra)? } else { array_constant(&mut extra, biff5.is_some())? };
                 push(&mut stack, kids, array)?;
             }
             0x21 => {
@@ -485,7 +597,15 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
                 }
             }
             0x23 => {
-                let i = usize::try_from(t.u32()?).ok().and_then(|i| i.checked_sub(1));
+                let index = if biff5.is_some() {
+                    // BIFF5: a 16-bit index and 12 reserved bytes.
+                    let i = t.u16()?;
+                    t.take(12)?;
+                    u32::from(i)
+                } else {
+                    t.u32()?
+                };
+                let i = usize::try_from(index).ok().and_then(|i| i.checked_sub(1));
                 let name = i.and_then(|i| links.names.get(i)).filter(|n| !n.is_empty()).ok_or(Unsupported("reference to a missing defined name"))?;
                 // A cell using a name the import drops would calculate to #NAME?: keep its
                 // saved result instead, as for references to other workbooks.
@@ -524,6 +644,36 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
                 t.take(grid.loc_len() * 2)?;
                 push(&mut stack, kids, Expr::Error(CellError::Ref))?;
             }
+            0x39 if biff5.is_some() => {
+                // BIFF5 PtgNameX: ixals, 8 reserved bytes, the name's index, 12 reserved bytes.
+                let ixals = t.u16()? as i16;
+                t.take(8)?;
+                let i = t.u16()?;
+                t.take(12)?;
+                let name = biff5.ok_or(Unsupported("malformed formula"))?.extern_name(ixals, i)?;
+                push(&mut stack, kids, Expr::Name(name))?;
+            }
+            0x3A | 0x3B if biff5.is_some() => {
+                let b5 = biff5.ok_or(Unsupported("malformed formula"))?;
+                let ixals = t.u16()? as i16;
+                t.take(8)?;
+                let (first, last) = (t.u16()? as i16, t.u16()? as i16);
+                let kind = if id == 0x3A {
+                    let (r, c) = grid.loc(&mut t)?;
+                    RefKind::Cell(anchor(r, c, base, mode == Mode::Name, grid)?)
+                } else {
+                    let (r0, r1, c0, c1) = grid.area(&mut t)?;
+                    area(r0, r1, c0, c1, base, mode == Mode::Name, grid)?
+                };
+                push(
+                    &mut stack,
+                    kids,
+                    match b5.sheet_sel(links, ixals, first, last)? {
+                        Some(sheet) => Expr::Ref(Reference { sheet, kind }),
+                        None => Expr::Error(CellError::Ref),
+                    },
+                )?;
+            }
             0x39 => {
                 let ixti = t.u16()?;
                 let i = t.u32()?;
@@ -556,11 +706,11 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
                 )?;
             }
             0x3C => {
-                t.take(2 + grid.loc_len())?;
+                t.take(if biff5.is_some() { BIFF5_3D_HEADER } else { 2 } + grid.loc_len())?;
                 push(&mut stack, kids, Expr::Error(CellError::Ref))?;
             }
             0x3D => {
-                t.take(2 + grid.loc_len() * 2)?;
+                t.take(if biff5.is_some() { BIFF5_3D_HEADER } else { 2 } + grid.loc_len() * 2)?;
                 push(&mut stack, kids, Expr::Error(CellError::Ref))?;
             }
             0x01 => return Err(Unsupported("nested shared or array formula reference")),
@@ -580,7 +730,8 @@ fn decode_in(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links,
 }
 
 /// PtgExtraArray ([MS-XLS] 2.5.198.59): an array constant's values in row-major order.
-fn array_constant(b: &mut Bytes<'_>) -> Result<Expr, Unsupported> {
+/// BIFF5 text values (`biff5`) are refused: their layout isn't read.
+fn array_constant(b: &mut Bytes<'_>, biff5: bool) -> Result<Expr, Unsupported> {
     let cols = usize::from(b.u8()?) + 1;
     let rows = usize::from(b.u16()?) + 1;
     if cols.saturating_mul(rows) > MAX_ARRAY {
@@ -603,6 +754,7 @@ fn array_constant(b: &mut Bytes<'_>) -> Result<Expr, Unsupported> {
                     }
                     Expr::Number(n)
                 }
+                0x02 if biff5 => return Err(Unsupported("text in Excel 5.0/95 array constants")),
                 0x02 => {
                     let cch = usize::from(b.u16()?);
                     let high = b.u8()? & 1 != 0;

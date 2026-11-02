@@ -155,6 +155,18 @@ impl<'a, 'b> Cursor<'a, 'b> {
         Ok(String::from_utf16_lossy(&units))
     }
 
+    /// `n` raw bytes (BIFF5 8-bit text, which has no compression flag in `Continue` records).
+    pub fn bytes(&mut self, n: usize) -> Result<Vec<u8>, IoError> {
+        if n > self.remaining() {
+            return Err(invalid("record is shorter than its contents"));
+        }
+        let mut out = Vec::with_capacity(n);
+        for _ in 0..n {
+            out.push(self.u8()?);
+        }
+        Ok(out)
+    }
+
     /// ShortXLUnicodeString: 1-byte count, flags, characters.
     pub fn short_string(&mut self) -> Result<String, IoError> {
         let cch = usize::from(self.u8()?);

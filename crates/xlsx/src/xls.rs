@@ -1,6 +1,9 @@
 //! Legacy Excel 97-2003 `.xls` (BIFF8) import, implemented from Microsoft's public
 //! specifications [MS-CFB] (the compound file container) and [MS-XLS] (the Workbook stream):
 //! <https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xls/cd03cb5f-ca02-4934-a391-bb674cb8aa06>.
+//! Excel 5.0/95 workbooks (BIFF5, a `Book` stream) go through the same reader: their strings
+//! are 8-bit text in the workbook's code page, there is no shared string table, and formula
+//! tokens, defined names and 3-D references use the BIFF5 layouts ([`formula::Biff5`]).
 //!
 //! Read: worksheets, shared strings, cell values, formulas (text and cached results, including
 //! shared and array formulas), cell formatting (number formats, fonts, fills, borders,
@@ -16,7 +19,7 @@
 //! series refer to the cells (see `chart`), and PivotTables on worksheet-range or defined-name
 //! sources (cache streams in `_SX_DB_CUR` and the SxView views, in `xls/pivot.rs`). Everything else (pictures, comments, macros) is
 //! skipped with a warning.
-//! Encrypted workbooks and pre-BIFF8 versions are refused.
+//! Encrypted workbooks and versions before BIFF5 are refused.
 
 mod autofilter;
 mod chart;
@@ -41,7 +44,7 @@ use gridcraft_model::{CalcMode, CalcSettings, Cell, DefinedName, Formula, LineIn
 use crate::cfb::Compound;
 use crate::tables::{col_width_to_px, pt_to_px};
 use crate::{IoError, ReadReport};
-use formula::{Links, Mode, SupBook, Unsupported, Xti, cell_error, decode};
+use formula::{Biff5, Extern, ExternKind, Links, Mode, SupBook, Unsupported, Xti, cell_error, decode, decode_version};
 use gridcraft_formula::Expr;
 use records::{Cursor, Record, Records};
 
@@ -60,6 +63,7 @@ const MAX_RECORDS: usize = 40_000_000;
 const BOF: u16 = 0x0809;
 const EOF: u16 = 0x000A;
 const BIFF8: u16 = 0x0600;
+const BIFF5: u16 = 0x0500;
 /// WsBool (MS-XLS 2.4.351): its first byte's `fDialog` bit marks a dialog sheet, whose BOF says worksheet.
 const WSBOOL: u16 = 0x0081;
 const WSBOOL_DIALOG: u8 = 0x10;
@@ -157,6 +161,10 @@ pub(crate) struct Lbl {
 
 #[derive(Default)]
 struct Globals {
+    /// The BIFF version every substream's BOF must carry.
+    version: u16,
+    /// BIFF5 tables (`None` for BIFF8).
+    biff5: Option<Biff5>,
     sheets: Vec<BoundSheet>,
     date1904: bool,
     itab_cur: Option<u32>,
@@ -179,17 +187,21 @@ pub fn read_xls(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
 /// [`read_xls`] with an explicit resource budget.
 pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workbook, ReadReport), IoError> {
     let cf = Compound::open(bytes).map_err(invalid)?;
-    let stream = match cf.root_stream("Workbook").map_err(invalid)? {
-        Some(s) => s,
-        None => {
-            if cf.has_root_stream("Book") {
-                return Err(invalid("Excel 5.0/95 workbooks (BIFF5) are not supported; save the file as .xlsx in Excel and try again."));
-            }
-            return Err(invalid("the file has no Workbook stream, so it is not an Excel workbook"));
-        }
+    // Excel 5.0/95 keeps the workbook in a `Book` stream.
+    let (stream, book) = match cf.root_stream("Workbook").map_err(invalid)? {
+        Some(s) => (s, false),
+        None => match cf.root_stream("Book").map_err(invalid)? {
+            Some(s) => (s, true),
+            None => return Err(invalid("the file has no Workbook stream, so it is not an Excel workbook")),
+        },
     };
     let mut report = ReadReport::default();
-    let g = globals(&stream, &mut budget, &mut report)?;
+    let g = match globals(&stream, &mut budget, &mut report) {
+        Err(IoError::Format(msg)) if book && msg.contains(ENCRYPTED) => {
+            return Err(invalid(format!("Excel 5.0/95 (BIFF5) workbook: {ENCRYPTED}")));
+        }
+        other => other?,
+    };
 
     let mut wb = Workbook::new();
     doc_props::read(&cf, &mut wb.props);
@@ -260,7 +272,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         next_id = next_id.saturating_add(1);
     }
     chart::add_chart_sheets(&mut wb, chart_sheets);
-    defined_names(&g.names, &g.links, &model_index, &mut wb, &mut report);
+    defined_names(&g.names, &g.links, g.biff5.as_ref(), &model_index, &mut wb, &mut report);
     tables::finish_workbook(&mut wb);
     let active = g
         .itab_cur
@@ -273,7 +285,12 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     // The overview comes first.
     report.warnings.insert(
         0,
-        "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights, defined names and charts were read. Pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported.".into(),
+        if g.biff5.is_some() {
+            "Imported from an Excel 5.0/95 (.xls) workbook: values, formulas, number formats, column widths, row heights and defined names were read. Fonts, fills, borders, charts, pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
+        } else {
+            "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights, defined names and charts were read. Pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
+        }
+        .into(),
     );
     Ok((wb, report))
 }
@@ -290,22 +307,26 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
     let mut recs = Records::new(stream, 0);
     let first = recs.next_record()?.ok_or_else(|| invalid("empty Workbook stream"))?;
     let (vers, dt) = bof(&first)?;
-    if vers != BIFF8 {
-        return Err(invalid(if vers == 0x0500 {
-            "Excel 5.0/95 workbooks (BIFF5) are not supported; save the file as .xlsx in Excel and try again."
-        } else {
-            "unsupported BIFF version (only Excel 97-2003 BIFF8 files are read)"
-        }));
+    if vers != BIFF8 && vers != BIFF5 {
+        return Err(invalid("unsupported BIFF version (only Excel 5.0/95 BIFF5 and Excel 97-2003 BIFF8 files are read)"));
     }
     if dt != 0x0005 {
         return Err(invalid("the Workbook stream does not start with the workbook globals"));
     }
-    let mut g = Globals::default();
+    let mut g = Globals { version: vers, ..Globals::default() };
+    if vers == BIFF5 {
+        g.biff5 = Some(Biff5 { codepage: 1252, externs: vec![] });
+    }
     let mut window_seen = false;
     let mut offsets = std::collections::HashSet::new();
     while let Some(rec) = recs.next_record()? {
         budget.record()?;
         let mut c = Cursor::new(&rec.parts);
+        if let Some(b5) = g.biff5.as_mut()
+            && biff5_global(&rec, &mut c, b5, &mut g.formats, &mut g.styles, budget, report)?
+        {
+            continue;
+        }
         match rec.id {
             EOF => break,
             0x0012 => protection::protect(&mut c, &mut g.protection, report),
@@ -338,7 +359,14 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
                 }
                 let state = c.u8()?;
                 let kind = c.u8()?;
-                let name = c.short_string()?;
+                let name = match &g.biff5 {
+                    // BIFF5: a 1-byte count and 8-bit characters.
+                    Some(b5) => {
+                        let cch = usize::from(c.u8()?);
+                        b5.text(&c.bytes(cch)?)
+                    }
+                    None => c.short_string()?,
+                };
                 let visibility = match state & 3 {
                     0 => Visibility::Visible,
                     1 => Visibility::Hidden,
@@ -403,7 +431,10 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
                 if g.names.len() >= MAX_NAMES {
                     continue;
                 }
-                let lbl = label(&mut c)?;
+                let lbl = match &g.biff5 {
+                    Some(b5) => label_biff5(&mut c, b5)?,
+                    None => label(&mut c)?,
+                };
                 g.links.names.push(lbl.name.clone());
                 g.names.push(lbl);
             }
@@ -411,7 +442,11 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
         }
     }
     // The same test `defined_names` applies, before any cell formula is decoded.
-    let skipped = g.names.iter().map(|l| !l.rgce.is_empty() && decode(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &g.links).is_err()).collect();
+    let skipped = g
+        .names
+        .iter()
+        .map(|l| !l.rgce.is_empty() && decode_version(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &g.links, g.biff5.as_ref()).is_err())
+        .collect();
     g.links.skipped = skipped;
     Ok(g)
 }
@@ -434,6 +469,76 @@ pub(crate) const BUILTIN_NAMES: [&str; 14] = [
     "_FilterDatabase",
 ];
 
+/// The globals records whose BIFF5 layout differs from BIFF8; returns whether `rec` was one.
+fn biff5_global(
+    rec: &Record<'_>,
+    c: &mut Cursor<'_, '_>,
+    b5: &mut Biff5,
+    formats: &mut HashMap<u16, String>,
+    styles: &mut styles::StyleRecords,
+    budget: &mut Budget,
+    report: &mut ReadReport,
+) -> Result<bool, IoError> {
+    match rec.id {
+        // CodePage: the code page of every 8-bit string.
+        0x0042 => {
+            let cp = c.u16()?;
+            if crate::csv::codepage_supported(cp) {
+                b5.codepage = cp;
+            } else {
+                b5.codepage = 1252;
+                report.warn(format!("The workbook's text uses code page {cp}, which isn't supported; it was read as Windows-1252."));
+            }
+        }
+        // Format: index, 1-byte count, 8-bit characters.
+        0x041E => {
+            let ifmt = c.u16()?;
+            let cch = usize::from(c.u8()?);
+            let fit = c.remaining();
+            if cch > fit {
+                report.warn("Some number formats were shorter than their declared length; the characters present were kept.");
+            }
+            let code = b5.text(&c.bytes(cch.min(fit))?);
+            budget.text(code.len())?;
+            formats.insert(ifmt, code);
+        }
+        // ExternSheet: one entry per record, a count then the encoded target.
+        0x0017 => {
+            if b5.externs.len() >= MAX_SHEETS {
+                return Ok(true);
+            }
+            let cch = usize::from(c.u8()?);
+            let raw = c.bytes(cch.min(c.remaining()))?;
+            let kind = match raw.split_first() {
+                Some((0x03, name)) => ExternKind::Sheet(b5.text(name)),
+                Some((0x02 | 0x04, _)) => ExternKind::OwnBook,
+                Some((b':', [])) => ExternKind::AddIn,
+                _ => ExternKind::Other,
+            };
+            b5.externs.push(Extern { kind, names: vec![] });
+        }
+        // ExternName: flags, 4 reserved bytes, then a 1-byte count and 8-bit characters.
+        0x0023 => {
+            c.u16()?;
+            c.skip(4)?;
+            let cch = usize::from(c.u8()?);
+            let name = b5.text(&c.bytes(cch)?);
+            if let Some(e) = b5.externs.last_mut()
+                && e.names.len() < MAX_NAMES
+            {
+                e.names.push(name);
+            }
+        }
+        // XF: only the number format and flags are read; BIFF5 fonts and styles aren't imported.
+        0x00E0 => styles.xf_biff5(c, MAX_XFS),
+        0x0031 | 0x0293 => {}
+        // No SST or SupBook in BIFF5.
+        0x00FC | 0x01AE => {}
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
 fn label(c: &mut Cursor<'_, '_>) -> Result<Lbl, IoError> {
     let flags = c.u16()?;
     let _key = c.u8()?;
@@ -444,6 +549,29 @@ fn label(c: &mut Cursor<'_, '_>) -> Result<Lbl, IoError> {
     c.skip(4)?;
     let high = c.u8()? & 1 != 0;
     let raw = c.chars(cch, high)?;
+    Ok(lbl(flags, raw, itab, cce, &c.rest(), 0))
+}
+
+/// A BIFF5 NAME record: as BIFF8's Lbl but with 8-bit text, and the menu, description, help
+/// and status texts (whose lengths the header gives) after the formula.
+fn label_biff5(c: &mut Cursor<'_, '_>, b5: &Biff5) -> Result<Lbl, IoError> {
+    let flags = c.u16()?;
+    let _key = c.u8()?;
+    let cch = usize::from(c.u8()?);
+    let cce = usize::from(c.u16()?);
+    c.skip(2)?;
+    let itab = c.u16()?;
+    let mut texts = 0usize;
+    for _ in 0..4 {
+        texts += usize::from(c.u8()?);
+    }
+    let raw = b5.text(&c.bytes(cch)?);
+    Ok(lbl(flags, raw, itab, cce, &c.rest(), texts))
+}
+
+/// A defined name from its header fields; `rest` holds the formula, its extra data, and
+/// `trailing` bytes of other texts.
+fn lbl(flags: u16, raw: String, itab: u16, cce: usize, rest: &[u8], trailing: usize) -> Lbl {
     let builtin = flags & 0x0020 != 0;
     let (name, builtin) = if builtin {
         let code = raw.chars().next().map_or(0, |ch| ch as u32);
@@ -452,11 +580,11 @@ fn label(c: &mut Cursor<'_, '_>) -> Result<Lbl, IoError> {
     } else {
         (raw, None)
     };
-    let rest = c.rest();
-    let rgce = rest.get(..cce).unwrap_or(&rest).to_vec();
-    let rgcb = rest.get(cce..).unwrap_or(&[]).to_vec();
+    let rgce = rest.get(..cce).unwrap_or(rest).to_vec();
+    let extra = rest.get(cce..).unwrap_or(&[]);
+    let rgcb = extra.get(..extra.len().saturating_sub(trailing)).unwrap_or(&[]).to_vec();
     let scope = usize::from(itab).checked_sub(1);
-    Ok(Lbl { name, builtin, hidden: flags & 1 != 0, macro_name: flags & 0x000A != 0, future_function: false, scope, rgce, rgcb })
+    Lbl { name, builtin, hidden: flags & 1 != 0, macro_name: flags & 0x000A != 0, future_function: false, scope, rgce, rgcb }
 }
 
 fn shared_strings(c: &mut Cursor<'_, '_>, budget: &mut Budget) -> Result<Vec<Arc<str>>, IoError> {
@@ -588,7 +716,7 @@ impl SheetState<'_> {
 
     /// Decodes a formula and attaches it to the cell at `pos`, or records why it can't be.
     fn attach(&mut self, pos: CellRef, p: &Parsed, mode: Mode, array: Option<RangeRef>) {
-        match decode(&p.rgce, &p.rgcb, pos, mode, &self.g.links) {
+        match decode_version(&p.rgce, &p.rgcb, pos, mode, &self.g.links, self.g.biff5.as_ref()) {
             Ok(e) => {
                 let text = gridcraft_formula::print(&e);
                 let mut f = Formula::new(&text);
@@ -679,7 +807,7 @@ fn worksheet(
     let mut recs = Records::new(stream, bs.pos);
     let first = recs.next_record()?.ok_or_else(|| invalid("missing sheet substream"))?;
     let (vers, dt) = bof(&first)?;
-    if vers != BIFF8 || dt != 0x0010 {
+    if vers != g.version || dt != 0x0010 {
         return Ok(None);
     }
     let mut st = SheetState {
@@ -799,9 +927,10 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
                 None => report.warn("Some cells refer to missing shared strings and were left empty."),
             }
         }
-        0x0204 => {
+        // Label, and BIFF5's RString (a label with formatting runs, which are skipped).
+        0x0204 | 0x00D6 => {
             let (r, col, x) = (c.u16()?, c.u16()?, c.u16()?);
-            let s = c.string()?;
+            let s = text(&mut c, st.g)?;
             budget.text(s.len())?;
             st.put(budget, r, col, x, Value::from(s))?;
         }
@@ -828,7 +957,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x0006 => formula_cell(&mut c, st, budget)?,
         0x0207 => {
             if let Some((pos, style)) = st.pending_string.take() {
-                let s = c.string()?;
+                let s = text(&mut c, st.g)?;
                 budget.text(s.len())?;
                 if let Some(cell) = st.sheet.cells.get_mut(pos) {
                     cell.value = Value::from(s);
@@ -973,6 +1102,17 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
     Ok(())
 }
 
+/// A cell's text: an XLUnicodeString, or in BIFF5 a 2-byte count and 8-bit characters.
+fn text(c: &mut Cursor<'_, '_>, g: &Globals) -> Result<String, IoError> {
+    match &g.biff5 {
+        Some(b5) => {
+            let cch = usize::from(c.u16()?);
+            Ok(b5.text(&c.bytes(cch)?))
+        }
+        None => c.string(),
+    }
+}
+
 fn formula_cell(c: &mut Cursor<'_, '_>, st: &mut SheetState<'_>, budget: &mut Budget) -> Result<(), IoError> {
     let (r, col, x) = (c.u16()?, c.u16()?, c.u16()?);
     let mut val = [0u8; 8];
@@ -1020,12 +1160,16 @@ fn formula_cell(c: &mut Cursor<'_, '_>, st: &mut SheetState<'_>, budget: &mut Bu
 /// The range of one worksheet's `_FilterDatabase` built-in name ([MS-XLS] 2.4.150), which is the
 /// range its AutoFilter filters. `sheet` is the BoundSheet8 index (the name's sheet scope).
 fn filter_database(g: &Globals, sheet: usize) -> Option<RangeRef> {
+    if g.biff5.is_some() {
+        // BIFF5 name tokens use other layouts; the AutoFilter range isn't read.
+        return None;
+    }
     let lbl = g.names.iter().find(|l| l.builtin == Some(13) && l.scope == Some(sheet))?;
     autofilter::filter_database(&lbl.rgce, &lbl.rgcb, &g.links)
 }
 
-fn defined_names(names: &[Lbl], links: &Links, model_index: &[Option<usize>], wb: &mut Workbook, report: &mut ReadReport) {
-    add_defined_names(names, model_index, wb, report, |l| decode(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, links));
+fn defined_names(names: &[Lbl], links: &Links, biff5: Option<&Biff5>, model_index: &[Option<usize>], wb: &mut Workbook, report: &mut ReadReport) {
+    add_defined_names(names, model_index, wb, report, |l| decode_version(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, links, biff5));
 }
 
 /// Adds the defined names to `wb`: print areas and print titles go to their sheet's page setup,
