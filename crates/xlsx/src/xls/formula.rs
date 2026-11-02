@@ -302,14 +302,7 @@ pub(crate) fn decode_xlsb(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, l
 
 /// [`decode_xlsb`] for a formula at `site`: structured references from inside their own table
 /// are written without the table name (`[@Qty]`), as the .xlsx reader gives them.
-pub(crate) fn decode_xlsb_at(
-    rgce: &[u8],
-    rgcb: &[u8],
-    base: CellRef,
-    mode: Mode,
-    links: &Links,
-    site: Site<'_>,
-) -> Result<Expr, Unsupported> {
+pub(crate) fn decode_xlsb_at(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, site: Site<'_>) -> Result<Expr, Unsupported> {
     decode_in(rgce, rgcb, base, mode, links, Grid::Biff12, site)
 }
 
