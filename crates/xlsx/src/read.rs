@@ -414,31 +414,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], known_function: Option<&'a dyn Fn(&str) ->
     }
     wb.chart_sheets = Arc::new(chart_sheets);
 
-    // Document properties.
-    if let Some(r) = find_rel(&root_rels, "core-properties").cloned()
-        && let Ok(Some(x)) = cx.pkg.read_xml(&r.target)
-    {
-        let get = |n: &str| x.child(n).map(|e| e.text.clone()).unwrap_or_default();
-        wb.props.title = get("title");
-        wb.props.subject = get("subject");
-        wb.props.author = get("creator");
-        wb.props.keywords = get("keywords");
-        wb.props.description = get("description");
-        wb.props.category = get("category");
-        wb.props.language =
-            Some(get("language")).filter(|l| l.len() <= 35 && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).unwrap_or_default();
-        wb.props.last_modified_by = get("lastModifiedBy");
-        // Dates are kept only when they look like W3CDTF, so a hostile file can't smuggle markup
-        // or an unbounded string into what is written back.
-        let date = |n: &str| Some(get(n)).filter(|d| is_w3cdtf(d)).unwrap_or_default();
-        wb.props.created = date("created");
-        wb.props.modified = date("modified");
-    }
-    if let Some(r) = find_rel(&root_rels, "extended-properties").cloned()
-        && let Ok(Some(x)) = cx.pkg.read_xml(&r.target)
-    {
-        wb.props.company = x.child("Company").map(|e| e.text.clone()).unwrap_or_default();
-    }
+    read_doc_props(&mut cx.pkg, &root_rels, &mut wb.props);
 
     // A VBA project is carried through unchanged: GridCraft never runs macros, but preserving the
     // binary keeps macro-enabled workbooks from being silently stripped on save.
@@ -459,6 +435,35 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], known_function: Option<&'a dyn Fn(&str) ->
     wb.styles = cx.styles;
     wb.phonetics = cx.phonetics;
     Ok((wb, cx.report))
+}
+
+/// Imports the shared OPC core and extended document properties.
+pub(crate) fn read_doc_props(pkg: &mut Package<'_>, root_rels: &[Rel], props: &mut gridcraft_model::DocProps) {
+    // Document properties.
+    if let Some(r) = find_rel(root_rels, "core-properties").cloned()
+        && let Ok(Some(x)) = pkg.read_xml(&r.target)
+    {
+        let get = |n: &str| x.child(n).map(|e| e.text.clone()).unwrap_or_default();
+        props.title = get("title");
+        props.subject = get("subject");
+        props.author = get("creator");
+        props.keywords = get("keywords");
+        props.description = get("description");
+        props.category = get("category");
+        props.language =
+            Some(get("language")).filter(|l| l.len() <= 35 && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).unwrap_or_default();
+        props.last_modified_by = get("lastModifiedBy");
+        // Dates are kept only when they look like W3CDTF, so a hostile file can't smuggle markup
+        // or an unbounded string into what is written back.
+        let date = |n: &str| Some(get(n)).filter(|d| is_w3cdtf(d)).unwrap_or_default();
+        props.created = date("created");
+        props.modified = date("modified");
+    }
+    if let Some(r) = find_rel(root_rels, "extended-properties").cloned()
+        && let Ok(Some(x)) = pkg.read_xml(&r.target)
+    {
+        props.company = x.child("Company").map(|e| e.text.clone()).unwrap_or_default();
+    }
 }
 
 fn visibility(se: &El) -> Visibility {

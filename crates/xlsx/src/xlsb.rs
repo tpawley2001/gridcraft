@@ -105,8 +105,8 @@ impl Budget {
 pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut package = Package::open(bytes)?;
     let types = content_types(&mut package)?;
-    let roots = relationships(&mut package, "")?;
-    let roots: Vec<_> = roots.iter().filter(|r| r.kind == "officeDocument").collect();
+    let root_rels = relationships(&mut package, "")?;
+    let roots: Vec<_> = root_rels.iter().filter(|r| r.kind == "officeDocument").collect();
     if roots.len() != 1 {
         return Err(invalid("expected one workbook relationship"));
     }
@@ -117,6 +117,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     check_type(&types, &root.target, MAIN)?;
     let book = required(&mut package, &root.target)?;
     let mut wb = Workbook::new();
+    crate::read::read_doc_props(&mut package, &root_rels, &mut wb.props);
     wb.sheets.clear();
     let mut report = ReadReport::default();
     report.warn("XLSB import: charts, images, macros and other features are not imported. Save a new .xlsx file; XLSB saving is not supported.");
@@ -368,6 +369,7 @@ fn parse_relationships(data: &[u8], path: &str) -> Result<Vec<Rel>, IoError> {
             .strip_prefix(REL_TYPE)
             .or_else(|| ty.strip_prefix(STRICT_REL_TYPE))
             .or_else(|| ty.strip_prefix(MS_REL_TYPE))
+            .or_else(|| (ty == "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties").then_some("core-properties"))
             .map(str::to_owned)
             .unwrap_or_else(|| format!("unsupported:{ty}"));
         let target = e.attr("Target").ok_or_else(|| invalid("relationship has no target"))?;
