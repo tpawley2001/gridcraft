@@ -135,6 +135,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     wb.sheets.clear();
     let mut report = ReadReport::default();
     report.warn("XLSB import: some workbook features are not imported. Save a new .xlsx file; XLSB saving is not supported.");
+    keep_custom_properties(&mut package, &types, &root_rels, &mut wb, &mut report);
     let mut itab_cur: Option<u32> = None;
     let (sheets, names, mut links) = workbook(&book, &mut wb, &mut report, &mut itab_cur)?;
     let cache_ids = pivot::cache_ids(&book);
@@ -268,6 +269,32 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         .unwrap_or(0);
     wb.set_active_sheet(active);
     Ok((wb, report))
+}
+
+/// Keeps the custom document properties part for saving as .xlsx: an .xlsb package holds the same
+/// `docProps/custom.xml` as an .xlsx one, kept byte for byte with its package-root relationship.
+fn keep_custom_properties(package: &mut Package<'_>, types: &[Entry], root_rels: &[Rel], wb: &mut Workbook, report: &mut ReadReport) {
+    use crate::passthrough::{CT_CUSTOM_PROPERTIES, MAX_KEPT_PART, REL_CUSTOM_PROPERTIES, keep_package_root_part};
+    let Some(rel) = root_rels.iter().find(|r| r.kind == "custom-properties") else { return };
+    let data = (|| {
+        if rel.external {
+            return None;
+        }
+        check_type(types, &rel.target, CT_CUSTOM_PROPERTIES).ok()?;
+        package.read_limited(&rel.target, MAX_KEPT_PART).ok().flatten()
+    })();
+    match data {
+        Some(data) => {
+            let kept = gridcraft_model::PreservedRel {
+                id: rel.id.clone(),
+                rel_type: REL_CUSTOM_PROPERTIES.into(),
+                target: rel.target.clone(),
+                external: false,
+            };
+            keep_package_root_part(wb, kept, CT_CUSTOM_PROPERTIES, data);
+        }
+        None => report.warn("The XLSB custom document properties could not be read and are not kept on save."),
+    }
 }
 
 pub(crate) fn is_xlsb(bytes: &[u8]) -> bool {

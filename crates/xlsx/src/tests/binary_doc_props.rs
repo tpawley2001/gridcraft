@@ -5,16 +5,16 @@ use super::{make_zip, xls_tests, xlsb_tests};
 use crate::{read_xls, read_xlsb, read_xlsx, write_xlsx};
 
 const SUMMARY: [u8; 16] = [0xe0, 0x85, 0x9f, 0xf2, 0xf9, 0x4f, 0x68, 0x10, 0xab, 0x91, 8, 0, 0x2b, 0x27, 0xb3, 0xd9];
-const DOCUMENT: [u8; 16] = [2, 0xd5, 0xcd, 0xd5, 0x9c, 0x2e, 0x1b, 0x10, 0x93, 0x97, 8, 0, 0x2b, 0x2c, 0xf9, 0xae];
+pub(super) const DOCUMENT: [u8; 16] = [2, 0xd5, 0xcd, 0xd5, 0x9c, 0x2e, 0x1b, 0x10, 0x93, 0x97, 8, 0, 0x2b, 0x2c, 0xf9, 0xae];
 
-fn typed(kind: u32, data: &[u8]) -> Vec<u8> {
+pub(super) fn typed(kind: u32, data: &[u8]) -> Vec<u8> {
     [kind.to_le_bytes().as_slice(), data].concat()
 }
-fn text(kind: u32, data: &[u8]) -> Vec<u8> {
+pub(super) fn text(kind: u32, data: &[u8]) -> Vec<u8> {
     let count = if kind == 0x1f { data.len() / 2 } else { data.len() };
     typed(kind, &[&(count as u32).to_le_bytes()[..], data].concat())
 }
-fn wide(kind: u32, s: &str) -> Vec<u8> {
+pub(super) fn wide(kind: u32, s: &str) -> Vec<u8> {
     text(kind, &s.encode_utf16().chain([0]).flat_map(u16::to_le_bytes).collect::<Vec<_>>())
 }
 fn stream(fmtid: [u8; 16], properties: &[(u32, Vec<u8>)]) -> Vec<u8> {
@@ -39,7 +39,7 @@ fn stream(fmtid: [u8; 16], properties: &[(u32, Vec<u8>)]) -> Vec<u8> {
     out.extend(set);
     out
 }
-fn xls(summary: Option<&[u8]>, document: Option<&[u8]>) -> Vec<u8> {
+pub(super) fn xls(summary: Option<&[u8]>, document: Option<&[u8]>) -> Vec<u8> {
     let base = xls_tests::one_sheet_with(&[]);
     let compound = crate::cfb::Compound::open(&base).unwrap();
     let book = compound.root_stream("Workbook").unwrap().unwrap();
