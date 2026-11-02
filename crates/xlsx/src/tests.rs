@@ -67,6 +67,7 @@ mod xlsb_array_const_tests;
 mod xlsb_block_warning_tests;
 mod xlsb_cell_style_tests;
 mod xlsb_comment_parts_tests;
+mod xlsb_connections_tests;
 mod xlsb_drawing_tests;
 mod xlsb_dynamic_array_tests;
 mod xlsb_edit_ranges_tests;

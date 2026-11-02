@@ -232,6 +232,47 @@ pub(crate) fn keep_package_root_part(wb: &mut Workbook, rel: PreservedRel, conte
     wb.preserved = Some(Arc::new(p));
 }
 
+/// Adds content kept by one binary-workbook reader to what an owner (the workbook or a sheet)
+/// already keeps, so readers that fill the same store never overwrite each other. Parts whose name
+/// is already kept, and relationships whose id the owner already uses, are left out.
+pub(crate) fn merge_preserved(into: &mut Option<Arc<Preserved>>, add: Option<Arc<Preserved>>) {
+    let Some(add) = add else { return };
+    let Some(existing) = into.as_deref() else {
+        *into = Some(add);
+        return;
+    };
+    let mut p = existing.clone();
+    let add = Arc::unwrap_or_clone(add);
+    for part in add.parts {
+        let key = normalize(&part.name);
+        if !p.parts.iter().any(|q| normalize(&q.name) == key) {
+            p.parts.push(part);
+        }
+    }
+    for rel in add.package_rels {
+        if !p.package_rels.iter().any(|r| r.id == rel.id) {
+            p.package_rels.push(rel);
+        }
+    }
+    for rel in add.rels {
+        if !p.rels.iter().any(|r| r.id == rel.id) {
+            p.rels.push(rel);
+        }
+    }
+    for rel in add.drawing_rels {
+        if !p.drawing_rels.iter().any(|r| r.id == rel.id) {
+            p.drawing_rels.push(rel);
+        }
+    }
+    p.elements.extend(add.elements);
+    p.sheets.extend(add.sheets);
+    p.anchors.extend(add.anchors);
+    if p.vml.is_none() {
+        p.vml = add.vml;
+    }
+    *into = Some(Arc::new(p));
+}
+
 fn kind(rel_type: &str) -> &str {
     rel_type.rsplit('/').next().unwrap_or("")
 }
