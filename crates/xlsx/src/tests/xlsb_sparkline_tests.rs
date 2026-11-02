@@ -44,7 +44,7 @@ fn book() -> Vec<u8> {
     out
 }
 
-fn file(sheet: &[u8]) -> Vec<u8> {
+pub(super) fn file(sheet: &[u8]) -> Vec<u8> {
     let (book, strings, two) = (book(), sst(), worksheet(&[], &[]));
     make_zip(&[
         ("[Content_Types].xml", TYPES.as_bytes()),
@@ -130,13 +130,13 @@ fn groups(groups: &[Vec<u8>]) -> Vec<u8> {
     out
 }
 
-fn sheet(tail: &[u8]) -> Vec<u8> {
+pub(super) fn sheet(tail: &[u8]) -> Vec<u8> {
     let mut data = row(1);
     data.extend(cell(5, 0, &7.0f64.to_le_bytes()));
     worksheet(&data, tail)
 }
 
-fn line_group() -> Vec<u8> {
+pub(super) fn line_group() -> Vec<u8> {
     wrapped(group(0, rgb(0x376092), true), &[sparkline("E2", 0, 1), sparkline("E3", 0, 2), sparkline("E4", 0, 3)])
 }
 

@@ -538,10 +538,12 @@ struct Records<'a> {
     /// Future-record and alternate-content markers are returned like other records, for parts
     /// whose content lives inside them.
     raw: bool,
+    /// Whether a record inside an extension block has been dropped (and reported) yet.
+    warned_skipped_blocks: bool,
 }
 impl<'a> Records<'a> {
     fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes: Bytes::new(bytes), count: 0, blocks: vec![], raw: false }
+        Self { bytes: Bytes::new(bytes), count: 0, blocks: vec![], raw: false, warned_skipped_blocks: false }
     }
     fn raw(bytes: &'a [u8]) -> Self {
         Self { raw: true, ..Self::new(bytes) }
@@ -589,14 +591,18 @@ impl<'a> Records<'a> {
                         return Err(invalid("extension blocks nested too deeply"));
                     }
                     self.blocks.push(id + 1);
-                    report.warn("Unsupported XLSB future-record and alternate-content blocks were skipped.");
                 }
                 36 | 38 if !self.raw => {
                     if self.blocks.pop() != Some(id) || !payload.is_empty() {
                         return Err(invalid("mismatched extension block end"));
                     }
                 }
-                _ if !self.blocks.is_empty() && !sparklines::is_record(id) => {}
+                _ if !self.blocks.is_empty() && !sparklines::is_record(id) => {
+                    if !self.warned_skipped_blocks {
+                        self.warned_skipped_blocks = true;
+                        report.warn("Unsupported XLSB future-record and alternate-content blocks were skipped.");
+                    }
+                }
                 _ => return Ok(Some((id, payload))),
             }
         }
