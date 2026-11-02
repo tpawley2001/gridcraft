@@ -6,7 +6,7 @@
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
 use gridcraft_model::{Color, Sheet, Sparkline, SparklineKind};
 
-use super::{Bytes, invalid, styles};
+use super::{Bytes, FormulaBytes, invalid, styles};
 use crate::IoError;
 use crate::ReadReport;
 use crate::xls::formula::{Links, Mode, decode_xlsb};
@@ -75,7 +75,7 @@ impl Sparklines {
 
 /// FRTHeader ([MS-XLSB] 2.5.61): the flags, then the references, ranges and formulas they
 /// announce. Returns the cell of the first range and the first formula's tokens.
-fn frt_header<'a>(b: &mut Bytes<'a>) -> Result<(Option<CellRef>, Option<(&'a [u8], &'a [u8])>), IoError> {
+fn frt_header<'a>(b: &mut Bytes<'a>) -> Result<(Option<CellRef>, Option<FormulaBytes<'a>>), IoError> {
     let flags = b.u32()?;
     // FRTRefs and FRTRelID never appear in sparkline records.
     if flags & 0b1001 != 0 {
