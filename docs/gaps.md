@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (§19: XLSB array constants and memory caches import as live formulas; §3: Office add-in content (web extension anchors and task panes) survives XLSX saves; §3, §17: XLSX grouped drawing objects kept on save; §7: `.xls` imports the sheet AutoFilter; XLSB imports sheet and workbook structure protection and calculation settings; XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §19: XLSB imports print setup, margins, print options, headers/footers and page breaks; XLSB workbook themes and theme tab colours imported; §19: XLSB imports tables and AutoFilters; `.xls` and `.xlsb` restore the saved active visible sheet; §7: `.xls` imports sheet protection, allowed actions and workbook structure protection; §7: `.xls` import reads Excel 2007+ conditional formats (CF12/CFEx); §7: `.xls` import reads page setup, margins, headers/footers, print options, page breaks and the tab colour; §19: XLSB imports hyperlinks and notes; §19: XLSB imports defined names and other-sheet references; §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas; §19: XLSB imports shared and array formulas; §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas; §19: XLSB imports column widths, row heights, hidden and outlined rows/columns, default sizes, frozen panes, sheet view options and tab colours; §3: XLSX keeps the volatile dependencies part (RTD and CUBE topics) on save; §19: XLSB imports fonts, fills, borders, alignment and protection; XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas including text constants; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-01 · **Change:** minor (§4: chart data tables implemented with XLSX round-trip and print/PDF; §13: Solver Options, Load/Save Model and Reset All; §19: XLSB array constants and memory caches import as live formulas; §3: Office add-in content (web extension anchors and task panes) survives XLSX saves; §3, §17: XLSX grouped drawing objects kept on save; §7: `.xls` imports the sheet AutoFilter; XLSB imports sheet and workbook structure protection and calculation settings; XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §19: XLSB imports print setup, margins, print options, headers/footers and page breaks; XLSB workbook themes and theme tab colours imported; §19: XLSB imports tables and AutoFilters; `.xls` and `.xlsb` restore the saved active visible sheet; §7: `.xls` imports sheet protection, allowed actions and workbook structure protection; §7: `.xls` import reads Excel 2007+ conditional formats (CF12/CFEx); §7: `.xls` import reads page setup, margins, headers/footers, print options, page breaks and the tab colour; §19: XLSB imports hyperlinks and notes; §19: XLSB imports defined names and other-sheet references; §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas; §19: XLSB imports shared and array formulas; §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas; §19: XLSB imports column widths, row heights, hidden and outlined rows/columns, default sizes, frozen panes, sheet view options and tab colours; §3: XLSX keeps the volatile dependencies part (RTD and CUBE topics) on save; §19: XLSB imports fonts, fills, borders, alignment and protection; XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas including text constants; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -50,6 +50,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 ### 4. Charts lose options on round trip; shallow chart model (F, FF)
 - **Missing:** axis scaling, label options, error bars, per-point formatting.
+- **Added:** data tables beneath column, bar, line, area and compatible combo charts, with legend keys, border controls, live source values, native XLSX round-trip and print/PDF.
 - **Evidence:** `Chart` holds only title, legend position, two flags and axis titles
   (`crates/model/src/features.rs`); PRs #158, #161 open; charts can't be resized (#190). Smooth lines (#62), Switch Row/Column (#116) and trendlines (read, written, drawn) landed. Multi-level category axes (year beside month) are read, drawn and written back.
   (`crates/model/src/features.rs`); all 2-D kinds survive XLSX round trip (#158, #161); charts
@@ -82,6 +83,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 ### 7. Legacy `.xls` only partly read; encrypted workbooks can't be saved with a password (FF)
 - **Evidence:** #121: Excel 97-2003 (BIFF8) `.xls` files now open (values, formulas, number
+  formats, merges, sizes, names, and cell formatting: fonts, fills, borders, alignment); exact theme colours (XFExt), charts, pictures, comments, conditional
+  formats, validation and BIFF5 files are not read, and `.xls` is never written. Password-encrypted
   formats, merges, sizes, names, data validation, conditional formats (cell-value and formula rules),
   the sheet AutoFilter (range and simple criteria)); fonts,
   formats, merges, sizes, names, sheet protection (allowed actions and legacy passwords), workbook
@@ -98,7 +101,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   RC4-encrypted files are still refused with a message.
 - **Impact:** common in finance, government and anything older than 2007; encrypted files are
   routine in business.
-- **Estimate:** 14–21 h (`.xls` styles and objects 10–15, encryption 4–6). [file-format-parity.md](file-format-parity.md)
+- **Estimate:** 14–21 h (`.xls` objects 10–15, encryption 4–6). [file-format-parity.md](file-format-parity.md)
 
 ### 8. PivotTables: no slicers, calculated items, PivotCharts; unverified in Excel (F)
 - **Evidence:** `parity-checklist.md` missing `insert.slicer`, `insert.timeline`,
@@ -141,8 +144,10 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - Solver (`data.solver`, #327) has Simplex LP with integer/binary branch and bound, a local
   nonlinear method (augmented Lagrangian, not GRG), the Evolutionary method, and Answer and
   Limits reports. Report refusal leaves the solution, saved model and history unchanged; a
-  successful solve and its reports share one Undo step (#1050). AllDifferent constraints,
-  the Solver Options dialog, the Sensitivity and Population reports and Load/Save Model remain.
+  successful solve and its reports share one Undo step (#1050). Load/Save Model writes the
+  model on cells of its sheet and reads it back; Reset All removes it. Solver Options sets the
+  evaluation limit, Integer Optimality and the Evolutionary options, which are saved with the
+  model. AllDifferent constraints and the Sensitivity and Population reports remain.
   The Analysis ToolPak
   (`data.analysisToolPak`) has 13 of 19 tools. Forecast Sheet (`data.forecastSheet`) and the
   FORECAST.ETS family are in; the sheet has no Forecast Start (hindcast) option yet. **Estimate:** 12–20 h.
@@ -233,6 +238,9 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-01 | minor | §4: chart data tables implemented for column, bar, line, area and compatible combo charts, with legend keys and border settings, live source values, XLSX round-trip and print/PDF; other chart gaps remain. |
+| 2026-10-31 | minor | §13: Solver Options (Max Evaluations, Integer Optimality and the Evolutionary options), saved with the model |
+| 2026-10-31 | minor | §13: Solver Load/Save Model (`data.solverSaveModel`, `data.solverLoadModel`) and Reset All (`data.solverReset`), with buttons in the Solver Parameters dialog |
 | 2026-11-01 | minor | §19: XLSB array constants and PtgMemArea caches now stay live in cell, shared, array and defined-name formulas; malformed payloads keep saved results. |
 | 2026-11-01 | minor | §3: Office add-in content survives XLSX saves: a content add-in's `mc:AlternateContent` drawing anchor, its `webextension` part (with its own rels) and its fallback snapshot picture, and the workbook's `webextensiontaskpanes` part; add-ins are not shown, and an add-in whose part is missing is left out so nothing dangles |
 | 2026-11-01 | minor | §3, §17: XLSX keeps grouped pictures, text boxes and shapes (`grpSp`) and their images on save; not shown yet |

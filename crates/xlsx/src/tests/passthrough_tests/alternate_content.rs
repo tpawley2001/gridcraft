@@ -251,6 +251,7 @@ fn added_chart_keeps_control_anchor() {
         source: None,
         by_rows: false,
         pivot: None,
+        data_table: None,
         scale: Default::default(),
     });
     let u = roundtrip(&wb);

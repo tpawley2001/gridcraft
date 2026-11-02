@@ -8,12 +8,12 @@ use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRe
 use gridcraft_formula::Expr;
 use gridcraft_model::{
     AutoFilter, Cell, CfOperator, CfRule, CfValueKind, Comment, CondFormat, EditRange, ErrorStyle, FilterCriterion, Formula, Hyperlink, LineInfo,
-    NoteBox, NoteCorner, Orientation, PasswordHash, Sheet, SheetProtection, Sparkline, SparklineKind, Table, TableColumn, TotalsFn, Validation,
-    ValidationKind, XmlColumnPr,
+    NoteBox, NoteCorner, Orientation, PageOrder, PasswordHash, Sheet, SheetProtection, Sparkline, SparklineKind, Table, TableColumn, TotalsFn,
+    Validation, ValidationKind, XmlColumnPr,
 };
 
 use crate::IoError;
-use crate::fmla::from_file;
+use crate::fmla::{from_file, unwrap_google_sheets};
 use crate::package::Rel;
 use crate::read::Ctx;
 use crate::styles::read_color;
@@ -182,6 +182,8 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
             "pageMargins" => read_page_margins(e, &mut sheet.print),
             "pageSetup" => {
                 read_paper(e, &mut sheet.print);
+                // `downThenOver` when absent (ECMA-376's default); an unknown value reads as that too.
+                sheet.print.page_order = e.attr("pageOrder").and_then(PageOrder::parse).unwrap_or_default();
                 // Excel treats a zero scale as unstated, keeping the default 100%.
                 if let Some(s) = e.attr_u32("scale").filter(|&s| s != 0) {
                     sheet.print.scale = s.clamp(10, 400) as u16;
@@ -506,7 +508,12 @@ fn read_formula(cx: &mut Ctx<'_>, st: &mut RowState, f: &El, pos: CellRef, dynam
 }
 
 fn read_formula_text(cx: &mut Ctx<'_>, st: &mut RowState, f: &El, pos: CellRef, dynamic: bool) -> Option<Formula> {
-    let model = from_file(f.text.trim());
+    let mut model = from_file(f.text.trim());
+    if let Some(known) = cx.known_function
+        && let Some(unwrapped) = unwrap_google_sheets(&model, known)
+    {
+        model = unwrapped;
+    }
     let text = model.as_str();
     match f.attr("t").unwrap_or("normal") {
         "shared" => {

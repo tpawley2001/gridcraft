@@ -192,6 +192,16 @@ pub fn small_button(ui: &mut Ui, icon: Icon, label: &str, tip: &str, dropdown: b
 
 /// [`small_button`] on a surface with its own tokens (the ribbon band: [`Tokens::on_band`]).
 pub fn small_button_on(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str, tip: &str, dropdown: bool) -> Response {
+    small_button_accent_on(ui, t, icon, None, label, tip, dropdown)
+}
+
+/// Small ribbon button whose icon takes an accent colour (see [`icons::paint_accent`]); `None`
+/// draws it like [`small_button`]. A labelled button reports its label to accessibility.
+pub fn small_button_accent(ui: &mut Ui, icon: Icon, accent: Option<Color32>, label: &str, tip: &str, dropdown: bool) -> Response {
+    small_button_accent_on(ui, &Tokens::get(ui.ctx()), icon, accent, label, tip, dropdown)
+}
+
+fn small_button_accent_on(ui: &mut Ui, t: &Tokens, icon: Icon, accent: Option<Color32>, label: &str, tip: &str, dropdown: bool) -> Response {
     let font = theme::ui_font(12.5);
     let label = tr(ui, label);
     let tw = if label.is_empty() { 0.0 } else { ui.painter().layout_no_wrap(label.to_string(), font.clone(), t.text).size().x + 6.0 };
@@ -202,7 +212,7 @@ pub fn small_button_on(ui: &mut Ui, t: &Tokens, icon: Icon, label: &str, tip: &s
     } else if resp.hovered() {
         ui.painter().rect_filled(rect, 4.0, t.hover);
     }
-    icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.left() + 12.0, rect.center().y), vec2(16.0, 16.0)), icon, t.text);
+    icons::paint_accent(ui.painter(), Rect::from_center_size(pos2(rect.left() + 12.0, rect.center().y), vec2(16.0, 16.0)), icon, t.text, accent);
     if !label.is_empty() {
         ui.painter().text(pos2(rect.left() + 24.0, rect.center().y), Align2::LEFT_CENTER, label, font, t.text);
     }
