@@ -3,8 +3,12 @@ use super::xls_custom_views_tests::{GUID, check, xml};
 use super::xlsb_tests::{RELS, ROOT, TYPES, record, sst, wide, worksheet};
 use crate::{read_xlsb, write_xlsx};
 fn view(guid: &[u8; 16]) -> Vec<u8> {
+    view_on(guid, 22)
+}
+/// A BrtUserBookView named "Print view" whose active sheet is the one with sheet id `sheet_id`.
+pub(super) fn view_on(guid: &[u8; 16], sheet_id: u32) -> Vec<u8> {
     let mut b = Vec::new();
-    for n in [0u32, 800, 0, 600, 22, 500] {
+    for n in [0u32, 800, 0, 600, sheet_id, 500] {
         b.extend(n.to_le_bytes());
     }
     b.extend(guid);
@@ -22,6 +26,19 @@ fn file(views: &[u8], guid: &[u8; 16]) -> Vec<u8> {
     }
     b.extend(record(144, &[]));
     b.extend(record(132, &[]));
+    let tail = sheet_view(guid);
+    super::make_zip(&[
+        ("[Content_Types].xml", TYPES.as_bytes()),
+        ("_rels/.rels", ROOT.as_bytes()),
+        ("records/book.bin", &b),
+        ("records/_rels/book.bin.rels", RELS.as_bytes()),
+        ("data/one.bin", &worksheet(&[], &[])),
+        ("data/two.bin", &worksheet(&[], &tail)),
+        ("text/strings.bin", &sst()),
+    ])
+}
+/// A sheet's Custom View records (BrtBeginUserShView .. BrtEndUserShView) for the view `guid`.
+pub(super) fn sheet_view(guid: &[u8; 16]) -> Vec<u8> {
     let mut sv = guid.to_vec();
     for n in [22u32, 80, 0, 0, 0, 0, 0, 0] {
         sv.extend(n.to_le_bytes());
@@ -32,16 +49,7 @@ fn file(views: &[u8], guid: &[u8; 16]) -> Vec<u8> {
     }
     pane.push(2);
     let selection: Vec<_> = [2u32, 1, 1, 0, 1, 1, 1, 1, 1].iter().flat_map(|n| n.to_le_bytes()).collect();
-    let tail = [record(423, &sv), record(151, &pane), record(152, &selection), record(424, &[])].concat();
-    super::make_zip(&[
-        ("[Content_Types].xml", TYPES.as_bytes()),
-        ("_rels/.rels", ROOT.as_bytes()),
-        ("records/book.bin", &b),
-        ("records/_rels/book.bin.rels", RELS.as_bytes()),
-        ("data/one.bin", &worksheet(&[], &[])),
-        ("data/two.bin", &worksheet(&[], &tail)),
-        ("text/strings.bin", &sst()),
-    ])
+    [record(423, &sv), record(151, &pane), record(152, &selection), record(424, &[])].concat()
 }
 #[test]
 fn xlsb_custom_views_roundtrip() {
