@@ -53,6 +53,7 @@ use crate::read::Ctx;
 use crate::write::{NS_REL, Out, Rels, XML_DECL};
 use crate::xml::{self, esc_attr};
 
+pub(crate) mod connections;
 mod read;
 mod rebase;
 mod strict;

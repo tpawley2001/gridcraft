@@ -23,21 +23,18 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use gridcraft_model::{Preserved, PreservedPart, PreservedRel};
+use gridcraft_model::Preserved;
 
 use super::{Bytes, Entry, Records, Rel, check_type};
 use crate::package::Package;
-use crate::write::XML_DECL;
-use crate::xml::esc_attr;
+use crate::passthrough::connections::{
+    Connection, DbPr, QueryTable, QueryTableField, QueryTableRefresh, TextPr, WebPr, add_query_table_part, attr, connections_part, flag, is_xml_char,
+    text_field_type,
+};
 use crate::{IoError, ReadReport};
 
 const CT_CONNECTIONS_BIN: &str = "application/vnd.ms-excel.connections";
 const CT_QUERY_TABLE_BIN: &str = "application/vnd.ms-excel.queryTable";
-const CT_CONNECTIONS: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.connections+xml";
-const CT_QUERY_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.queryTable+xml";
-const REL_CONNECTIONS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/connections";
-const REL_QUERY_TABLE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/queryTable";
-const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
 const DROPPED: &str = "Some XLSB data connections could not be kept and were dropped; the rest are kept when saving as .xlsx.";
 const DROPPED_QUERY: &str = "Some XLSB query tables could not be kept and were dropped; the rest are kept when saving as .xlsx.";
@@ -128,21 +125,9 @@ pub(super) fn read_connections(package: &mut Package<'_>, types: &[Entry], rels:
     if dropped {
         report.warn(DROPPED);
     }
-    if items.is_empty() {
-        return kept;
-    }
-    let mut xml = format!("{XML_DECL}<connections xmlns=\"{NS_MAIN}\">");
-    for (id, item) in items {
-        kept.ids.insert(id);
-        xml.push_str(&item);
-    }
-    xml.push_str("</connections>");
-    let name = "xl/connections.xml".to_string();
-    kept.preserved = Some(Arc::new(Preserved {
-        rels: vec![PreservedRel { id: "rIdConnections".into(), rel_type: REL_CONNECTIONS.into(), target: name.clone(), external: false }],
-        parts: vec![PreservedPart { name, content_type: CT_CONNECTIONS.into(), data: xml.into_bytes().into(), rels: vec![] }],
-        ..Preserved::default()
-    }));
+    kept.ids = items.iter().map(|(id, _)| *id).collect();
+    let xml: Vec<&str> = items.iter().map(|(_, item)| item.as_str()).collect();
+    kept.preserved = connections_part(&xml);
     kept
 }
 
@@ -172,9 +157,7 @@ pub(super) fn read_query_tables(
             continue;
         };
         kept.query_tables = kept.query_tables.saturating_add(1);
-        let name = format!("xl/queryTables/queryTable{}.xml", kept.query_tables);
-        p.rels.push(PreservedRel { id: rel.id.clone(), rel_type: REL_QUERY_TABLE.into(), target: name.clone(), external: false });
-        p.parts.push(PreservedPart { name, content_type: CT_QUERY_TABLE.into(), data: xml.into_bytes().into(), rels: vec![] });
+        add_query_table_part(&mut p, rel.id.clone(), kept.query_tables, xml);
     }
     (!p.is_empty()).then(|| Arc::new(p))
 }
@@ -231,17 +214,6 @@ fn text(b: &mut Bytes<'_>, max: u32) -> Res<String> {
         return Err(Skip);
     }
     Ok(s)
-}
-
-fn is_xml_char(c: char) -> bool {
-    matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}')
-}
-
-fn attr(out: &mut String, name: &str, value: &str) {
-    let _ = write!(out, " {name}=\"{}\"", esc_attr(value));
-}
-fn flag(out: &mut String, name: &str, on: bool) {
-    let _ = write!(out, " {name}=\"{}\"", u8::from(on));
 }
 
 /// The next record, which must be `id`.
@@ -305,71 +277,44 @@ fn connection(payload: &[u8], body: &[(u16, &[u8])]) -> Res<(u32, String)> {
         return Err(Skip);
     }
 
-    let mut x = format!("<connection id=\"{id}\"");
-    if let Some(s) = &data_file {
-        attr(&mut x, "sourceFile", s);
-    }
-    if let Some(s) = &conn_file {
-        attr(&mut x, "odcFile", s);
-    }
-    if ty == DB_OLEDB && f1 & 0x01 != 0 {
-        flag(&mut x, "keepAlive", true);
-    }
-    if interval != 0 {
-        let _ = write!(x, " interval=\"{interval}\"");
-    }
-    attr(&mut x, "name", &name);
-    if let Some(s) = &desc {
-        attr(&mut x, "description", s);
-    }
-    let _ = write!(x, " type=\"{ty}\"");
     let always_use_file = db_like && f1 & 0x08 != 0;
-    if ty == DB_OLEDB && !always_use_file {
-        match recon {
-            1 => {}
-            2 | 3 => {
-                let _ = write!(x, " reconnectionMethod=\"{recon}\"");
-            }
-            _ => return Err(Skip),
-        }
-    }
-    let _ = write!(x, " refreshedVersion=\"{refreshed}\"");
-    if min_refreshable != 0 {
-        let _ = write!(x, " minRefreshableVersion=\"{min_refreshable}\"");
-    }
-    if db_like && pc == 0x01 {
-        flag(&mut x, "savePassword", true);
-    }
-    for (bit, name) in [(0x02, "new"), (0x04, "deleted")] {
-        if f1 & bit != 0 {
-            flag(&mut x, name, true);
-        }
-    }
-    if always_use_file {
-        flag(&mut x, "onlyUseConnectionFile", true);
-    }
-    for (bit, name) in [(0x10, "background"), (0x20, "refreshOnLoad"), (0x40, "saveData")] {
-        if f1 & bit != 0 {
-            flag(&mut x, name, true);
-        }
-    }
-    if db_like {
-        match cred {
-            0 => {}
-            1 => attr(&mut x, "credentials", "none"),
-            2 => attr(&mut x, "credentials", "stored"),
-            _ => return Err(Skip),
-        }
-    }
-    if let Some(s) = &sso {
-        attr(&mut x, "singleSignOnId", s);
-    }
-    x.push('>');
-    for child in [db, web, txt, params].into_iter().flatten() {
-        x.push_str(&child);
-    }
-    x.push_str("</connection>");
-    Ok((id, x))
+    let reconnection_method = match recon {
+        _ if ty != DB_OLEDB || always_use_file => None,
+        1 => None,
+        2 | 3 => Some(recon),
+        _ => return Err(Skip),
+    };
+    let credentials = match cred {
+        _ if !db_like => None,
+        0 => None,
+        1 => Some("none"),
+        2 => Some("stored"),
+        _ => return Err(Skip),
+    };
+    let c = Connection {
+        id,
+        name,
+        ty,
+        description: desc,
+        source_file: data_file,
+        odc_file: conn_file,
+        keep_alive: ty == DB_OLEDB && f1 & 0x01 != 0,
+        interval,
+        reconnection_method,
+        refreshed_version: refreshed,
+        min_refreshable_version: min_refreshable,
+        save_password: db_like && pc == 0x01,
+        new: f1 & 0x02 != 0,
+        deleted: f1 & 0x04 != 0,
+        only_use_connection_file: always_use_file,
+        background: f1 & 0x10 != 0,
+        refresh_on_load: f1 & 0x20 != 0,
+        save_data: f1 & 0x40 != 0,
+        credentials,
+        single_sign_on_id: sso,
+        children: [db, web, txt, params].into_iter().flatten().collect(),
+    };
+    Ok((id, c.xml()))
 }
 
 /// BrtBeginECDbProps ([MS-XLSB] 2.4.61) as `<dbPr>`.
@@ -384,20 +329,9 @@ fn db_props(payload: &[u8]) -> Res<String> {
     if cmd_type > 5 {
         return Err(Skip);
     }
-    let mut x = String::from("<dbPr");
-    attr(&mut x, "connection", &conn);
-    if let Some(s) = &cmd {
-        attr(&mut x, "command", s);
-    }
-    if let Some(s) = &cmd_svr {
-        attr(&mut x, "serverCommand", s);
-    }
     // CMDNULL (no command) has no XML form; SQL is the default.
-    if cmd_type != 0 && cmd_type != 2 {
-        let _ = write!(x, " commandType=\"{cmd_type}\"");
-    }
-    x.push_str("/>");
-    Ok(x)
+    let command_type = (cmd_type != 0 && cmd_type != 2).then_some(cmd_type);
+    Ok(DbPr { connection: conn, command: cmd, server_command: cmd_svr, command_type }.xml())
 }
 
 /// BrtBeginECWebProps ([MS-XLSB] 2.4.71), its HTML tables and BrtEndECWebProps, as `<webPr>`.
@@ -409,37 +343,31 @@ fn web_props(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>) -> Res
     let post = if load & 0x01 != 0 { Some(text(&mut b, u32::MAX >> 1)?) } else { None };
     let edit = if load & 0x02 != 0 { Some(text(&mut b, u32::MAX >> 1)?) } else { None };
     b.finish()?;
-    let mut x = String::from("<webPr");
-    for (bit, name) in
-        [(8, "xml"), (9, "sourceData"), (10, "parsePre"), (11, "consecutive"), (12, "firstRow"), (13, "xl97"), (14, "textDates"), (15, "xl2000")]
-    {
-        if flags & (1 << bit) != 0 {
-            flag(&mut x, name, true);
-        }
-    }
-    if let Some(s) = &url {
-        attr(&mut x, "url", s);
-    }
-    if let Some(s) = &post {
-        attr(&mut x, "post", s);
-    }
-    if flags & (1 << 16) != 0 {
-        flag(&mut x, "htmlTables", true);
-    }
-    match flags & 0xFF {
-        0 => {}
-        1 => attr(&mut x, "htmlFormat", "rtf"),
-        2 => attr(&mut x, "htmlFormat", "all"),
+    let html_format = match flags & 0xFF {
+        0 => None,
+        1 => Some("rtf"),
+        2 => Some("all"),
         _ => return Err(Skip),
-    }
-    if let Some(s) = &edit {
-        attr(&mut x, "editPage", s);
-    }
+    };
+    let bit = |n: u32| flags & (1 << n) != 0;
+    let mut web = WebPr {
+        xml: bit(8),
+        source_data: bit(9),
+        parse_pre: bit(10),
+        consecutive: bit(11),
+        first_row: bit(12),
+        xl97: bit(13),
+        text_dates: bit(14),
+        xl2000: bit(15),
+        url,
+        post,
+        html_tables: bit(16),
+        html_format,
+        edit_page: edit,
+        tables: None,
+    };
     match it.next() {
-        Some(&(END_WEB_PROPS, [])) => {
-            x.push_str("/>");
-            Ok(x)
-        }
+        Some(&(END_WEB_PROPS, [])) => Ok(web.xml()),
         Some(&(BEGIN_WP_TABLES, p)) => {
             let mut b = Bytes::new(p);
             let count = b.u32()?;
@@ -473,8 +401,8 @@ fn web_props(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>) -> Res
                 return Err(Skip);
             }
             expect_empty(it, END_WEB_PROPS)?;
-            let _ = write!(x, "><tables count=\"{count}\">{tables}</tables></webPr>");
-            Ok(x)
+            web.tables = Some((count, tables));
+            Ok(web.xml())
         }
         _ => Err(Skip),
     }
@@ -496,58 +424,34 @@ fn text_props(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>) -> Re
         return Err(Skip);
     }
     let bit = |n: u32| flags & (1 << n) != 0;
-    let mut x = String::from("<textPr");
-    if !bit(21) {
-        flag(&mut x, "prompt", false);
-    }
-    match flags & 0x03 {
-        0 => attr(&mut x, "fileType", "mac"),
-        1 => {}
-        2 => attr(&mut x, "fileType", "dos"),
+    let file_type = match flags & 0x03 {
+        0 => Some("mac"),
+        1 => None,
+        2 => Some("dos"),
         _ => return Err(Skip),
-    }
-    if first_row != 1 {
-        let _ = write!(x, " firstRow=\"{first_row}\"");
-    }
-    if !file.is_empty() {
-        attr(&mut x, "sourceFile", &file);
-    }
-    if !bit(12) {
-        flag(&mut x, "delimited", false);
-    }
+    };
     // ISO-8859-1 bytes are the first 256 code points.
-    for (byte, name, default) in [(decimal, "decimal", '.'), (thousands, "thousands", ',')] {
+    let separator = |byte: u8, default: char| -> Res<Option<char>> {
         let c = char::from(byte);
-        if byte != 0 && c != default {
-            if !is_xml_char(c) {
-                return Err(Skip);
-            }
-            attr(&mut x, name, &c.to_string());
+        match byte != 0 && c != default {
+            true if !is_xml_char(c) => Err(Skip),
+            on => Ok(on.then_some(c)),
         }
-    }
-    if !bit(13) {
-        flag(&mut x, "tab", false);
-    }
-    for (n, name) in [(14, "space"), (15, "comma"), (16, "semicolon"), (17, "consecutive")] {
-        if bit(n) {
-            flag(&mut x, name, true);
-        }
-    }
-    match (flags >> 18) & 0x03 {
-        0 => {}
-        1 => attr(&mut x, "qualifier", "singleQuote"),
-        _ => attr(&mut x, "qualifier", "none"),
-    }
-    if bit(22) {
-        let c = char::from_u32(u32::from(custom)).filter(|c| is_xml_char(*c)).ok_or(Skip)?;
-        attr(&mut x, "delimiter", &c.to_string());
-    }
+    };
+    let delimiter = match bit(22) {
+        true => Some(char::from_u32(u32::from(custom)).filter(|c| is_xml_char(*c)).ok_or(Skip)?),
+        false => None,
+    };
+    let qualifier = match (flags >> 18) & 0x03 {
+        0 => None,
+        1 => Some("singleQuote"),
+        _ => Some("none"),
+    };
     // ECTWFLDINFOLST: the field count, then one BrtBeginECTwFldInfo per field.
     let mut b = Bytes::new(expect(it, BEGIN_FLD_INFO_LST)?);
     let count = b.u32()?;
     b.finish()?;
-    let mut fields = String::new();
-    let mut n = 0u32;
+    let mut fields = vec![];
     loop {
         let Some(&(rid, p)) = it.next() else { return Err(Skip) };
         match rid {
@@ -558,27 +462,33 @@ fn text_props(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>) -> Re
                 let ty = b.u32()?;
                 let start = b.u32()?;
                 b.finish()?;
-                const TYPES: [&str; 10] = ["general", "text", "MDY", "DMY", "YMD", "MYD", "DYM", "YDM", "skip", "EMD"];
-                let name = usize::try_from(ty).ok().and_then(|i| TYPES.get(i)).ok_or(Skip)?;
-                fields.push_str("<textField");
-                if ty != 0 {
-                    attr(&mut fields, "type", name);
-                }
-                if start != 0 {
-                    let _ = write!(fields, " position=\"{start}\"");
-                }
-                fields.push_str("/>");
-                n = n.saturating_add(1);
+                fields.push((text_field_type(ty).ok_or(Skip)?, start));
             }
             _ => return Err(Skip),
         }
     }
-    if n != count || n == 0 {
+    if usize::try_from(count).ok() != Some(fields.len()) || fields.is_empty() {
         return Err(Skip);
     }
     expect_empty(it, END_TXT_WIZ)?;
-    let _ = write!(x, "><textFields count=\"{count}\">{fields}</textFields></textPr>");
-    Ok(x)
+    let t = TextPr {
+        prompt: bit(21),
+        file_type,
+        first_row,
+        source_file: file,
+        delimited: bit(12),
+        decimal: separator(decimal, '.')?,
+        thousands: separator(thousands, ',')?,
+        tab: bit(13),
+        space: bit(14),
+        comma: bit(15),
+        semicolon: bit(16),
+        consecutive: bit(17),
+        qualifier,
+        delimiter,
+        fields,
+    };
+    Ok(t.xml())
 }
 
 /// BrtBeginECParams ([MS-XLSB] 2.4.64) and its parameters, as `<parameters>`.
@@ -681,58 +591,12 @@ fn query_table(bytes: &[u8], report: &mut ReadReport) -> Res<(u32, String)> {
         return Err(Skip);
     }
     let bit = |n: u32| flags & (1 << n) != 0;
-    let mut x = format!("{XML_DECL}<queryTable xmlns=\"{NS_MAIN}\"");
-    attr(&mut x, "name", &name);
-    for (n, name, default) in [
-        (0, "headers", true),
-        (1, "rowNumbers", false),
-        (2, "disableRefresh", false),
-        (3, "backgroundRefresh", true),
-        (4, "firstBackgroundRefresh", false),
-        (5, "refreshOnLoad", false),
-    ] {
-        if bit(n) != default {
-            flag(&mut x, name, bit(n));
-        }
-    }
-    let grow = match (bit(6), bit(7)) {
+    let grow_shrink = match (bit(6), bit(7)) {
         (false, true) => Some("overwriteClear"),
         (false, false) => Some("insertClear"),
         (true, false) => None,
         (true, true) => return Err(Skip),
     };
-    if let Some(g) = grow {
-        attr(&mut x, "growShrinkType", g);
-    }
-    if bit(8) {
-        flag(&mut x, "fillFormulas", true);
-    }
-    if !bit(9) {
-        flag(&mut x, "removeDataOnSave", true);
-    }
-    if bit(10) {
-        flag(&mut x, "disableEdit", true);
-    }
-    if !bit(11) {
-        flag(&mut x, "preserveFormatting", false);
-    }
-    if !bit(12) {
-        flag(&mut x, "adjustColumnWidth", false);
-    }
-    if bit(13) {
-        flag(&mut x, "intermediate", true);
-    }
-    let _ = write!(x, " connectionId=\"{connection}\" autoFormatId=\"{auto_format}\"");
-    for (n, name) in [
-        (14, "applyNumberFormats"),
-        (17, "applyBorderFormats"),
-        (15, "applyFontFormats"),
-        (18, "applyPatternFormats"),
-        (16, "applyAlignmentFormats"),
-        (19, "applyWidthHeightFormats"),
-    ] {
-        flag(&mut x, name, bit(n));
-    }
     let mut refresh = None;
     let mut ended = false;
     while let Some(&(rid, p)) = it.next() {
@@ -747,19 +611,36 @@ fn query_table(bytes: &[u8], report: &mut ReadReport) -> Res<(u32, String)> {
     if !ended {
         return Err(Skip);
     }
-    match refresh {
-        Some(r) => {
-            x.push('>');
-            x.push_str(&r);
-            x.push_str("</queryTable>");
-        }
-        None => x.push_str("/>"),
-    }
-    Ok((connection, x))
+    let q = QueryTable {
+        name,
+        headers: bit(0),
+        row_numbers: bit(1),
+        disable_refresh: bit(2),
+        background_refresh: bit(3),
+        first_background_refresh: bit(4),
+        refresh_on_load: bit(5),
+        grow_shrink,
+        fill_formulas: bit(8),
+        remove_data_on_save: !bit(9),
+        disable_edit: bit(10),
+        preserve_formatting: bit(11),
+        adjust_column_width: bit(12),
+        intermediate: bit(13),
+        connection_id: connection,
+        auto_format_id: auto_format,
+        apply_number: bit(14),
+        apply_border: bit(17),
+        apply_font: bit(15),
+        apply_pattern: bit(18),
+        apply_alignment: bit(16),
+        apply_width_height: Some(bit(19)),
+        refresh,
+    };
+    Ok((connection, q.xml()))
 }
 
-/// BrtBeginQSIR ([MS-XLSB] 2.4.191) and its fields and deleted fields, as `<queryTableRefresh>`.
-fn query_refresh(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>) -> Res<String> {
+/// BrtBeginQSIR ([MS-XLSB] 2.4.191) and its fields and deleted fields.
+fn query_refresh(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>) -> Res<QueryTableRefresh> {
     let mut b = Bytes::new(payload);
     let flags = b.u16()?;
     let next_id = b.u32()?;
@@ -769,32 +650,11 @@ fn query_refresh(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>) ->
     if next_id > 65_535 || left >= 16_384 || right >= 16_384 {
         return Err(Skip);
     }
-    let mut x = format!("<queryTableRefresh nextId=\"{next_id}\"");
-    if flags & 0x01 == 0 {
-        flag(&mut x, "preserveSortFilterLayout", false);
-    }
-    if flags & 0x08 != 0 {
-        flag(&mut x, "fieldIdWrapped", true);
-    }
-    if flags & 0x10 == 0 {
-        flag(&mut x, "headersInLastRefresh", false);
-    }
-    let min_version = (flags >> 5) & 0x1F;
-    if min_version != 0 {
-        let _ = write!(x, " minimumVersion=\"{min_version}\"");
-    }
-    if left != 0 {
-        let _ = write!(x, " unboundColumnsLeft=\"{left}\"");
-    }
-    if right != 0 {
-        let _ = write!(x, " unboundColumnsRight=\"{right}\"");
-    }
-    x.push('>');
     // QSIFS: the column count, then BrtBeginQSIF / BrtEndQSIF per field.
     let mut b = Bytes::new(expect(it, BEGIN_QSIFS)?);
     let count = b.u32()?;
     b.finish()?;
-    let mut fields = String::new();
+    let mut fields: Vec<QueryTableField> = vec![];
     let mut ids = HashSet::new();
     loop {
         let Some(&(rid, p)) = it.next() else { return Err(Skip) };
@@ -811,37 +671,28 @@ fn query_refresh(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>) ->
                 if !ids.insert(id) {
                     return Err(Skip);
                 }
-                let _ = write!(fields, "<queryTableField id=\"{id}\"");
-                if let Some(s) = &name {
-                    attr(&mut fields, "name", s);
-                }
-                if f & 0x01 != 0 {
-                    flag(&mut fields, "dataBound", false);
-                }
-                for (bit, name) in [(0x04, "rowNumbers"), (0x02, "fillFormulas"), (0x08, "clipped")] {
-                    if f & bit != 0 {
-                        flag(&mut fields, name, true);
-                    }
-                }
-                if table_column != 0 {
-                    let _ = write!(fields, " tableColumnId=\"{table_column}\"");
-                }
-                fields.push_str("/>");
+                fields.push(QueryTableField {
+                    id,
+                    name,
+                    data_bound: f & 0x01 == 0,
+                    row_numbers: f & 0x04 != 0,
+                    fill_formulas: f & 0x02 != 0,
+                    clipped: f & 0x08 != 0,
+                    table_column_id: table_column,
+                });
             }
             _ => return Err(Skip),
         }
     }
-    if usize::try_from(count).ok() != Some(ids.len()) {
+    if usize::try_from(count).ok() != Some(fields.len()) {
         return Err(Skip);
     }
-    let _ = write!(x, "<queryTableFields count=\"{count}\">{fields}</queryTableFields>");
+    let mut deleted = vec![];
     loop {
         let Some(&(rid, p)) = it.next() else { return Err(Skip) };
         match rid {
             END_QSIR if p.is_empty() => break,
-            BEGIN_DELETED_NAMES if p.is_empty() => {
-                let mut deleted = String::new();
-                let mut n = 0u32;
+            BEGIN_DELETED_NAMES if p.is_empty() && deleted.is_empty() => {
                 loop {
                     let Some(&(rid, p)) = it.next() else { return Err(Skip) };
                     match rid {
@@ -851,23 +702,28 @@ fn query_refresh(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>) ->
                             let name = text(&mut b, 255)?;
                             b.finish()?;
                             expect_empty(it, END_DELETED_NAME)?;
-                            deleted.push_str("<deletedField");
-                            attr(&mut deleted, "name", &name);
-                            deleted.push_str("/>");
-                            n = n.saturating_add(1);
+                            deleted.push(name);
                         }
                         _ => return Err(Skip),
                     }
                 }
-                if n == 0 {
+                if deleted.is_empty() {
                     return Err(Skip);
                 }
-                let _ = write!(x, "<queryTableDeletedFields count=\"{n}\">{deleted}</queryTableDeletedFields>");
             }
             // A sort state and anything else: not mapped.
             _ => return Err(Skip),
         }
     }
-    x.push_str("</queryTableRefresh>");
-    Ok(x)
+    Ok(QueryTableRefresh {
+        next_id,
+        preserve_sort_filter_layout: flags & 0x01 != 0,
+        field_id_wrapped: flags & 0x08 != 0,
+        headers_in_last_refresh: flags & 0x10 != 0,
+        minimum_version: (flags >> 5) & 0x1F,
+        unbound_columns_left: left,
+        unbound_columns_right: right,
+        fields,
+        deleted,
+    })
 }
