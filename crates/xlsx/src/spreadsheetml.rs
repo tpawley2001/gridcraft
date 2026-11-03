@@ -165,7 +165,7 @@ impl Import {
                 if entries > MAX_LINE_ENTRIES {
                     break;
                 }
-                sheet.cols.insert(c as u32, info.clone());
+                sheet.cols.insert(c as u32, info);
             }
         }
         let mut next_row = 0u64;
@@ -188,7 +188,7 @@ impl Import {
                     if entries > MAX_LINE_ENTRIES {
                         break;
                     }
-                    sheet.rows.insert(r as u32, info.clone());
+                    sheet.rows.insert(r as u32, info);
                 }
             }
             self.row(sheet, row, r as u32, row_style, sys);
