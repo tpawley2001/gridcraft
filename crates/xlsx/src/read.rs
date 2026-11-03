@@ -269,6 +269,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], known_function: Option<&'a dyn Fn(&str) ->
     let wb_xml = workbook_xml(&mut cx.pkg, &wb_part)?;
     let wb_rels = cx.pkg.rels(&wb_part)?;
     let mut kept = crate::passthrough::KeptReader::new(&mut cx);
+    kept.note_custom_views(&wb_xml);
     cx.cell_pictures = match crate::richdata::read(&mut cx, &wb_rels) {
         Ok(pictures) => pictures,
         Err(error) => {

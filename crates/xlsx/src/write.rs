@@ -451,6 +451,8 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
         w.push_str(" fullCalcOnLoad=\"1\"");
     }
     w.push_str("/>");
+    // CT_Workbook: customWorkbookViews after calcPr (and oleSize), before pivotCaches.
+    w.push_str(&kept.custom_views);
     w.push_str(&pivots.workbook_xml(&mut wb_rels));
     let exts = crate::passthrough::workbook_elements(wb, "ext");
     if !exts.is_empty() {
@@ -598,7 +600,7 @@ fn write_sheets(
     kind: XlsxKind,
 ) -> (String, crate::passthrough::WorkbookKept, crate::pivot::PivotWriter) {
     // Kept content first: the kept sheets among the worksheets need their relationship ids.
-    let kept = crate::passthrough::write_workbook(wb, wb_rels, out, kind.is_macro_enabled());
+    let mut kept = crate::passthrough::write_workbook(wb, wb_rels, out, kind.is_macro_enabled());
     let mut pivots = crate::pivot::PivotWriter::default();
     let mut sheets_xml = String::new();
     let any_visible = wb.sheets.iter().any(|s| s.visibility == Visibility::Visible);
@@ -624,6 +626,7 @@ fn write_sheets(
         let _ = write!(sheets_xml, "<sheet name=\"{}\" sheetId=\"{sheet_id}\"{state} r:id=\"{rid}\"/>", esc_attr(&name));
     }
     sheets_xml.push_str(&kept.sheet_entries(wb.sheets.len(), true, &mut ids));
+    kept.custom_views = crate::passthrough::custom_workbook_views(wb, &ids);
 
     (sheets_xml, kept, pivots)
 }

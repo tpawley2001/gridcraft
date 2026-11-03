@@ -13,6 +13,7 @@ mod chart_data_table;
 mod chart_ref_offsets;
 mod code_name_tests;
 mod csv_tests;
+mod custom_views_tests;
 mod dif_tests;
 mod drawing_hyperlinks;
 mod dxf_font_charset;

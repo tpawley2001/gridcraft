@@ -77,6 +77,8 @@ pub struct KeptReader {
     overrides: HashMap<String, String>,
     budget: usize,
     parts_left: usize,
+    /// The workbook has Custom Views: every sheet is scanned for its `<customSheetViews>`.
+    custom_views: bool,
 }
 
 impl KeptReader {
@@ -89,6 +91,7 @@ impl KeptReader {
             overrides: HashMap::new(),
             budget: kept_total(),
             parts_left: MAX_KEPT_PARTS,
+            custom_views: false,
         };
         if let Ok(root) = rels_as_written(cx, "")
             && root.iter().any(|r| r.rel_type.starts_with("http://purl.oclc.org/"))
@@ -357,6 +360,13 @@ impl KeptReader {
         }
         // Excel trusts the saved cell values only when both are present; without them it
         // recalculates everything on open, and links into closed workbooks come back as errors.
+        // Custom Views (View > Custom Views); each sheet keeps its part of them.
+        if let Some(v) = wb_xml.child("customWorkbookViews") {
+            match custom_workbook_views_xml(v, &|id| id) {
+                Ok(x) => p.elements.push(PreservedXml { slot: "customWorkbookViews".into(), xml: x }),
+                Err(why) => cx.warn(format!("custom views were dropped: {why}")),
+            }
+        }
         if let Some(v) = wb_xml.child("fileVersion") {
             let mut x = String::from("<fileVersion");
             for k in FILE_VERSION_ATTRS {
@@ -380,6 +390,11 @@ impl KeptReader {
             p.elements.push(PreservedXml { slot: "ext".into(), xml: x });
         }
         (!p.is_empty()).then(|| Arc::new(p))
+    }
+
+    /// Notes whether the workbook part `wb_xml` lists Custom Views, before its sheets are read.
+    pub fn note_custom_views(&mut self, wb_xml: &xml::El) {
+        self.custom_views = wb_xml.child("customWorkbookViews").is_some();
     }
 
     /// Sheet-level content of the sheet part `part`.
@@ -407,7 +422,7 @@ impl KeptReader {
         // Notes have one VML drawing per sheet; another one holds the header and footer pictures.
         let vml_drawings = rels.iter().filter(|r| is_kind(r, &["vmlDrawing"])).count();
         let notes = rels.iter().filter(|r| is_kind(r, &["comments"])).count();
-        if rels.iter().any(|r| is_kind(r, SHEET_ELEMENT_KINDS) || is_kind(r, &["customProperty"])) || vml_drawings > notes {
+        if rels.iter().any(|r| is_kind(r, SHEET_ELEMENT_KINDS) || is_kind(r, &["customProperty"])) || vml_drawings > notes || self.custom_views {
             self.sheet_elements(cx, part, name, &rels, &mut p, &mut seen);
         }
         (!p.is_empty()).then(|| Arc::new(p))
@@ -452,6 +467,13 @@ impl KeptReader {
             match self.custom_properties(cx, &x, rels, p, seen) {
                 Ok(()) => p.elements.push(PreservedXml { slot: "customProperties".into(), xml: x }),
                 Err(why) => cx.warn(format!("sheet \"{name}\": custom properties were dropped: {why}")),
+            }
+        }
+        // The sheet's part of the Custom Views: print settings may name printer settings parts.
+        if let Some(x) = frags.iter().position(|(slot, _)| slot == "customSheetViews").map(|i| frags.remove(i).1) {
+            match self.custom_sheet_views(cx, name, x, rels, p, seen) {
+                Ok(x) => p.elements.push(PreservedXml { slot: "customSheetViews".into(), xml: x }),
+                Err(why) => cx.warn(format!("sheet \"{name}\": custom views were dropped: {why}")),
             }
         }
         // Controls and OLE objects are drawn from shapes in the legacy VML drawing.
@@ -630,6 +652,64 @@ impl KeptReader {
         Ok(())
     }
 
+    /// A sheet's `<customSheetViews>` as kept: each view must have a `guid`. The printer settings
+    /// parts its `<pageSetup r:id>`s name are kept with it; when they can't be, the (optional)
+    /// `r:id`s are removed rather than left naming nothing.
+    fn custom_sheet_views(
+        &mut self,
+        cx: &mut Ctx<'_>,
+        name: &str,
+        x: String,
+        rels: &[PreservedRel],
+        p: &mut Preserved,
+        seen: &mut HashSet<String>,
+    ) -> Result<String, String> {
+        let x = self.transitional(cx, &format!("sheet \"{name}\": custom views"), x)?;
+        let el = xml::parse(x.as_bytes()).map_err(|_| "their XML is damaged".to_string())?;
+        if el.children.is_empty() {
+            return Err("there are none".into());
+        }
+        for v in &el.children {
+            if v.name != "customSheetView" {
+                return Err(format!("they hold an unexpected <{}>", v.name));
+            }
+            if v.attr("guid").is_none_or(|g| g.trim().is_empty()) {
+                return Err("a view has no guid".into());
+            }
+        }
+        let mut ids = vec![];
+        map_rel_ids(&x, &mut |id| {
+            ids.push(id.to_string());
+            Some(id.to_string())
+        })
+        .ok_or("their XML is damaged")?;
+        if ids.is_empty() {
+            return Ok(x);
+        }
+        let roots: Option<Vec<PreservedRel>> =
+            ids.iter().map(|id| rels.iter().find(|r| r.id == *id && is_kind(r, &["printerSettings"])).cloned()).collect();
+        let mut q = Preserved::default();
+        let kept = match roots {
+            Some(roots) => self.keep(cx, &mut q, &roots, seen),
+            None => Err("a view refers to a missing relationship".into()),
+        };
+        match kept {
+            Ok(()) => {
+                p.parts.extend(q.parts);
+                for r in q.rels {
+                    if !p.rels.iter().any(|x| x.id == r.id) {
+                        p.rels.push(r);
+                    }
+                }
+                Ok(x)
+            }
+            Err(why) => {
+                cx.warn(format!("sheet \"{name}\": printer settings of custom views were dropped: {why}"));
+                drop_rel_ids(&x).ok_or_else(|| "their XML is damaged".to_string())
+            }
+        }
+    }
+
     /// The sheet's VML drawing without its notes (GridCraft writes those), and the parts its
     /// shapes refer to (preview images).
     fn vml(
@@ -710,7 +790,10 @@ fn scan_sheet(bytes: &[u8]) -> Option<SheetScan> {
                 }
                 reader.read_to_end(e.name()).ok()?;
                 let end = usize::try_from(reader.buffer_position()).ok()?;
-                let wanted = matches!(local.as_slice(), b"customProperties" | b"picture" | b"oleObjects" | b"controls" | b"AlternateContent");
+                let wanted = matches!(
+                    local.as_slice(),
+                    b"customProperties" | b"customSheetViews" | b"picture" | b"oleObjects" | b"controls" | b"AlternateContent"
+                );
                 if wanted && end.saturating_sub(start) <= MAX_FRAGMENT {
                     let frag = text.get(start..end)?;
                     push_fragment(&mut out, frag, &local, &decls);
@@ -913,9 +996,78 @@ fn push_fragment(out: &mut SheetScan, frag: &str, local: &[u8], decls: &[(String
     } else {
         String::from_utf8_lossy(local).into_owned()
     };
-    if (SHEET_SLOTS.contains(&slot.as_str()) || SHEET_SLOTS_EARLY.contains(&slot.as_str())) && !out.fragments.iter().any(|(s, _)| *s == slot) {
+    let known = [SHEET_SLOTS, SHEET_SLOTS_EARLY, SHEET_SLOTS_MID].iter().any(|slots| slots.contains(&slot.as_str()));
+    if known && !out.fragments.iter().any(|(s, _)| *s == slot) {
         out.fragments.push((slot, frag));
     }
+}
+
+/// `<customWorkbookViews>` written from its parsed element, each view's `activeSheetId` passed
+/// through `active`. Only CT_CustomWorkbookView's attributes are written (no extensions). An
+/// error when a view lacks its name, guid or active sheet.
+pub(crate) fn custom_workbook_views_xml(el: &xml::El, active: &dyn Fn(u32) -> u32) -> Result<String, String> {
+    let mut x = String::from("<customWorkbookViews>");
+    let mut n = 0usize;
+    for v in &el.children {
+        if v.name != "customWorkbookView" {
+            return Err(format!("they hold an unexpected <{}>", v.name));
+        }
+        if v.attr("name").is_none() || v.attr("guid").is_none_or(|g| g.trim().is_empty()) {
+            return Err("a view has no name or guid".into());
+        }
+        let sheet = v.attr_u32("activeSheetId").ok_or("a view has no active sheet")?;
+        x.push_str("<customWorkbookView");
+        for k in CUSTOM_WORKBOOK_VIEW_ATTRS {
+            if *k == "activeSheetId" {
+                let _ = write!(x, " {k}=\"{}\"", active(sheet));
+            } else if let Some(a) = v.attr(k) {
+                let _ = write!(x, " {k}=\"{}\"", esc_attr(a));
+            }
+        }
+        x.push_str("/>");
+        n += 1;
+    }
+    if n == 0 {
+        return Err("there are none".into());
+    }
+    x.push_str("</customWorkbookViews>");
+    Ok(x)
+}
+
+/// An XML fragment without its relationship-id attributes (any attribute in the relationships
+/// namespace). `None` when the fragment is damaged.
+fn drop_rel_ids(x: &str) -> Option<String> {
+    let mut reader = Reader::from_str(x);
+    let mut writer = Writer::new(Vec::with_capacity(x.len()));
+    let mut prefixes: HashSet<Vec<u8>> = HashSet::new();
+    let strip = |e: &BytesStart<'_>, prefixes: &mut HashSet<Vec<u8>>| -> Option<BytesStart<'static>> {
+        for a in e.attributes().with_checks(false) {
+            let a = a.ok()?;
+            if let Some(p) = a.key.as_ref().strip_prefix(b"xmlns:")
+                && (a.value.as_ref() == NS_REL.as_bytes() || a.value.as_ref() == NS_REL_STRICT.as_bytes())
+            {
+                prefixes.insert(p.to_vec());
+            }
+        }
+        let mut out = BytesStart::new(String::from_utf8(e.name().as_ref().to_vec()).ok()?);
+        for a in e.attributes().with_checks(false) {
+            let a = a.ok()?;
+            let key = a.key.as_ref();
+            if key.starts_with(b"xmlns") || !a.key.prefix().is_some_and(|p| prefixes.contains(p.as_ref())) {
+                out.push_attribute(Attribute { key: QName(key), value: a.value.clone() });
+            }
+        }
+        Some(out.into_owned())
+    };
+    loop {
+        match reader.read_event().ok()? {
+            Event::Eof => break,
+            Event::Start(e) => writer.write_event(Event::Start(strip(&e, &mut prefixes)?)).ok()?,
+            Event::Empty(e) => writer.write_event(Event::Empty(strip(&e, &mut prefixes)?)).ok()?,
+            ev => writer.write_event(ev).ok()?,
+        }
+    }
+    String::from_utf8(writer.into_inner()).ok()
 }
 
 /// Adds the root's namespace declarations a fragment doesn't declare itself.

@@ -1,4 +1,4 @@
-use super::read::{map_rel_ids, vml_block_max};
+use super::read::{custom_workbook_views_xml, map_rel_ids, vml_block_max};
 use super::*;
 
 // ---------------------------------------------------------------- writing
@@ -166,22 +166,29 @@ pub struct SheetIds {
     wanted: HashSet<u32>,
     given: HashSet<u32>,
     next: u32,
+    /// The ids given to the sheets that asked for them (they kept the id the file gave them).
+    own: HashSet<u32>,
+    /// The id of the first sheet written.
+    first: Option<u32>,
 }
 
 impl SheetIds {
     pub fn new(wb: &Workbook, kept: &WorkbookKept) -> SheetIds {
         let wanted: HashSet<u32> = wb.sheets.iter().map(|s| s.file_id).chain(kept.sheets.iter().map(|s| s.sheet_id)).filter(|&id| id != 0).collect();
-        SheetIds { wanted, given: HashSet::new(), next: 1 }
+        SheetIds { wanted, given: HashSet::new(), next: 1, own: HashSet::new(), first: None }
     }
 
     pub fn take(&mut self, wanted: u32) -> u32 {
         if wanted != 0 && self.given.insert(wanted) {
+            self.own.insert(wanted);
+            self.first.get_or_insert(wanted);
             return wanted;
         }
         while self.wanted.contains(&self.next) || self.given.contains(&self.next) {
             self.next += 1;
         }
         self.given.insert(self.next);
+        self.first.get_or_insert(self.next);
         self.next
     }
 }
@@ -191,6 +198,8 @@ impl SheetIds {
 pub struct WorkbookKept {
     /// Workbook XML elements that go right after `<sheets>` (`<externalReferences>`).
     pub elements: String,
+    /// `<customWorkbookViews>`, which goes after `<calcPr>` (see [`custom_workbook_views`]).
+    pub custom_views: String,
     sheets: Vec<KeptSheet>,
 }
 
@@ -337,6 +346,7 @@ pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out, macros: 
     }
     WorkbookKept {
         elements: p.elements.iter().filter(|e| e.slot == "externalReferences").filter_map(|e| remap(&e.xml, &ids)).collect(),
+        custom_views: String::new(),
         sheets: live
             .iter()
             .filter_map(|s| {
@@ -356,6 +366,22 @@ pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out, macros: 
 pub fn workbook_elements(wb: &Workbook, slot: &str) -> String {
     let Some(p) = wb.preserved.as_deref() else { return String::new() };
     p.elements.iter().filter(|e| e.slot == slot).map(|e| e.xml.as_str()).collect()
+}
+
+/// The workbook's kept `<customWorkbookViews>` once its sheets are written (`ids`): a view whose
+/// active sheet is no longer written under the id it had (deleted) shows the first sheet.
+pub fn custom_workbook_views(wb: &Workbook, ids: &SheetIds) -> String {
+    let x = workbook_elements(wb, "customWorkbookViews");
+    let Ok(el) = xml::parse(x.as_bytes()) else { return String::new() };
+    let first = ids.first.unwrap_or(1);
+    custom_workbook_views_xml(&el, &|id| if ids.own.contains(&id) { id } else { first }).unwrap_or_default()
+}
+
+/// The guids (lower case) of the workbook's kept Custom Views: a sheet writes only its views with one of them.
+pub fn custom_view_guids(wb: &Workbook) -> HashSet<String> {
+    let x = workbook_elements(wb, "customWorkbookViews");
+    let Ok(el) = xml::parse(x.as_bytes()) else { return HashSet::new() };
+    el.kids("customWorkbookView").filter_map(|v| v.attr("guid")).map(|g| g.trim().to_ascii_lowercase()).collect()
 }
 
 /// Adds the kept package-root relationships (custom properties…) to `_rels/.rels`.
