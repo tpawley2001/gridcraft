@@ -114,6 +114,10 @@ pub struct Sheet {
     /// Frozen rows and columns (top/left).
     pub freeze: Option<(u32, u32)>,
     pub tab_color: Option<Color>,
+    /// VBA code name (`Sheet1`, or one set in the VBA editor) that binds the sheet's document
+    /// module to it. Kept across a rename; a copy of the sheet gets none. `None` = not stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_name: Option<String>,
     pub visibility: Visibility,
     pub show_gridlines: bool,
     pub show_headings: bool,
@@ -198,6 +202,7 @@ impl Sheet {
             merges: vec![],
             freeze: None,
             tab_color: None,
+            code_name: None,
             visibility: Visibility::Visible,
             show_gridlines: true,
             show_outline_symbols: true,

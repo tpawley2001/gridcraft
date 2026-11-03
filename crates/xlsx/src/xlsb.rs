@@ -685,7 +685,8 @@ fn workbook(
             153 => {
                 wb.date_system = if b.u32()? & 1 != 0 { DateSystem::D1904 } else { DateSystem::D1900 };
                 b.u32()?;
-                b.text(31)?;
+                // BrtWbProp ([MS-XLSB] 2.4.820) ends with strName, the workbook's code name.
+                wb.code_name = Some(b.text(31)?).filter(|n| !n.is_empty());
                 b.finish()?;
             }
             158 if !view_seen => {
@@ -1469,6 +1470,7 @@ fn worksheet(
                 if tab_color(&mut sheet, payload).is_err() {
                     report.warn("Malformed XLSB sheet property records were skipped.");
                 }
+                sheet.code_name = sheet_code_name(payload);
             }
             137 => match sheet_view(&mut sheet, payload, view_seen) {
                 Ok(first) => {
@@ -1622,6 +1624,14 @@ fn tab_color(sheet: &mut Sheet, payload: &[u8]) -> Result<(), IoError> {
     let color = styles::color(&mut b)?;
     sheet.tab_color = if color == Color::Auto { None } else { Some(color) };
     Ok(())
+}
+
+/// BrtWsProp's strName, the sheet's code name, after the flags, the tab colour (BrtColor),
+/// rwSync and colSync. `None` when it is empty, null or missing.
+fn sheet_code_name(payload: &[u8]) -> Option<String> {
+    let mut b = Bytes::new(payload);
+    b.take(3 + 8 + 4 + 4).ok()?;
+    b.string(31, true).ok().flatten().filter(|n| !n.is_empty())
 }
 
 /// BrtBeginWsView: display options of the first workbook view's sheet view. `Ok(true)` when

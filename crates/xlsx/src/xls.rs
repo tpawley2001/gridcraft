@@ -197,6 +197,7 @@ struct Globals {
     pivot_caches: pivot::Caches,
     /// The pictures of the MsoDrawingGroup records.
     pictures: drawing::BStore,
+    code_name: Option<String>,
 }
 
 /// Reads an Excel 97-2003 workbook. Inspect the report's warnings for what was skipped.
@@ -229,6 +230,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     }
     wb.sheets.clear();
     wb.view = g.view;
+    wb.code_name = g.code_name.clone();
     wb.protected_structure = g.protection.locked;
     wb.structure_password = g.protection.password.clone();
     wb.date_system = if g.date1904 { DateSystem::D1904 } else { DateSystem::D1900 };
@@ -442,6 +444,7 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
                 g.sheets.push(BoundSheet { pos, name, visibility, kind });
             }
             0x0022 => g.date1904 = c.u16()? == 1,
+            CODE_NAME => g.code_name = code_name(&mut c),
             0x000E => g.precision_as_displayed = c.u16()? == 0,
             0x041E => {
                 let ifmt = c.u16()?;
@@ -965,6 +968,14 @@ fn worksheet(
     Ok(Some((st.sheet, st.calc, st.pivots)))
 }
 
+/// CodeName ([MS-XLS] 2.4.37): the VBA code name of the workbook (in the globals) or of a sheet.
+const CODE_NAME: u16 = 0x01BA;
+
+/// A CodeName record's XLUnicodeString; `None` when it is empty or truncated.
+fn code_name(c: &mut Cursor<'_, '_>) -> Option<String> {
+    c.string().ok().filter(|n| !n.is_empty())
+}
+
 /// The shortest WINDOW2 a file holds (the chart-sheet form); a shorter one is truncated.
 const WINDOW2_MIN_LEN: usize = 10;
 
@@ -984,6 +995,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x0013 => protection::password(&mut c, &mut st.protection, report),
         0x0867 => protection::feat_hdr(&mut c, &mut st.protection, report),
         0x0868 => protection::feat(&mut c, &mut st.sheet, report),
+        CODE_NAME => st.sheet.code_name = code_name(&mut c),
         0x0203 => {
             let (r, col, x) = (c.u16()?, c.u16()?, c.u16()?);
             let v = Value::number(c.f64()?);

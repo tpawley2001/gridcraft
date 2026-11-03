@@ -230,6 +230,7 @@ fn read_workbook_properties(cx: &mut Ctx<'_>, wb: &mut Workbook, xml: &El) {
             Some("placeholders") => ShowObjects::Placeholders,
             _ => ShowObjects::All,
         };
+        wb.code_name = p.attr("codeName").filter(|n| !n.is_empty()).map(str::to_string);
     }
     wb.date_system = cx.date_system;
     if let Some(c) = xml.child("calcPr") {
