@@ -18,13 +18,15 @@
 //! sheet tab colour, sheet protection, Allow Edit Ranges (titles, references and legacy passwords), workbook structure protection, the sheet AutoFilter
 //! (range and criteria), charts: embedded charts and chart sheets become live charts whose
 //! series refer to the cells (see `chart`), PNG and JPEG pictures (see `drawing`), and PivotTables on worksheet-range or defined-name
-//! sources (cache streams in `_SX_DB_CUR` and the SxView views, in `xls/pivot.rs`). Everything else (other shapes, comments, macros) is
+//! sources (cache streams in `_SX_DB_CUR` and the SxView views, in `xls/pivot.rs`), and query tables with
+//! their data connections (kept for .xlsx, in `xls/connections.rs`). Everything else (other shapes, comments, macros) is
 //! skipped with a warning.
 //! Encrypted workbooks and versions before BIFF5 are refused.
 
 mod autofilter;
 mod chart;
 mod cond_format;
+mod connections;
 mod doc_props;
 mod drawing;
 pub(crate) mod formula;
@@ -253,6 +255,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         report.warn("Some extended cell colours (XFExt records) could not be read; the palette colours were kept.");
     }
 
+    let mut connections = connections::Kept::default();
     let mut pivots = pivot::Loader::new(&cf, &g.pivot_caches, &g.formats, wb.date_system);
     // BoundSheet8 index → model sheet index.
     let mut model_index: Vec<Option<usize>> = Vec::with_capacity(g.sheets.len());
@@ -275,7 +278,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         if bs.kind == 1 {
             // An Excel 4.0 macro sheet: its cells are kept for a macro-enabled save, never evaluated.
             match worksheet(&stream, bs, None, &g, &styles, &mut budget, &mut report, true)? {
-                Some((sheet, _, _)) => {
+                Some((sheet, _, _, _)) => {
                     report.warn(macro_sheet::kept_warning(&bs.name));
                     macro_sheets.push(macro_sheet::MacroSheet {
                         name: bs.name.clone(),
@@ -297,13 +300,14 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         }
         wb.check_sheet_name(&bs.name, None).map_err(invalid)?;
         let filter = filter_database(&g, bound);
-        let Some((mut sheet, calc, views)) = worksheet(&stream, bs, filter, &g, &styles, &mut budget, &mut report, false)? else {
+        let Some((mut sheet, calc, views, queries)) = worksheet(&stream, bs, filter, &g, &styles, &mut budget, &mut report, false)? else {
             report.warn("Dialog sheets and unreadable sheets were skipped.");
             model_index.push(None);
             continue;
         };
         sheet.visibility = bs.visibility;
         sheet.pivots = pivots.build(views, &mut report);
+        connections.sheet(queries, &mut sheet.preserved);
         // Every worksheet repeats the workbook's calculation settings; Excel applies the first.
         if wb.sheets.is_empty() {
             wb.calc = calc;
@@ -335,6 +339,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     chart::add_chart_sheets(&mut wb, chart_sheets);
     macro_sheet::add_macro_sheets(&mut wb, macro_sheets, &chart_bounds);
     defined_names(&g.names, &g.links, g.biff5.as_ref(), &model_index, &mut wb, &mut report);
+    connections.finish(&mut wb, &mut report);
     tables::finish_workbook(&mut wb);
     let active = g
         .itab_cur
@@ -785,6 +790,8 @@ struct SheetState<'g> {
     charts: chart::Embedded,
     /// The PivotTable views read so far: built into model PivotTables once every sheet is read.
     pivots: pivot::Views,
+    /// The query tables read so far, as their records: translated once every sheet is read.
+    queries: connections::Blocks,
 }
 
 impl SheetState<'_> {
@@ -907,7 +914,7 @@ fn worksheet(
     budget: &mut Budget,
     report: &mut ReadReport,
     macro_sheet: bool,
-) -> Result<Option<(Sheet, CalcSettings, pivot::Views)>, IoError> {
+) -> Result<Option<(Sheet, CalcSettings, pivot::Views, connections::Blocks)>, IoError> {
     if bs.pos >= stream.len() {
         return Err(invalid(format!("sheet '{}' points outside the Workbook stream", bs.name)));
     }
@@ -936,6 +943,7 @@ fn worksheet(
         tables: tables::SheetTables::default(),
         charts: chart::Embedded::default(),
         pivots: pivot::Views::default(),
+        queries: connections::Blocks::default(),
     };
     let mut depth = 1usize;
     while let Some(rec) = recs.next_record()? {
@@ -996,7 +1004,7 @@ fn worksheet(
             report.warn(format!("Some formulas use {why}; their saved results were kept as values."));
         }
     }
-    Ok(Some((st.sheet, st.calc, st.pivots)))
+    Ok(Some((st.sheet, st.calc, st.pivots, st.queries)))
 }
 
 /// CodeName ([MS-XLS] 2.4.37): the VBA code name of the workbook (in the globals) or of a sheet.
@@ -1018,6 +1026,10 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
     }
     st.cond.next_record(rec.id);
     st.autofilter.next_record(rec.id, report);
+    // BIFF5 has no query tables.
+    if st.g.biff5.is_none() {
+        st.queries.record(rec);
+    }
     if page_setup::read(rec, &mut st.sheet.print, &mut st.sheet.tab_color, &mut st.page, report) {
         return Ok(());
     }

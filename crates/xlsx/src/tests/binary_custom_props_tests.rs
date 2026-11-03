@@ -28,7 +28,7 @@ fn set(properties: &[(u32, Vec<u8>)]) -> Vec<u8> {
     set
 }
 /// A DocumentSummaryInformation stream with the standard set and, when given, the user-defined one.
-fn stream(user: Option<&[(u32, Vec<u8>)]>) -> Vec<u8> {
+pub(super) fn stream(user: Option<&[(u32, Vec<u8>)]>) -> Vec<u8> {
     let first = set(&[(2, text(0x1e, b"Finance\0"))]);
     let mut out = vec![0; 28];
     out[..2].copy_from_slice(&0xfffeu16.to_le_bytes());
@@ -91,7 +91,7 @@ fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     era * 146_097 + doe - 719_468
 }
-fn custom_part(wb: &Workbook) -> Option<Vec<u8>> {
+pub(super) fn custom_part(wb: &Workbook) -> Option<Vec<u8>> {
     let p = wb.preserved.as_deref()?;
     p.parts.iter().find(|q| q.name == CUSTOM).map(|q| q.data.to_vec())
 }
@@ -163,7 +163,7 @@ fn data_with_type(roots: &str, ct: &str, part: &[u8], sheet: &[u8]) -> Vec<u8> {
     ])
 }
 
-fn all_types() -> Vec<(u32, Vec<u8>)> {
+pub(super) fn all_types() -> Vec<(u32, Vec<u8>)> {
     let due = filetime(2026, 10, 31, 9, 15, 0);
     vec![
         codepage(1252),
