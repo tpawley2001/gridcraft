@@ -618,14 +618,18 @@ fn opening_google_sheets_export_unwraps_only_formulas_gridcraft_calculates() {
 }
 
 #[test]
-fn sylk_import_uses_content_and_refuses_export() {
+fn sylk_import_uses_content_and_exports_active_sheet() {
     let bytes = b"ID;P\nC;Y1;X1;K7;ERC\nE\n";
     for name in ["report.slk", "report.csv", "report.xlsx", "report"] {
         let (wb, warnings) = open_bytes(name, bytes).unwrap();
         assert!(warnings.is_empty());
         assert_eq!(wb.sheets[0].value(CellRef::new(0, 0)), gridcraft_core::Value::Number(7.0));
         assert_eq!(wb.sheets[0].cell(CellRef::new(0, 0)).unwrap().formula.as_ref().unwrap().text, "A1");
-        assert!(save_bytes(&wb, "report.slk").unwrap_err().to_string().contains("import only"));
+        let saved = save_bytes(&wb, "report.slk").unwrap();
+        assert!(saved.starts_with(b"ID;"));
+        let (back, report) = gridcraft_xlsx::read_sylk(&saved).unwrap();
+        assert!(report.warnings.is_empty());
+        assert_eq!(back.sheet(0).unwrap().value(CellRef::new(0, 0)), wb.sheet(0).unwrap().value(CellRef::new(0, 0)));
     }
     assert_eq!(FileKind::from_path("REPORT.SLK"), Some(FileKind::Sylk));
     assert!(open_bytes("broken.slk", b"not a SYLK file").unwrap_err().to_string().contains("We can't open 'broken.slk':"));
@@ -647,4 +651,19 @@ fn dif_opens_named_sheet_and_saves_active_sheet_values() {
     assert_eq!(again.sheets.len(), 1);
     assert_eq!(again.sheet(0).unwrap().value(CellRef::new(2, 2)), gridcraft_core::Value::Bool(false));
     assert_eq!(again.sheet(0).unwrap().value(CellRef::new(0, 0)), gridcraft_core::Value::Empty);
+}
+
+#[test]
+fn save_sylk_uses_active_sheet() {
+    let mut wb = Workbook::new();
+    wb.sheet_mut(0).unwrap().set_value(CellRef::new(0, 0), gridcraft_core::Value::from("first"));
+    let second = wb.sheets.len();
+    wb.sheets.push(std::sync::Arc::new(gridcraft_model::Sheet::new("Second")));
+    wb.sheet_mut(second).unwrap().set_value(CellRef::new(0, 0), gridcraft_core::Value::from("active"));
+    wb.set_active_sheet(second);
+    let bytes = save_bytes_as(&wb, "book.slk", FileKind::Sylk).unwrap();
+    assert!(bytes.starts_with(b"ID;"));
+    let (back, _) = gridcraft_xlsx::read_sylk(&bytes).unwrap();
+    assert_eq!(back.sheet(0).unwrap().value(CellRef::new(0, 0)), gridcraft_core::Value::from("active"));
+    assert_eq!(save_bytes(&wb, "book.slk").unwrap(), bytes);
 }

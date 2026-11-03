@@ -1,4 +1,4 @@
-//! SYLK text import, including cached values and R1C1 formulas.
+//! SYLK text import and export, including cached values and R1C1 formulas.
 
 use std::sync::Arc;
 
@@ -174,6 +174,36 @@ fn identifier(ch: char) -> bool {
     ch.is_alphanumeric() || matches!(ch, '_' | '.')
 }
 
+/// A SYLK whole-axis reference has no second axis. A single axis denotes a whole row/column.
+fn read_whole_axis(text: &str) -> Option<(usize, String)> {
+    let axis = text.chars().next()?;
+    let mut cursor = 1;
+    let (first, absolute) = self::axis(text, &mut cursor)?;
+    if !absolute {
+        return None;
+    }
+    let last = if text.get(cursor..)?.starts_with(&format!(":{axis}")) {
+        cursor += 2;
+        let (last, absolute) = self::axis(text, &mut cursor)?;
+        if !absolute {
+            return None;
+        }
+        last
+    } else {
+        first
+    };
+    if text.get(cursor..)?.chars().next().is_some_and(|c| identifier(c) || matches!(c, '(' | '!')) {
+        return None;
+    }
+    let limit = if axis == 'C' { MAX_COLS } else { MAX_ROWS };
+    if !(1..=i64::from(limit)).contains(&first) || !(1..=i64::from(limit)).contains(&last) {
+        return None;
+    }
+    let label =
+        |n: i64| -> Option<String> { Some(if axis == 'C' { format!("${}", col_to_letters(u32::try_from(n - 1).ok()?)) } else { format!("${n}") }) };
+    Some((cursor, format!("{}:{}", label(first)?, label(last)?)))
+}
+
 /// Converts R1C1 references while preserving quoted strings, sheet names and identifiers.
 pub(crate) fn r1c1_to_a1(formula: &str, at: CellRef) -> Option<String> {
     let mut out = String::new();
@@ -192,6 +222,12 @@ pub(crate) fn r1c1_to_a1(formula: &str, at: CellRef) -> Option<String> {
             quote = Some(ch);
             out.push(ch);
             cursor += ch.len_utf8();
+        } else if matches!(ch, 'R' | 'C')
+            && !previous.is_some_and(identifier)
+            && let Some((len, range)) = read_whole_axis(rest)
+        {
+            out.push_str(&range);
+            cursor += len;
         } else if ch == 'R' && !previous.is_some_and(identifier) {
             let mut end = cursor + 1;
             let candidate = axis(formula, &mut end).and_then(|r| {
@@ -268,5 +304,220 @@ mod additional_tests {
         }
         assert!(r1c1_to_a1("R[-3]C", at).is_none());
         assert!(r1c1_to_a1("R1C16385", at).is_none());
+    }
+}
+
+/// Writes one sheet as SYLK, using the workbook's number format table.
+/// Output is UTF-8, bounded like CSV, and deliberately excludes other sheet features.
+pub fn write_sylk(wb: &Workbook, sheet: usize) -> Result<Vec<u8>, IoError> {
+    let sh = wb.sheet(sheet).ok_or_else(|| IoError::Format("missing SYLK sheet".into()))?;
+    let mut out = String::from("ID;PGRIDCRAFT;N;E\r\nP;PGeneral\r\n");
+    let mut formats = std::collections::HashMap::from([(String::from("General"), 0usize)]);
+    for (at, cell) in sh.cells.iter() {
+        if !at.is_valid() || (cell.value == Value::Empty && cell.formula.is_none()) {
+            continue;
+        }
+        let code = wb.styles.get(sh.style_id(at)).num_fmt.as_str();
+        if !formats.contains_key(code) {
+            let index = formats.len();
+            formats.insert(code.to_owned(), index);
+            append(&mut out, "P;P")?;
+            field(&mut out, code)?;
+            append(&mut out, "\r\n")?;
+        }
+    }
+    for (&col, info) in &sh.cols {
+        if col >= MAX_COLS {
+            continue;
+        }
+        if let Some(size) = info.size.filter(|s| s.is_finite() && *s != sh.default_col_width) {
+            let width = if size < 12.0 { size / 12.0 } else { (size - 5.0) / 7.0 };
+            append(&mut out, &format!("F;W{} {} {}\r\n", col + 1, col + 1, width.round().clamp(0.0, 255.0)))?;
+        }
+    }
+    for (at, cell) in sh.cells.iter() {
+        if !at.is_valid() || (cell.value == Value::Empty && cell.formula.is_none()) {
+            continue;
+        }
+        let code = wb.styles.get(sh.style_id(at)).num_fmt.as_str();
+        let index = formats.get(code).copied().unwrap_or_default();
+        if index != 0 {
+            append(&mut out, &format!("F;P{index};Y{};X{}\r\n", at.row + 1, at.col + 1))?;
+        }
+        append(&mut out, &format!("C;Y{};X{};K", at.row + 1, at.col + 1))?;
+        match &cell.value {
+            Value::Empty => {}
+            Value::Number(n) => append(&mut out, &n.to_string())?,
+            Value::Text(t) => {
+                append(&mut out, "\"")?;
+                field(&mut out, t)?;
+                append(&mut out, "\"")?;
+            }
+            Value::Bool(b) => append(&mut out, if *b { "TRUE" } else { "FALSE" })?,
+            Value::Error(e) => append(&mut out, e.as_str())?,
+            Value::Array(_) => return Err(IoError::Format("SYLK cannot store an array as a cell value".into())),
+        }
+        if let Some(formula) = cell.formula.as_ref().and_then(|f| a1_to_r1c1(&f.text, at)) {
+            append(&mut out, ";E")?;
+            field(&mut out, &formula)?;
+        }
+        append(&mut out, "\r\n")?;
+    }
+    append(&mut out, "E\r\n")?;
+    Ok(out.into_bytes())
+}
+
+fn append(out: &mut String, text: &str) -> Result<(), IoError> {
+    if out.len().saturating_add(text.len()) > crate::csv::MAX_CSV_BYTES {
+        return Err(IoError::TooLarge("SYLK exceeds 512 MiB".into()));
+    }
+    out.push_str(text);
+    Ok(())
+}
+
+/// Escape field delimiters and flatten line breaks without allocating a second copy.
+fn field(out: &mut String, text: &str) -> Result<(), IoError> {
+    for ch in text.chars() {
+        match ch {
+            ';' => append(out, ";;")?,
+            '\r' | '\n' => append(out, " ")?,
+            _ => append(out, ch.encode_utf8(&mut [0; 4]))?,
+        }
+    }
+    Ok(())
+}
+
+fn relative_axis(axis: char, n: u32, absolute: bool, origin: u32) -> String {
+    if absolute {
+        format!("{axis}{}", n + 1)
+    } else {
+        let offset = i64::from(n) - i64::from(origin);
+        if offset == 0 { axis.to_string() } else { format!("{axis}[{offset}]") }
+    }
+}
+
+/// Converts A1 references, preserving quoted strings, sheet names and identifiers.
+/// Unsupported reference syntax leaves the writer free to export just the cached value.
+pub(crate) fn a1_to_r1c1(formula: &str, at: CellRef) -> Option<String> {
+    if !at.is_valid() {
+        return None;
+    }
+    let formula = formula.strip_prefix('=').unwrap_or(formula);
+    // Also bounds malformed/nested input through the formula parser's normal limits.
+    gridcraft_formula::parse(formula).ok()?;
+    let mut out = String::new();
+    let mut cursor = 0;
+    let mut quote = None;
+    let mut previous = None;
+    while let Some(rest) = formula.get(cursor..).filter(|s| !s.is_empty()) {
+        let ch = rest.chars().next()?;
+        if let Some(q) = quote {
+            out.push(ch);
+            cursor += ch.len_utf8();
+            if ch == q {
+                quote = None;
+            }
+        } else if matches!(ch, '\"' | '\'') {
+            quote = Some(ch);
+            out.push(ch);
+            cursor += ch.len_utf8();
+        } else if matches!(ch, '[' | ']' | '{' | '}' | '\r' | '\n') {
+            return None;
+        } else if !previous.is_some_and(identifier) {
+            if let Some((col, row, ca, ra, tail)) = gridcraft_core::addr::parse_a1_prefix(rest)
+                && !tail.chars().next().is_some_and(|c| identifier(c) || matches!(c, '(' | '!'))
+            {
+                out.push_str(&relative_axis('R', row, ra, at.row));
+                out.push_str(&relative_axis('C', col, ca, at.col));
+                cursor += rest.len() - tail.len();
+            } else if let Some((len, converted)) = whole_axis_range(rest) {
+                out.push_str(&converted);
+                cursor += len;
+            } else {
+                if ch == '$' {
+                    return None;
+                }
+                out.push(ch);
+                cursor += ch.len_utf8();
+            }
+        } else {
+            out.push(ch);
+            cursor += ch.len_utf8();
+        }
+        previous = Some(ch);
+    }
+    if quote.is_some() { None } else { Some(out) }
+}
+
+/// Whole axes use absolute SYLK coordinates; an equal-ended range needs only one axis.
+fn whole_axis_range(text: &str) -> Option<(usize, String)> {
+    fn endpoint(text: &str) -> Option<(usize, char, u32)> {
+        let rest = text.strip_prefix('$').unwrap_or(text);
+        let letters = rest.bytes().take_while(u8::is_ascii_alphabetic).count();
+        let (len, axis, n) = if letters > 0 {
+            (letters, 'C', gridcraft_core::letters_to_col(rest.get(..letters)?)?.checked_add(1)?)
+        } else {
+            let len = rest.bytes().take_while(u8::is_ascii_digit).count();
+            let n = rest.get(..len)?.parse::<u32>().ok().filter(|n| (1..=MAX_ROWS).contains(n))?;
+            (len, 'R', n)
+        };
+        Some((text.len() - rest.len() + len, axis, n))
+    }
+    let (first, axis, n) = endpoint(text)?;
+    let tail = text.get(first..)?.strip_prefix(':')?;
+    let (last, other, m) = endpoint(tail)?;
+    if axis != other || tail.get(last..)?.chars().next().is_some_and(|c| identifier(c) || matches!(c, '(' | '!')) {
+        return None;
+    }
+    Some((first + 1 + last, if n == m { format!("{axis}{n}") } else { format!("{axis}{n}:{axis}{m}") }))
+}
+
+#[cfg(test)]
+mod write_additional_tests {
+    use super::*;
+
+    #[test]
+    fn whole_axes_convert_and_round_trip() {
+        let at = CellRef::new(4, 2);
+        for (a1, r1c1, canonical) in [
+            ("SUM(A:A)", "SUM(C1)", "SUM($A:$A)"),
+            ("SUM(A:C)", "SUM(C1:C3)", "SUM($A:$C)"),
+            ("SUM(1:1)", "SUM(R1)", "SUM($1:$1)"),
+            ("SUM($2:$5)", "SUM(R2:R5)", "SUM($2:$5)"),
+        ] {
+            assert_eq!(a1_to_r1c1(a1, at).as_deref(), Some(r1c1));
+            assert_eq!(r1c1_to_a1(r1c1, at).as_deref(), Some(canonical));
+            let bytes = format!("ID;P\r\nC;Y5;X3;K42;E{r1c1}\r\nE\r\n");
+            let (wb, report) = read_sylk(bytes.as_bytes()).unwrap();
+            assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+            let (back, report) = read_sylk(&write_sylk(&wb, 0).unwrap()).unwrap();
+            assert!(report.warnings.is_empty());
+            assert_eq!(back.sheet(0).unwrap().cell(at).unwrap().formula.as_ref().unwrap().text, canonical);
+        }
+    }
+
+    #[test]
+    fn text_delimiters_quotes_and_line_breaks() {
+        let mut wb = Workbook::new();
+        wb.sheet_mut(0).unwrap().set_value(CellRef::new(0, 0), Value::text("a;\"quoted\"\r\nb\nc"));
+        let bytes = write_sylk(&wb, 0).unwrap();
+        assert!(std::str::from_utf8(&bytes).unwrap().contains("K\"a;;\"quoted\"  b c\"\r\n"));
+        let (back, _) = read_sylk(&bytes).unwrap();
+        assert_eq!(back.sheet(0).unwrap().value(CellRef::new(0, 0)), Value::text("a;\"quoted\"  b c"));
+    }
+
+    #[test]
+    fn unsupported_formula_keeps_cached_value() {
+        let mut wb = Workbook::new();
+        let at = CellRef::new(0, 0);
+        let mut cell = gridcraft_model::Cell::value(Value::Number(7.0));
+        cell.formula = Some(Arc::new(Formula { text: "invalid(".into(), expr: None, array: None, dynamic: false }));
+        wb.sheet_mut(0).unwrap().cells.set(at, cell);
+        let bytes = write_sylk(&wb, 0).unwrap();
+        assert!(!std::str::from_utf8(&bytes).unwrap().lines().any(|line| line.starts_with("C;") && line.contains(";E")));
+        let (back, _) = read_sylk(&bytes).unwrap();
+        assert_eq!(back.sheet(0).unwrap().value(at), Value::Number(7.0));
+        assert!(back.sheet(0).unwrap().cell(at).unwrap().formula.is_none());
+        assert!(a1_to_r1c1("SUM(Table1[Value])", at).is_none());
     }
 }

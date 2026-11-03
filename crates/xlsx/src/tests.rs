@@ -52,6 +52,7 @@ mod smartart_passthrough;
 mod smooth_roundtrip;
 mod strict_passthrough;
 mod sylk_tests;
+mod sylk_write_tests;
 mod table_dxfs;
 mod table_ids;
 mod trendline_roundtrip;

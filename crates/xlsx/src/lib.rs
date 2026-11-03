@@ -55,7 +55,7 @@ pub use dif::{read_dif, write_dif};
 pub use ods::{read_ods, read_ods_with};
 pub use package::MAX_PART;
 pub use passthrough::rebase_links;
-pub use sylk::{is_sylk, read_sylk};
+pub use sylk::{is_sylk, read_sylk, write_sylk};
 pub use xls::read_xls;
 pub use xlsb::read_xlsb;
 
