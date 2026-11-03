@@ -270,3 +270,13 @@ mod additional_tests {
         assert!(r1c1_to_a1("R1C16385", at).is_none());
     }
 }
+
+/// Writes one sheet of a workbook as SYLK. (Stub: to be implemented.)
+pub fn write_sylk(_wb: &Workbook, _sheet: usize) -> Result<Vec<u8>, IoError> {
+    Err(IoError::Format("SYLK save is not implemented".into()))
+}
+
+/// Converts A1 references in formula text to R1C1 relative to `at`. (Stub: to be implemented.)
+pub(crate) fn a1_to_r1c1(_formula: &str, _at: CellRef) -> Option<String> {
+    None
+}
