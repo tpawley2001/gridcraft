@@ -8,17 +8,27 @@
 //! table's areas, functions, show-values-as, layout flags, grand totals and style. The records
 //! part is not read: the report is rebuilt from the source on refresh. Anything the model can't
 //! hold becomes a warning, and a damaged part keeps the report as plain cells.
+//!
+//! A calculated field (2.2.5.2.5) is a `BrtBeginPCDField` with `fLoadFmla` set: its formula is
+//! the record's `fldFmla`, a `PivotParsedFormula` (2.5.98.15), after the name and the optional
+//! caption. The field's `PNAMES` collection (`BrtBeginPName` records, part ABNF 2.1.7.38) lists the cache fields the
+//! formula uses by index (`ifdb`), and each `PtgSxName` token names one of them by its position
+//! there. The formula becomes [`PivotCalcField`] text with field names as Excel writes them
+//! (`=Sales/Units`, `='Unit Price'*0.1`), as the .xlsx reader reads `cacheField/@formula`.
 
 use std::collections::HashMap;
 
 use gridcraft_core::{CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, number_to_text};
 use gridcraft_formula::quote_sheet;
-use gridcraft_model::{PivotDateGroup, PivotField, PivotFilter, PivotFunc, PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue};
+use gridcraft_model::{
+    PivotCalcField, PivotDateGroup, PivotField, PivotFilter, PivotFunc, PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue,
+};
 
 use super::{Bytes, Entry, Records, check_type, error, invalid, parse_relationships, rels_path};
 use crate::package::{Package, Rel};
 use crate::pivot::{MAX_FIELDS, MAX_ITEMS, func_caption, same};
 use crate::write::abs_range;
+use crate::xls::formula::{Links, Mode, decode_xlsb};
 use crate::{IoError, ReadReport};
 
 const CACHE_TYPE: &str = "application/vnd.ms-excel.pivotCacheDefinition";
@@ -48,6 +58,7 @@ const BEGIN_PCD_FGROUP: u16 = 219;
 const BEGIN_PCD_FG_ITEMS: u16 = 221;
 const END_PCD_FG_ITEMS: u16 = 222;
 const BEGIN_PCD_FG_RANGE: u16 = 223;
+const BEGIN_PNAME: u16 = 255;
 const PCDI_MISSING: u16 = 20;
 const PCDI_NUMBER: u16 = 21;
 const PCDI_BOOLEAN: u16 = 22;
@@ -95,8 +106,14 @@ pub(super) fn cache_ids(book: &[u8]) -> Vec<(u32, String)> {
 struct FieldIn {
     name: String,
     database: bool,
-    /// A calculated field: its formula is stored as parsed tokens, which aren't imported.
+    /// A calculated field (`fLoadFmla`).
     calculated: bool,
+    /// A calculated field's formula as read: (`rgce`, `rgcb`).
+    tokens: Option<(Vec<u8>, Vec<u8>)>,
+    /// The cache fields (`ifdb`) its `PtgSxName` tokens refer to, in `BrtBeginPName` order.
+    pnames: Vec<u32>,
+    /// The decoded formula (`=Sales/Units`); `None` for a calculated field that isn't imported.
+    formula: Option<String>,
     items: Vec<String>,
     /// (base field, grouping, group item captions); grouping `None` = unsupported grouping.
     group: Option<(Option<usize>, Option<PivotDateGroup>, Vec<String>)>,
@@ -272,14 +289,11 @@ fn cache(bytes: &[u8], sheet_name: &str, sys: DateSystem, report: &mut ReadRepor
     let mut fields: Vec<FieldIn> = Vec::new();
     let mut field: Option<FieldIn> = None;
     let mut to = ItemsTo::None;
-    let mut calculated = false;
     while let Some((id, payload)) = records.next(&mut scratch)? {
         let mut b = Bytes::new(payload);
         match id {
             END_PIVOT_CACHE_DEF => {
-                if calculated {
-                    report.warn("Calculated PivotTable fields in XLSB files are not imported.");
-                }
+                calculated_formulas(&mut fields, report);
                 let Some(source) = source else {
                     report.warn("An XLSB PivotTable's cache has no worksheet source; kept as plain cells.");
                     return Ok(None);
@@ -337,12 +351,27 @@ fn cache(bytes: &[u8], sheet_name: &str, sys: DateSystem, report: &mut ReadRepor
                     field = None;
                     continue;
                 }
+                // Flags: fSrcField 0x0004, fCaption 0x0008, fLoadFmla 0x0100.
                 let flags = b.u16()?;
                 b.take(18)?; // ifmt, wTypeSql, ihdb, isxtl, cIsxtmps
                 let name = b.text(32_767)?;
                 let is_calculated = flags & 0x0100 != 0;
-                calculated |= is_calculated;
-                field = Some(FieldIn { name, database: flags & 0x0004 != 0, calculated: is_calculated, ..FieldIn::default() });
+                // stFldCaption, then fldFmla. One that can't be read is left out (warned below).
+                let tokens = is_calculated
+                    .then(|| {
+                        if flags & 0x0008 != 0 {
+                            b.text(32_767).ok()?;
+                        }
+                        pivot_formula(&mut b).ok()
+                    })
+                    .flatten();
+                field = Some(FieldIn { name, database: flags & 0x0004 != 0, calculated: is_calculated, tokens, ..FieldIn::default() });
+            }
+            BEGIN_PNAME => {
+                // Only a cache field's PNAMES; a calculated item's (out of a field) is not read.
+                if let Some(f) = field.as_mut().filter(|f| f.calculated && f.pnames.len() < MAX_FIELDS) {
+                    f.pnames.push(b.u32()?);
+                }
             }
             END_PCD_FIELD => {
                 if let Some(f) = field.take() {
@@ -388,6 +417,39 @@ fn cache(bytes: &[u8], sheet_name: &str, sys: DateSystem, report: &mut ReadRepor
         }
     }
     Err(invalid("pivot cache definition has no end"))
+}
+
+/// `PivotParsedFormula` ([MS-XLSB] 2.5.98.15): `cce` (under 16,385), `rgce`, `cb`, `rgcb`.
+fn pivot_formula(b: &mut Bytes<'_>) -> Result<(Vec<u8>, Vec<u8>), IoError> {
+    let cce = b.u32()?;
+    if cce >= 16_385 {
+        return Err(invalid("PivotTable formula too long"));
+    }
+    let rgce = b.take(cce as usize)?.to_vec();
+    let cb = b.u32()?;
+    let rgcb = b.take(usize::try_from(cb).map_err(|_| invalid("PivotTable formula too long"))?)?.to_vec();
+    Ok((rgce, rgcb))
+}
+
+/// Decodes each calculated field's formula; one that can't be expressed is warned about and
+/// left out (its data fields are skipped), the rest of the cache is kept.
+fn calculated_formulas(fields: &mut [FieldIn], report: &mut ReadReport) {
+    let names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+    for f in fields.iter_mut().filter(|f| f.calculated) {
+        let decoded = f.tokens.as_ref().ok_or("unreadable formula").and_then(|(rgce, rgcb)| {
+            let pivot_fields = f.pnames.iter().map(|i| usize::try_from(*i).ok().and_then(|i| names.get(i)).cloned().unwrap_or_default()).collect();
+            let links = Links { pivot_fields, ..Links::default() };
+            // Quoted field names are not worksheet syntax: the text is checked when the
+            // PivotTable compiles it, as for the .xlsx reader's `formula` attribute.
+            decode_xlsb(rgce, rgcb, CellRef::new(0, 0), Mode::Cell, &links).map(|e| gridcraft_formula::print(&e)).map_err(|u| u.0)
+        });
+        match decoded {
+            Ok(text) if !f.name.trim().is_empty() => f.formula = Some(format!("={text}")),
+            Ok(_) => report.warn("A calculated PivotTable field without a name was not imported."),
+            Err(why) => report.warn(format!("Calculated PivotTable field \"{}\" was not imported: {why}.", f.name)),
+        }
+        f.tokens = None;
+    }
 }
 
 fn push_item(field: Option<&mut FieldIn>, to: ItemsTo, label: String) {
@@ -739,7 +801,7 @@ fn table(v: &ViewIn, cache: &CacheIn, caches: &Caches, report: &mut ReadReport) 
 
     for d in &v.data {
         let Some(f) = usize::try_from(d.field).ok().and_then(|i| cache.fields.get(i)) else { continue };
-        if f.calculated {
+        if f.calculated && f.formula.is_none() {
             continue;
         }
         let func = func_of(d.func).unwrap_or_else(|| {
@@ -755,6 +817,15 @@ fn table(v: &ViewIn, cache: &CacheIn, caches: &Caches, report: &mut ReadReport) 
             .and_then(|id| crate::tables::builtin_format(u32::from(id)).map(str::to_string).or_else(|| caches.formats.get(&id).cloned()));
         let name = d.name.clone().unwrap_or_else(|| format!("{} of {}", func_caption(func), f.name));
         pt.values.push(PivotValue { source_col: f.name.clone(), func, name, show_as, number_format });
+    }
+
+    // Calculated fields of the cache (each PivotTable on it can use them).
+    for f in &cache.fields {
+        if let Some(formula) = &f.formula
+            && !pt.calculated_fields.iter().any(|c| same(&c.name, &f.name))
+        {
+            pt.calculated_fields.push(PivotCalcField { name: f.name.clone(), formula: formula.clone() });
+        }
     }
 
     pt.anchor = loc.start;

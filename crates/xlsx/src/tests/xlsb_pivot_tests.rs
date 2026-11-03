@@ -3,7 +3,7 @@
 //! PivotTable written as XML. The refreshed report is checked in the engine's integration tests.
 
 use gridcraft_core::{CellRef, RangeRef, Value};
-use gridcraft_model::{PivotFilter, PivotFunc, PivotLayout, PivotSort, PivotTable, Workbook};
+use gridcraft_model::{PivotCalcField, PivotFilter, PivotFunc, PivotLayout, PivotSort, PivotTable, Workbook};
 
 use crate::testing::xlsb_pivot::{PivotCase, cache_part, view_part, xlsb, xlsb_with, xlsx};
 use crate::{ReadReport, read_xlsb, read_xlsx, write_xlsx};
@@ -162,4 +162,67 @@ fn hostile_counts_and_indices_are_bounded() {
     let bad_cache = [cache.clone(), record(191, &run)].concat();
     let (wb, _) = read_xlsb(&xlsb_with(PivotCase::Basic, &bad_cache, &view_part(PivotCase::Basic))).unwrap();
     assert!(wb.sheets.len() == 2);
+}
+
+fn calc(name: &str, formula: &str) -> PivotCalcField {
+    PivotCalcField { name: name.into(), formula: formula.into() }
+}
+
+#[test]
+fn calculated_field_in_the_values_matches_xlsx() {
+    let pt = same_as_xlsx(PivotCase::Calculated);
+    assert_eq!(pt.calculated_fields, vec![calc("Price", "=Sales/Units")]);
+    assert_eq!(pt.values.len(), 2);
+    assert_eq!((pt.values[0].source_col.as_str(), pt.values[0].name.as_str()), ("Sales", "Sum of Sales"));
+    assert_eq!((pt.values[1].source_col.as_str(), pt.values[1].func, pt.values[1].name.as_str()), ("Price", PivotFunc::Sum, "Sum of Price"));
+    assert_eq!(pt.rows.iter().map(|f| f.source_col.as_str()).collect::<Vec<_>>(), ["Region"]);
+    assert!(pt.columns.is_empty() && !pt.values_on_rows);
+    let (_, report) = from_xlsb(PivotCase::Calculated);
+    assert!(report.warnings.iter().all(|w| !w.to_lowercase().contains("calculated")), "{:?}", report.warnings);
+}
+
+/// Field names are quoted only where Excel would quote a sheet name, as in the .xlsx test's
+/// `='Unit Price'*0.1`; a calculated field may use another one.
+#[test]
+fn calculated_fields_using_calculated_fields_match_xlsx() {
+    let pt = same_as_xlsx(PivotCase::CalculatedChain);
+    assert_eq!(pt.calculated_fields, vec![calc("Price", "=Sales/Units"), calc("Unit Bonus", "=Price*0.1"), calc("Half Bonus", "='Unit Bonus'/2")]);
+}
+
+#[test]
+fn calculated_field_with_unsupported_tokens_is_skipped_alone() {
+    let (wb, report) = from_xlsb(PivotCase::CalculatedUnsupported);
+    let warnings = pivot_warnings(&report);
+    assert_eq!(warnings.len(), 1, "{:?}", report.warnings);
+    assert!(warnings[0].contains("\"Bad\""), "{warnings:?}");
+    let pts = pivots(&wb);
+    assert_eq!(pts.len(), 1);
+    assert_eq!(pts[0].calculated_fields, vec![calc("Price", "=Sales/Units")]);
+    assert_eq!(pts[0].values.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["Sum of Sales", "Sum of Price"]);
+}
+
+#[test]
+fn calculated_field_survives_xlsx_save_and_reopen() {
+    for case in [PivotCase::Calculated, PivotCase::CalculatedChain] {
+        let (wb, _) = from_xlsb(case);
+        let before = pivots(&wb);
+        let (back, report) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+        assert!(pivot_warnings(&report).is_empty(), "{case:?}: {:?}", report.warnings);
+        let after = pivots(&back);
+        assert_eq!(after.len(), 1, "{case:?}");
+        assert_eq!(after[0].calculated_fields, before[0].calculated_fields, "{case:?}");
+        assert_eq!(after[0].values, before[0].values, "{case:?}");
+        let strip = |p: &PivotTable| PivotTable { id: 0, ..p.clone() };
+        assert_eq!(strip(&after[0]), strip(&before[0]), "{case:?}");
+    }
+}
+
+/// Every truncation of a cache with calculated fields imports without a panic.
+#[test]
+fn truncated_calculated_cache_never_aborts_the_import() {
+    let (cache, view) = (cache_part(PivotCase::CalculatedChain), view_part(PivotCase::CalculatedChain));
+    for n in 0..cache.len() {
+        let (wb, report) = read_xlsb(&xlsb_with(PivotCase::CalculatedChain, &cache[..n], &view)).unwrap();
+        assert!(pivots(&wb).is_empty() || !pivot_warnings(&report).is_empty() || n + 1 >= cache.len(), "cache cut at {n}");
+    }
 }

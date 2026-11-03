@@ -1,7 +1,7 @@
 # Importing Excel binary workbooks
 
-Last updated: 2026-11-01.
-> **Last updated:** 2026-11-01 · **Change:** minor (pictures, shapes, text boxes and charts imported; PivotTables imported; workbook themes and theme tab colours imported)
+Last updated: 2026-11-02.
+> **Last updated:** 2026-11-02 · **Change:** minor (calculated PivotTable fields imported; pictures, shapes, text boxes and charts imported; PivotTables imported; workbook themes and theme tab colours imported)
 
 Open an `.xlsb` file with File → Open, drag it onto GridCraft, or pass it to the CLI.
 GridCraft imports worksheet data into a new workbook and shows the conversion limits.
@@ -68,7 +68,10 @@ row, column and page fields (with the selected page item), data fields with thei
 number formats, grand totals and PivotTable style with its options, so they refresh, can be
 edited and save to XLSX as PivotTables. PivotTables over external, OLAP or consolidation
 sources, with a missing cache part or a damaged part keep their last rendered values as plain
-cells with one warning; calculated fields and grouping the model can't hold also warn.
+cells with one warning. Calculated fields keep their formula (`=Sales/Units`, field names in
+quotes where needed: `='Unit Price'*0.1`) and can be used in the values area, as in XLSX; one
+whose formula uses tokens the import can't decode is skipped with one warning. Grouping the
+model can't hold also warns.
 
 Save opens Save As and suggests a new `.xlsx` file. The source XLSB file is not used as the
 workbook's save destination; requests to save to `.xlsb` return an error.
@@ -94,6 +97,7 @@ identifiers are 677 (workbook) and 678 (sheet).
 
 | Date | Change |
 |---|---|
+| 2026-11-02 | Calculated PivotTable fields: `fldFmla` of `BrtBeginPCDField` decoded with its `PtgSxName` field references (PNAMES); they refresh and save to XLSX. |
 | 2026-11-01 | Import pictures, shapes, text boxes and charts from each sheet's drawing part (BrtDrawing). |
 | 2026-11-01 | Array constants and PtgMemArea caches decode in cell, shared, array and defined-name formulas; malformed payloads retain saved results. Layouts follow [MS-XLSB] PtgArray, PtgExtraArray, SerAr and PtgExtraMem. |
 | --- | --- |

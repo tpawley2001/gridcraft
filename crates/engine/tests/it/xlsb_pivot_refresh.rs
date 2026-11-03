@@ -61,3 +61,16 @@ fn xlsb_page_field_filters_the_refresh() {
     assert_eq!(row_numbers(&wb, "B"), [30.0]);
     assert_eq!(row_numbers(&wb, "Grand Total"), [40.0]);
 }
+
+/// Sum of Price (calculated Price = Sales/Units) is sum(Sales) / sum(Units) per Region.
+#[test]
+fn xlsb_calculated_field_refreshes_like_the_xlsx_one() {
+    // East: Sales 10 + 30, Units 2 + 3; West: Sales 20 + 40, Units 4 + 10.
+    for case in [PivotCase::Calculated, PivotCase::CalculatedChain] {
+        for wb in [refreshed(&xlsb(case), true), refreshed(&xlsx(case), false)] {
+            assert_eq!(row_numbers(&wb, "East"), [40.0, 40.0 / 5.0], "{case:?}");
+            assert_eq!(row_numbers(&wb, "West"), [60.0, 60.0 / 14.0], "{case:?}");
+            assert_eq!(row_numbers(&wb, "Grand Total"), [100.0, 100.0 / 19.0], "{case:?}");
+        }
+    }
+}

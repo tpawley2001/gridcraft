@@ -1,7 +1,8 @@
 //! A small sales list ("Data" A1:C5: Region, Product, Sales) with a PivotTable on "Report", built
 //! in code twice: as an .xlsb package (records from the public [MS-XLSB] layouts) and as the
 //! equivalent .xlsx package (hand-written SpreadsheetML), so tests can check that both readers
-//! give the same PivotTable and that it refreshes.
+//! give the same PivotTable and that it refreshes. The calculated-field cases add a Units column
+//! (Data!D) and calculated fields over it.
 
 use std::io::Write;
 
@@ -20,6 +21,73 @@ pub enum PivotCase {
     MissingCache,
     /// As `Basic` with a truncated `BrtBeginSXView` record.
     TruncatedView,
+    /// Cache fields Region, Product, Sales, Units and calculated Price = Sales/Units; rows
+    /// Region, values Sum of Sales and Sum of Price (Σ Values in Columns), at Report!A3.
+    Calculated,
+    /// As `Calculated` plus `Unit Bonus` = Price*0.1 and `Half Bonus` = 'Unit Bonus'/2, which
+    /// use calculated fields.
+    CalculatedChain,
+    /// As `Calculated` plus `Bad`, whose formula is a token the import refuses (`PtgExp`), and
+    /// values Sum of Sales, Sum of Bad and Sum of Price.
+    CalculatedUnsupported,
+}
+
+impl PivotCase {
+    fn calculated(self) -> bool {
+        matches!(self, PivotCase::Calculated | PivotCase::CalculatedChain | PivotCase::CalculatedUnsupported)
+    }
+}
+
+/// Units of the `DATA` records in the calculated-field cases.
+pub const UNITS: [f64; 4] = [2.0, 4.0, 3.0, 10.0];
+
+/// `PtgSxName` ([MS-XLSB] 2.5.98.16): 0x18, eptg 0x1D, then `sxIndex` (the position of the
+/// field in the formula's PNAMES collection).
+fn sx_name(index: u32) -> Vec<u8> {
+    [vec![0x18, 0x1D], index.to_le_bytes().to_vec()].concat()
+}
+
+/// A calculated cache field: name, the .xlsx `formula` attribute, the `rgce` tokens and the
+/// cache fields (`ifdb`) its `PtgSxName` tokens refer to.
+struct Calc {
+    name: &'static str,
+    xlsx: &'static str,
+    rgce: Vec<u8>,
+    refs: Vec<u32>,
+}
+
+/// The calculated fields of `case`, after the four source fields (indices 4, 5, …).
+fn calcs(case: PivotCase) -> Vec<Calc> {
+    if !case.calculated() {
+        return vec![];
+    }
+    // Price = Sales/Units: two field references and PtgDiv (0x06).
+    let mut out = vec![Calc { name: "Price", xlsx: "Sales/Units", rgce: [sx_name(0), sx_name(1), vec![0x06]].concat(), refs: vec![2, 3] }];
+    match case {
+        PivotCase::CalculatedChain => {
+            // Unit Bonus = Price*0.1: PtgNum (0x1F, f64) and PtgMul (0x05).
+            let num = [vec![0x1F], 0.1f64.to_le_bytes().to_vec()].concat();
+            out.push(Calc { name: "Unit Bonus", xlsx: "Price*0.1", rgce: [sx_name(0), num, vec![0x05]].concat(), refs: vec![4] });
+            // Half Bonus = 'Unit Bonus'/2: PtgInt (0x1E, u16) and PtgDiv.
+            out.push(Calc { name: "Half Bonus", xlsx: "'Unit Bonus'/2", rgce: [sx_name(0), vec![0x1E, 2, 0, 0x06]].concat(), refs: vec![5] });
+        }
+        PivotCase::CalculatedUnsupported => {
+            // PtgExp (0x01) and a row: never valid in a PivotParsedFormula.
+            out.push(Calc { name: "Bad", xlsx: "", rgce: vec![0x01, 0, 0, 0, 0], refs: vec![] });
+        }
+        _ => {}
+    }
+    out
+}
+
+/// The data fields of `case`: (cache field, caption).
+fn data_fields(case: PivotCase) -> Vec<(u32, &'static str)> {
+    match case {
+        PivotCase::Count => vec![(2, "Count of Sales")],
+        PivotCase::Calculated | PivotCase::CalculatedChain => vec![(2, "Sum of Sales"), (4, "Sum of Price")],
+        PivotCase::CalculatedUnsupported => vec![(2, "Sum of Sales"), (5, "Sum of Bad"), (4, "Sum of Price")],
+        _ => vec![(2, "Sum of Sales")],
+    }
 }
 
 const DATA: [(&str, &str, f64); 4] = [("East", "A", 10.0), ("West", "A", 20.0), ("East", "B", 30.0), ("West", "B", 40.0)];
@@ -91,11 +159,20 @@ fn worksheet(rows: &[(u32, Vec<Vec<u8>>)], tail: &[u8]) -> Vec<u8> {
     [out, record(146, &[]), tail.to_vec(), record(130, &[])].concat()
 }
 
-/// The Data sheet: headers and four records, plus table "SalesTbl" for `TableSource`.
-fn data_sheet(table: bool) -> Vec<u8> {
-    let mut rows = vec![(0, HEADERS.iter().enumerate().map(|(c, h)| text_cell(c as u32, h)).collect())];
+/// The Data sheet: headers and four records, plus table "SalesTbl" for `TableSource` and a
+/// Units column for the calculated-field cases.
+fn data_sheet(table: bool, units: bool) -> Vec<u8> {
+    let mut header: Vec<Vec<u8>> = HEADERS.iter().enumerate().map(|(c, h)| text_cell(c as u32, h)).collect();
+    if units {
+        header.push(text_cell(3, "Units"));
+    }
+    let mut rows = vec![(0, header)];
     for (r, (region, product, sales)) in DATA.iter().enumerate() {
-        rows.push((r as u32 + 1, vec![text_cell(0, region), text_cell(1, product), number_cell(2, *sales)]));
+        let mut cells = vec![text_cell(0, region), text_cell(1, product), number_cell(2, *sales)];
+        if units {
+            cells.push(number_cell(3, UNITS[r]));
+        }
+        rows.push((r as u32 + 1, cells));
     }
     let tail = if table { [record(660, &u32s(&[1])), record(661, &wide("rIdT1")), record(662, &[])].concat() } else { vec![] };
     worksheet(&rows, &tail)
@@ -151,6 +228,32 @@ fn cache_field(name: &str, atbl_flags: u16, minmax: Option<(f64, f64)>, items: &
     [record(183, &field), record(189, &atbl), items.concat(), record(190, &[]), record(184, &[])].concat()
 }
 
+/// `BrtBeginPCDField` … `BrtEndPCDField` for a calculated field: flags fLoadFmla (0x0100), not
+/// fSrcField; ifmt, wTypeSql, ihdb, isxtl, cIsxtmps (18 zero bytes); stFldName; fldFmla, a
+/// PivotParsedFormula (cce, rgce, cb = 0). Then PNAMES: `BrtBeginPNames` (253, cnames), per
+/// referenced field `BrtBeginPName` (255: ifdb, ifn 0xFF "not specified", flags 0) and
+/// `BrtEndPName` (256), and `BrtEndPNames` (254).
+fn calc_field(c: &Calc) -> Vec<u8> {
+    let mut field = 0x0100u16.to_le_bytes().to_vec();
+    field.extend([0; 18]);
+    field.extend(wide(c.name));
+    field.extend(u32s(&[c.rgce.len() as u32]));
+    field.extend(&c.rgce);
+    field.extend(u32s(&[0]));
+    let mut out = record(183, &field);
+    if !c.refs.is_empty() {
+        out.extend(record(253, &u32s(&[c.refs.len() as u32])));
+        for ifdb in &c.refs {
+            let mut name = ifdb.to_le_bytes().to_vec();
+            name.extend([0xff, 0]);
+            out.extend([record(255, &name), record(256, &[])].concat());
+        }
+        out.extend(record(254, &[]));
+    }
+    out.extend(record(184, &[]));
+    out
+}
+
 /// The PivotCache Definition part.
 pub fn cache_part(case: PivotCase) -> Vec<u8> {
     // Version bytes, fRefreshOnLoad and fEnableRefresh, citmGhostMax, refresh date, flags,
@@ -163,8 +266,15 @@ pub fn cache_part(case: PivotCase) -> Vec<u8> {
     let range = if case == PivotCase::TableSource {
         [vec![1, 0, 0], wide("SalesTbl")].concat()
     } else {
-        [vec![0, 0, 2], wide("Data"), u32s(&[0, 4, 0, 2])].concat()
+        [vec![0, 0, 2], wide("Data"), u32s(&[0, 4, 0, if case.calculated() { 3 } else { 2 }])].concat()
     };
+    let calcs = calcs(case);
+    let mut extra = vec![];
+    if case.calculated() {
+        extra.push(cache_field("Units", 0x01c0, Some((2.0, 10.0)), &[], 0));
+    }
+    extra.extend(calcs.iter().map(calc_field));
+    let count = if case.calculated() { 4 + calcs.len() as u32 } else { 3 };
     let strings = |items: &[&str]| -> Vec<Vec<u8>> { items.iter().map(|s| record(24, &wide(s))).collect() };
     let mut run = 2u16.to_le_bytes().to_vec();
     run.extend(u32s(&[2]));
@@ -175,10 +285,11 @@ pub fn cache_part(case: PivotCase) -> Vec<u8> {
         record(187, &range),
         record(188, &[]),
         record(186, &[]),
-        record(181, &u32s(&[3])),
+        record(181, &u32s(&[count])),
         cache_field("Region", 0x0009, None, &strings(&["East", "West"]), 2),
         cache_field("Product", 0x0009, None, &[record(191, &run), record(192, &[])], 2),
         cache_field("Sales", 0x01c0, Some((10.0, 40.0)), &[], 0),
+        extra.concat(),
         record(182, &[]),
         record(180, &[]),
     ]
@@ -223,21 +334,49 @@ pub fn view_part(case: PivotCase) -> Vec<u8> {
         view.truncate(10);
     }
     // rfxGeom, rwFirstHead, rwFirstData, colFirstData, crwPage, ccolPage
-    let location = if page { u32s(&[2, 5, 0, 1, 3, 3, 1, 1, 1]) } else { u32s(&[2, 6, 0, 3, 3, 4, 1, 0, 0]) };
-    let (func, name) = if case == PivotCase::Count { (1, "Count of Sales") } else { (0, "Sum of Sales") };
-    let mut data = u32s(&[2, func, 0, 0, 0, 0]);
-    data.push(1);
-    data.extend(wide(name));
+    let location = if page {
+        u32s(&[2, 5, 0, 1, 3, 3, 1, 1, 1])
+    } else if case.calculated() {
+        u32s(&[2, 5, 0, 2, 3, 3, 1, 0, 0])
+    } else {
+        u32s(&[2, 6, 0, 3, 3, 4, 1, 0, 0])
+    };
+    let func = if case == PivotCase::Count { 1 } else { 0 };
+    let data_fields = data_fields(case);
+    // BrtBeginSXDI: isxvdData, iiftab, df, isxvd, isxvi, ifmt, fName and stDisplayName.
+    let data: Vec<u8> = data_fields
+        .iter()
+        .flat_map(|(field, name)| {
+            let mut data = u32s(&[*field, func, 0, 0, 0, 0]);
+            data.push(1);
+            data.extend(wide(name));
+            [record(293, &data), record(294, &[])].concat()
+        })
+        .collect();
+    // Pivot fields after Sales: Units (no axis) and the calculated fields (data).
+    let extra: Vec<u8> =
+        if case.calculated() { [pivot_field(0, 0), calcs(case).iter().flat_map(|_| pivot_field(8, 0)).collect()].concat() } else { vec![] };
+    let fields = if case.calculated() { 4 + calcs(case).len() as u32 } else { 3 };
     let mut style = 0x0030u16.to_le_bytes().to_vec();
     style.extend(wide("PivotStyleLight16"));
     let mut out = [
         record(280, &view),
         record(314, &location),
         record(313, &[]),
-        record(287, &u32s(&[3])),
+        record(287, &u32s(&[fields])),
         pivot_field(if page { 4 } else { 1 }, 2),
-        pivot_field(if page { 1 } else { 2 }, 2),
+        pivot_field(
+            if page {
+                1
+            } else if case.calculated() {
+                0
+            } else {
+                2
+            },
+            2,
+        ),
         pivot_field(8, 0),
+        extra,
         record(288, &[]),
     ]
     .concat();
@@ -248,9 +387,11 @@ pub fn view_part(case: PivotCase) -> Vec<u8> {
         pi.push(0);
         out.extend([record(291, &u32s(&[1])), record(289, &pi), record(290, &[]), record(292, &[])].concat());
     } else {
-        out.extend([record(309, &u32s(&[1, 0])), record(310, &[]), record(311, &u32s(&[1, 1])), record(312, &[])].concat());
+        // Columns: Product, or Σ Values (-2) in the calculated-field cases.
+        let col = if case.calculated() { (-2i32) as u32 } else { 1 };
+        out.extend([record(309, &u32s(&[1, 0])), record(310, &[]), record(311, &u32s(&[1, col])), record(312, &[])].concat());
     }
-    out.extend([record(295, &u32s(&[1])), record(293, &data), record(294, &[]), record(296, &[])].concat());
+    out.extend([record(295, &u32s(&[data_fields.len() as u32])), data, record(296, &[])].concat());
     out.extend([record(513, &style), record(315, &[])].concat());
     out
 }
@@ -308,7 +449,7 @@ pub fn xlsb_with(case: PivotCase, cache: &[u8], view: &[u8]) -> Vec<u8> {
     let data_rels = rels(&[("rIdT1", "table", "../tables/table1.bin")]);
     let report_rels = rels(&[("rId1", "pivotTable", "../pivotTables/pivotTable1.bin")]);
     let view_rels = rels(&[("rId1", "pivotCacheDefinition", "../pivotCache/pivotCacheDefinition1.bin")]);
-    let (data, report, table_bin) = (data_sheet(table), report_sheet(), table_part());
+    let (data, report, table_bin) = (data_sheet(table, case.calculated()), report_sheet(), table_part());
     let mut parts: Vec<(&str, &[u8])> = vec![
         ("[Content_Types].xml", types.as_bytes()),
         ("_rels/.rels", root.as_bytes()),
@@ -355,23 +496,53 @@ fn number_xml(cell: &str, n: f64) -> String {
 pub fn xlsx(case: PivotCase) -> Vec<u8> {
     let table = case == PivotCase::TableSource;
     let page = case == PivotCase::PageFilter;
-    let mut data_rows = vec![(1, HEADERS.iter().zip(["A1", "B1", "C1"]).map(|(h, c)| text_xml(c, h)).collect())];
+    let calc = case.calculated();
+    let mut header: Vec<String> = HEADERS.iter().zip(["A1", "B1", "C1"]).map(|(h, c)| text_xml(c, h)).collect();
+    if calc {
+        header.push(text_xml("D1", "Units"));
+    }
+    let mut data_rows = vec![(1, header)];
     for (i, (region, product, sales)) in DATA.iter().enumerate() {
         let r = i + 2;
-        data_rows
-            .push((r as u32, vec![text_xml(&format!("A{r}"), region), text_xml(&format!("B{r}"), product), number_xml(&format!("C{r}"), *sales)]));
+        let mut cells = vec![text_xml(&format!("A{r}"), region), text_xml(&format!("B{r}"), product), number_xml(&format!("C{r}"), *sales)];
+        if calc {
+            cells.push(number_xml(&format!("D{r}"), UNITS[i]));
+        }
+        data_rows.push((r as u32, cells));
     }
     let data = sheet_xml(&data_rows, if table { r#"<tableParts count="1"><tablePart r:id="rIdT1"/></tableParts>"# } else { "" });
     let report = sheet_xml(&[(3, vec![text_xml("A3", "Sum of Sales")])], "");
     let book = format!(
         r#"<?xml version="1.0"?><workbook xmlns="{MAIN_NS}" xmlns:r="{REL}"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/><sheet name="Report" sheetId="2" r:id="rId2"/></sheets><pivotCaches><pivotCache cacheId="1" r:id="rId3"/></pivotCaches></workbook>"#
     );
-    let source = if table { r#"<worksheetSource name="SalesTbl"/>"# } else { r#"<worksheetSource ref="A1:C5" sheet="Data"/>"# };
+    let source = if table {
+        r#"<worksheetSource name="SalesTbl"/>"#
+    } else if calc {
+        r#"<worksheetSource ref="A1:D5" sheet="Data"/>"#
+    } else {
+        r#"<worksheetSource ref="A1:C5" sheet="Data"/>"#
+    };
+    let calcs = calcs(case);
+    let mut extra_fields = String::new();
+    if calc {
+        extra_fields.push_str(r#"<cacheField name="Units" numFmtId="0"><sharedItems containsSemiMixedTypes="0" containsString="0" containsNumber="1" containsInteger="1" minValue="2" maxValue="10"/></cacheField>"#);
+    }
+    for c in &calcs {
+        let formula = c.xlsx.replace('\'', "&apos;");
+        extra_fields.push_str(&format!(r#"<cacheField name="{}" numFmtId="0" formula="{formula}" databaseField="0"/>"#, c.name));
+    }
+    let field_count = if calc { 4 + calcs.len() } else { 3 };
     let cache = format!(
-        r#"<?xml version="1.0"?><pivotCacheDefinition xmlns="{MAIN_NS}" xmlns:r="{REL}" refreshOnLoad="1" createdVersion="3" refreshedVersion="3" minRefreshableVersion="3" recordCount="0"><cacheSource type="worksheet">{source}</cacheSource><cacheFields count="3"><cacheField name="Region" numFmtId="0"><sharedItems count="2"><s v="East"/><s v="West"/></sharedItems></cacheField><cacheField name="Product" numFmtId="0"><sharedItems count="2"><s v="A"/><s v="B"/></sharedItems></cacheField><cacheField name="Sales" numFmtId="0"><sharedItems containsSemiMixedTypes="0" containsString="0" containsNumber="1" containsInteger="1" minValue="10" maxValue="40"/></cacheField></cacheFields></pivotCacheDefinition>"#
+        r#"<?xml version="1.0"?><pivotCacheDefinition xmlns="{MAIN_NS}" xmlns:r="{REL}" refreshOnLoad="1" createdVersion="3" refreshedVersion="3" minRefreshableVersion="3" recordCount="0"><cacheSource type="worksheet">{source}</cacheSource><cacheFields count="{field_count}"><cacheField name="Region" numFmtId="0"><sharedItems count="2"><s v="East"/><s v="West"/></sharedItems></cacheField><cacheField name="Product" numFmtId="0"><sharedItems count="2"><s v="A"/><s v="B"/></sharedItems></cacheField><cacheField name="Sales" numFmtId="0"><sharedItems containsSemiMixedTypes="0" containsString="0" containsNumber="1" containsInteger="1" minValue="10" maxValue="40"/></cacheField>{extra_fields}</cacheFields></pivotCacheDefinition>"#
     );
     let items = r#"<items count="3"><item x="0"/><item x="1"/><item t="default"/></items>"#;
-    let (location, fields, areas) = if page {
+    let (location, fields, areas) = if calc {
+        (
+            r#"<location ref="A3:C6" firstHeaderRow="0" firstDataRow="1" firstDataCol="1"/>"#,
+            format!(r#"<pivotField axis="axisRow" showAll="0">{items}</pivotField><pivotField showAll="0">{items}</pivotField>"#),
+            r#"<rowFields count="1"><field x="0"/></rowFields><colFields count="1"><field x="-2"/></colFields>"#,
+        )
+    } else if page {
         (
             r#"<location ref="A3:B6" firstHeaderRow="1" firstDataRow="1" firstDataCol="1" rowPageCount="1" colPageCount="1"/>"#,
             format!(r#"<pivotField axis="axisPage" showAll="0">{items}</pivotField><pivotField axis="axisRow" showAll="0">{items}</pivotField>"#),
@@ -384,13 +555,18 @@ pub fn xlsx(case: PivotCase) -> Vec<u8> {
             r#"<rowFields count="1"><field x="0"/></rowFields><colFields count="1"><field x="1"/></colFields>"#,
         )
     };
-    let data_field = if case == PivotCase::Count {
-        r#"<dataField name="Count of Sales" fld="2" subtotal="count" baseField="0" baseItem="0"/>"#
+    let subtotal = if case == PivotCase::Count { r#" subtotal="count""# } else { "" };
+    let data_list = data_fields(case);
+    let data_field: String =
+        data_list.iter().map(|(fld, name)| format!(r#"<dataField name="{name}" fld="{fld}"{subtotal} baseField="0" baseItem="0"/>"#)).collect();
+    let data_count = data_list.len();
+    let extra_pivot_fields = if calc {
+        format!(r#"<pivotField showAll="0"/>{}"#, r#"<pivotField dataField="1" showAll="0"/>"#.repeat(calcs.len()))
     } else {
-        r#"<dataField name="Sum of Sales" fld="2" baseField="0" baseItem="0"/>"#
+        String::new()
     };
     let view = format!(
-        r#"<?xml version="1.0"?><pivotTableDefinition xmlns="{MAIN_NS}" name="PivotTable1" cacheId="1" applyNumberFormats="0" applyBorderFormats="0" applyFontFormats="0" applyPatternFormats="0" applyAlignmentFormats="0" applyWidthHeightFormats="1" dataCaption="Values" updatedVersion="3" minRefreshableVersion="3" useAutoFormatting="1" itemPrintTitles="1" createdVersion="3" indent="0" outline="1" outlineData="1" multipleFieldFilters="0">{location}<pivotFields count="3">{fields}<pivotField dataField="1" showAll="0"/></pivotFields>{areas}<dataFields count="1">{data_field}</dataFields><pivotTableStyleInfo name="PivotStyleLight16" showRowHeaders="1" showColHeaders="1" showRowStripes="0" showColStripes="0" showLastColumn="1"/></pivotTableDefinition>"#
+        r#"<?xml version="1.0"?><pivotTableDefinition xmlns="{MAIN_NS}" name="PivotTable1" cacheId="1" applyNumberFormats="0" applyBorderFormats="0" applyFontFormats="0" applyPatternFormats="0" applyAlignmentFormats="0" applyWidthHeightFormats="1" dataCaption="Values" updatedVersion="3" minRefreshableVersion="3" useAutoFormatting="1" itemPrintTitles="1" createdVersion="3" indent="0" outline="1" outlineData="1" multipleFieldFilters="0">{location}<pivotFields count="{field_count}">{fields}<pivotField dataField="1" showAll="0"/>{extra_pivot_fields}</pivotFields>{areas}<dataFields count="{data_count}">{data_field}</dataFields><pivotTableStyleInfo name="PivotStyleLight16" showRowHeaders="1" showColHeaders="1" showRowStripes="0" showColStripes="0" showLastColumn="1"/></pivotTableDefinition>"#
     );
     let table_xml = format!(
         r#"<?xml version="1.0"?><table xmlns="{MAIN_NS}" id="1" name="SalesTbl" displayName="SalesTbl" ref="A1:C5"><autoFilter ref="A1:C5"/><tableColumns count="3"><tableColumn id="1" name="Region"/><tableColumn id="2" name="Product"/><tableColumn id="3" name="Sales"/></tableColumns><tableStyleInfo name="TableStyleMedium2" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/></table>"#
