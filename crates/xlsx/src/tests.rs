@@ -12,6 +12,7 @@ mod chart_combo_kinds;
 mod chart_data_table;
 mod chart_ref_offsets;
 mod csv_tests;
+mod dif_tests;
 mod drawing_hyperlinks;
 mod dxf_font_charset;
 mod encrypted_tests;
