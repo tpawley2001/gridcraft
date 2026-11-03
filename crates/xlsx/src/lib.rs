@@ -12,6 +12,7 @@
 #![forbid(unsafe_code)]
 
 mod array_formula;
+mod binary_custom_views;
 mod cfb;
 mod chart;
 mod chartex;

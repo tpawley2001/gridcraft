@@ -209,6 +209,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut model_index: Vec<Option<usize>> = Vec::with_capacity(sheets.len());
     let mut table_names = HashSet::new();
     let mut table_id = 1u32;
+    let sheet_ids: Vec<u32> = sheets.iter().map(|s| s.sheet_id).collect();
     let mut chart_sheets = vec![];
     let mut chart_bounds: Vec<usize> = vec![];
     let mut unread_chart_sheets = false;
@@ -327,6 +328,25 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         report.warn(UNREAD_FORMULAS);
     }
     add_macro_sheets(&mut wb, macro_sheets, &chart_bounds);
+    let mut views = Vec::new();
+    let mut records = Records::new(&book);
+    while let Some((id, payload)) = records.next(&mut report)? {
+        if id == 397 {
+            if views.len() < crate::binary_custom_views::LIMIT
+                && let Some(view) = crate::binary_custom_views::book(payload, true)
+            {
+                views.push(view);
+            } else {
+                crate::binary_custom_views::warn(&mut report);
+            }
+        }
+    }
+    if !views.is_empty() {
+        crate::binary_custom_views::pin_sheet_ids(&mut wb);
+    }
+    crate::binary_custom_views::finish_book(&views, &mut wb.preserved, |id| {
+        sheet_ids.iter().position(|&s| s == id).and_then(|i| model_index.get(i).copied().flatten()).unwrap_or(0)
+    });
     add_defined_names(&names, &model_index, &mut wb, &mut report, |l| decode_xlsb(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &links));
     if budget.formulas_kept > 0 {
         report.warn(format!(
@@ -716,6 +736,7 @@ impl<'a> Records<'a> {
 }
 
 struct SheetInfo {
+    sheet_id: u32,
     name: String,
     rel: Option<String>,
     visibility: Visibility,
@@ -808,7 +829,7 @@ fn workbook(
                 let name = b.text(31)?;
                 b.finish()?;
                 links.sheets.push(name.clone());
-                sheets.push(SheetInfo { name, rel, visibility });
+                sheets.push(SheetInfo { sheet_id, name, rel, visibility });
             }
             // BrtSupBookSrc (another workbook), BrtSupSelf / BrtSupSame (this one), BrtSupAddin.
             355 | 357 | 358 | 667 if links.books.len() < MAX_LINKS => {
@@ -1423,6 +1444,7 @@ fn worksheet(
     let mut col_budget = MAX_COL_ASSIGNMENTS;
     let mut view_seen = false;
     let mut in_first_view = false;
+    let mut custom_views = crate::binary_custom_views::SheetViews::default();
     let mut groups = Groups::default();
     let mut page = PageState::default();
     let mut rules = rules::Rules::default();
@@ -1430,9 +1452,13 @@ fn worksheet(
     // The `icmb` of a BrtCellMeta, for the cell record that follows it.
     let mut meta: Option<u32> = None;
     while let Some((id, payload)) = records.next(report)? {
+        if id != 130 && custom_views.record(id, payload, true, report) {
+            continue;
+        }
         let mut b = Bytes::new(payload);
         match id {
             130 => {
+                custom_views.finish(&mut sheet.preserved, report);
                 if data || !data_seen {
                     return Err(invalid("incomplete worksheet data"));
                 }

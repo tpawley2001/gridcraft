@@ -186,6 +186,8 @@ pub(crate) struct Lbl {
 struct Globals {
     /// The BIFF version every substream's BOF must carry.
     version: u16,
+    custom_views: Vec<(u32, String)>,
+    tab_ids: Vec<u16>,
     /// BIFF5 tables (`None` for BIFF8).
     biff5: Option<Biff5>,
     sheets: Vec<BoundSheet>,
@@ -341,6 +343,17 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     macro_sheet::add_macro_sheets(&mut wb, macro_sheets, &chart_bounds);
     defined_names(&g.names, &g.links, g.biff5.as_ref(), &model_index, &mut wb, &mut report);
     connections.finish(&mut wb, &mut report);
+    if !g.custom_views.is_empty() {
+        crate::binary_custom_views::pin_sheet_ids(&mut wb);
+    }
+    crate::binary_custom_views::finish_book(&g.custom_views, &mut wb.preserved, |id| {
+        let index = if g.tab_ids.is_empty() {
+            usize::try_from(id).ok().and_then(|i| i.checked_sub(1))
+        } else {
+            g.tab_ids.iter().position(|&tab| u32::from(tab) == id)
+        };
+        index.and_then(|i| model_index.get(i).copied().flatten()).unwrap_or(0)
+    });
     tables::finish_workbook(&mut wb);
     let active = g
         .itab_cur
@@ -426,6 +439,21 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
         }
         match rec.id {
             EOF => break,
+            0x013D if g.biff5.is_none() => {
+                while c.remaining() >= 2 && g.tab_ids.len() < 65535 {
+                    g.tab_ids.push(c.u16()?);
+                }
+            }
+            0x01A9 if g.biff5.is_none() => {
+                let data: Vec<u8> = rec.parts.iter().flat_map(|p| p.iter().copied()).take(2048).collect();
+                if g.custom_views.len() < crate::binary_custom_views::LIMIT
+                    && let Some(view) = crate::binary_custom_views::book(&data, false)
+                {
+                    g.custom_views.push(view);
+                } else {
+                    crate::binary_custom_views::warn(report);
+                }
+            }
             0x0012 => protection::protect(&mut c, &mut g.protection, report),
             0x0013 => protection::password(&mut c, &mut g.protection, report),
             0x002F => return Err(invalid(ENCRYPTED)),
@@ -946,6 +974,7 @@ fn worksheet(
         pivots: pivot::Views::default(),
         queries: connections::Blocks::default(),
     };
+    let mut custom_views = crate::binary_custom_views::SheetViews::default();
     let mut depth = 1usize;
     while let Some(rec) = recs.next_record()? {
         budget.record()?;
@@ -980,8 +1009,15 @@ fn worksheet(
             }
             _ => {}
         }
+        if g.biff5.is_none() {
+            let data = rec.parts.first().copied().unwrap_or_default();
+            if custom_views.record(rec.id, data, false, report) {
+                continue;
+            }
+        }
         sheet_record(&rec, &mut st, budget, report)?;
     }
+    custom_views.finish(&mut st.sheet.preserved, report);
     st.sheet.protection = st.protection.sheet();
     // Shared and array formulas: their definitions follow the first cell that uses them.
     let (arrays, shared) = (std::mem::take(&mut st.arrays), std::mem::take(&mut st.shared));
