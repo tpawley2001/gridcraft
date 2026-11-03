@@ -8,18 +8,18 @@ use crate::{read_xls, read_xlsx, write_xlsx};
 
 use super::xls_tests::compound;
 
-fn rec(id: u16, payload: &[u8]) -> Vec<u8> {
+pub(super) fn rec(id: u16, payload: &[u8]) -> Vec<u8> {
     let mut v = id.to_le_bytes().to_vec();
     v.extend_from_slice(&(payload.len() as u16).to_le_bytes());
     v.extend_from_slice(payload);
     v
 }
 
-fn cat(parts: &[&[u8]]) -> Vec<u8> {
+pub(super) fn cat(parts: &[&[u8]]) -> Vec<u8> {
     parts.concat()
 }
 
-fn u16s(v: &[u16]) -> Vec<u8> {
+pub(super) fn u16s(v: &[u16]) -> Vec<u8> {
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 
@@ -27,11 +27,11 @@ fn u32s(v: &[u32]) -> Vec<u8> {
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 
-fn bof(dt: u16) -> Vec<u8> {
+pub(super) fn bof(dt: u16) -> Vec<u8> {
     rec(0x0809, &cat(&[&u16s(&[0x0600, dt, 0x0DBB, 0x07CC]), &[0; 8]]))
 }
 
-fn eof() -> Vec<u8> {
+pub(super) fn eof() -> Vec<u8> {
     rec(0x000A, &[])
 }
 
@@ -44,7 +44,7 @@ fn end() -> Vec<u8> {
 }
 
 /// A workbook of `(name, BoundSheet8 dt, substream)` sheets; every formula's ixti 0 is the first sheet.
-fn book(sheets: &[(&str, u8, Vec<u8>)]) -> Vec<u8> {
+pub(super) fn book(sheets: &[(&str, u8, Vec<u8>)]) -> Vec<u8> {
     let globals = |pos: &[u32]| {
         let mut g = bof(0x0005);
         for ((name, dt, _), p) in sheets.iter().zip(pos) {
@@ -168,12 +168,12 @@ fn drawing() -> Vec<u8> {
 }
 
 /// Obj with FtCmo `ot` and FtEnd.
-fn obj(ot: u16) -> Vec<u8> {
+pub(super) fn obj(ot: u16) -> Vec<u8> {
     rec(0x005D, &cat(&[&u16s(&[0x15, 0x12, ot, 1, 0]), &[0; 12], &u16s(&[0, 0])]))
 }
 
 /// Sheet1 cells: A2:A5 labels as numbers 1-4, B1/C1 headers absent, B2:C5 numbers.
-fn cells() -> Vec<u8> {
+pub(super) fn cells() -> Vec<u8> {
     let mut v = vec![];
     for r in 1..5u16 {
         for c in 0..3u16 {
@@ -191,7 +191,7 @@ fn embedded(chart_stream: &[u8]) -> Vec<u8> {
     book(&[("Sheet1", 0, worksheet(&cat(&[&drawing(), &obj(5), chart_stream])))])
 }
 
-fn column_chart() -> Vec<u8> {
+pub(super) fn column_chart() -> Vec<u8> {
     let two = cat(&[&series(1, &[]), &series(2, &[])]);
     chart(&two, &bar(0), &text(1, "Quarterly sales"))
 }

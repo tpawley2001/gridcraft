@@ -16,8 +16,8 @@
 //! scale, fit to page, margins, headers and footers, print options, manual page breaks), the
 //! sheet tab colour, sheet protection, Allow Edit Ranges (titles, references and legacy passwords), workbook structure protection, the sheet AutoFilter
 //! (range and criteria), charts: embedded charts and chart sheets become live charts whose
-//! series refer to the cells (see `chart`), and PivotTables on worksheet-range or defined-name
-//! sources (cache streams in `_SX_DB_CUR` and the SxView views, in `xls/pivot.rs`). Everything else (pictures, comments, macros) is
+//! series refer to the cells (see `chart`), PNG and JPEG pictures (see `drawing`), and PivotTables on worksheet-range or defined-name
+//! sources (cache streams in `_SX_DB_CUR` and the SxView views, in `xls/pivot.rs`). Everything else (other shapes, comments, macros) is
 //! skipped with a warning.
 //! Encrypted workbooks and versions before BIFF5 are refused.
 
@@ -25,6 +25,7 @@ mod autofilter;
 mod chart;
 mod cond_format;
 mod doc_props;
+mod drawing;
 pub(crate) mod formula;
 mod ftab;
 mod page_setup;
@@ -55,6 +56,8 @@ const MAX_SHEETS: usize = 4096;
 const MAX_NAMES: usize = 65_536;
 const MAX_XFS: usize = 65_536;
 const MAX_MERGES: usize = 100_000;
+/// Picture bytes kept per workbook at most.
+const MAX_PICTURE_BYTES: usize = 512 * 1024 * 1024;
 /// Records read from the whole Workbook stream at most (a 65,536 × 256 sheet has fewer). One
 /// allowance shared by every substream: many BoundSheet records pointing into one huge
 /// substream must not each get their own.
@@ -102,11 +105,13 @@ pub(crate) struct Budget {
     max_records: usize,
     /// Charts read so far.
     charts: usize,
+    /// Picture bytes kept so far.
+    pictures: usize,
 }
 
 impl Default for Budget {
     fn default() -> Self {
-        Budget { cells: 0, text: 0, records: 0, max_records: MAX_RECORDS, charts: 0 }
+        Budget { cells: 0, text: 0, records: 0, max_records: MAX_RECORDS, charts: 0, pictures: 0 }
     }
 }
 
@@ -122,6 +127,16 @@ impl Budget {
             return Err(IoError::TooLarge("XLS: too many records".into()));
         }
         Ok(())
+    }
+    /// Counts a picture's bytes; `false` when they would pass `MAX_PICTURE_BYTES`.
+    fn picture(&mut self, len: usize) -> bool {
+        match self.pictures.checked_add(len) {
+            Some(total) if total <= MAX_PICTURE_BYTES => {
+                self.pictures = total;
+                true
+            }
+            _ => false,
+        }
     }
     fn cell(&mut self) -> Result<(), IoError> {
         self.cells += 1;
@@ -179,6 +194,8 @@ struct Globals {
     precision_as_displayed: bool,
     protection: protection::Protection,
     pivot_caches: pivot::Caches,
+    /// The pictures of the MsoDrawingGroup records.
+    pictures: drawing::BStore,
 }
 
 /// Reads an Excel 97-2003 workbook. Inspect the report's warnings for what was skipped.
@@ -263,11 +280,16 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         return Err(invalid("the workbook has no worksheets that can be read"));
     }
     wb.calc.precision_as_displayed = g.precision_as_displayed;
-    // Chart ids are unique in the workbook.
+    // Chart and picture ids are unique in the workbook, as the .xlsx reader numbers objects.
     let mut next_id = 1u32;
-    for sheet in wb.sheets.iter_mut().filter(|s| !s.charts.is_empty()) {
-        for ch in Arc::make_mut(sheet).charts.iter_mut() {
+    for sheet in wb.sheets.iter_mut().filter(|s| !s.charts.is_empty() || !s.images.is_empty()) {
+        let sheet = Arc::make_mut(sheet);
+        for ch in sheet.charts.iter_mut() {
             ch.id = next_id;
+            next_id = next_id.saturating_add(1);
+        }
+        for image in sheet.images.iter_mut() {
+            image.id = next_id;
             next_id = next_id.saturating_add(1);
         }
     }
@@ -304,7 +326,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         if g.biff5.is_some() {
             "Imported from an Excel 5.0/95 (.xls) workbook: values, formulas, number formats, column widths, row heights and defined names were read. Fonts, fills, borders, charts, pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         } else {
-            "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights, defined names and charts were read. Pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
+            "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights, defined names, charts and pictures were read. Comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         }
         .into(),
     );
@@ -348,6 +370,7 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
     }
     let mut window_seen = false;
     let mut offsets = std::collections::HashSet::new();
+    let mut drawing_group = vec![];
     while let Some(rec) = recs.next_record()? {
         budget.record()?;
         let mut c = Cursor::new(&rec.parts);
@@ -420,6 +443,14 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
                 budget.text(code.len())?;
                 g.formats.insert(ifmt, code);
             }
+            // MsoDrawingGroup: one OfficeArtDggContainer, split over records and their Continues.
+            0x00EB => {
+                for part in &rec.parts {
+                    if drawing_group.len().saturating_add(part.len()) <= MAX_TEXT {
+                        drawing_group.extend_from_slice(part);
+                    }
+                }
+            }
             0x00E0 => g.styles.xf(&mut c, MAX_XFS),
             0x0031 => g.styles.font(&mut c),
             0x0092 => g.styles.palette(&mut c),
@@ -470,6 +501,7 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
             _ => {}
         }
     }
+    g.pictures = drawing::bstore(&drawing_group, budget, report);
     // The same test `defined_names` applies, before any cell formula is decoded.
     let skipped = g
         .names
@@ -905,7 +937,7 @@ fn worksheet(
     st.page.finish(&mut st.sheet.print);
     st.cond.finish(report);
     st.sheet.autofilter = std::mem::take(&mut st.autofilter).finish(filter, report);
-    std::mem::take(&mut st.charts).finish(&mut st.sheet);
+    std::mem::take(&mut st.charts).finish(&mut st.sheet, &g.pictures, report);
     if st.dropped > 0 {
         report.warn(format!("{} cells outside the grid were skipped.", st.dropped));
     }

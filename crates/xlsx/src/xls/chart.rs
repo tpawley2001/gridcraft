@@ -18,10 +18,11 @@ use std::sync::Arc;
 
 use gridcraft_core::CellRef;
 use gridcraft_model::{
-    Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, LegendPos, PreservedPart, PreservedRel, PreservedSheet,
-    PrintSettings, Series, Sheet, Visibility, Workbook,
+    Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, Image, LegendPos, PreservedPart, PreservedRel,
+    PreservedSheet, PrintSettings, Series, Sheet, Visibility, Workbook,
 };
 
+use super::drawing::{self, BStore, Blip, ShapeProps};
 use super::formula::{Links, Mode, decode};
 use super::records::{Cursor, Record, Records};
 use super::{BOF, Budget, EOF};
@@ -75,8 +76,9 @@ const BRAI: u16 = 0x1051;
 const BOP_POP: u16 = 0x1061;
 const SI_INDEX: u16 = 0x1065;
 
-/// Obj `ot` values ([MS-XLS] 2.5.152 FtCmo): a chart and a note.
+/// Obj `ot` values ([MS-XLS] 2.5.152 FtCmo): a chart, a picture and a note.
 const OT_CHART: u16 = 0x0005;
+const OT_PICTURE: u16 = 0x0008;
 const OT_NOTE: u16 = 0x0019;
 /// OfficeArtClientAnchorSheet record type ([MS-XLS] 2.5.193).
 const CLIENT_ANCHOR: u16 = 0xF010;
@@ -109,11 +111,13 @@ fn u32_at(b: &[u8], at: usize) -> Option<u32> {
     Some(u32::from(u16_at(b, at)?) | (u32::from(u16_at(b, at.checked_add(2)?)?) << 16))
 }
 
-/// The last client anchor in one MsoDrawing record's OfficeArt records: containers (`recVer`
-/// 0xF) are entered, atoms skipped by their length.
-fn client_anchor(data: &[u8]) -> Option<ClientAnchor> {
+/// The last client anchor in one MsoDrawing record's OfficeArt records, with the properties of
+/// its shape (the FOPTs since the shape's FSP): containers (`recVer` 0xF) are entered, atoms
+/// skipped by their length.
+fn client_anchor(data: &[u8]) -> Option<(ClientAnchor, ShapeProps)> {
     let mut pos = 0usize;
     let mut found = None;
+    let mut props = ShapeProps::default();
     for _ in 0..MAX_ART_RECORDS {
         let (Some(ver), Some(ty), Some(len)) = (u16_at(data, pos), u16_at(data, pos.saturating_add(2)), u32_at(data, pos.saturating_add(4))) else {
             break;
@@ -123,13 +127,18 @@ fn client_anchor(data: &[u8]) -> Option<ClientAnchor> {
             pos = body;
             continue;
         }
-        if ty == CLIENT_ANCHOR {
+        if ty == drawing::FSP {
+            props = ShapeProps::default();
+        } else if ty == drawing::FOPT || ty == drawing::TERTIARY_FOPT {
+            let end = body.saturating_add(usize::try_from(len).unwrap_or(usize::MAX)).min(data.len());
+            drawing::fopt(ver >> 4, data.get(body..end).unwrap_or_default(), &mut props);
+        } else if ty == CLIENT_ANCHOR {
             // flags, then colL, dxL, rwT, dyT, colR, dxR, rwB, dyB.
             let f = |i: usize| u16_at(data, body.saturating_add(2 + 2 * i));
             if let (Some(col_l), Some(dx_l), Some(row_t), Some(dy_t), Some(col_r), Some(dx_r), Some(row_b), Some(dy_b)) =
                 (f(0), f(1), f(2), f(3), f(4), f(5), f(6), f(7))
             {
-                found = Some(ClientAnchor { col_l, dx_l, row_t, dy_t, col_r, dx_r, row_b, dy_b });
+                found = Some((ClientAnchor { col_l, dx_l, row_t, dy_t, col_r, dx_r, row_b, dy_b }, props.clone()));
             }
         }
         pos = body.saturating_add(usize::try_from(len).unwrap_or(usize::MAX));
@@ -137,32 +146,38 @@ fn client_anchor(data: &[u8]) -> Option<ClientAnchor> {
     found
 }
 
-/// A worksheet's embedded charts, collected while its substream is read.
+/// A worksheet's embedded charts and pictures, collected while its substream is read.
 #[derive(Default)]
 pub(super) struct Embedded {
-    /// The last drawing shape's anchor, until an Obj record claims it.
-    anchor: Option<ClientAnchor>,
+    /// The last drawing shape's anchor and properties, until an Obj record claims them.
+    anchor: Option<(ClientAnchor, ShapeProps)>,
     /// The anchor of the chart Obj whose substream comes next.
     pending: Option<ClientAnchor>,
     charts: Vec<(Option<ClientAnchor>, Chart)>,
+    pictures: Vec<(ClientAnchor, ShapeProps)>,
 }
 
 impl Embedded {
-    /// An MsoDrawing record: remembers its shape's anchor.
+    /// An MsoDrawing record: remembers its shape's anchor and properties.
     pub(super) fn drawing(&mut self, rec: &Record<'_>) {
         if let Some(a) = client_anchor(&rec.parts.concat()) {
             self.anchor = Some(a);
         }
     }
 
-    /// An Obj record: a chart takes the shape's anchor; pictures and shapes are reported.
+    /// An Obj record: a chart or picture takes the shape's anchor; other shapes are reported.
     pub(super) fn obj(&mut self, rec: &Record<'_>, report: &mut ReadReport) {
         let ot = rec.parts.first().and_then(|p| u16_at(p, 4));
         let anchor = self.anchor.take();
         match ot {
-            Some(OT_CHART) => self.pending = anchor,
+            Some(OT_CHART) => self.pending = anchor.map(|(a, _)| a),
+            Some(OT_PICTURE) => {
+                if let Some(a) = anchor {
+                    self.pictures.push(a);
+                }
+            }
             Some(OT_NOTE) => {}
-            _ => report.warn("Pictures and shapes in .xls files are not imported yet."),
+            _ => report.warn("Shapes in .xls files are not imported yet."),
         }
     }
 
@@ -178,13 +193,37 @@ impl Embedded {
         Ok(true)
     }
 
-    /// Places the charts on the sheet (its column widths and row heights are known by now).
-    pub(super) fn finish(self, sheet: &mut Sheet) {
+    /// Places the charts and pictures on the sheet (its column widths and row heights are known
+    /// by now). Pictures whose blip isn't a PNG or JPEG in the store are skipped with one warning.
+    pub(super) fn finish(self, sheet: &mut Sheet, store: &BStore, report: &mut ReadReport) {
         for (anchor, mut ch) in self.charts {
             if let Some(a) = anchor {
                 ch.anchor = place(sheet, &a);
             }
             sheet.charts.push(ch);
+        }
+        let mut skipped = false;
+        for (a, props) in self.pictures {
+            let Some(Blip::Picture { data, mime }) = props.pib.and_then(|pib| store.get(pib)) else {
+                skipped = true;
+                continue;
+            };
+            let anchor = place(sheet, &a);
+            sheet.images.push(Image {
+                hidden: props.hidden,
+                hyperlink: None,
+                name: props.name,
+                id: 0,
+                anchor,
+                data: Arc::clone(data),
+                mime: (*mime).to_string(),
+                alt: props.alt.unwrap_or_default(),
+                blip_ext: vec![],
+            });
+        }
+        // A damaged store was reported when it was read.
+        if skipped && !store.damaged {
+            report.warn("Some pictures in .xls files use a format that isn't imported (only PNG and JPEG are).");
         }
     }
 }
@@ -932,7 +971,7 @@ mod tests {
         let mut data = vec![0x0F, 0x00, 0x04, 0xF0];
         data.extend_from_slice(&(atom.len() as u32).to_le_bytes());
         data.extend_from_slice(&atom);
-        let a = client_anchor(&data).unwrap();
+        let (a, _) = client_anchor(&data).unwrap();
         assert_eq!((a.col_l, a.row_t, a.col_r, a.row_b), (1, 2, 5, 12));
         // A truncated atom and a huge length are ignored, not read past.
         assert_eq!(client_anchor(&data[..data.len() - 3]), None);
