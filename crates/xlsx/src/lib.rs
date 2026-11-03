@@ -13,6 +13,7 @@
 
 mod array_formula;
 mod binary_custom_views;
+mod binary_filter;
 mod cfb;
 mod chart;
 mod chartex;

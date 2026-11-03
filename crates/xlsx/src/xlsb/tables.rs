@@ -15,7 +15,9 @@ use super::rules::icon_set;
 use super::{Bytes, Entry, Records, SheetInfo, check_type, invalid, relationships};
 use crate::package::{Package, Rel};
 use crate::xls::formula::{Links, List, Mode, Site, decode_xlsb_at};
-use crate::{IoError, ReadReport};
+use crate::{IoError, ReadReport, binary_filter};
+
+const DATE_FILTER_WARNING: &str = "XLSB date filters in AutoFilters are not imported.";
 
 const TABLE: &str = "application/vnd.ms-excel.table";
 /// Tables read per sheet; the rest are skipped with a warning.
@@ -32,6 +34,7 @@ const END_AFILTER: u16 = 162;
 const BEGIN_FILTER_COLUMN: u16 = 163;
 const END_FILTER_COLUMN: u16 = 164;
 const BEGIN_FILTERS: u16 = 165;
+const END_FILTERS: u16 = 166;
 const FILTER: u16 = 167;
 const COLOR_FILTER: u16 = 168;
 const ICON_FILTER: u16 = 169;
@@ -114,6 +117,8 @@ struct FilterBuilder<'a> {
     crit: Option<FilterCriterion>,
     /// Inside `BrtBeginCustomFilters`: whether the comparisons are joined by AND, and them.
     custom: Option<(bool, Vec<(String, String)>)>,
+    in_filters: bool,
+    invalid_date: bool,
 }
 
 impl FilterBuilder<'_> {
@@ -124,8 +129,13 @@ impl FilterBuilder<'_> {
                 self.col = Some(b.u32()?);
                 self.crit = None;
                 self.custom = None;
+                self.in_filters = false;
+                self.invalid_date = false;
             }
             END_FILTER_COLUMN => {
+                if self.invalid_date && matches!(&self.crit, Some(FilterCriterion::Values { values, blanks: false }) if values.is_empty()) {
+                    self.crit = None;
+                }
                 if let (Some(col), Some(crit)) = (self.col.take(), self.crit.take()) {
                     if self.criteria.len() >= MAX_FILTER_COLUMNS {
                         report.warn("XLSB AutoFilter columns past the first 16384 were skipped.");
@@ -135,12 +145,14 @@ impl FilterBuilder<'_> {
                 }
             }
             BEGIN_FILTERS => {
+                self.in_filters = true;
                 let blanks = b.u32()? != 0;
                 self.crit = Some(FilterCriterion::Values { values: vec![], blanks });
             }
+            END_FILTERS => self.in_filters = false,
             FILTER => {
                 let value = b.text(255)?;
-                if let Some(FilterCriterion::Values { values, .. }) = &mut self.crit {
+                if let Some(FilterCriterion::Values { values, .. } | FilterCriterion::DateGroups { values, .. }) = &mut self.crit {
                     if values.len() < MAX_FILTER_VALUES {
                         values.push(value);
                     } else {
@@ -173,12 +185,42 @@ impl FilterBuilder<'_> {
                 let value = b.f64()?;
                 self.crit = Some(FilterCriterion::Top10 { bottom: flags & 1 == 0, percent: flags & 2 != 0, count: value.clamp(0.0, 1e9) as u32 });
             }
-            DYNAMIC_FILTER => match b.u32()? {
-                1 => self.crit = Some(FilterCriterion::AboveAverage(true)),
-                2 => self.crit = Some(FilterCriterion::AboveAverage(false)),
-                _ => report.warn("XLSB date filters in AutoFilters are not imported."),
-            },
-            DATE_GROUP_ITEM => report.warn("XLSB date filters in AutoFilters are not imported."),
+            DYNAMIC_FILTER => {
+                let cft = b.u32()?;
+                let applied = b.u8()? & 1 != 0;
+                let bounds = (b.f64()?, b.f64()?);
+                self.crit = binary_filter::dynamic(cft, applied.then_some(bounds));
+                if self.crit.is_none() {
+                    report.warn(DATE_FILTER_WARNING);
+                }
+            }
+            DATE_GROUP_ITEM if self.in_filters => {
+                let parsed = (|| {
+                    let year = b.u16()?;
+                    let month = b.u16()?;
+                    let day = b.u32()?;
+                    let time = [b.u16()?, b.u16()?, b.u16()?];
+                    b.take(6)?;
+                    let depth = b.u32()?;
+                    Ok::<_, IoError>(binary_filter::date_group(year, month, day, time, depth))
+                })();
+                if let Ok(Some(group)) = parsed {
+                    if let Some(crit) = &mut self.crit {
+                        let count = match crit {
+                            FilterCriterion::DateGroups { groups, .. } => groups.len(),
+                            _ => 0,
+                        };
+                        if count < MAX_FILTER_VALUES {
+                            binary_filter::add_group(crit, group);
+                        } else {
+                            report.warn(DATE_FILTER_WARNING);
+                        }
+                    }
+                } else {
+                    report.warn(DATE_FILTER_WARNING);
+                    self.invalid_date = true;
+                }
+            }
             COLOR_FILTER => {
                 // BrtColorFilter: dxfId, then fCellColor (fill colour when non-zero, else font
                 // colour). A missing format drops the criterion, like the .xlsx reader.
@@ -209,7 +251,7 @@ impl FilterBuilder<'_> {
 pub(super) fn autofilter(records: &mut Records<'_>, begin: &[u8], dxfs: &[Style], report: &mut ReadReport) -> Result<Option<AutoFilter>, IoError> {
     let mut b = Bytes::new(begin);
     let range = rfx(&mut b).ok().flatten();
-    let mut filter = FilterBuilder { dxfs, criteria: vec![], col: None, crit: None, custom: None };
+    let mut filter = FilterBuilder { dxfs, criteria: vec![], col: None, crit: None, custom: None, in_filters: false, invalid_date: false };
     loop {
         let (id, payload) = records.next(report)?.ok_or_else(|| invalid("unterminated AutoFilter"))?;
         if id == END_AFILTER {

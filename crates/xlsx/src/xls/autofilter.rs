@@ -7,11 +7,12 @@
 //! 2.5.98) or icon (AF12CellIcon, 2.5.2) is in the record itself; a value list's AF12Criteria
 //! (2.5.3) and AF12DateInfo (2.5.4) items each follow in their own ContinueFrt12 (2.4.62).
 //! AutoFilter12 is the full criterion: it replaces the AutoFilter record Excel writes beside it
-//! as an approximation for older versions. Date filters are skipped, as the xlsx reader does.
+//! as an approximation for older versions. A dynamic filter's `cft` is a date filter such as
+//! "this month" ([MS-XLS] CFT), and a value list's AF12DateInfo items are its date-group ticks.
 
 use gridcraft_core::{CellRef, RangeRef, number_to_text};
 use gridcraft_formula::Expr;
-use gridcraft_model::{AutoFilter, Color, FilterCriterion};
+use gridcraft_model::{AutoFilter, Color, DateGroup, FilterCriterion};
 
 use super::{Cursor, Links, Mode, SheetState, decode};
 use crate::{IoError, ReadReport};
@@ -22,8 +23,6 @@ const UNSUPPORTED: &str = "Some .xls AutoFilter criteria (Boolean or error value
 const MALFORMED: &str = "Some .xls AutoFilter criteria could not be read and were skipped.";
 /// AutoFilterInfo without the name Excel must write beside it.
 const NO_RANGE: &str = "An .xls sheet has an AutoFilter but no _FilterDatabase range; its filter was skipped.";
-/// Dynamic date filters and date groupings, as the xlsx reader words it.
-const DATES: &str = "date filters in AutoFilters are not supported";
 
 /// BIFF8 columns at most: the number of criteria one sheet can hold.
 const MAX_CRITERIA: usize = 256;
@@ -40,8 +39,6 @@ enum Skipped {
     Unsupported,
     /// A record shorter than its contents.
     Malformed,
-    /// A dynamic date filter or date grouping.
-    Date,
 }
 
 impl From<IoError> for Skipped {
@@ -55,7 +52,6 @@ impl Skipped {
         report.warn(match self {
             Skipped::Unsupported => UNSUPPORTED,
             Skipped::Malformed => MALFORMED,
-            Skipped::Date => DATES,
         });
     }
 }
@@ -66,9 +62,11 @@ struct ValueList {
     /// AF12Criteria still to come, then AF12DateInfo.
     criteria: u32,
     dates: u32,
-    has_dates: bool,
     values: Vec<String>,
     blanks: bool,
+    groups: Vec<DateGroup>,
+    /// A date-group tick outside its ranges or with an unknown grouping was skipped.
+    invalid_date: bool,
     /// The first item that could not be read: the column keeps no AutoFilter12 criterion.
     error: Option<Skipped>,
 }
@@ -99,9 +97,8 @@ impl ValueList {
             self.criteria -= 1;
             self.item(c)
         } else if self.dates > 0 {
-            // AF12DateInfo: a date grouping, which the model has no field for.
             self.dates -= 1;
-            Ok(())
+            self.date(c)
         } else {
             return;
         };
@@ -110,14 +107,38 @@ impl ValueList {
         }
     }
 
-    fn outcome(self) -> (u32, Result<Option<FilterCriterion>, Skipped>) {
+    /// One AF12DateInfo (2.5.4): yr, mon, dom, hr, min, sec, two unused fields, then the
+    /// dttm grouping. An invalid tick is skipped; the list keeps its other items.
+    fn date(&mut self, c: &mut Cursor<'_, '_>) -> Result<(), Skipped> {
+        let year = c.u16()?;
+        let month = c.u16()?;
+        let day = c.u32()?;
+        let time = [c.u16()?, c.u16()?, c.u16()?];
+        c.skip(6)?;
+        let depth = c.u32()?;
+        match crate::binary_filter::date_group(year, month, day, time, depth) {
+            Some(group) => self.groups.push(group),
+            None => self.invalid_date = true,
+        }
+        Ok(())
+    }
+
+    fn outcome(self, report: &mut ReadReport) -> (u32, Result<Option<FilterCriterion>, Skipped>) {
         let result = match self.error {
             Some(e) => Err(e),
             None if self.criteria > 0 || self.dates > 0 => Err(Skipped::Malformed),
-            // Only date groupings: a date filter.
-            None if self.values.is_empty() && !self.blanks && self.has_dates => Err(Skipped::Date),
-            None if self.values.is_empty() && !self.blanks => Ok(None),
-            None => Ok(Some(FilterCriterion::Values { values: self.values, blanks: self.blanks })),
+            // Every tick was invalid: the column keeps the AutoFilter record's approximation.
+            None if self.values.is_empty() && !self.blanks && self.groups.is_empty() && self.invalid_date => Err(Skipped::Unsupported),
+            None => {
+                if self.invalid_date {
+                    Skipped::Unsupported.warn(report);
+                }
+                Ok(match (self.values, self.blanks, self.groups) {
+                    (values, false, groups) if values.is_empty() && groups.is_empty() => None,
+                    (values, blanks, groups) if groups.is_empty() => Some(FilterCriterion::Values { values, blanks }),
+                    (values, blanks, groups) => Some(FilterCriterion::DateGroups { values, blanks, groups }),
+                })
+            }
         };
         (self.entry, result)
     }
@@ -162,7 +183,7 @@ impl State {
         if id != 0x087F
             && let Some(list) = self.pending.take()
         {
-            let (entry, result) = list.outcome();
+            let (entry, result) = list.outcome(report);
             self.settle(entry, result, report);
         }
     }
@@ -253,17 +274,15 @@ fn parse12(c: &mut Cursor<'_, '_>, table: &[u32; 64]) -> Result<(u32, Filter12),
     match ft {
         0 => match cft {
             0 => {
-                let mut list = ValueList { entry, criteria, dates, has_dates: dates > 0, values: vec![], blanks: false, error: None };
+                let mut list = ValueList { entry, criteria, dates, values: vec![], blanks: false, groups: vec![], invalid_date: false, error: None };
                 // Each item belongs in its own ContinueFrt12; read any written in the record itself.
                 while c.remaining() > 0 && (list.criteria > 0 || list.dates > 0) {
                     list.next(c);
                 }
                 Ok((entry, Filter12::List(list)))
             }
-            1 => done(Ok(Some(FilterCriterion::AboveAverage(true)))),
-            2 => done(Ok(Some(FilterCriterion::AboveAverage(false)))),
-            0x08..=0x27 => done(Err(Skipped::Date)),
-            _ => done(Err(Skipped::Unsupported)),
+            // Above or below average, or a dynamic date filter; AutoFilter12 has no bounds.
+            _ => done(crate::binary_filter::dynamic(cft, None).map(Some).ok_or(Skipped::Unsupported)),
         },
         1 => done(Ok(Some(FilterCriterion::FillColor(dxf_color(c, false, table)?)))),
         2 => done(Ok(Some(FilterCriterion::FontColor(dxf_color(c, true, table)?)))),
