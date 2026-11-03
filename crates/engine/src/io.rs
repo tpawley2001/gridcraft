@@ -18,6 +18,7 @@ pub enum FileKind {
     Xlsb,
     Ods,
     Csv,
+    Dif,
     Tsv,
     Json,
     Html,
@@ -33,6 +34,7 @@ impl FileKind {
             "slk" => FileKind::Sylk,
             "ods" => FileKind::Ods,
             "csv" => FileKind::Csv,
+            "dif" => FileKind::Dif,
             "tsv" | "tab" | "txt" => FileKind::Tsv,
             "json" | "scjson" => FileKind::Json,
             "html" | "htm" => FileKind::Html,
@@ -323,6 +325,11 @@ fn read_plain(name: &str, bytes: &[u8], csv_as_text: bool) -> Result<(Workbook, 
             }
             Ok((wb, warnings))
         }
+        Some(FileKind::Dif) => {
+            let (mut wb, report) = gridcraft_xlsx::read_dif(bytes).map_err(|e| EngineError::Other(format!("We can't open '{name}': {e}")))?;
+            rename_first_sheet(&mut wb, name);
+            Ok((wb, report.warnings))
+        }
         Some(FileKind::Tsv) => {
             let opts = gridcraft_xlsx::CsvOptions { delimiter: b'\t', parse_values: !csv_as_text, ..Default::default() };
             let (mut wb, report) = gridcraft_xlsx::read_csv_with_report(bytes, &opts).map_err(|e| EngineError::Other(e.to_string()))?;
@@ -379,7 +386,7 @@ pub fn save_bytes(wb: &Workbook, path: &str) -> Result<Vec<u8>> {
     // a typo like `.cvs` would otherwise produce a file no other app recognises.
     let Some(kind) = FileKind::from_path(path) else {
         let name = std::path::Path::new(path).file_name().and_then(std::ffi::OsStr::to_str).unwrap_or(path);
-        return Err(EngineError::Other(format!("{name}: unknown file format. Save as .xlsx, .csv, .tsv, .json or .html.")));
+        return Err(EngineError::Other(format!("{name}: unknown file format. Save as .xlsx, .csv, .tsv, .dif, .json or .html.")));
     };
     save_bytes_as(wb, path, kind)
 }
@@ -408,6 +415,9 @@ pub fn save_bytes_as(wb: &Workbook, path: &str, kind: FileKind) -> Result<Vec<u8
         // A workbook read from CSV keeps the separator it was read with (a `;` file stays `;`).
         FileKind::Csv => wb.sheet(sheet).map(|sh| csv(wb, sh, wb.csv_delimiter.unwrap_or(b','))).transpose().map(Option::unwrap_or_default),
         FileKind::Tsv => wb.sheet(sheet).map(|sh| csv(wb, sh, b'\t')).transpose().map(Option::unwrap_or_default),
+        FileKind::Dif => {
+            wb.sheet(sheet).map(gridcraft_xlsx::write_dif).transpose().map(Option::unwrap_or_default).map_err(|e| EngineError::Other(e.to_string()))
+        }
         FileKind::Json => crate::macros::json_bytes(wb),
         FileKind::Html => to_html(wb, sheet).map(String::into_bytes),
     }

@@ -630,3 +630,21 @@ fn sylk_import_uses_content_and_refuses_export() {
     assert_eq!(FileKind::from_path("REPORT.SLK"), Some(FileKind::Sylk));
     assert!(open_bytes("broken.slk", b"not a SYLK file").unwrap_err().to_string().contains("We can't open 'broken.slk':"));
 }
+
+#[test]
+fn dif_opens_named_sheet_and_saves_active_sheet_values() {
+    assert_eq!(FileKind::from_path("values.DIF"), Some(FileKind::Dif));
+    let bytes = b"DATA\n0,0\n\"\"\n-1,0\nBOT\n1,0\n\"=1+2\"\n0,12.5\nV\n-1,0\nEOD\n";
+    let (mut wb, warnings) = open_bytes("values.dif", bytes).unwrap();
+    assert!(warnings.is_empty());
+    assert_eq!(wb.sheet(0).unwrap().name, "values");
+    assert_eq!(wb.sheet(0).unwrap().value(CellRef::new(0, 0)), gridcraft_core::Value::from("=1+2"));
+    wb.sheets.push(std::sync::Arc::new(Sheet::new("Active")));
+    wb.set_active_sheet(1);
+    wb.sheet_mut(1).unwrap().set_value(CellRef::new(2, 2), gridcraft_core::Value::Bool(false));
+    let out = save_bytes(&wb, "active.dif").unwrap();
+    let (again, _) = open_bytes("active.dif", &out).unwrap();
+    assert_eq!(again.sheets.len(), 1);
+    assert_eq!(again.sheet(0).unwrap().value(CellRef::new(2, 2)), gridcraft_core::Value::Bool(false));
+    assert_eq!(again.sheet(0).unwrap().value(CellRef::new(0, 0)), gridcraft_core::Value::Empty);
+}
