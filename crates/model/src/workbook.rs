@@ -215,6 +215,9 @@ pub struct Workbook {
     pub calc: CalcSettings,
     #[serde(default, skip_serializing_if = "is_all")]
     pub show_objects: ShowObjects,
+    /// The workbook's VBA code name (`ThisWorkbook`, or one set in the VBA editor). `None` = not stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_name: Option<String>,
     /// Read and set with [`Workbook::active_sheet`] and [`Workbook::set_active_sheet`].
     pub active_sheet: ActiveSheet,
     /// The workbook window's display settings (`<workbookView>`), kept across an open + save.
@@ -357,6 +360,7 @@ impl Workbook {
             date_system: DateSystem::D1900,
             calc: CalcSettings::default(),
             show_objects: ShowObjects::All,
+            code_name: None,
             active_sheet: ActiveSheet::default(),
             view: WorkbookView::default(),
             props: DocProps::default(),

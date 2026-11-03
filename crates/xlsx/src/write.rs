@@ -344,6 +344,24 @@ fn workbook_view_attrs(wb: &Workbook) -> String {
     attrs
 }
 
+/// The `<workbookPr>` element (ECMA-376 Part 1 §18.2.28).
+fn workbook_pr(wb: &Workbook) -> String {
+    let mut w = String::from("<workbookPr");
+    match wb.show_objects {
+        ShowObjects::All => {}
+        ShowObjects::Placeholders => w.push_str(" showObjects=\"placeholders\""),
+        ShowObjects::None => w.push_str(" showObjects=\"none\""),
+    }
+    if wb.date_system == gridcraft_core::DateSystem::D1904 {
+        w.push_str(" date1904=\"1\"");
+    }
+    if let Some(name) = &wb.code_name {
+        let _ = write!(w, " codeName=\"{}\"", crate::xml::esc_attr(name));
+    }
+    w.push_str("/>");
+    w
+}
+
 /// Writes the workbook for the file `book_name` (a bare file name). A PivotChart is bound to its
 /// PivotTable in Excel only when its link starts with the workbook in brackets.
 pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) -> Result<Vec<u8>, IoError> {
@@ -396,16 +414,7 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
     // only when appName is "xl" (#799). One without names GridCraft (#1699), and Excel recalculates it.
     let file_version = crate::passthrough::workbook_elements(wb, "fileVersion");
     w.push_str(if file_version.is_empty() { "<fileVersion appName=\"gridcraft\"/>" } else { &file_version });
-    w.push_str("<workbookPr");
-    match wb.show_objects {
-        ShowObjects::All => {}
-        ShowObjects::Placeholders => w.push_str(" showObjects=\"placeholders\""),
-        ShowObjects::None => w.push_str(" showObjects=\"none\""),
-    }
-    if wb.date_system == gridcraft_core::DateSystem::D1904 {
-        w.push_str(" date1904=\"1\"");
-    }
-    w.push_str("/>");
+    w.push_str(&workbook_pr(wb));
     if wb.protected_structure {
         let pw = wb.structure_password.as_ref().map(|h| crate::sheet_write::password_attrs(h, "workbook")).unwrap_or_default();
         let _ = write!(w, "<workbookProtection{pw} lockStructure=\"1\"/>");

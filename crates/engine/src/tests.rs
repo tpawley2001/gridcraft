@@ -2239,6 +2239,19 @@ fn copies_of_a_long_named_sheet_get_unique_names() {
 }
 
 #[test]
+fn a_copied_sheet_gets_no_code_name() {
+    let mut wb = (*s().doc().unwrap().wb).clone();
+    std::sync::Arc::make_mut(&mut wb.sheets[0]).code_name = Some("Sheet1".into());
+    let mut s = Session::new();
+    s.add_document(crate::DocState::from_saved(wb, None, "coded".into(), crate::Trust::FromFile));
+    s.execute("sheet.move", json!({"sheet": 0, "to": 1, "copy": true})).unwrap();
+    s.execute("sheet.rename", json!({"sheet": 0, "name": "Renamed"})).unwrap();
+    let d = s.doc().unwrap();
+    assert_eq!(d.wb.sheets[0].code_name.as_deref(), Some("Sheet1"));
+    assert_eq!(d.wb.sheets[1].code_name, None);
+}
+
+#[test]
 fn row_and_column_inserts_move_legacy_array_ranges() {
     // Found by the command-sequence fuzzer: the formula cell moved but its array range stayed,
     // so the array covered the wrong cells (and read back from XLSX as #SPILL!).
