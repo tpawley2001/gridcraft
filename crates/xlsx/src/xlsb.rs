@@ -13,8 +13,8 @@
 //! sparklines, drawings (pictures, shapes, text boxes and charts, read with the .xlsx drawing reader) and
 //! each sheet's page setup, print options, header/footer and manual page breaks are imported; data
 //! connections and query tables are kept for saving as .xlsx ([`connections`]).
-//! Chart sheets open as chart sheets: the chart of the drawing their BrtDrawing record names
-//! (default print settings; their page setup is not read), saved to .xlsx as chart sheets. Dialog
+//! Chart sheets open as chart sheets: the chart of the drawing their BrtDrawing record names, with
+//! their margins, page setup and header/footer, saved to .xlsx as chart sheets. Dialog
 //! and macro sheets are skipped; gradient fills, cell style inheritance, differential formats, macros and other workbook features
 //! are not run or imported.
 
@@ -215,6 +215,8 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut unread_chart_sheets = false;
     let mut macro_sheets: Vec<MacroSheet> = vec![];
     let mut macro_unread = false;
+    // Damaged chart sheet page records warn once for the workbook.
+    let mut chart_page = PageState::default();
     for (bound, info) in sheets.into_iter().enumerate() {
         model_index.push(None);
         let Some(id) = info.rel else {
@@ -233,7 +235,11 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             let mut chart = None;
             let named =
                 wb.check_sheet_name(&info.name, None).is_ok() && !chart_sheets.iter().any(|c: &ChartSheet| c.name.eq_ignore_ascii_case(&info.name));
-            if let Some((id, sheet_rels)) = chart_sheet_drawing(&mut package, &types, &target, &mut report).filter(|_| named) {
+            let mut print = PrintSettings::default();
+            if let Some((id, sheet_rels, page_setup)) =
+                chart_sheet_drawing(&mut package, &types, &target, &mut chart_page, &mut report).filter(|_| named)
+            {
+                print = page_setup;
                 // The drawing is DrawingML XML, as in .xlsx: read into a scratch sheet for its chart.
                 let mut scratch = Sheet::new(info.name.clone());
                 let mut cx = crate::read::Ctx::new(package);
@@ -243,7 +249,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             }
             match chart {
                 Some(chart) => {
-                    chart_sheets.push(ChartSheet { name: info.name, visibility: info.visibility, before: wb.sheets.len(), chart });
+                    chart_sheets.push(ChartSheet { name: info.name, visibility: info.visibility, before: wb.sheets.len(), chart, print });
                     chart_bounds.push(bound);
                 }
                 None => unread_chart_sheets = true,
@@ -519,21 +525,79 @@ fn sheet_drawing(cx: &mut crate::read::Ctx<'_>, sheet_rels: &[Rel], id: &str, sh
     }
 }
 
-/// The drawing of an XLSB chart sheet part ([MS-XLSB] 2.1.7.7): the RelID of its first BrtDrawing
-/// record and the part's relationships. `None` when the part is missing, mistyped, too large,
-/// malformed before that record, or has no drawing.
-fn chart_sheet_drawing(package: &mut Package<'_>, types: &[Entry], path: &str, report: &mut ReadReport) -> Option<(String, Vec<Rel>)> {
+/// BrtCsPageSetup ([MS-XLSB] 2.4.343): a chart sheet's page setup.
+const CS_PAGE_SETUP: u16 = 652;
+/// BrtBeginUserCsView / BrtEndUserCsView ([MS-XLSB] 2.4.291, 2.4.641): a custom view's own page
+/// setup sits between them.
+const BEGIN_USER_CS_VIEW: u16 = 655;
+const END_USER_CS_VIEW: u16 = 656;
+
+/// The drawing and page setup of an XLSB chart sheet part ([MS-XLSB] 2.1.7.7): the RelID of its
+/// first BrtDrawing record, the part's relationships, and the BrtMargins, BrtCsPageSetup and
+/// header/footer records outside custom views. `None` when the part is missing, mistyped, too
+/// large, malformed before that record, or has no drawing. A damaged page record keeps the
+/// defaults for its part, with one warning for each kind of record in `page`.
+fn chart_sheet_drawing(
+    package: &mut Package<'_>,
+    types: &[Entry],
+    path: &str,
+    page: &mut PageState,
+    report: &mut ReadReport,
+) -> Option<(String, Vec<Rel>, PrintSettings)> {
     check_type(types, path, CHARTSHEET).ok()?;
     let data = package.read_limited(path, MAX_META).ok()??;
     let mut records = Records::new(&data);
-    let id = loop {
-        let (id, payload) = records.next(report).ok()??;
-        if id == 550 {
-            break drawing_rel(Bytes::new(payload)).ok()??;
+    let mut print = PrintSettings::default();
+    let mut drawing = None;
+    let mut in_view = false;
+    // Page records come before BrtDrawing; a part damaged after it still has its chart.
+    while let Ok(Some((id, payload))) = records.next(report) {
+        match id {
+            BEGIN_USER_CS_VIEW => in_view = true,
+            END_USER_CS_VIEW => in_view = false,
+            _ if in_view => {}
+            476 => {
+                if let Some(m) = page.read(report, "BrtMargins", || read_margins(payload)) {
+                    print.margins = m;
+                }
+            }
+            CS_PAGE_SETUP => {
+                if let Some((paper, orientation)) = page.read(report, "BrtCsPageSetup", || read_cs_page_setup(payload)) {
+                    if let Some(paper) = paper {
+                        print.paper = paper.to_string();
+                    }
+                    print.orientation = orientation;
+                }
+            }
+            479 => {
+                if let Some(hf) = page.read(report, "BrtBeginHeaderFooter", || read_header_footer(payload)) {
+                    hf.store(&mut print);
+                }
+            }
+            550 if drawing.is_none() => drawing = Some(drawing_rel(Bytes::new(payload)).ok()??),
+            _ => {}
         }
-    };
+    }
+    let id = drawing?;
     let rels = package.read_limited(&rels_path(path), MAX_META).ok()??;
-    Some((id, parse_relationships(&rels, path).ok()?))
+    Some((id, parse_relationships(&rels, path).ok()?, print))
+}
+
+/// `BrtCsPageSetup` ([MS-XLSB] 2.4.343), reduced to the paper size and the orientation (a chart
+/// sheet has no scale or fit-to-pages fields).
+fn read_cs_page_setup(payload: &[u8]) -> Result<(Option<&'static str>, Orientation), IoError> {
+    let mut b = Bytes::new(payload);
+    let paper = b.u32()?;
+    b.u32()?; // iRes
+    b.u32()?; // iVRes
+    b.u32()?; // iCopies
+    b.u16()?; // iPageStart
+    let flags = b.u16()?;
+    b.string(260, true)?; // szRelID: the printer settings part.
+    b.finish()?;
+    // fNoOrient (bit 3) leaves the orientation to the printer; fLandscape is bit 0.
+    let landscape = flags & 0x0008 == 0 && flags & 0x0001 != 0;
+    Ok((crate::tables::paper_name(paper), if landscape { Orientation::Landscape } else { Orientation::Portrait }))
 }
 
 /// The relationship id of a BrtDrawing record ([MS-XLSB] 2.4.385): a RelID, a nullable wide

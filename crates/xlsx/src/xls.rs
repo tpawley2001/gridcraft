@@ -268,8 +268,8 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     for (bound, bs) in g.sheets.iter().enumerate() {
         if bs.kind == 2 {
             match chart::chart_sheet(&stream, bs.pos, &mut budget, &g.links, &mut report)? {
-                Some(chart) => {
-                    chart_sheets.push(chart::ChartSheet { name: bs.name.clone(), visibility: bs.visibility, before: wb.sheets.len(), chart });
+                Some((chart, print)) => {
+                    chart_sheets.push(chart::ChartSheet { name: bs.name.clone(), visibility: bs.visibility, before: wb.sheets.len(), chart, print });
                     chart_bounds.push(bound);
                 }
                 None => report.warn(format!("Chart sheets that can't be read were skipped ('{}').", bs.name)),

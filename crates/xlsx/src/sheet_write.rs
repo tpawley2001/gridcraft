@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use gridcraft_core::{CellError, CellRef, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_model::{
     Cell, CfOperator, CfRule, CfValueKind, Color, CondFormat, ErrorStyle, FilterCriterion, LineInfo, NoteBox, NoteCorner, Orientation, PageOrder,
-    Sheet, SparklineKind, Style, Table, TotalsFn, Validation, ValidationKind, Workbook, default_icon_thresholds, icon_count,
+    PrintSettings, Sheet, SparklineKind, Style, Table, TotalsFn, Validation, ValidationKind, Workbook, default_icon_thresholds, icon_count,
 };
 
 use crate::drawing::{Obj, image_content_type, image_ext};
@@ -394,44 +394,16 @@ fn write_sheet_drawing(
     }
 }
 
-fn write_sheet_printing<'a>(s: &mut String, sheet: &'a Sheet, rels: &mut Rels, out: &mut Out) -> crate::passthrough::SheetKept<'a> {
-    // Printing.
-    let p = &sheet.print;
-    if p.gridlines || p.headings || p.center_h || p.center_v {
-        s.push_str("<printOptions");
-        for (a, v) in [("horizontalCentered", p.center_h), ("verticalCentered", p.center_v), ("headings", p.headings), ("gridLines", p.gridlines)] {
-            if v {
-                let _ = write!(s, " {a}=\"1\"");
-            }
-        }
-        s.push_str("/>");
-    }
-    // Unmodelled content kept from the source file (printer settings, controls, OLE objects…).
-    let kept = crate::passthrough::SheetKept::write(sheet, rels, out);
-    let m = |i: usize| num(p.margins.get(i).copied().unwrap_or(0.75) as f64);
+/// `<pageMargins>` (worksheets and chart sheets), in inches.
+pub(crate) fn write_page_margins(s: &mut String, p: &PrintSettings) {
+    // The margins are f32: write each one's shortest decimal (0.7, not 0.699999988…).
+    let m = |i: usize| num(p.margins.get(i).map_or(0.75, |v| v.to_string().parse::<f64>().unwrap_or(f64::from(*v))));
     let _ =
         write!(s, "<pageMargins left=\"{}\" right=\"{}\" top=\"{}\" bottom=\"{}\" header=\"{}\" footer=\"{}\"/>", m(0), m(1), m(2), m(3), m(4), m(5));
-    s.push_str("<pageSetup");
-    if let Some(id) = paper_id(&p.paper)
-        && id != 1
-    {
-        let _ = write!(s, " paperSize=\"{id}\"");
-    }
-    if p.scale != 100 && (10..=400).contains(&p.scale) {
-        let _ = write!(s, " scale=\"{}\"", p.scale);
-    }
-    if let Some((w, h)) = p.fit_to {
-        let _ = write!(s, " fitToWidth=\"{w}\" fitToHeight=\"{h}\"");
-    }
-    // Only "over, then down" is written, as Excel does: `downThenOver` is the schema default.
-    if p.page_order != PageOrder::DownThenOver {
-        let _ = write!(s, " pageOrder=\"{}\"", p.page_order.id());
-    }
-    let _ = write!(s, " orientation=\"{}\"", if p.orientation == Orientation::Landscape { "landscape" } else { "portrait" });
-    if let Some(id) = kept.page_setup_id() {
-        let _ = write!(s, " r:id=\"{id}\"");
-    }
-    s.push_str("/>");
+}
+
+/// `<headerFooter>` (worksheets and chart sheets); nothing when the settings are the defaults.
+pub(crate) fn write_header_footer(s: &mut String, p: &PrintSettings) {
     if p.has_header_footer() || p.different_first || p.different_odd_even || !p.hf_scale_with_doc || !p.hf_align_with_margins {
         s.push_str("<headerFooter");
         for (attr, on, default) in [
@@ -460,6 +432,45 @@ fn write_sheet_printing<'a>(s: &mut String, sheet: &'a Sheet, rels: &mut Rels, o
         }
         s.push_str("</headerFooter>");
     }
+}
+
+fn write_sheet_printing<'a>(s: &mut String, sheet: &'a Sheet, rels: &mut Rels, out: &mut Out) -> crate::passthrough::SheetKept<'a> {
+    // Printing.
+    let p = &sheet.print;
+    if p.gridlines || p.headings || p.center_h || p.center_v {
+        s.push_str("<printOptions");
+        for (a, v) in [("horizontalCentered", p.center_h), ("verticalCentered", p.center_v), ("headings", p.headings), ("gridLines", p.gridlines)] {
+            if v {
+                let _ = write!(s, " {a}=\"1\"");
+            }
+        }
+        s.push_str("/>");
+    }
+    // Unmodelled content kept from the source file (printer settings, controls, OLE objects…).
+    let kept = crate::passthrough::SheetKept::write(sheet, rels, out);
+    write_page_margins(s, p);
+    s.push_str("<pageSetup");
+    if let Some(id) = paper_id(&p.paper)
+        && id != 1
+    {
+        let _ = write!(s, " paperSize=\"{id}\"");
+    }
+    if p.scale != 100 && (10..=400).contains(&p.scale) {
+        let _ = write!(s, " scale=\"{}\"", p.scale);
+    }
+    if let Some((w, h)) = p.fit_to {
+        let _ = write!(s, " fitToWidth=\"{w}\" fitToHeight=\"{h}\"");
+    }
+    // Only "over, then down" is written, as Excel does: `downThenOver` is the schema default.
+    if p.page_order != PageOrder::DownThenOver {
+        let _ = write!(s, " pageOrder=\"{}\"", p.page_order.id());
+    }
+    let _ = write!(s, " orientation=\"{}\"", if p.orientation == Orientation::Landscape { "landscape" } else { "portrait" });
+    if let Some(id) = kept.page_setup_id() {
+        let _ = write!(s, " r:id=\"{id}\"");
+    }
+    s.push_str("/>");
+    write_header_footer(s, p);
     for (tag, list, max) in [("rowBreaks", &p.row_breaks, 16383u32), ("colBreaks", &p.col_breaks, 1048575)] {
         let list: Vec<u32> = list.iter().copied().filter(|&b| b > 0).collect();
         if !list.is_empty() {
