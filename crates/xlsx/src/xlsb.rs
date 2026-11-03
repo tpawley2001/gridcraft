@@ -12,8 +12,10 @@
 //! Allow Edit Ranges (titles, references and legacy or iterated passwords),
 //! sparklines, drawings (pictures, shapes, text boxes and charts, read with the .xlsx drawing reader) and
 //! each sheet's page setup, print options, header/footer and manual page breaks are imported; data
-//! connections and query tables are kept for saving as .xlsx ([`connections`]);
-//! gradient fills, cell style inheritance, differential formats, macros and other workbook features
+//! connections and query tables are kept for saving as .xlsx ([`connections`]).
+//! Chart sheets open as chart sheets: the chart of the drawing their BrtDrawing record names
+//! (default print settings; their page setup is not read), saved to .xlsx as chart sheets. Dialog
+//! and macro sheets are skipped; gradient fills, cell style inheritance, differential formats, macros and other workbook features
 //! are not run or imported.
 
 mod sparklines;
@@ -36,7 +38,8 @@ use crate::package::{Package, Rel, normalize, resolve, split_dir};
 use crate::tables::{col_width_to_px, pt_to_px};
 use crate::xls::formula::{Links, Mode, Site, SupBook, Xti, decode_xlsb, decode_xlsb_at};
 use crate::xls::{
-    BUILTIN_NAMES, FormulaGroups, Lbl, MAX_SHARED_ATTACHES, Parsed, Pending, add_defined_names, blank_array_followers, resolve_pending,
+    BUILTIN_NAMES, ChartSheet, FormulaGroups, Lbl, MAX_SHARED_ATTACHES, Parsed, Pending, add_chart_sheets, add_defined_names, blank_array_followers,
+    resolve_pending,
 };
 use crate::{IoError, ReadReport};
 use gridcraft_formula::Expr;
@@ -48,6 +51,7 @@ mod tables;
 const MAIN: &str = "application/vnd.ms-excel.main";
 const BINARY_MAIN: &str = "application/vnd.ms-excel.sheet.binary.macroEnabled.main";
 const WORKSHEET: &str = "application/vnd.ms-excel.worksheet";
+const CHARTSHEET: &str = "application/vnd.ms-excel.chartsheet";
 const STYLES: &str = "application/vnd.ms-excel.styles";
 const MAX_STYLE_RECORDS: usize = 65_536;
 const STRINGS: &str = "application/vnd.ms-excel.sharedStrings";
@@ -202,6 +206,8 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut model_index: Vec<Option<usize>> = Vec::with_capacity(sheets.len());
     let mut table_names = HashSet::new();
     let mut table_id = 1u32;
+    let mut chart_sheets = vec![];
+    let mut unread_chart_sheets = false;
     for info in sheets {
         model_index.push(None);
         let Some(id) = info.rel else {
@@ -214,6 +220,25 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         let rel = rels.iter().find(|r| r.id == id).ok_or_else(|| invalid("worksheet relationship is missing"))?;
         if rel.external {
             return Err(invalid("external sheet relationship"));
+        }
+        if rel.kind == "chartsheet" {
+            let target = rel.target.clone();
+            let mut chart = None;
+            let named =
+                wb.check_sheet_name(&info.name, None).is_ok() && !chart_sheets.iter().any(|c: &ChartSheet| c.name.eq_ignore_ascii_case(&info.name));
+            if let Some((id, sheet_rels)) = chart_sheet_drawing(&mut package, &types, &target, &mut report).filter(|_| named) {
+                // The drawing is DrawingML XML, as in .xlsx: read into a scratch sheet for its chart.
+                let mut scratch = Sheet::new(info.name.clone());
+                let mut cx = crate::read::Ctx::new(package);
+                sheet_drawing(&mut cx, &sheet_rels, &id, &mut scratch, &mut report);
+                package = cx.pkg;
+                chart = scratch.charts.into_iter().next();
+            }
+            match chart {
+                Some(chart) => chart_sheets.push(ChartSheet { name: info.name, visibility: info.visibility, before: wb.sheets.len(), chart }),
+                None => unread_chart_sheets = true,
+            }
+            continue;
         }
         if rel.kind != "worksheet" {
             if !matches!(rel.kind.as_str(), "chartsheet" | "dialogsheet" | "xlMacrosheet" | "xlIntlMacrosheet") {
@@ -264,6 +289,10 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     if wb.sheets.is_empty() {
         return Err(invalid("no supported worksheets"));
     }
+    if unread_chart_sheets {
+        report.warn("XLSB chart sheets that could not be read were skipped.");
+    }
+    add_chart_sheets(&mut wb, chart_sheets);
     add_defined_names(&names, &model_index, &mut wb, &mut report, |l| decode_xlsb(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &links));
     if budget.formulas_kept > 0 {
         report.warn(format!(
@@ -434,6 +463,23 @@ fn sheet_drawing(cx: &mut crate::read::Ctx<'_>, sheet_rels: &[Rel], id: &str, sh
             report.warn(format!("The drawing {target} of XLSB sheet '{}' could not be read ({e}) and was skipped.", sheet.name));
         }
     }
+}
+
+/// The drawing of an XLSB chart sheet part ([MS-XLSB] 2.1.7.7): the RelID of its first BrtDrawing
+/// record and the part's relationships. `None` when the part is missing, mistyped, too large,
+/// malformed before that record, or has no drawing.
+fn chart_sheet_drawing(package: &mut Package<'_>, types: &[Entry], path: &str, report: &mut ReadReport) -> Option<(String, Vec<Rel>)> {
+    check_type(types, path, CHARTSHEET).ok()?;
+    let data = package.read_limited(path, MAX_META).ok()??;
+    let mut records = Records::new(&data);
+    let id = loop {
+        let (id, payload) = records.next(report).ok()??;
+        if id == 550 {
+            break drawing_rel(Bytes::new(payload)).ok()??;
+        }
+    };
+    let rels = package.read_limited(&rels_path(path), MAX_META).ok()??;
+    Some((id, parse_relationships(&rels, path).ok()?))
 }
 
 /// The relationship id of a BrtDrawing record ([MS-XLSB] 2.4.385): a RelID, a nullable wide

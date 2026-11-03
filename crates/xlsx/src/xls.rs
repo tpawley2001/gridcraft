@@ -38,6 +38,8 @@ mod styles;
 mod tables;
 mod validation;
 
+pub(crate) use chart::{ChartSheet, add_chart_sheets};
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 

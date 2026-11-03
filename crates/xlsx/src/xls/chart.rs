@@ -886,7 +886,7 @@ fn parse(records: &[Record<'_>], links: &Links, report: &mut ReadReport) -> Resu
 
 /// A chart sheet read from the file: its name, state, how many worksheets come before it, and
 /// its chart.
-pub(super) struct ChartSheet {
+pub(crate) struct ChartSheet {
     pub name: String,
     pub visibility: Visibility,
     pub before: usize,
@@ -898,7 +898,7 @@ const EMU_PER_PX: f64 = 9525.0;
 
 /// Adds the chart sheets to the workbook: a printable copy of each, and the chart sheet, drawing
 /// and chart parts that saving as `.xlsx` writes back in place.
-pub(super) fn add_chart_sheets(wb: &mut Workbook, sheets: Vec<ChartSheet>) {
+pub(crate) fn add_chart_sheets(wb: &mut Workbook, sheets: Vec<ChartSheet>) {
     if sheets.is_empty() {
         return;
     }
