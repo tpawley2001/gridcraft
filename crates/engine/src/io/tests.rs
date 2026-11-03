@@ -667,3 +667,19 @@ fn save_sylk_uses_active_sheet() {
     assert_eq!(back.sheet(0).unwrap().value(CellRef::new(0, 0)), gridcraft_core::Value::from("active"));
     assert_eq!(save_bytes(&wb, "book.slk").unwrap(), bytes);
 }
+
+#[test]
+fn xml_spreadsheet_2003_opens_whatever_its_extension() {
+    let xml = r#"<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Worksheet ss:Name="Report"><Table><Row><Cell><Data ss:Type="Number">21</Data></Cell><Cell ss:Formula="=RC[-1]*2"><Data ss:Type="Number">42</Data></Cell></Row></Table></Worksheet>
+</Workbook>"#;
+    for name in ["report.xls", "report.xml", "report"] {
+        let (wb, _) = open_bytes(name, xml.as_bytes()).unwrap();
+        assert_eq!(wb.sheets[0].name, "Report");
+        assert_eq!(wb.sheets[0].cell(CellRef::new(0, 1)).and_then(|c| c.formula.as_ref()).map(|f| f.text.as_str()), Some("A1*2"));
+    }
+    // Other XML is not taken for SpreadsheetML.
+    assert!(!gridcraft_xlsx::is_spreadsheetml(br#"<root xmlns="urn:x"/>"#));
+}

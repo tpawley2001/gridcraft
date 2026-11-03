@@ -51,6 +51,7 @@ mod sheet_data_pin;
 mod sheet_names;
 mod smartart_passthrough;
 mod smooth_roundtrip;
+mod spreadsheetml_tests;
 mod strict_passthrough;
 mod sylk_tests;
 mod sylk_write_tests;
