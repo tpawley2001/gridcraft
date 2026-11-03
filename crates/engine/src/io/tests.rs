@@ -616,3 +616,17 @@ fn opening_google_sheets_export_unwraps_only_formulas_gridcraft_calculates() {
     assert_eq!(text("A2").as_deref(), Some("IFERROR(__XLUDF.DUMMYFUNCTION(\"GOOGLETRANSLATE(\"\"hi\"\",\"\"en\"\",\"\"fr\"\")\"),\"salut\")"));
     assert_eq!(opened.sheets[0].cells.get(CellRef::parse("A2").unwrap()).map(|c| c.value.clone()), Some(Value::text("salut")));
 }
+
+#[test]
+fn sylk_import_uses_content_and_refuses_export() {
+    let bytes = b"ID;P\nC;Y1;X1;K7;ERC\nE\n";
+    for name in ["report.slk", "report.csv", "report.xlsx", "report"] {
+        let (wb, warnings) = open_bytes(name, bytes).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(wb.sheets[0].value(CellRef::new(0, 0)), gridcraft_core::Value::Number(7.0));
+        assert_eq!(wb.sheets[0].cell(CellRef::new(0, 0)).unwrap().formula.as_ref().unwrap().text, "A1");
+        assert!(save_bytes(&wb, "report.slk").unwrap_err().to_string().contains("import only"));
+    }
+    assert_eq!(FileKind::from_path("REPORT.SLK"), Some(FileKind::Sylk));
+    assert!(open_bytes("broken.slk", b"not a SYLK file").unwrap_err().to_string().contains("We can't open 'broken.slk':"));
+}

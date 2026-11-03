@@ -13,6 +13,8 @@ pub enum FileKind {
     Xlsx,
     /// Excel 97-2003 workbook (import only).
     Xls,
+    /// Symbolic Link text workbook (import only).
+    Sylk,
     Xlsb,
     Ods,
     Csv,
@@ -28,6 +30,7 @@ impl FileKind {
             "xlsx" | "xlsm" | "xltx" | "xltm" => FileKind::Xlsx,
             "xls" | "xlt" => FileKind::Xls,
             "xlsb" => FileKind::Xlsb,
+            "slk" => FileKind::Sylk,
             "ods" => FileKind::Ods,
             "csv" => FileKind::Csv,
             "tsv" | "tab" | "txt" => FileKind::Tsv,
@@ -257,6 +260,11 @@ fn sane_python_output(v: &gridcraft_core::Value) -> bool {
 fn read_plain(name: &str, bytes: &[u8], csv_as_text: bool) -> Result<(Workbook, Vec<String>)> {
     let kind = FileKind::from_path(name);
     let sniffed = gridcraft_xlsx::sniff(bytes);
+    if gridcraft_xlsx::is_sylk(bytes) || (kind == Some(FileKind::Sylk) && sniffed == gridcraft_xlsx::Format::Csv) {
+        let (wb, report) = gridcraft_xlsx::read_sylk(bytes).map_err(|e| EngineError::Other(format!("We can't open '{name}': {e}")))?;
+        return Ok((wb, report.warnings));
+    }
+
     if sniffed == gridcraft_xlsx::Format::Xls {
         let (wb, report) = gridcraft_xlsx::read_xls(bytes).map_err(|e| EngineError::Other(format!("We can't open '{name}': {e}")))?;
         return Ok((wb, report.warnings));
@@ -391,6 +399,9 @@ pub fn save_bytes_as(wb: &Workbook, path: &str, kind: FileKind) -> Result<Vec<u8
         }
         FileKind::Xls => {
             Err(EngineError::Other("Excel 97-2003 (.xls) is supported for import only. Save as .xlsx or another supported export format.".into()))
+        }
+        FileKind::Sylk => {
+            Err(EngineError::Other("SYLK (.slk) is supported for import only. Save as .xlsx or another supported export format.".into()))
         }
         FileKind::Xlsb => Err(EngineError::Other("XLSB is supported for data import only. Save as .xlsx or another supported export format.".into())),
         FileKind::Ods => Err(EngineError::Other("ODS is supported for data import only. Save as .xlsx or another supported export format.".into())),

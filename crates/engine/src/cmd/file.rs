@@ -67,9 +67,12 @@ fn open(s: &mut Session, p: &Json) -> Result<Json> {
         Some(path) => crate::io::source_path(path),
         None => Some(std::path::PathBuf::from(&name)),
     };
-    let imported =
-        matches!(crate::io::FileKind::from_path(&name), Some(crate::io::FileKind::Ods | crate::io::FileKind::Xlsb | crate::io::FileKind::Xls))
-            || matches!(gridcraft_xlsx::sniff(&bytes), gridcraft_xlsx::Format::Ods | gridcraft_xlsx::Format::Xlsb | gridcraft_xlsx::Format::Xls);
+    let imported = gridcraft_xlsx::is_sylk(&bytes)
+        || matches!(
+            crate::io::FileKind::from_path(&name),
+            Some(crate::io::FileKind::Ods | crate::io::FileKind::Xlsb | crate::io::FileKind::Xls | crate::io::FileKind::Sylk)
+        )
+        || matches!(gridcraft_xlsx::sniff(&bytes), gridcraft_xlsx::Format::Ods | gridcraft_xlsx::Format::Xlsb | gridcraft_xlsx::Format::Xls);
     let title = if imported {
         format!("{} (imported).xlsx", std::path::Path::new(&name).file_stem().and_then(std::ffi::OsStr::to_str).unwrap_or("Book"))
     } else {
