@@ -31,7 +31,7 @@ fn fmla_num(col: u32, cached: f64, rgce: &[u8]) -> Vec<u8> {
 }
 
 /// Macro1's records: A1 = 5, A2 = "x", A3 = `=1+1` (cached 2).
-fn macro_cells() -> Vec<u8> {
+pub(super) fn macro_cells() -> Vec<u8> {
     let mut d = row(0);
     d.extend(cell(5, 0, &5.0f64.to_le_bytes()));
     d.extend(row(1));
@@ -89,7 +89,7 @@ fn plain() -> Vec<u8> {
     package("xlMacrosheet", 0, &worksheet(&macro_cells(), &[]))
 }
 
-fn unpack(bytes: &[u8]) -> HashMap<String, String> {
+pub(super) fn unpack(bytes: &[u8]) -> HashMap<String, String> {
     let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
     let mut parts = HashMap::new();
     for i in 0..z.len() {
@@ -120,7 +120,7 @@ fn macro_part(p: &HashMap<String, String>) -> (&String, &String) {
     parts[0]
 }
 
-fn names(p: &HashMap<String, String>) -> Vec<String> {
+pub(super) fn names(p: &HashMap<String, String>) -> Vec<String> {
     sheet_entries(p).into_iter().map(|(n, _)| n).collect()
 }
 

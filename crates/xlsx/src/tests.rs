@@ -91,6 +91,7 @@ mod xlsb_layout_tests;
 mod xlsb_links_tests;
 mod xlsb_list_tests;
 mod xlsb_macro_sheet_tests;
+mod xlsb_mixed_sheets_tests;
 mod xlsb_names_tests;
 mod xlsb_pivot_tests;
 mod xlsb_print_tests;
