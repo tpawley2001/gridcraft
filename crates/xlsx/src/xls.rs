@@ -29,6 +29,7 @@ mod doc_props;
 mod drawing;
 pub(crate) mod formula;
 mod ftab;
+mod macro_sheet;
 mod page_setup;
 mod pivot;
 mod protection;
@@ -254,28 +255,47 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     // BoundSheet8 index → model sheet index.
     let mut model_index: Vec<Option<usize>> = Vec::with_capacity(g.sheets.len());
     let mut chart_sheets: Vec<chart::ChartSheet> = vec![];
+    // BoundSheet8 position of each chart sheet, for the order of the kept sheets.
+    let mut chart_bounds: Vec<usize> = vec![];
+    let mut macro_sheets: Vec<macro_sheet::MacroSheet> = vec![];
     for (bound, bs) in g.sheets.iter().enumerate() {
         if bs.kind == 2 {
             match chart::chart_sheet(&stream, bs.pos, &mut budget, &g.links, &mut report)? {
                 Some(chart) => {
-                    chart_sheets.push(chart::ChartSheet { name: bs.name.clone(), visibility: bs.visibility, before: wb.sheets.len(), chart })
+                    chart_sheets.push(chart::ChartSheet { name: bs.name.clone(), visibility: bs.visibility, before: wb.sheets.len(), chart });
+                    chart_bounds.push(bound);
                 }
                 None => report.warn(format!("Chart sheets that can't be read were skipped ('{}').", bs.name)),
             }
             model_index.push(None);
             continue;
         }
+        if bs.kind == 1 {
+            // An Excel 4.0 macro sheet: its cells are kept for a macro-enabled save, never evaluated.
+            match worksheet(&stream, bs, None, &g, &styles, &mut budget, &mut report, true)? {
+                Some((sheet, _, _)) => {
+                    report.warn(macro_sheet::kept_warning(&bs.name));
+                    macro_sheets.push(macro_sheet::MacroSheet {
+                        name: bs.name.clone(),
+                        visibility: bs.visibility,
+                        before: wb.sheets.len(),
+                        bound,
+                        sheet,
+                    });
+                }
+                None => report.warn("Excel 4.0 macro sheets that can't be read were skipped."),
+            }
+            model_index.push(None);
+            continue;
+        }
         if bs.kind != 0 {
-            report.warn(match bs.kind {
-                1 => "Excel 4.0 macro sheets were skipped.",
-                _ => "VBA modules and other non-worksheet sheets were skipped.",
-            });
+            report.warn("VBA modules and other non-worksheet sheets were skipped.");
             model_index.push(None);
             continue;
         }
         wb.check_sheet_name(&bs.name, None).map_err(invalid)?;
         let filter = filter_database(&g, bound);
-        let Some((mut sheet, calc, views)) = worksheet(&stream, bs, filter, &g, &styles, &mut budget, &mut report)? else {
+        let Some((mut sheet, calc, views)) = worksheet(&stream, bs, filter, &g, &styles, &mut budget, &mut report, false)? else {
             report.warn("Dialog sheets and unreadable sheets were skipped.");
             model_index.push(None);
             continue;
@@ -311,6 +331,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         next_id = next_id.saturating_add(1);
     }
     chart::add_chart_sheets(&mut wb, chart_sheets);
+    macro_sheet::add_macro_sheets(&mut wb, macro_sheets, &chart_bounds);
     defined_names(&g.names, &g.links, g.biff5.as_ref(), &model_index, &mut wb, &mut report);
     tables::finish_workbook(&mut wb);
     let active = g
@@ -874,6 +895,7 @@ pub(crate) fn blank_array_followers(st: &mut impl FormulaGroups, pending: &[Pend
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn worksheet(
     stream: &[u8],
     bs: &BoundSheet,
@@ -882,6 +904,7 @@ fn worksheet(
     styles: &[StyleId],
     budget: &mut Budget,
     report: &mut ReadReport,
+    macro_sheet: bool,
 ) -> Result<Option<(Sheet, CalcSettings, pivot::Views)>, IoError> {
     if bs.pos >= stream.len() {
         return Err(invalid(format!("sheet '{}' points outside the Workbook stream", bs.name)));
@@ -889,7 +912,7 @@ fn worksheet(
     let mut recs = Records::new(stream, bs.pos);
     let first = recs.next_record()?.ok_or_else(|| invalid("missing sheet substream"))?;
     let (vers, dt) = bof(&first)?;
-    if vers != g.version || dt != 0x0010 {
+    if vers != g.version || dt != if macro_sheet { 0x0040 } else { 0x0010 } {
         return Ok(None);
     }
     let mut st = SheetState {
@@ -962,8 +985,14 @@ fn worksheet(
     if st.dropped > 0 {
         report.warn(format!("{} cells outside the grid were skipped.", st.dropped));
     }
-    for why in &st.unsupported {
-        report.warn(format!("Some formulas use {why}; their saved results were kept as values."));
+    if macro_sheet {
+        if !st.unsupported.is_empty() {
+            report.warn(macro_sheet::UNREAD_FORMULAS);
+        }
+    } else {
+        for why in &st.unsupported {
+            report.warn(format!("Some formulas use {why}; their saved results were kept as values."));
+        }
     }
     Ok(Some((st.sheet, st.calc, st.pivots)))
 }
