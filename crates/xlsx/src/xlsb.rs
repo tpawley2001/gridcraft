@@ -86,6 +86,9 @@ mod cell_meta;
 mod dxf;
 mod rules;
 
+/// Icon set names by KPISets number, shared with the `.xls` AutoFilter12 reader.
+pub(crate) use rules::icon_set;
+
 fn invalid(msg: impl Into<String>) -> IoError {
     IoError::Format(format!("XLSB: {}", msg.into()))
 }

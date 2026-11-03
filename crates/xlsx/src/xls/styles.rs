@@ -182,7 +182,7 @@ impl StyleRecords {
     }
 
     /// The 64-entry colour table: the built-in eight, then the palette (or the default one).
-    fn color_table(&self) -> [u32; 64] {
+    pub(super) fn color_table(&self) -> [u32; 64] {
         let mut table = INDEXED;
         if let Some(p) = &self.palette {
             for (slot, c) in table.iter_mut().skip(8).zip(p.iter()) {

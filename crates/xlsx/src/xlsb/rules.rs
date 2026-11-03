@@ -428,7 +428,7 @@ fn cfvo(payload: &[u8], base: CellRef, links: &Links) -> Result<CfValueKind, IoE
 }
 
 /// KPISets ([MS-XLSB] 2.5.86) as ECMA-376 icon set names.
-pub(super) fn icon_set(n: u32) -> Option<&'static str> {
+pub(crate) fn icon_set(n: u32) -> Option<&'static str> {
     const SETS: [&str; 17] = [
         "3Arrows",
         "3ArrowsGray",
