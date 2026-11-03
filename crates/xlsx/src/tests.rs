@@ -61,6 +61,7 @@ mod xls_biff5_tests;
 mod xls_cf12_tests;
 mod xls_chart_tests;
 mod xls_edit_ranges_tests;
+mod xls_macro_sheet_tests;
 mod xls_picture_tests;
 mod xls_pivot_tests;
 mod xls_print_tests;
