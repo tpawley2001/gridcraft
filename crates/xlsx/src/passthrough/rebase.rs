@@ -66,6 +66,20 @@ impl<'a> SheetKept<'a> {
         self.slots(SHEET_SLOTS_EARLY).replace(&format!(" xmlns:r=\"{NS_REL}\""), "")
     }
 
+    /// The kept `<customSheetViews>` (after `<autoFilter>`, before `<mergeCells>`) with only the
+    /// views whose guid is in `guids` (lower case); empty when none remains.
+    pub fn custom_sheet_views(&self, guids: &HashSet<String>) -> String {
+        if guids.is_empty() {
+            return String::new();
+        }
+        let x = self.slots(SHEET_SLOTS_MID);
+        if x.is_empty() {
+            return String::new();
+        }
+        let keep = |g: &str| guids.contains(&g.trim().to_ascii_lowercase());
+        filter_custom_sheet_views(&x, &keep).map(|x| x.replace(&format!(" xmlns:r=\"{NS_REL}\""), "")).unwrap_or_default()
+    }
+
     /// The kept sheet elements, in schema order.
     pub fn elements(&self) -> String {
         self.slots(SHEET_SLOTS)
@@ -83,6 +97,55 @@ impl<'a> SheetKept<'a> {
         }
         s
     }
+}
+
+/// `<customSheetViews>` with only the `<customSheetView>`s whose guid passes `keep`. `None` when
+/// none passes or the XML is damaged.
+fn filter_custom_sheet_views(x: &str, keep: &dyn Fn(&str) -> bool) -> Option<String> {
+    let guid = |e: &BytesStart<'_>| {
+        e.attributes()
+            .with_checks(false)
+            .flatten()
+            .find(|a| a.key.as_ref() == b"guid")
+            .and_then(|a| String::from_utf8(a.value.to_vec()).ok())
+            .unwrap_or_default()
+    };
+    let mut reader = Reader::from_str(x);
+    let mut out = String::with_capacity(x.len());
+    let mut last = 0usize;
+    let mut depth = 0usize;
+    let mut any = false;
+    loop {
+        let start = usize::try_from(reader.buffer_position()).ok()?;
+        let (view, end) = match reader.read_event().ok()? {
+            Event::Eof => break,
+            Event::Start(e) if depth == 1 => {
+                let g = guid(&e);
+                reader.read_to_end(e.name()).ok()?;
+                (Some(g), usize::try_from(reader.buffer_position()).ok()?)
+            }
+            Event::Start(_) => {
+                depth += 1;
+                (None, 0)
+            }
+            Event::Empty(e) if depth == 1 => (Some(guid(&e)), usize::try_from(reader.buffer_position()).ok()?),
+            Event::End(_) => {
+                depth = depth.saturating_sub(1);
+                (None, 0)
+            }
+            _ => (None, 0),
+        };
+        match view {
+            Some(g) if keep(&g) => any = true,
+            Some(_) => {
+                out.push_str(x.get(last..start)?);
+                last = end;
+            }
+            None => {}
+        }
+    }
+    out.push_str(x.get(last..)?);
+    any.then_some(out)
 }
 
 // ---------------------------------------------------------------- linked workbooks

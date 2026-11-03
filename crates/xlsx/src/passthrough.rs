@@ -13,8 +13,10 @@
 //! wrapped in `mc:AlternateContent` that the drawing reader doesn't model (control shapes and Office
 //! add-ins, with their web extension part, its own rels and the add-in's snapshot picture) and its SmartArt
 //! graphics with their diagram parts, and the
-//! pictures of the headers and footers, `&G`, with their `<legacyDrawingHF>`). The workbook also keeps its
-//! `<fileVersion>` and the calcFeatures extension, which Excel needs to trust the saved values.
+//! pictures of the headers and footers, `&G`, with their `<legacyDrawingHF>`, and the sheet's part of
+//! the Custom Views, `<customSheetViews>`). The workbook also keeps its `<fileVersion>` and the
+//! calcFeatures extension, which Excel needs to trust the saved values, and its Custom Views
+//! (`<customWorkbookViews>`): a sheet keeps only the views the workbook still lists.
 //!
 //! On write, kept parts get fresh part names where needed and new relationship ids; the `r:id`s in
 //! kept XML are rewritten to match (the kept relationships of a sheet's drawing keep their ids: a
@@ -63,7 +65,7 @@ pub use strict::strict_rel_type_to_transitional;
 use strict::{Untranslatable, is_xml_part, to_transitional};
 #[cfg(test)]
 pub(crate) use write::sheet_names_in;
-pub use write::{KeptOut, SheetIds, WorkbookKept, workbook_elements, write_package_rels, write_workbook};
+pub use write::{KeptOut, SheetIds, WorkbookKept, custom_view_guids, custom_workbook_views, workbook_elements, write_package_rels, write_workbook};
 
 /// Most bytes kept for one workbook.
 pub const MAX_KEPT_TOTAL: usize = 256 * 1024 * 1024;
@@ -122,6 +124,36 @@ const NS_CALC_FEATURES: &str = "http://schemas.microsoft.com/office/spreadsheetm
 const SHEET_SLOTS: &[&str] = &["legacyDrawingHF", "picture", "oleObjects", "controls"];
 /// Kept sheet elements that come before `<drawing>` in CT_Worksheet (after `<pageSetup>`).
 const SHEET_SLOTS_EARLY: &[&str] = &["customProperties"];
+/// Kept sheet elements that come between `<autoFilter>`/`<sortState>` and `<mergeCells>` in
+/// CT_Worksheet: the sheet's part of the Custom Views (ECMA-376 Part 1 §18.3.1.28).
+const SHEET_SLOTS_MID: &[&str] = &["customSheetViews"];
+/// Attributes of `<customWorkbookView>` (CT_CustomWorkbookView, ECMA-376 Part 1 §18.2.3).
+const CUSTOM_WORKBOOK_VIEW_ATTRS: &[&str] = &[
+    "name",
+    "guid",
+    "autoUpdate",
+    "mergeInterval",
+    "changesSavedWin",
+    "onlySync",
+    "personalView",
+    "includePrintSettings",
+    "includeHiddenRowCol",
+    "maximized",
+    "minimized",
+    "showHorizontalScroll",
+    "showVerticalScroll",
+    "showSheetTabs",
+    "xWindow",
+    "yWindow",
+    "windowWidth",
+    "windowHeight",
+    "tabRatio",
+    "activeSheetId",
+    "showFormulaBar",
+    "showStatusbar",
+    "showComments",
+    "showObjects",
+];
 /// The content type of a worksheet custom property part (ECMA-376 Part 1 §18.3.1.23).
 const CT_CUSTOM_PROPERTY: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.customProperty";
 

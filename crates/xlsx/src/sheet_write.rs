@@ -198,8 +198,14 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
 
     write_sheet_data(&mut s, SheetCellData { workbook: wb, index: si, sheet, overrides: &overrides, extra: &extra, dynamic: &dynamic }, &sid, out);
 
-    let prio = write_sheet_rules(&mut s, sheet, &mut rels, out);
+    let (prio, custom_views_at) = write_sheet_rules(&mut s, sheet, &mut rels, out);
     let kept = write_sheet_printing(&mut s, sheet, &mut rels, out);
+    // The sheet's part of the Custom Views goes between <autoFilter> and <mergeCells>; it is known
+    // once the kept relationships are added.
+    let custom_views = kept.custom_sheet_views(&crate::passthrough::custom_view_guids(wb));
+    if !custom_views.is_empty() && s.is_char_boundary(custom_views_at) {
+        s.insert_str(custom_views_at, &custom_views);
+    }
     // Kept content that comes before <drawing> in CT_Worksheet (custom properties).
     s.push_str(&kept.early_elements());
 
@@ -468,7 +474,9 @@ fn write_sheet_printing<'a>(s: &mut String, sheet: &'a Sheet, rels: &mut Rels, o
     kept
 }
 
-fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut Out) -> Vec<u32> {
+/// Writes protection, filter, merges, conditional formats, validations and links; returns the
+/// conditional formats' priorities and where `<customSheetViews>` goes (before `<mergeCells>`).
+fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut Out) -> (Vec<u32>, usize) {
     // sheetProtection
     if let Some(p) = &sheet.protection {
         s.push_str("<sheetProtection sheet=\"1\" objects=\"1\" scenarios=\"1\"");
@@ -505,6 +513,7 @@ fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut O
     {
         s.push_str(&autofilter_xml(af.range, &af.criteria, out));
     }
+    let custom_views_at = s.len();
     if !sheet.merges.is_empty() {
         let merges: Vec<&RangeRef> = sheet.merges.iter().filter(|m| !m.is_single()).collect();
         let _ = write!(s, "<mergeCells count=\"{}\">", merges.len());
@@ -576,7 +585,7 @@ fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut O
         }
         s.push_str("</hyperlinks>");
     }
-    prio
+    (prio, custom_views_at)
 }
 
 struct SheetCellData<'a> {
