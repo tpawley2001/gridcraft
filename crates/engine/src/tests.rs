@@ -5373,6 +5373,7 @@ fn a_script_cannot_switch_windows() {
 }
 
 mod equation;
+mod filter_date_tests;
 mod macros;
 mod objects;
 mod python_cells;

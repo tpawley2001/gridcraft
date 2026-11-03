@@ -995,6 +995,44 @@ pub enum FilterCriterion {
         set: String,
         id: Option<u32>,
     },
+    /// Values plus Excel's date-group ticks (`filters` with `dateGroupItem`).
+    DateGroups {
+        values: Vec<String>,
+        blanks: bool,
+        groups: Vec<DateGroup>,
+    },
+    /// A dynamic date filter other than above/below average (`dynamicFilter`), kept from files.
+    /// Re-applying the filter leaves those rows as they are.
+    DynamicDate {
+        kind: String,
+        val: Option<f64>,
+        max_val: Option<f64>,
+        val_iso: Option<String>,
+        max_val_iso: Option<String>,
+    },
+}
+
+/// One date-group tick of a values filter (`dateGroupItem`): the date fields down to `grouping`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DateGroup {
+    pub year: u16,
+    pub month: Option<u8>,
+    pub day: Option<u8>,
+    pub hour: Option<u8>,
+    pub minute: Option<u8>,
+    pub second: Option<u8>,
+    pub grouping: DateGrouping,
+}
+
+/// How deep a [`DateGroup`] matches (`ST_DateTimeGrouping`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DateGrouping {
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

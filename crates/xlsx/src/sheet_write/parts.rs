@@ -1,4 +1,5 @@
 use super::*;
+use gridcraft_model::DateGrouping;
 
 /// Valid table name: letters, digits, `_` and `.`, starting with a letter, `_` or `\`
 /// (Microsoft "Names in formulas" rules).
@@ -85,6 +86,46 @@ pub(super) fn autofilter_xml(range: RangeRef, criteria: &[(u32, FilterCriterion)
                 let mut st = Style::default();
                 st.font.color = *c;
                 let _ = write!(s, "<colorFilter dxfId=\"{}\" cellColor=\"0\"/>", dxf_id(&mut out.dxfs, &st));
+            }
+            FilterCriterion::DateGroups { values, blanks, groups } => {
+                let _ = write!(s, "<filters{}>", if *blanks { " blank=\"1\"" } else { "" });
+                for v in values {
+                    let _ = write!(s, "<filter val=\"{}\"/>", esc_attr(v));
+                }
+                for g in groups {
+                    let _ = write!(s, "<dateGroupItem year=\"{}\"", g.year);
+                    for (k, v) in [("month", g.month), ("day", g.day), ("hour", g.hour), ("minute", g.minute), ("second", g.second)] {
+                        if let Some(v) = v {
+                            let _ = write!(s, " {k}=\"{v}\"");
+                        }
+                    }
+                    let grouping = match g.grouping {
+                        DateGrouping::Year => "year",
+                        DateGrouping::Month => "month",
+                        DateGrouping::Day => "day",
+                        DateGrouping::Hour => "hour",
+                        DateGrouping::Minute => "minute",
+                        DateGrouping::Second => "second",
+                    };
+                    let _ = write!(s, " dateTimeGrouping=\"{grouping}\"/>");
+                }
+                s.push_str("</filters>");
+            }
+            FilterCriterion::DynamicDate { kind, val, max_val, val_iso, max_val_iso } => {
+                let _ = write!(s, "<dynamicFilter type=\"{}\"", esc_attr(kind));
+                if let Some(v) = val {
+                    let _ = write!(s, " val=\"{v}\"");
+                }
+                if let Some(v) = val_iso {
+                    let _ = write!(s, " valIso=\"{}\"", esc_attr(v));
+                }
+                if let Some(v) = max_val {
+                    let _ = write!(s, " maxVal=\"{v}\"");
+                }
+                if let Some(v) = max_val_iso {
+                    let _ = write!(s, " maxValIso=\"{}\"", esc_attr(v));
+                }
+                s.push_str("/>");
             }
             FilterCriterion::Icon { set, id } => {
                 let _ = write!(s, "<iconFilter iconSet=\"{}\"", esc_attr(set));

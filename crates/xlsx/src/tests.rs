@@ -1,6 +1,7 @@
 //! Integration-style tests: round trips, hand-written fixtures, hostile input and CSV.
 
 mod array_export;
+mod autofilter_date_tests;
 mod axis_scale_roundtrip;
 mod binary_custom_props_tests;
 mod binary_doc_props;

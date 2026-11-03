@@ -2,6 +2,7 @@ use super::{
     AutoFilter, CellRef, Comment, Ctx, El, FilterCriterion, HashMap, Hyperlink, MAX_COLS, MAX_HYPERLINK_BYTES, MAX_HYPERLINK_CELLS, MAX_ROWS,
     NoteBox, NoteCorner, RangeRef, Rel, Sheet, Table, TableColumn, TotalsFn, XmlColumnPr, from_file, xml,
 };
+use gridcraft_model::{DateGroup, DateGrouping};
 
 pub(super) fn read_hyperlinks(cx: &mut Ctx<'_>, name: &str, e: &El, rels: &[Rel], sheet: &mut Sheet) {
     let mut cells = 0u64;
@@ -50,15 +51,87 @@ fn filter_op(s: Option<&str>) -> &'static str {
     }
 }
 
+/// `ST_DynamicFilterType` values (ECMA-376 Part 1 §18.18.26) other than `null` and above/below average.
+const DYNAMIC_DATE_TYPES: &[&str] = &[
+    "tomorrow",
+    "today",
+    "yesterday",
+    "nextWeek",
+    "thisWeek",
+    "lastWeek",
+    "nextMonth",
+    "thisMonth",
+    "lastMonth",
+    "nextQuarter",
+    "thisQuarter",
+    "lastQuarter",
+    "nextYear",
+    "thisYear",
+    "lastYear",
+    "yearToDate",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "M1",
+    "M2",
+    "M3",
+    "M4",
+    "M5",
+    "M6",
+    "M7",
+    "M8",
+    "M9",
+    "M10",
+    "M11",
+    "M12",
+];
+
+/// A `dateGroupItem` (§18.3.2.4); `None` when the year or grouping is missing or a field is not a number.
+fn date_group_item(x: &El) -> Option<DateGroup> {
+    let grouping = match x.attr("dateTimeGrouping")? {
+        "year" => DateGrouping::Year,
+        "month" => DateGrouping::Month,
+        "day" => DateGrouping::Day,
+        "hour" => DateGrouping::Hour,
+        "minute" => DateGrouping::Minute,
+        "second" => DateGrouping::Second,
+        _ => return None,
+    };
+    let part = |k: &str| -> Option<Option<u8>> {
+        match x.attr(k) {
+            None => Some(None),
+            Some(v) => v.trim().parse::<u8>().ok().map(Some),
+        }
+    };
+    Some(DateGroup {
+        year: x.attr("year")?.trim().parse().ok()?,
+        month: part("month")?,
+        day: part("day")?,
+        hour: part("hour")?,
+        minute: part("minute")?,
+        second: part("second")?,
+        grouping,
+    })
+}
+
 pub fn read_autofilter(cx: &mut Ctx<'_>, e: &El) -> Option<AutoFilter> {
     let range = e.attr("ref").and_then(RangeRef::parse)?;
     let mut criteria = vec![];
     for fc in e.kids("filterColumn") {
         let Some(col) = fc.attr_u32("colId") else { continue };
         let crit = if let Some(f) = fc.child("filters") {
-            FilterCriterion::Values {
-                values: f.kids("filter").filter_map(|x| x.attr("val")).map(str::to_string).collect(),
-                blanks: f.flag("blank", false),
+            let values = f.kids("filter").filter_map(|x| x.attr("val")).map(str::to_string).collect();
+            let blanks = f.flag("blank", false);
+            let items: Vec<&El> = f.kids("dateGroupItem").collect();
+            if items.is_empty() {
+                FilterCriterion::Values { values, blanks }
+            } else {
+                let groups: Vec<DateGroup> = items.into_iter().filter_map(date_group_item).collect();
+                if groups.len() < f.kids("dateGroupItem").count() {
+                    cx.warn("AutoFilter date-group items with a missing or invalid year, date part or grouping were skipped");
+                }
+                FilterCriterion::DateGroups { values, blanks, groups }
             }
         } else if let Some(cf) = fc.child("customFilters") {
             let mut it = cf.kids("customFilter").map(|c| (filter_op(c.attr("operator")).to_string(), c.attr("val").unwrap_or("").to_string()));
@@ -74,6 +147,13 @@ pub fn read_autofilter(cx: &mut Ctx<'_>, e: &El) -> Option<AutoFilter> {
             match d.attr("type") {
                 Some("aboveAverage") => FilterCriterion::AboveAverage(true),
                 Some("belowAverage") => FilterCriterion::AboveAverage(false),
+                Some(kind) if DYNAMIC_DATE_TYPES.contains(&kind) => FilterCriterion::DynamicDate {
+                    kind: kind.to_string(),
+                    val: d.attr_f64("val").filter(|v| v.is_finite()),
+                    max_val: d.attr_f64("maxVal").filter(|v| v.is_finite()),
+                    val_iso: d.attr("valIso").map(str::to_string),
+                    max_val_iso: d.attr("maxValIso").map(str::to_string),
+                },
                 _ => {
                     cx.warn("date filters in AutoFilters are not supported");
                     continue;
