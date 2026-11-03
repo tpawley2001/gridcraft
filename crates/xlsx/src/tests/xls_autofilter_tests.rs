@@ -11,18 +11,18 @@ use crate::{read_xls, read_xlsx, write_xlsx};
 
 use super::xls_tests::compound;
 
-fn rec(id: u16, payload: &[u8]) -> Vec<u8> {
+pub(super) fn rec(id: u16, payload: &[u8]) -> Vec<u8> {
     let mut v = id.to_le_bytes().to_vec();
     v.extend_from_slice(&(payload.len() as u16).to_le_bytes());
     v.extend_from_slice(payload);
     v
 }
 
-fn cat(parts: &[&[u8]]) -> Vec<u8> {
+pub(super) fn cat(parts: &[&[u8]]) -> Vec<u8> {
     parts.concat()
 }
 
-fn u16s(v: &[u16]) -> Vec<u8> {
+pub(super) fn u16s(v: &[u16]) -> Vec<u8> {
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 
@@ -36,7 +36,7 @@ fn eof() -> Vec<u8> {
 
 /// Lbl `_FilterDatabase` (built-in name 0x0D) for the sheet with itab `itab`, over `area`
 /// (rwFirst, rwLast, colFirst, colLast).
-fn filter_database(itab: u16, area: [u16; 4]) -> Vec<u8> {
+pub(super) fn filter_database(itab: u16, area: [u16; 4]) -> Vec<u8> {
     // PtgArea3d (2.5.198.28) through the internal SupBook's first XTI (ixti 0).
     let rgce = cat(&[&[0x3B], &0u16.to_le_bytes(), &u16s(&area)]);
     rec(0x0018, &cat(&[&u16s(&[0x0020]), &[0, 1], &u16s(&[rgce.len() as u16, 0, itab]), &[0; 4], &[0, 0x0D], &rgce]))
@@ -75,12 +75,12 @@ fn auto_filter(entry: u16, flags: u16, first: &[u8], second: &[u8], strings: &[&
     rec(0x009E, &p)
 }
 
-fn filter_info(entries: u16) -> Vec<u8> {
+pub(super) fn filter_info(entries: u16) -> Vec<u8> {
     rec(0x009D, &u16s(&[entries]))
 }
 
 /// A one-sheet workbook whose globals hold `globals_extra` and whose sheet holds `sheet_records`.
-fn xls_file(globals_extra: &[u8], sheet_records: &[u8]) -> Vec<u8> {
+pub(super) fn xls_file(globals_extra: &[u8], sheet_records: &[u8]) -> Vec<u8> {
     let boundsheet = |pos: u32| rec(0x0085, &cat(&[&pos.to_le_bytes(), &[0, 0, 6, 0], b"Sheet1"]));
     let globals = |pos: u32| {
         cat(&[
@@ -357,10 +357,11 @@ fn xls_autofilter12_icon_filter() {
 fn xls_autofilter12_dynamic_filters() {
     let (got, _) = criteria(&[&filter12(0, 0, 1, 0, 0, &[]), &filter12(1, 0, 2, 0, 0, &[])]);
     assert_eq!(got, vec![(0, FilterCriterion::AboveAverage(true)), (1, FilterCriterion::AboveAverage(false))]);
-    // "This month" (cft 0x0F): no criterion, one date-filter warning.
+    // "This month" (cft 0x0F): a dynamic date filter, no warning.
     let (got, warnings) = criteria(&[&filter12(0, 0, 0x0F, 0, 0, &[])]);
-    assert!(got.is_empty());
-    assert_eq!(warnings.iter().filter(|w| w.contains("date filters in AutoFilters are not supported")).count(), 1, "{warnings:?}");
+    let this_month = FilterCriterion::DynamicDate { kind: "thisMonth".into(), val: None, max_val: None, val_iso: None, max_val_iso: None };
+    assert_eq!(got, vec![(0, this_month)]);
+    assert!(warnings.iter().all(|w| !w.contains("AutoFilter")), "{warnings:?}");
 }
 
 #[test]
