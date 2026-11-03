@@ -31,7 +31,7 @@ mod doc_props;
 mod drawing;
 pub(crate) mod formula;
 mod ftab;
-mod macro_sheet;
+pub(crate) mod macro_sheet;
 mod page_setup;
 mod pivot;
 mod protection;
@@ -285,6 +285,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
                         visibility: bs.visibility,
                         before: wb.sheets.len(),
                         bound,
+                        intl: false,
                         sheet,
                     });
                 }
