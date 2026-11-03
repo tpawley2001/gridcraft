@@ -15,6 +15,7 @@ mod csv_tests;
 mod drawing_hyperlinks;
 mod dxf_font_charset;
 mod encrypted_tests;
+mod equation_tests;
 mod fixtures;
 mod google_sheets_dummy;
 mod group_passthrough;

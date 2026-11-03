@@ -1069,7 +1069,7 @@ impl FormulaGroups for Target<'_> {
         if let Some(cell) = self.sheet.cells.get_mut(pos) {
             cell.formula = Some(Arc::new(f));
         } else {
-            self.sheet.cells.set(pos, Cell { value: Value::Empty, formula: Some(Arc::new(f)), style: StyleId::DEFAULT });
+            self.sheet.cells.set(pos, Cell { value: Value::Empty, formula: Some(Arc::new(f)), style: StyleId::DEFAULT, py: None });
         }
     }
     fn refuse(&mut self, _why: &'static str) {

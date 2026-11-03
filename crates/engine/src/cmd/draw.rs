@@ -83,6 +83,7 @@ fn stroke(s: &mut Session, p: &Json) -> Result<Json> {
         hidden: false,
         hyperlink: None,
         name: None,
+        math: Default::default(),
         id,
         kind: ShapeKind::Ink,
         anchor: Anchor {
