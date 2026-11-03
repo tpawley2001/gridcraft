@@ -9,14 +9,14 @@ use super::xls_tests::compound;
 use crate::tables::INDEXED;
 use crate::{read_xls, read_xlsx, write_xlsx};
 
-fn rec(id: u16, payload: &[u8]) -> Vec<u8> {
+pub(super) fn rec(id: u16, payload: &[u8]) -> Vec<u8> {
     let mut v = id.to_le_bytes().to_vec();
     v.extend_from_slice(&(payload.len() as u16).to_le_bytes());
     v.extend_from_slice(payload);
     v
 }
 
-fn u16s(v: &[u16]) -> Vec<u8> {
+pub(super) fn u16s(v: &[u16]) -> Vec<u8> {
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 
@@ -31,7 +31,7 @@ fn eof() -> Vec<u8> {
 }
 
 /// Font: height in twips, flags, colour, weight, script, underline, then a UTF-16 name.
-fn font(twips: u16, flags: u16, icv: u16, weight: u16, script: u16, underline: u8, name: &str) -> Vec<u8> {
+pub(super) fn font(twips: u16, flags: u16, icv: u16, weight: u16, script: u16, underline: u8, name: &str) -> Vec<u8> {
     let mut p = u16s(&[twips, flags, icv, weight, script]);
     p.extend_from_slice(&[underline, 0, 0, 0]);
     p.push(name.encode_utf16().count() as u8);
@@ -50,24 +50,24 @@ fn with_family_charset(mut font_record: Vec<u8>, family: u8, charset: u8) -> Vec
 
 /// The CellXF fields an XF record carries after ifnt, ifmt and the protection flags.
 #[derive(Clone, Copy, Default)]
-struct XfData {
-    alc: u8,
-    wrap: bool,
-    alc_v: u8,
-    trot: u8,
-    indent: u8,
-    shrink: bool,
+pub(super) struct XfData {
+    pub(super) alc: u8,
+    pub(super) wrap: bool,
+    pub(super) alc_v: u8,
+    pub(super) trot: u8,
+    pub(super) indent: u8,
+    pub(super) shrink: bool,
     /// dgLeft, dgRight, dgTop, dgBottom, dgDiag.
-    dg: [u32; 5],
+    pub(super) dg: [u32; 5],
     /// icvLeft, icvRight, icvTop, icvBottom, icvDiag.
-    icv: [u32; 5],
-    diag: u32,
-    fls: u32,
-    fore: u16,
-    back: u16,
+    pub(super) icv: [u32; 5],
+    pub(super) diag: u32,
+    pub(super) fls: u32,
+    pub(super) fore: u16,
+    pub(super) back: u16,
 }
 
-fn xf(ifnt: u16, ifmt: u16, flags: u16, d: XfData) -> Vec<u8> {
+pub(super) fn xf(ifnt: u16, ifmt: u16, flags: u16, d: XfData) -> Vec<u8> {
     let mut p = u16s(&[ifnt, ifmt, flags]);
     p.push(d.alc | (u8::from(d.wrap) << 3) | (d.alc_v << 4));
     p.push(d.trot);
@@ -82,16 +82,16 @@ fn xf(ifnt: u16, ifmt: u16, flags: u16, d: XfData) -> Vec<u8> {
 }
 
 /// What Excel writes for unformatted cells: bottom aligned, automatic fill colours.
-fn plain() -> XfData {
+pub(super) fn plain() -> XfData {
     XfData { alc_v: 2, fore: 0x40, back: 0x41, ..XfData::default() }
 }
 
 /// Locked, a cell XF inheriting from style XF 0.
-const CELL: u16 = 0x0001;
+pub(super) const CELL: u16 = 0x0001;
 /// Locked, a style XF with no parent.
-const STYLE: u16 = 0xFFF5;
+pub(super) const STYLE: u16 = 0xFFF5;
 
-fn number(r: u16, c: u16, ixfe: u16, n: f64) -> Vec<u8> {
+pub(super) fn number(r: u16, c: u16, ixfe: u16, n: f64) -> Vec<u8> {
     let mut p = u16s(&[r, c, ixfe]);
     p.extend_from_slice(&n.to_le_bytes());
     rec(0x0203, &p)
@@ -102,7 +102,7 @@ fn blank(r: u16, c: u16, ixfe: u16) -> Vec<u8> {
 }
 
 /// A one-sheet workbook: `formatting` records in the globals, `cells` in the sheet.
-fn workbook(formatting: &[Vec<u8>], cells: &[Vec<u8>]) -> Vec<u8> {
+pub(super) fn workbook(formatting: &[Vec<u8>], cells: &[Vec<u8>]) -> Vec<u8> {
     let boundsheet = |pos: u32| {
         let mut p = pos.to_le_bytes().to_vec();
         p.extend_from_slice(&[0, 0, 6, 0]);
@@ -115,12 +115,12 @@ fn workbook(formatting: &[Vec<u8>], cells: &[Vec<u8>]) -> Vec<u8> {
     [globals(len), sheet].concat()
 }
 
-fn style_at<'a>(wb: &'a Workbook, a1: &str) -> &'a Style {
+pub(super) fn style_at<'a>(wb: &'a Workbook, a1: &str) -> &'a Style {
     wb.styles.get(wb.sheets[0].style_id(CellRef::parse(a1).unwrap()))
 }
 
 /// Four default fonts (Arial 10 and its bold/italic variants), as Excel writes them.
-fn default_fonts() -> Vec<Vec<u8>> {
+pub(super) fn default_fonts() -> Vec<Vec<u8>> {
     vec![
         font(200, 0, 0x7FFF, 400, 0, 0, "Arial"),
         font(200, 0, 0x7FFF, 700, 0, 0, "Arial"),
