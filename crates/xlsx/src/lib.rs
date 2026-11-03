@@ -32,6 +32,7 @@ mod richdata;
 mod sheet_read;
 mod sheet_write;
 mod styles;
+mod sylk;
 mod tables;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
@@ -52,6 +53,7 @@ pub use csv::{MAX_CSV_BYTES, read_csv, read_csv_with_report, write_csv, write_cs
 pub use ods::{read_ods, read_ods_with};
 pub use package::MAX_PART;
 pub use passthrough::rebase_links;
+pub use sylk::{is_sylk, read_sylk};
 pub use xls::read_xls;
 pub use xlsb::read_xlsb;
 
