@@ -3,6 +3,7 @@ use super::{
     AutoFilter, CellRef, EngineError, FilterCriterion, Json, Ordering, RangeRef, Result, Session, Sheet, Value, Workbook, bad, bool_param, col_param,
     current_region, data_target, edit, json,
 };
+use gridcraft_model::{DateGroup, DateGrouping};
 
 // ---------------------------------------------------------------- filter
 
@@ -180,6 +181,21 @@ pub(crate) fn grow_autofilter(sh: &mut Sheet, at: CellRef) {
     }
 }
 
+/// Whether a date/time falls in a date-group tick: every field down to the group's level matches.
+fn date_group_ok(g: &DateGroup, dt: &gridcraft_core::date::DateTime) -> bool {
+    let depth = match g.grouping {
+        DateGrouping::Year => 1,
+        DateGrouping::Month => 2,
+        DateGrouping::Day => 3,
+        DateGrouping::Hour => 4,
+        DateGrouping::Minute => 5,
+        DateGrouping::Second => 6,
+    };
+    let parts = [g.month, g.day, g.hour, g.minute, g.second];
+    let actual = [dt.month, dt.day, dt.hour, dt.minute, dt.second];
+    dt.year == i32::from(g.year) && parts.iter().zip(actual).take(depth - 1).all(|(want, got)| want.is_some_and(|w| u32::from(w) == got))
+}
+
 /// Hides rows of the autofilter range that fail any criterion.
 pub(crate) fn apply_filter(wb: &mut Workbook, sheet: usize) {
     let Some(sh) = wb.sheet(sheet) else { return };
@@ -248,8 +264,20 @@ pub(crate) fn apply_filter(wb: &mut Workbook, sheet: usize) {
                 },
                 FilterCriterion::FillColor(col) => wb.styles.get(sh.style_id(c)).fill.fg == *col,
                 FilterCriterion::FontColor(col) => wb.styles.get(sh.style_id(c)).font.color == *col,
-                // Icons are not evaluated here: the row keeps its current visibility.
-                FilterCriterion::Icon { .. } => !sh.is_row_hidden(row),
+                FilterCriterion::DateGroups { values, blanks, groups } => {
+                    if filter_blank(&v) {
+                        *blanks
+                    } else {
+                        values.iter().any(|x| x.eq_ignore_ascii_case(&text) || x.eq_ignore_ascii_case(&v.display()))
+                            || match v {
+                                Value::Number(n) => gridcraft_core::date::datetime_from_serial(wb.date_system, n)
+                                    .is_some_and(|dt| groups.iter().any(|g| date_group_ok(g, &dt))),
+                                _ => false,
+                            }
+                    }
+                }
+                // Icons and dynamic date filters are not evaluated here: the row keeps its current visibility.
+                FilterCriterion::Icon { .. } | FilterCriterion::DynamicDate { .. } => !sh.is_row_hidden(row),
             };
             if !ok {
                 visible = false;
