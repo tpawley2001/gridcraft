@@ -38,12 +38,11 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - **Missing:** slicers and their caches, timelines, the data model, query tables attached to
   tables, unmodelled `extLst` entries, chart details. Pass-through (#330) keeps custom XML,
   external links, connections, sheet query tables, printer settings, worksheet custom properties,
-  form and ActiveX controls,
-  OLE objects, sheet backgrounds, SmartArt graphics (diagram parts) and Office add-ins (web
-  extensions: the content add-in's drawing anchor, its `webextension` part and its fallback
-  picture, and the workbook's task panes part); never checked in Excel (repair prompts unknown).
-  the volatile dependencies part (RTD and CUBE topics), form and ActiveX controls,
-  OLE objects, sheet backgrounds, SmartArt graphics (diagram parts) and grouped drawing objects (`grpSp`); never checked in Excel (repair prompts unknown).
+  the volatile dependencies part (RTD and CUBE topics), form and ActiveX controls, OLE objects,
+  sheet backgrounds, SmartArt graphics (diagram parts), grouped drawing objects (`grpSp`) and
+  Office add-ins (web extensions: the content add-in's drawing anchor, its `webextension` part and
+  its fallback picture, and the workbook's task panes part); never checked in Excel (repair
+  prompts unknown).
 - **Evidence:** `crates/xlsx/src/passthrough.rs` (what is kept, and why the rest isn't).
 - **Impact:** open-edit-save still simplifies workbooks with slicers, timelines or Power Pivot.
 - **Estimate:** 6–10 h. [file-format-parity.md](file-format-parity.md)
