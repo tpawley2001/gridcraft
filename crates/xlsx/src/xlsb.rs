@@ -37,6 +37,7 @@ use quick_xml::name::ResolveResult;
 use crate::package::{Package, Rel, normalize, resolve, split_dir};
 use crate::tables::{col_width_to_px, pt_to_px};
 use crate::xls::formula::{Links, Mode, Site, SupBook, Xti, decode_xlsb, decode_xlsb_at};
+use crate::xls::macro_sheet::{MacroSheet, UNREAD_FORMULAS, add_macro_sheets, kept_warning};
 use crate::xls::{
     BUILTIN_NAMES, ChartSheet, FormulaGroups, Lbl, MAX_SHARED_ATTACHES, Parsed, Pending, add_chart_sheets, add_defined_names, blank_array_followers,
     resolve_pending,
@@ -52,6 +53,8 @@ const MAIN: &str = "application/vnd.ms-excel.main";
 const BINARY_MAIN: &str = "application/vnd.ms-excel.sheet.binary.macroEnabled.main";
 const WORKSHEET: &str = "application/vnd.ms-excel.worksheet";
 const CHARTSHEET: &str = "application/vnd.ms-excel.chartsheet";
+const MACRO_SHEET: &str = "application/vnd.ms-excel.macrosheet";
+const INTL_MACRO_SHEET: &str = "application/vnd.ms-excel.intlmacrosheet";
 const STYLES: &str = "application/vnd.ms-excel.styles";
 const MAX_STYLE_RECORDS: usize = 65_536;
 const STRINGS: &str = "application/vnd.ms-excel.sharedStrings";
@@ -207,8 +210,11 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut table_names = HashSet::new();
     let mut table_id = 1u32;
     let mut chart_sheets = vec![];
+    let mut chart_bounds: Vec<usize> = vec![];
     let mut unread_chart_sheets = false;
-    for info in sheets {
+    let mut macro_sheets: Vec<MacroSheet> = vec![];
+    let mut macro_unread = false;
+    for (bound, info) in sheets.into_iter().enumerate() {
         model_index.push(None);
         let Some(id) = info.rel else {
             if info.visibility != Visibility::VeryHidden {
@@ -235,9 +241,33 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
                 chart = scratch.charts.into_iter().next();
             }
             match chart {
-                Some(chart) => chart_sheets.push(ChartSheet { name: info.name, visibility: info.visibility, before: wb.sheets.len(), chart }),
+                Some(chart) => {
+                    chart_sheets.push(ChartSheet { name: info.name, visibility: info.visibility, before: wb.sheets.len(), chart });
+                    chart_bounds.push(bound);
+                }
                 None => unread_chart_sheets = true,
             }
+            continue;
+        }
+        if matches!(rel.kind.as_str(), "xlMacrosheet" | "xlIntlMacrosheet") {
+            // An Excel 4.0 macro sheet: its cells are kept for a macro-enabled save, never evaluated.
+            let kept_before = budget.formulas_kept;
+            match macro_sheet(&mut package, &types, &rel.target, &info.name, &strings, &styles, &dxfs, &links, &cell_meta, &mut budget, &mut report) {
+                Some(sheet) => {
+                    report.warn(kept_warning(&info.name));
+                    macro_sheets.push(MacroSheet {
+                        name: info.name.clone(),
+                        visibility: info.visibility,
+                        before: wb.sheets.len(),
+                        bound,
+                        intl: rel.kind == "xlIntlMacrosheet",
+                        sheet,
+                    });
+                }
+                None => report.warn("Excel 4.0 macro sheets that can't be read were skipped."),
+            }
+            macro_unread |= budget.formulas_kept > kept_before;
+            budget.formulas_kept = kept_before;
             continue;
         }
         if rel.kind != "worksheet" {
@@ -293,6 +323,10 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         report.warn("XLSB chart sheets that could not be read were skipped.");
     }
     add_chart_sheets(&mut wb, chart_sheets);
+    if macro_unread {
+        report.warn(UNREAD_FORMULAS);
+    }
+    add_macro_sheets(&mut wb, macro_sheets, &chart_bounds);
     add_defined_names(&names, &model_index, &mut wb, &mut report, |l| decode_xlsb(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &links));
     if budget.formulas_kept > 0 {
         report.warn(format!(
@@ -1332,6 +1366,36 @@ impl PageState {
             }
         }
     }
+}
+
+/// Reads an Excel 4.0 macro sheet part ([MS-XLSB] Macro Sheet part: the worksheet record stream)
+/// into a detached sheet, or `None` when it can't be read.
+#[allow(clippy::too_many_arguments)] // workbook-level tables the sheet decoder reads
+fn macro_sheet(
+    package: &mut Package<'_>,
+    types: &[Entry],
+    path: &str,
+    name: &str,
+    strings: &[Arc<str>],
+    styles: &[StyleId],
+    dxfs: &[gridcraft_model::Style],
+    links: &Links,
+    cell_meta: &cell_meta::CellMeta,
+    budget: &mut Budget,
+    report: &mut ReadReport,
+) -> Option<Sheet> {
+    check_type(types, path, MACRO_SHEET).or_else(|_| check_type(types, path, INTL_MACRO_SHEET)).ok()?;
+    let bytes = package.read(path).ok().flatten()?;
+    budget.links = 0;
+    budget.comments = 0;
+    // A part that fails part-way reports only that it was skipped.
+    let mut notes = ReadReport::default();
+    let sheet =
+        worksheet(&bytes, name, strings, styles, dxfs, links, cell_meta, &[], budget, &mut SheetParts::default(), &mut None, &mut notes).ok()?;
+    for note in notes.warnings {
+        report.warn(note);
+    }
+    Some(sheet)
 }
 
 #[allow(clippy::too_many_arguments)] // workbook-level tables the sheet decoder reads

@@ -18,30 +18,35 @@ const NS_XM: &str = "http://schemas.microsoft.com/office/excel/2006/main";
 const NS_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const REL_MACRO_SHEET: &str = "http://schemas.microsoft.com/office/2006/relationships/xlMacrosheet";
 const CT_MACRO_SHEET: &str = "application/vnd.ms-excel.macrosheet+xml";
+const REL_INTL_MACRO_SHEET: &str = "http://schemas.microsoft.com/office/2006/relationships/xlIntlMacrosheet";
+const CT_INTL_MACRO_SHEET: &str = "application/vnd.ms-excel.intlmacrosheet+xml";
 
 /// The warning for a macro sheet formula that couldn't be read (its saved value is kept).
-pub(super) const UNREAD_FORMULAS: &str = "Some Excel 4.0 macro formulas could not be read and were kept as values.";
+pub(crate) const UNREAD_FORMULAS: &str = "Some Excel 4.0 macro formulas could not be read and were kept as values.";
 
 /// A macro sheet read from the file.
-pub(super) struct MacroSheet {
+pub(crate) struct MacroSheet {
     pub name: String,
     pub visibility: Visibility,
     /// How many worksheets come before it.
     pub before: usize,
     /// Its BoundSheet8 position, for the order among the other kept sheets.
     pub bound: usize,
+    /// An international macro sheet (`xlIntlMacrosheet`): same part, its own content and
+    /// relationship types.
+    pub intl: bool,
     pub sheet: Sheet,
 }
 
 /// The note a kept macro sheet gets, worded like the `.xlsx` reader's.
-pub(super) fn kept_warning(name: &str) -> String {
+pub(crate) fn kept_warning(name: &str) -> String {
     format!("macro sheet \"{name}\" is kept as it is but can't be shown or edited; kept only when saved as a macro-enabled workbook")
 }
 
 /// Adds the macro sheets to the workbook's kept parts. `chart_bounds` gives the BoundSheet8
 /// position of each kept chart sheet already there (in order), so every kept sheet stays in
 /// file order.
-pub(super) fn add_macro_sheets(wb: &mut Workbook, sheets: Vec<MacroSheet>, chart_bounds: &[usize]) {
+pub(crate) fn add_macro_sheets(wb: &mut Workbook, sheets: Vec<MacroSheet>, chart_bounds: &[usize]) {
     if sheets.is_empty() {
         return;
     }
@@ -50,15 +55,16 @@ pub(super) fn add_macro_sheets(wb: &mut Workbook, sheets: Vec<MacroSheet>, chart
         std::mem::take(&mut kept.sheets).into_iter().enumerate().map(|(i, s)| (chart_bounds.get(i).copied().unwrap_or(usize::MAX), s)).collect();
     for (i, ms) in sheets.into_iter().enumerate() {
         let n = i + 1;
+        let (content_type, rel_type) = if ms.intl { (CT_INTL_MACRO_SHEET, REL_INTL_MACRO_SHEET) } else { (CT_MACRO_SHEET, REL_MACRO_SHEET) };
         let part = format!("xl/macrosheets/sheet{n}.xml");
         kept.parts.push(PreservedPart {
             name: part.clone(),
-            content_type: CT_MACRO_SHEET.into(),
+            content_type: content_type.into(),
             data: Arc::from(macro_sheet_xml(&ms.sheet).into_bytes()),
             rels: vec![],
         });
         let rel_id = format!("rIdXlsMacroSheet{n}");
-        kept.rels.push(PreservedRel { id: rel_id.clone(), rel_type: REL_MACRO_SHEET.into(), target: part, external: false });
+        kept.rels.push(PreservedRel { id: rel_id.clone(), rel_type: rel_type.into(), target: part, external: false });
         order.push((ms.bound, PreservedSheet { name: ms.name, visibility: ms.visibility, rel_id, before: ms.before, sheet_id: 0 }));
     }
     order.sort_by_key(|(bound, _)| *bound);
@@ -71,7 +77,7 @@ type Row<'a> = (LineInfo, Vec<(CellRef, &'a Cell)>);
 
 /// The `<xm:macrosheet>` part of a detached sheet: dimension, column widths and the cells (with
 /// row heights). Cell styles are the workbook's style indices, as in its worksheets.
-pub(super) fn macro_sheet_xml(sheet: &Sheet) -> String {
+pub(crate) fn macro_sheet_xml(sheet: &Sheet) -> String {
     let mut s = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<xm:macrosheet xmlns=\"{NS_MAIN}\" xmlns:r=\"{NS_REL}\" xmlns:xm=\"{NS_XM}\">"
     );
