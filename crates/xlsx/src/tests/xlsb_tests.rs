@@ -276,7 +276,12 @@ fn xlsb_requires_internal_typed_relationships_and_sniffs_only_root_workbook() {
         "Id=\"two\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet",
         "Id=\"two\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet",
     );
+    // A chart sheet whose part isn't a readable chart sheet is skipped; the workbook still loads.
     let (wb, report) = read_xlsb(&package(&book(false), &sheet, &sst(), ROOT, &chartsheet, TYPES)).unwrap();
+    assert_eq!(wb.sheets.len(), 1);
+    assert!(report.warnings.iter().any(|w| w.contains("chart sheets that could not be read")));
+    let dialogsheet = chartsheet.replace("relationships/chartsheet", "relationships/dialogsheet");
+    let (wb, report) = read_xlsb(&package(&book(false), &sheet, &sst(), ROOT, &dialogsheet, TYPES)).unwrap();
     assert_eq!(wb.sheets.len(), 1);
     assert!(report.warnings.iter().any(|w| w.contains("non-worksheet")));
     // An unrelated binary part must not change the format of an XML workbook package.
