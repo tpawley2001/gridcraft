@@ -12,6 +12,7 @@ mod chart_bool_default;
 mod chart_combo_kinds;
 mod chart_data_table;
 mod chart_ref_offsets;
+mod chart_sheet_print_tests;
 mod code_name_tests;
 mod csv_tests;
 mod custom_views_tests;

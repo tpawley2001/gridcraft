@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use gridcraft_core::CellRef;
 use gridcraft_model::{
-    Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, Image, LegendPos, PreservedPart, PreservedRel,
+    Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, Image, LegendPos, Orientation, PreservedPart, PreservedRel,
     PreservedSheet, PrintSettings, Series, Sheet, Visibility, Workbook,
 };
 
@@ -185,7 +185,7 @@ impl Embedded {
     /// ends inside it (cut off), so nothing more of the sheet can be read.
     pub(super) fn chart(&mut self, recs: &mut Records<'_>, budget: &mut Budget, links: &Links, report: &mut ReadReport) -> Result<bool, IoError> {
         let anchor = self.pending.take();
-        match read(recs, budget, links, report)? {
+        match read(recs, budget, links, None, report)? {
             Read::Chart(ch) => self.charts.push((anchor, *ch)),
             Read::Skipped => {}
             Read::CutOff => return Ok(false),
@@ -247,9 +247,16 @@ fn place(sheet: &Sheet, a: &ClientAnchor) -> Anchor {
     }
 }
 
-/// Reads the chart substream of a chart sheet at `pos`. A substream that isn't a readable chart
-/// gives `None` with a warning.
-pub(super) fn chart_sheet(stream: &[u8], pos: usize, budget: &mut Budget, links: &Links, report: &mut ReadReport) -> Result<Option<Chart>, IoError> {
+/// Reads the chart substream of a chart sheet at `pos`, and its page setup records (Setup, the
+/// margins, Header/Footer: [MS-XLS] 2.4.257, 2.4.136, 2.4.123). A substream that isn't a
+/// readable chart gives `None` with a warning.
+pub(super) fn chart_sheet(
+    stream: &[u8],
+    pos: usize,
+    budget: &mut Budget,
+    links: &Links,
+    report: &mut ReadReport,
+) -> Result<Option<(Chart, PrintSettings)>, IoError> {
     let mut recs = Records::new(stream, pos);
     let first = match recs.next_record() {
         Ok(Some(r)) => r,
@@ -259,8 +266,9 @@ pub(super) fn chart_sheet(stream: &[u8], pos: usize, budget: &mut Budget, links:
     if pos >= stream.len() || !is_chart_bof(&first) {
         return Ok(None);
     }
-    Ok(match read(&mut recs, budget, links, report)? {
-        Read::Chart(ch) => Some(*ch),
+    let mut print = PrintSettings::default();
+    Ok(match read(&mut recs, budget, links, Some(&mut print), report)? {
+        Read::Chart(ch) => Some((*ch, chart_sheet_print(&print))),
         Read::Skipped | Read::CutOff => None,
     })
 }
@@ -274,10 +282,18 @@ enum Read {
     CutOff,
 }
 
-/// Reads a chart substream up to its EOF (its BOF already read). A chart that can't be imported
-/// is skipped with a warning; only resource limits are errors.
-fn read(recs: &mut Records<'_>, budget: &mut Budget, links: &Links, report: &mut ReadReport) -> Result<Read, IoError> {
+/// Reads a chart substream up to its EOF (its BOF already read), and, for a chart sheet, its page
+/// setup records into `print`. A chart that can't be imported is skipped with a warning; only
+/// resource limits are errors.
+fn read(
+    recs: &mut Records<'_>,
+    budget: &mut Budget,
+    links: &Links,
+    mut print: Option<&mut PrintSettings>,
+    report: &mut ReadReport,
+) -> Result<Read, IoError> {
     let mut records = vec![];
+    let (mut tab, mut page) = (None, super::page_setup::PageState::default());
     let mut depth = 1usize;
     let mut nested = false;
     loop {
@@ -301,7 +317,12 @@ fn read(recs: &mut Records<'_>, budget: &mut Budget, links: &Links, report: &mut
                     break;
                 }
             }
-            _ if depth == 1 => records.push(rec),
+            _ if depth == 1 => {
+                if let Some(print) = print.as_deref_mut() {
+                    super::page_setup::read(&rec, print, &mut tab, &mut page, report);
+                }
+                records.push(rec);
+            }
             _ => {}
         }
     }
@@ -884,13 +905,59 @@ fn parse(records: &[Record<'_>], links: &Links, report: &mut ReadReport) -> Resu
     p.finish(report)
 }
 
-/// A chart sheet read from the file: its name, state, how many worksheets come before it, and
-/// its chart.
+/// A chart sheet read from the file: its name, state, how many worksheets come before it, its
+/// chart and its page setup.
 pub(crate) struct ChartSheet {
     pub name: String,
     pub visibility: Visibility,
     pub before: usize,
     pub chart: Chart,
+    pub print: PrintSettings,
+}
+
+/// The part of a sheet's print settings a chart sheet keeps (as the `.xlsx` chart sheet reader
+/// does): orientation, paper, margins and header/footer.
+pub(crate) fn chart_sheet_print(p: &PrintSettings) -> PrintSettings {
+    PrintSettings {
+        orientation: p.orientation,
+        paper: p.paper.clone(),
+        margins: p.margins,
+        header: p.header.clone(),
+        footer: p.footer.clone(),
+        different_first: p.different_first,
+        different_odd_even: p.different_odd_even,
+        first_header: p.first_header.clone(),
+        first_footer: p.first_footer.clone(),
+        even_header: p.even_header.clone(),
+        even_footer: p.even_footer.clone(),
+        hf_scale_with_doc: p.hf_scale_with_doc,
+        hf_align_with_margins: p.hf_align_with_margins,
+        ..PrintSettings::default()
+    }
+}
+
+/// The chart sheet XML (ECMA-376 Part 1 §18.3.1.12) in CT_Chartsheet order: the page margins, a
+/// `<pageSetup>` (§18.3.1.64) for a paper or orientation that isn't the default, and a
+/// `<headerFooter>` (§18.3.1.46) when there is one, before the drawing.
+fn chart_sheet_xml(p: &PrintSettings) -> String {
+    let mut s = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<chartsheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"{REL}\"><sheetPr/><sheetViews><sheetView workbookViewId=\"0\"/></sheetViews>"
+    );
+    crate::sheet_write::write_page_margins(&mut s, p);
+    let paper = crate::tables::paper_id(&p.paper).filter(|&id| id != 1);
+    if paper.is_some() || p.orientation == Orientation::Landscape {
+        s.push_str("<pageSetup");
+        if let Some(id) = paper {
+            let _ = write!(s, " paperSize=\"{id}\"");
+        }
+        if p.orientation == Orientation::Landscape {
+            s.push_str(" orientation=\"landscape\"");
+        }
+        s.push_str("/>");
+    }
+    crate::sheet_write::write_header_footer(&mut s, p);
+    s.push_str("<drawing r:id=\"rId1\"/></chartsheet>");
+    s
 }
 
 const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -919,9 +986,7 @@ pub(crate) fn add_chart_sheets(wb: &mut Workbook, sheets: Vec<ChartSheet>) {
             drawing,
             "<xdr:absoluteAnchor><xdr:pos x=\"0\" y=\"0\"/><xdr:ext cx=\"{cx}\" cy=\"{cy}\"/><xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"2\" name=\"Chart 1\"/><xdr:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></xdr:cNvGraphicFramePr></xdr:nvGraphicFramePr><xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></xdr:xfrm><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"{REL}\" r:id=\"rId1\"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:absoluteAnchor></xdr:wsDr>"
         );
-        let sheet_xml = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<chartsheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"{REL}\"><sheetPr/><sheetViews><sheetView workbookViewId=\"0\"/></sheetViews><pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/><drawing r:id=\"rId1\"/></chartsheet>"
-        );
+        let sheet_xml = chart_sheet_xml(&cs.print);
         let rel =
             |ty: &str, target: &str| PreservedRel { id: "rId1".into(), rel_type: format!("{REL}/{ty}"), target: target.into(), external: false };
         kept.parts.push(PreservedPart {
@@ -945,13 +1010,7 @@ pub(crate) fn add_chart_sheets(wb: &mut Workbook, sheets: Vec<ChartSheet>) {
         let rel_id = format!("rIdXlsChartSheet{n}");
         kept.rels.push(PreservedRel { id: rel_id.clone(), rel_type: format!("{REL}/chartsheet"), target: sheet_part, external: false });
         kept.sheets.push(PreservedSheet { name: cs.name.clone(), visibility: cs.visibility, rel_id, before: cs.before, sheet_id: 0 });
-        prints.push(ChartSheetPrint {
-            name: cs.name,
-            visibility: cs.visibility,
-            before: cs.before,
-            chart: cs.chart,
-            print: PrintSettings::default(),
-        });
+        prints.push(ChartSheetPrint { name: cs.name, visibility: cs.visibility, before: cs.before, chart: cs.chart, print: cs.print });
     }
     wb.preserved = Some(Arc::new(kept));
     wb.chart_sheets = Arc::new(prints);

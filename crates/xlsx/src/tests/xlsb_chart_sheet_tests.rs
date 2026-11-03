@@ -64,6 +64,16 @@ fn chart_sheet_part(part: Part) -> Vec<u8> {
 
 /// An XLSB package with `entries`; `custom` adds a custom document properties part.
 fn package(entries: &[Entry], custom: bool) -> Vec<u8> {
+    package_with(entries, custom, None)
+}
+
+/// A worksheet "Data" and a chart sheet "Chart1" whose part is `chart_part`.
+pub(super) fn package_with_chart_part(chart_part: &[u8]) -> Vec<u8> {
+    package_with(&[data(), chart("Chart1")], false, Some(chart_part))
+}
+
+/// [`package`], with `chart_part` (when given) as every chart sheet's part.
+fn package_with(entries: &[Entry], custom: bool, chart_part: Option<&[u8]>) -> Vec<u8> {
     let mut roots = format!(
         r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="book" Type="{R}/officeDocument" Target="xl/workbook.bin"/>"#
     );
@@ -83,7 +93,7 @@ fn package(entries: &[Entry], custom: bool) -> Vec<u8> {
         let (dir, ct, bytes) = match e.kind {
             "worksheet" => ("worksheets", "worksheet", worksheet(&[], &[])),
             "dialogsheet" => ("dialogsheets", "dialogsheet", vec![]),
-            _ => ("chartsheets", "chartsheet", chart_sheet_part(e.part)),
+            _ => ("chartsheets", "chartsheet", chart_part.map_or_else(|| chart_sheet_part(e.part), <[u8]>::to_vec)),
         };
         let path = format!("xl/{dir}/sheet{i}.bin");
         rels.push_str(&format!(r#"<Relationship Id="s{i}" Type="{R}/{}" Target="{dir}/sheet{i}.bin"/>"#, e.kind));
