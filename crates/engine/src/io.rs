@@ -266,6 +266,11 @@ fn read_plain(name: &str, bytes: &[u8], csv_as_text: bool) -> Result<(Workbook, 
         let (wb, report) = gridcraft_xlsx::read_sylk(bytes).map_err(|e| EngineError::Other(format!("We can't open '{name}': {e}")))?;
         return Ok((wb, report.warnings));
     }
+    // XML Spreadsheet 2003 opens whatever it is called (often `.xls`); other XML is left alone.
+    if gridcraft_xlsx::is_spreadsheetml(bytes) {
+        let (wb, report) = gridcraft_xlsx::read_spreadsheetml(bytes).map_err(|e| EngineError::Other(format!("We can't open '{name}': {e}")))?;
+        return Ok((wb, report.warnings));
+    }
 
     if sniffed == gridcraft_xlsx::Format::Xls {
         let (wb, report) = gridcraft_xlsx::read_xls(bytes).map_err(|e| EngineError::Other(format!("We can't open '{name}': {e}")))?;
