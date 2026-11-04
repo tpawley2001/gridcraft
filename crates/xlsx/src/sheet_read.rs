@@ -149,6 +149,11 @@ fn read_sheet_format(e: &El, sheet: &mut Sheet) {
             sheet.default_row_height = px;
         }
     }
+    // An omitted flag means false even at a nonstandard height. At the standard height,
+    // keep it absent so that opening a newly saved file does not add an attribute.
+    if sheet.default_row_custom_height.is_none() && (sheet.default_row_height - gridcraft_model::DEFAULT_ROW_HEIGHT).abs() > 0.01 {
+        sheet.default_row_custom_height = Some(false);
+    }
     if let Some(w) = e.attr_f64("defaultColWidth") {
         let px = col_width_to_px(w);
         if px > 0.0 {

@@ -144,3 +144,12 @@ fn inactive_iterated_password_metadata_survives() {
         assert!(p.attr(attr).is_some());
     }
 }
+
+#[test]
+fn omitted_custom_height_uses_the_schema_default_at_nonstandard_height() {
+    let out = twice(&fixture(r#"<sheetFormatPr defaultRowHeight="30"/><sheetData/>"#));
+    let xml = sheet_xml(&out, 1);
+    let format = xml.child("sheetFormatPr").unwrap();
+    assert!(!format.flag("customHeight", false));
+    assert!(!format.flag("zeroHeight", false));
+}

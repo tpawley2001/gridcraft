@@ -133,29 +133,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
 
     write_sheet_views(&mut s, sheet, selected);
 
-    // sheetFormatPr
-    let max_row_outline = sheet.rows.values().map(|r| r.outline).max().unwrap_or(0);
-    let max_col_outline = sheet.cols.values().map(|r| r.outline).max().unwrap_or(0);
-    s.push_str("<sheetFormatPr");
-    if (sheet.default_col_width - gridcraft_model::DEFAULT_COL_WIDTH).abs() > 0.01 {
-        let _ = write!(s, " defaultColWidth=\"{}\"", num(px_to_col_width(sheet.default_col_width)));
-    }
-    let _ = write!(s, " defaultRowHeight=\"{}\"", num(px_to_pt(sheet.default_row_height)));
-    if let Some(custom) = sheet.default_row_custom_height {
-        let _ = write!(s, " customHeight=\"{}\"", u8::from(custom));
-    } else if (sheet.default_row_height - gridcraft_model::DEFAULT_ROW_HEIGHT).abs() > 0.01 {
-        s.push_str(" customHeight=\"1\"");
-    }
-    if let Some(hidden) = sheet.default_rows_hidden {
-        let _ = write!(s, " zeroHeight=\"{}\"", u8::from(hidden));
-    }
-    if max_row_outline > 0 {
-        let _ = write!(s, " outlineLevelRow=\"{max_row_outline}\"");
-    }
-    if max_col_outline > 0 {
-        let _ = write!(s, " outlineLevelCol=\"{max_col_outline}\"");
-    }
-    s.push_str("/>");
+    write_sheet_format(&mut s, sheet);
 
     // cols: runs of identical settings.
     if !sheet.cols.is_empty() {
@@ -539,6 +517,33 @@ fn write_sheet_printing<'a>(s: &mut String, sheet: &'a Sheet, rels: &mut Rels, o
     }
 
     kept
+}
+
+/// Writes sparse worksheet defaults without expanding row records.
+fn write_sheet_format(s: &mut String, sheet: &Sheet) {
+    // sheetFormatPr
+    let max_row_outline = sheet.rows.values().map(|r| r.outline).max().unwrap_or(0);
+    let max_col_outline = sheet.cols.values().map(|r| r.outline).max().unwrap_or(0);
+    s.push_str("<sheetFormatPr");
+    if (sheet.default_col_width - gridcraft_model::DEFAULT_COL_WIDTH).abs() > 0.01 {
+        let _ = write!(s, " defaultColWidth=\"{}\"", num(px_to_col_width(sheet.default_col_width)));
+    }
+    let _ = write!(s, " defaultRowHeight=\"{}\"", num(px_to_pt(sheet.default_row_height)));
+    if let Some(custom) = sheet.default_row_custom_height {
+        let _ = write!(s, " customHeight=\"{}\"", u8::from(custom));
+    } else if (sheet.default_row_height - gridcraft_model::DEFAULT_ROW_HEIGHT).abs() > 0.01 {
+        s.push_str(" customHeight=\"1\"");
+    }
+    if let Some(hidden) = sheet.default_rows_hidden {
+        let _ = write!(s, " zeroHeight=\"{}\"", u8::from(hidden));
+    }
+    if max_row_outline > 0 {
+        let _ = write!(s, " outlineLevelRow=\"{max_row_outline}\"");
+    }
+    if max_col_outline > 0 {
+        let _ = write!(s, " outlineLevelCol=\"{max_col_outline}\"");
+    }
+    s.push_str("/>");
 }
 
 /// Writes protection, filter, merges, conditional formats, validations and links; returns the
