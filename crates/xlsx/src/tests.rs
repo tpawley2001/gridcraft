@@ -169,3 +169,5 @@ mod codex_day_worksheet_settings;
 mod codex_day_xlsb_cell_parameter;
 mod worksheet_settings;
 mod codex_day_workbook_options;
+
+mod workbook_options_controls;

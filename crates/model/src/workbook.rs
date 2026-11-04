@@ -37,6 +37,45 @@ pub enum ShowObjects {
     None,
 }
 
+/// External-link update policy stored in XLSX (`ST_UpdateLinks`).
+/// Retaining this policy never refreshes or follows a link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UpdateLinks {
+    UserSet,
+    Never,
+    Always,
+}
+
+/// Additional XLSX `workbookPr` settings (ECMA-376 Part 1 §18.2.28).
+/// `None` leaves the attribute absent, using the schema default; `Some` retains
+/// an explicit value, including false and defaults. These are preservation settings.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorkbookOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_compress_pictures: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discard_image_edit_data: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_image_dpi: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_links: Option<UpdateLinks>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_ink_annotation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hide_pivot_field_list: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_pivot_chart_filter: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_border_unselected_tables: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub check_compatibility: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date_compatibility: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_theme_version: Option<u32>,
+}
+
 /// The workbook window's display settings from `<workbookView>` (Excel: File › Options ›
 /// Advanced, "Display options for this workbook"): whether the window shows the sheet tabs
 /// and the two scroll bars, and how much of the horizontal bar the tabs take (`tabRatio`,
@@ -220,6 +259,9 @@ pub struct Workbook {
     pub calc: CalcSettings,
     #[serde(default, skip_serializing_if = "is_all")]
     pub show_objects: ShowObjects,
+    /// Image, link, display and compatibility options retained from XLSX.
+    #[serde(default)]
+    pub options: WorkbookOptions,
     /// The workbook's VBA code name (`ThisWorkbook`, or one set in the VBA editor). `None` = not stored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_name: Option<String>,
@@ -371,6 +413,7 @@ impl Workbook {
             date_system: DateSystem::D1900,
             calc: CalcSettings::default(),
             show_objects: ShowObjects::All,
+            options: WorkbookOptions::default(),
             code_name: None,
             remove_personal_info: false,
             active_sheet: ActiveSheet::default(),

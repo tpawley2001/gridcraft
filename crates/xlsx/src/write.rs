@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 
 use gridcraft_core::RangeRef;
 use gridcraft_formula::quote_sheet;
-use gridcraft_model::{CalcMode, CalcSettings, PhoneticString, ShowObjects, Style, Visibility, Workbook, WorkbookView};
+use gridcraft_model::{CalcMode, CalcSettings, PhoneticString, ShowObjects, Style, UpdateLinks, Visibility, Workbook, WorkbookView};
 
 use crate::package::ZipOut;
 use crate::xml::{esc, esc_attr};
@@ -364,6 +364,34 @@ fn workbook_pr(wb: &Workbook) -> String {
     }
     if let Some(name) = &wb.code_name {
         let _ = write!(w, " codeName=\"{}\"", crate::xml::esc_attr(name));
+    }
+    let options = &wb.options;
+    for (name, value) in [
+        ("autoCompressPictures", options.auto_compress_pictures),
+        ("discardImageEditData", options.discard_image_edit_data),
+        ("showInkAnnotation", options.show_ink_annotation),
+        ("hidePivotFieldList", options.hide_pivot_field_list),
+        ("showPivotChartFilter", options.show_pivot_chart_filter),
+        ("showBorderUnselectedTables", options.show_border_unselected_tables),
+        ("checkCompatibility", options.check_compatibility),
+        ("dateCompatibility", options.date_compatibility),
+    ] {
+        if let Some(value) = value {
+            let _ = write!(w, " {name}=\"{}\"", u8::from(value));
+        }
+    }
+    if let Some(policy) = options.update_links {
+        let value = match policy {
+            UpdateLinks::UserSet => "userSet",
+            UpdateLinks::Never => "never",
+            UpdateLinks::Always => "always",
+        };
+        let _ = write!(w, " updateLinks=\"{value}\"");
+    }
+    for (name, value) in [("defaultImageDpi", options.default_image_dpi), ("defaultThemeVersion", options.default_theme_version)] {
+        if let Some(value) = value {
+            let _ = write!(w, " {name}=\"{value}\"");
+        }
     }
     w.push_str("/>");
     w

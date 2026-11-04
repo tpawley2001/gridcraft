@@ -6,7 +6,7 @@ use std::sync::Arc;
 use gridcraft_core::{DateSystem, RangeRef};
 use gridcraft_model::{
     CalcMode, CellPicture, Chart, ChartSheetPrint, DefinedName, PhoneticString, PrintSettings, Sheet, ShowObjects, Style, StyleId, StyleTable,
-    Visibility, Workbook, WorkbookView,
+    UpdateLinks, Visibility, Workbook, WorkbookOptions, WorkbookView,
 };
 
 use crate::package::{Package, Rel};
@@ -226,6 +226,28 @@ fn workbook_xml(pkg: &mut Package<'_>, part: &str) -> Result<El, IoError> {
     Ok(xml)
 }
 
+/// Only recognized, typed values enter the model; malformed values use schema defaults.
+fn read_workbook_options(p: &El) -> WorkbookOptions {
+    WorkbookOptions {
+        auto_compress_pictures: p.attr_bool("autoCompressPictures"),
+        discard_image_edit_data: p.attr_bool("discardImageEditData"),
+        default_image_dpi: p.attr_u32("defaultImageDpi"),
+        update_links: match p.attr("updateLinks") {
+            Some("userSet") => Some(UpdateLinks::UserSet),
+            Some("never") => Some(UpdateLinks::Never),
+            Some("always") => Some(UpdateLinks::Always),
+            _ => None,
+        },
+        show_ink_annotation: p.attr_bool("showInkAnnotation"),
+        hide_pivot_field_list: p.attr_bool("hidePivotFieldList"),
+        show_pivot_chart_filter: p.attr_bool("showPivotChartFilter"),
+        show_border_unselected_tables: p.attr_bool("showBorderUnselectedTables"),
+        check_compatibility: p.attr_bool("checkCompatibility"),
+        date_compatibility: p.attr_bool("dateCompatibility"),
+        default_theme_version: p.attr_u32("defaultThemeVersion"),
+    }
+}
+
 /// Read workbook-level settings before processing the individual sheets.
 fn read_workbook_properties(cx: &mut Ctx<'_>, wb: &mut Workbook, xml: &El) {
     if let Some(p) = xml.child("workbookPr") {
@@ -239,6 +261,7 @@ fn read_workbook_properties(cx: &mut Ctx<'_>, wb: &mut Workbook, xml: &El) {
             _ => ShowObjects::All,
         };
         wb.code_name = p.attr("codeName").filter(|n| !n.is_empty()).map(str::to_string);
+        wb.options = read_workbook_options(p);
     }
     wb.date_system = cx.date_system;
     if let Some(c) = xml.child("calcPr") {
