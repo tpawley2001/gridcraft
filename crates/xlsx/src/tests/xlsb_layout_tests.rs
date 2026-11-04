@@ -128,7 +128,7 @@ fn ws_prop(kind: u8, index: u8, rgb: [u8; 3]) -> Vec<u8> {
     record(147, &out)
 }
 /// A worksheet with `head` before the sheet data, `data` inside it.
-fn sheet(head: &[u8], data: &[u8]) -> Vec<u8> {
+pub(super) fn sheet(head: &[u8], data: &[u8]) -> Vec<u8> {
     let mut out = record(129, &[]);
     out.extend(head);
     out.extend(record(145, &[]));
