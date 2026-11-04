@@ -314,3 +314,27 @@ fn ods_formulas_and_named_ranges_are_kept_live() {
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
     assert_eq!(back.sheets[0].cell(CellRef::new(0, 2)).and_then(|x| x.formula.as_ref().map(|f| f.text.clone())).as_deref(), Some("SUM(A1:B1,1)"));
 }
+
+#[test]
+fn ods_shortened_repeats_warn_once_across_sheets() {
+    let repeated = r#"<table:table-row table:number-rows-repeated="4294967295"><table:table-cell office:value-type="string" office:string-value="value"/></table:table-row>"#;
+    let bytes = ods(&format!(
+        r#"<table:table table:name="First">{repeated}{repeated}</table:table><table:table table:name="Second">{repeated}</table:table>"#
+    ));
+    let (wb, report) = read_ods(&bytes).unwrap();
+    assert_eq!(wb.sheets[0].cells.len(), 2);
+    assert_eq!(wb.sheets[0].value(CellRef::new(1, 0)), text("value"));
+    assert_eq!(wb.sheets[1].cells.len(), 1);
+    assert_eq!(report.warnings.iter().filter(|w| w.contains("repeated past")).count(), 1);
+}
+
+#[test]
+fn ods_shortened_repeats_keep_single_row_merge_bounds() {
+    let repeated = r#"<table:table-row table:number-rows-repeated="5000000"><table:table-cell table:number-rows-spanned="2" office:value-type="float" office:value="7"/></table:table-row>"#;
+    let bytes = ods(&format!(r#"<table:table table:name="Data">{repeated}</table:table>"#));
+    let (wb, _) = read_ods(&bytes).unwrap();
+    assert_eq!(wb.sheets[0].cells.len(), 1);
+    assert_eq!(wb.sheets[0].merges, vec![RangeRef::new(CellRef::new(0, 0), CellRef::new(1, 0))]);
+    let late = ods(&format!(r#"<table:table table:name="Data"><table:table-row table:number-rows-repeated="1048575"/>{repeated}</table:table>"#));
+    assert!(matches!(read_ods(&late), Err(IoError::TooLarge(_))));
+}
