@@ -10,6 +10,7 @@ mod cellmetadata;
 mod chart_book_names;
 mod chart_bool_default;
 mod chart_combo_kinds;
+mod chart_combo_pie_doughnut;
 mod chart_data_table;
 mod chart_ref_offsets;
 mod chart_sheet_print_tests;
