@@ -170,7 +170,8 @@ mod codex_day_worksheet_settings;
 mod codex_day_xlsb_cell_parameter;
 mod worksheet_settings;
 
+mod codex_day_major_font;
+mod codex_day_table_sort;
 mod codex_day_table_sort;
 mod table_sort_tests;
 mod workbook_options_controls;
-mod codex_day_table_sort;
