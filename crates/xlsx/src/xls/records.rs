@@ -177,6 +177,10 @@ impl<'a, 'b> Cursor<'a, 'b> {
     /// XLUnicodeString: 2-byte count, flags, characters.
     pub fn string(&mut self) -> Result<String, IoError> {
         let cch = usize::from(self.u16()?);
+        // Some BIFF8 writers omit the flags byte for empty strings at the record's end.
+        if cch == 0 && self.remaining() == 0 {
+            return Ok(String::new());
+        }
         let high = self.u8()? & 1 != 0;
         self.chars(cch, high)
     }
