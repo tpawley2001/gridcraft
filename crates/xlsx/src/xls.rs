@@ -833,6 +833,10 @@ struct SheetState<'g> {
     pivots: pivot::Views,
     /// The query tables read so far, as their records: translated once every sheet is read.
     queries: connections::Blocks,
+    /// The SELECTION records read so far: pane and active cell.
+    selections: Vec<(u8, CellRef)>,
+    /// A SELECTION record was cut short.
+    bad_selection: bool,
 }
 
 impl SheetState<'_> {
@@ -987,6 +991,8 @@ fn worksheet(
         charts: chart::Embedded::default(),
         pivots: pivot::Views::default(),
         queries: connections::Blocks::default(),
+        selections: vec![],
+        bad_selection: false,
     };
     let mut custom_views = crate::binary_custom_views::SheetViews::default();
     let mut depth = 1usize;
@@ -1041,6 +1047,14 @@ fn worksheet(
     std::mem::take(&mut st.tables).finish(&mut st.sheet, budget, report)?;
     st.page.finish(&mut st.sheet.print);
     st.cond.finish(report);
+    // The top-left pane's selection (the only one without frozen panes), else the last one.
+    let chosen = st.selections.iter().find(|(pnn, _)| *pnn == 3).or(st.selections.last());
+    if let Some((_, at)) = chosen {
+        st.sheet.view_active = *at;
+    }
+    if st.bad_selection {
+        report.warn("Malformed .xls selection records were skipped.");
+    }
     st.sheet.autofilter = std::mem::take(&mut st.autofilter).finish(filter, report);
     std::mem::take(&mut st.charts).finish(&mut st.sheet, &g.pictures, report);
     if st.dropped > 0 {
@@ -1068,6 +1082,8 @@ fn code_name(c: &mut Cursor<'_, '_>) -> Option<String> {
 
 /// The shortest WINDOW2 a file holds (the chart-sheet form); a shorter one is truncated.
 const WINDOW2_MIN_LEN: usize = 10;
+/// Columns in a BIFF8 sheet (IV).
+const XLS_MAX_COLS: u32 = 256;
 
 fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, report: &mut ReadReport) -> Result<(), IoError> {
     let mut c = Cursor::new(&rec.parts);
@@ -1271,6 +1287,34 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
             st.sheet.show_headings = on(0x0004);
             st.sheet.show_zeros = on(0x0010);
             st.sheet.right_to_left = on(0x0040);
+            // rwTop and colLeft: the scroll position, which frozen panes replace.
+            if let (Ok(top), Ok(left)) = (c.u16(), c.u16())
+                && st.sheet.freeze.is_none()
+                && u32::from(top) < MAX_ROWS
+                && u32::from(left) < XLS_MAX_COLS
+            {
+                st.sheet.view_top_left = CellRef::new(u32::from(top), u32::from(left));
+            }
+        }
+        0x001D => {
+            // SELECTION ([MS-XLS] 2.4.248): pnn, rwAct, colAct, irefAct, cref, then Ref8U entries.
+            // A truncated record is skipped; the sheet keeps its cells.
+            let mut parse = || -> Result<(u8, u16, u16), IoError> {
+                let (pnn, row, col) = (c.u8()?, c.u16()?, c.u16()?);
+                c.skip(2)?; // irefAct.
+                let count = c.u16()?; // cref.
+                for _ in 0..count {
+                    c.skip(8)?;
+                }
+                Ok((pnn, row, col))
+            };
+            match parse() {
+                Ok((pnn, row, col)) if u32::from(row) < MAX_ROWS && u32::from(col) < XLS_MAX_COLS => {
+                    st.selections.push((pnn, CellRef::new(u32::from(row), u32::from(col))));
+                }
+                Ok(_) => {}
+                Err(_) => st.bad_selection = true,
+            }
         }
         0x001C => report.warn("Cell comments in .xls files are not imported yet."),
         0x00EC => st.charts.drawing(rec),
