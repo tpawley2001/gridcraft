@@ -468,6 +468,11 @@ impl<'h> Evaluator<'h> {
         if let Some(k) = k {
             return Ev::V(gridcraft_functions::aggregate_values_k(func, &values, &k));
         }
+        // SUBTOTAL's COUNTA counts a cell holding an error rather than returning it (AGGREGATE's
+        // does not).
+        if name == "SUBTOTAL" && func == 3 {
+            return Ev::V(gridcraft_functions::subtotal_counta_values(&values));
+        }
         Ev::V(gridcraft_functions::aggregate_values(func, &values))
     }
 }

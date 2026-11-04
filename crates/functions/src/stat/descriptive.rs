@@ -515,24 +515,32 @@ pub(super) fn standardize(a: &[Arg], _: C) -> R<Value> {
 /// [`aggregate_values_k`] (they give `#VALUE!` here). Values that are not numbers are ignored
 /// (COUNTA counts non-empty values); the first error value present is returned.
 pub fn aggregate_values(function_num: u32, values: &[Value]) -> Value {
-    crate::util::finish(aggregate_impl(function_num, values, None))
+    crate::util::finish(aggregate_impl(function_num, values, None, false))
+}
+
+/// SUBTOTAL's COUNTA (codes 3 and 103) over already-filtered cell values: like
+/// [`aggregate_values`], but an error value counts as one non-empty value instead of being
+/// returned (Microsoft's COUNTA documentation counts cells holding any type of information,
+/// including error values).
+pub fn subtotal_counta_values(values: &[Value]) -> Value {
+    crate::util::finish(aggregate_impl(3, values, None, true))
 }
 
 /// AGGREGATE codes 14 = LARGE, 15 = SMALL, 16 = PERCENTILE.INC, 17 = QUARTILE.INC,
 /// 18 = PERCENTILE.EXC, 19 = QUARTILE.EXC with their `k` argument; codes 1–13 delegate to
 /// [`aggregate_values`].
 pub fn aggregate_values_k(function_num: u32, values: &[Value], k: &Value) -> Value {
-    crate::util::finish(aggregate_impl(function_num, values, Some(k)))
+    crate::util::finish(aggregate_impl(function_num, values, Some(k), false))
 }
 
-fn aggregate_impl(function_num: u32, values: &[Value], k: Option<&Value>) -> R<Value> {
+fn aggregate_impl(function_num: u32, values: &[Value], k: Option<&Value>, count_errors: bool) -> R<Value> {
     let code = if (101..=111).contains(&function_num) { function_num - 100 } else { function_num };
     let mut xs = Vec::new();
     let mut nonempty = 0usize;
     let mut push = |v: &Value| -> R<()> {
         match v {
             Value::Number(n) => xs.push(*n),
-            Value::Error(e) => return Err(*e),
+            Value::Error(e) if !count_errors => return Err(*e),
             _ => {}
         }
         if !v.is_empty() {
