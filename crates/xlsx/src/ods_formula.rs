@@ -69,7 +69,15 @@ pub fn to_excel(src: &str) -> Option<String> {
                 }
                 let word: String = chars.get(start..i)?.iter().collect();
                 if chars.get(i) == Some(&'(') {
-                    out.push_str(&function_name(&word)?);
+                    // OpenFormula's FLOOR/CEILING take an optional third Mode argument; Excel
+                    // computes those calls as FLOOR.MATH/CEILING.MATH (its own take two).
+                    let upper = word.to_ascii_uppercase();
+                    if matches!(upper.as_str(), "FLOOR" | "CEILING") && call_separators(&chars, i)? == 2 {
+                        out.push_str(&upper);
+                        out.push_str(".MATH");
+                    } else {
+                        out.push_str(&function_name(&word)?);
+                    }
                 } else {
                     out.push_str(&word);
                 }
@@ -81,6 +89,26 @@ pub fn to_excel(src: &str) -> Option<String> {
         i += 1;
     }
     Some(out)
+}
+
+/// How many `;` separate the arguments of the call whose `(` is at `open`, counting only the
+/// call's own depth (not those inside nested calls, inline arrays, strings or references).
+fn call_separators(chars: &[char], open: usize) -> Option<usize> {
+    let mut i = open + 1;
+    let mut depth = 0usize;
+    let mut separators = 0usize;
+    loop {
+        match chars.get(i)? {
+            '"' => i = string_end(chars, i)?,
+            '[' => i = bracket_end(chars, i)?,
+            '(' | '{' => depth = depth.checked_add(1)?,
+            ')' if depth == 0 => return Some(separators),
+            ')' | '}' => depth = depth.checked_sub(1)?,
+            ';' if depth == 0 => separators = separators.saturating_add(1),
+            _ => {}
+        }
+        i += 1;
+    }
 }
 
 /// The index of the quote closing the string literal opened at `start` (`""` is an escaped quote).
@@ -246,6 +274,12 @@ mod tests {
             ("of:=SUM({1;2|3;4})", "SUM({1,2;3,4})"),
             ("of:=COM.MICROSOFT.XLOOKUP(1;[.A1:.A3];[.B1:.B3])", "XLOOKUP(1,A1:A3,B1:B3)"),
             ("of:=LEGACY.NORMSDIST(1)", "NORMSDIST(1)"),
+            ("of:=FLOOR(37; -1; 0)", "FLOOR.MATH(37, -1, 0)"),
+            ("of:=CEILING(-37.2;1;0)", "CEILING.MATH(-37.2,1,0)"),
+            ("of:=FLOOR(2.5;1;0)", "FLOOR.MATH(2.5,1,0)"),
+            ("of:=CEILING(2.5;1)", "CEILING(2.5,1)"),
+            ("of:=COM.MICROSOFT.FLOOR(2.5;1)", "FLOOR(2.5,1)"),
+            ("of:=COM.MICROSOFT.CEILING(2.5;1)", "CEILING(2.5,1)"),
             ("of:=\"a;b|[.c]\"&[.A1]", "\"a;b|[.c]\"&A1"),
             ("of:=\"say \"\"hi\"\"\"", "\"say \"\"hi\"\"\""),
             ("of:=A1*2", "A1*2"),
