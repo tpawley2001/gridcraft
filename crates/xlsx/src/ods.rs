@@ -30,19 +30,70 @@ const MAX_TEXT: u64 = 64 * 1024 * 1024;
 const MAX_SHEETS: usize = 1024;
 const MAX_NAMES: usize = 10_000;
 
-/// Reads only the small, exact mimetype entry, including when the ZIP uses compression.
+const MAX_MANIFEST: u64 = 1024 * 1024;
+
+/// Decides from the package itself whether it is an ODS file. A present `mimetype` entry must be
+/// exactly the spreadsheet type; ODF 1.2 Part 3 §3.3 makes the entry optional, and without it
+/// §4 gives the package type through the manifest's root (`full-path="/"`) file entry.
 /// Looking at a filename or at arbitrary bytes inside the archive is not sufficient.
-pub(crate) fn has_mimetype(bytes: &[u8]) -> bool {
+pub(crate) fn is_ods_package(bytes: &[u8]) -> bool {
     let Ok(mut zip) = zip::ZipArchive::new(Cursor::new(bytes)) else { return false };
     if zip.len() > MAX_ENTRIES {
         return false;
     }
-    let Ok(mut file) = zip.by_name("mimetype") else { return false };
-    if file.size() != MIME.len() as u64 {
+    if zip.index_for_name("mimetype").is_some() {
+        let Ok(mut file) = zip.by_name("mimetype") else { return false };
+        if file.size() != MIME.len() as u64 {
+            return false;
+        }
+        let mut value = Vec::new();
+        return (&mut file).take(MIME.len() as u64 + 1).read_to_end(&mut value).is_ok() && value == MIME;
+    }
+    if zip.index_for_name("content.xml").is_none() {
         return false;
     }
-    let mut value = Vec::new();
-    (&mut file).take(MIME.len() as u64 + 1).read_to_end(&mut value).is_ok() && value == MIME
+    let Ok(mut file) = zip.by_name("META-INF/manifest.xml") else { return false };
+    if file.size() > MAX_MANIFEST {
+        return false;
+    }
+    let mut manifest = Vec::new();
+    if (&mut file).take(MAX_MANIFEST + 1).read_to_end(&mut manifest).is_err() || manifest.len() as u64 > MAX_MANIFEST {
+        return false;
+    }
+    manifest_declares_spreadsheet(&manifest)
+}
+
+/// True when a `manifest:file-entry` directly under the root has `full-path="/"` and the
+/// spreadsheet media type. Namespaces are resolved, so any prefix works.
+fn manifest_declares_spreadsheet(bytes: &[u8]) -> bool {
+    let mut reader = NsReader::from_reader(bytes);
+    let mut depth = 0usize;
+    loop {
+        let Ok(event) = reader.read_event() else { return false };
+        match &event {
+            Event::Start(e) | Event::Empty(e) => {
+                let (ns, name) = reader.resolver_mut().resolve_element(e.name());
+                if depth == 1 && is_ns(ns, MANIFEST) && name.as_ref() == b"file-entry" {
+                    let path = attr(&mut reader, e, MANIFEST, b"full-path");
+                    let media = attr(&mut reader, e, MANIFEST, b"media-type");
+                    if let (Ok(Some(path)), Ok(Some(media))) = (path, media)
+                        && path == "/"
+                    {
+                        return media.as_bytes() == MIME;
+                    }
+                }
+                if matches!(event, Event::Start(_)) {
+                    depth += 1;
+                    if depth > crate::xml::MAX_DEPTH {
+                        return false;
+                    }
+                }
+            }
+            Event::End(_) => depth = depth.saturating_sub(1),
+            Event::DocType(_) | Event::Eof => return false,
+            _ => {}
+        }
+    }
 }
 
 /// Imports ODS sheets, typed values, displayed text and merges. Cached formula results are
@@ -57,8 +108,8 @@ pub fn read_ods(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
 /// beside `calc`); bare [`read_ods`] accepts every function name.
 pub fn read_ods_with(bytes: &[u8], known_function: &dyn Fn(&str) -> bool) -> Result<(Workbook, ReadReport), IoError> {
     let mut package = Package::open(bytes)?;
-    if !has_mimetype(bytes) {
-        return Err(IoError::Format("missing or invalid ODS mimetype".into()));
+    if !is_ods_package(bytes) {
+        return Err(IoError::Format("missing or invalid ODS mimetype or manifest media type".into()));
     }
     if let Some(manifest) = package.read("META-INF/manifest.xml")? {
         check_manifest(&manifest)?;
