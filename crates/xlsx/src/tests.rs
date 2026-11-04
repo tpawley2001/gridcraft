@@ -175,3 +175,4 @@ mod codex_day_table_sort;
 mod font_scheme_tests;
 mod table_sort_tests;
 mod workbook_options_controls;
+mod codex_day_table_sort;
