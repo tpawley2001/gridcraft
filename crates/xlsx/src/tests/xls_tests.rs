@@ -628,7 +628,8 @@ fn a_format_shorter_than_its_count_keeps_its_characters() {
 
 pub(super) fn one_sheet_with(sheet_records: &[u8]) -> Vec<u8> {
     let globals = |pos: u32| cat(&[&bof(0x0005), &rec(0x0085, &cat(&[&pos.to_le_bytes(), &[0, 0, 6, 0], b"Sheet1"])), &eof()]);
-    let sheet = cat(&[&bof(0x0010), sheet_records, &rec(0x0203, &cat(&[&cell(0, 0, 0), &7.0f64.to_le_bytes()])), &eof()]);
+    // Explicit test records take precedence over the default A1 value.
+    let sheet = cat(&[&bof(0x0010), &rec(0x0203, &cat(&[&cell(0, 0, 0), &7.0f64.to_le_bytes()])), sheet_records, &eof()]);
     compound("Workbook", &cat(&[&globals(globals(0).len() as u32), &sheet]))
 }
 
