@@ -1,12 +1,41 @@
 use super::format::{cell_format_code, r1c1_to_a1};
 use super::{Area, Arg, Array, CellError, Ev, Evaluator, Expr, FnCtx, MAX_CELLS, Value, err};
+
+/// INDIRECT of an array of texts: one reference (or `#REF!`) per text, in the texts' shape. Only
+/// the criteria functions take it apart (one call per element); elsewhere the first one is used.
+/// Not a union (`Ev::R` with several areas), which AREAS and INDEX's area number count.
+pub(super) struct RefArray {
+    pub(super) rows: usize,
+    pub(super) cols: usize,
+    pub(super) refs: Vec<Ev>,
+}
+
+impl RefArray {
+    /// The reference at a broadcast position (`#N/A` outside, as for arrays).
+    pub(super) fn get_broadcast(&self, r: usize, c: usize) -> Ev {
+        let r = if self.rows == 1 { 0 } else { r };
+        let c = if self.cols == 1 { 0 } else { c };
+        if r >= self.rows || c >= self.cols {
+            return err(CellError::NA);
+        }
+        r.checked_mul(self.cols).and_then(|i| i.checked_add(c)).and_then(|i| self.refs.get(i)).cloned().unwrap_or_else(|| err(CellError::NA))
+    }
+}
+
+pub(super) enum RefArg {
+    One(Ev),
+    Many(RefArray),
+}
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS, RangeRef};
 use std::sync::Arc;
 
 impl<'h> Evaluator<'h> {
-    /// Whole rows/columns trimmed for ROW()/COLUMN() arrays.
-    pub(super) fn trim_lines(&mut self, a: &Area) -> RangeRef {
-        if a.range.is_full_cols() || a.range.is_full_rows() { self.trim(a) } else { a.range }
+    /// The range whose rows (`rows`) or columns ROW()/COLUMN() list: whole columns trimmed to the
+    /// used rows for ROW, whole rows to the used columns for COLUMN. `ROW(1:3)` keeps its three
+    /// rows on any sheet.
+    pub(super) fn trim_lines(&mut self, a: &Area, rows: bool) -> RangeRef {
+        let long = if rows { a.range.is_full_cols() } else { a.range.is_full_rows() };
+        if long { self.trim(a) } else { a.range }
     }
 
     pub(super) fn offset(&mut self, args: &[Expr]) -> Ev {
@@ -49,15 +78,30 @@ impl<'h> Evaluator<'h> {
     }
 
     pub(super) fn indirect(&mut self, args: &[Expr]) -> Ev {
+        // Outside the criteria functions an array of texts keeps the first one.
+        match self.indirect_refs(args, false) {
+            RefArg::One(ev) => ev,
+            RefArg::Many(refs) => refs.refs.into_iter().next().unwrap_or_else(|| err(CellError::Ref)),
+        }
+    }
+
+    /// The argument of a criteria function where a range goes: `INDIRECT` of an array of texts
+    /// gives one reference per text, anything else is evaluated as usual.
+    pub(super) fn ref_arg(&mut self, e: &Expr) -> RefArg {
+        match e {
+            Expr::Call(name, args) if name.eq_ignore_ascii_case("INDIRECT") => self.indirect_refs(args, true),
+            e => RefArg::One(self.eval(e)),
+        }
+    }
+
+    /// INDIRECT: one reference, or one per element when the text is an array (`#REF!` for an
+    /// element that isn't a reference text). Without `per_element` only the first text is used.
+    fn indirect_refs(&mut self, args: &[Expr], per_element: bool) -> RefArg {
         self.host.note_volatile();
         if args.is_empty() || args.len() > 2 {
-            return err(CellError::Value);
+            return RefArg::One(err(CellError::Value));
         }
-        let text = match self.arg_val(args, 0).map(|v| v.scalar().to_text()) {
-            Some(Ok(t)) => t,
-            Some(Err(e)) => return err(e),
-            None => return err(CellError::Value),
-        };
+        let Some(text) = self.arg_val(args, 0) else { return RefArg::One(err(CellError::Value)) };
         let a1 = match args.get(1) {
             None | Some(Expr::Missing) => true,
             Some(e) => {
@@ -65,6 +109,26 @@ impl<'h> Evaluator<'h> {
                 v.scalar().to_bool().unwrap_or(true)
             }
         };
+        match text {
+            Value::Array(arr) if per_element && arr.data.len() > 1 => {
+                let refs = arr
+                    .data
+                    .iter()
+                    .map(|v| match v.to_text() {
+                        Ok(t) => self.indirect_text(t, a1),
+                        Err(_) => err(CellError::Ref),
+                    })
+                    .collect();
+                RefArg::Many(RefArray { rows: arr.rows, cols: arr.cols, refs })
+            }
+            v => RefArg::One(match v.scalar().to_text() {
+                Ok(t) => self.indirect_text(t, a1),
+                Err(e) => err(e),
+            }),
+        }
+    }
+
+    fn indirect_text(&mut self, text: String, a1: bool) -> Ev {
         // With a1 = FALSE, text that isn't R1C1 can still be a name, but never an A1 reference.
         let (text, a1_ok) = if a1 {
             (text, true)
