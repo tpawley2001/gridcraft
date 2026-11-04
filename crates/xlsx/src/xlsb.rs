@@ -150,7 +150,9 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     report.warn("XLSB import: some workbook features are not imported. Save a new .xlsx file; XLSB saving is not supported.");
     keep_custom_properties(&mut package, &types, &root_rels, &mut wb, &mut report);
     let mut itab_cur: Option<u32> = None;
-    let (sheets, names, mut links) = workbook(&book, &mut wb, &mut report, &mut itab_cur)?;
+    let (mut sheets, names, mut links) = workbook(&book, &mut wb, &mut report, &mut itab_cur)?;
+    crate::read::repair_sheet_names(sheets.iter_mut().map(|s| &mut s.name), &mut report);
+    links.sheets = sheets.iter().map(|s| s.name.clone()).collect();
     let cache_ids = pivot::cache_ids(&book);
     let rels = relationships(&mut package, &root.target)?;
     links.lists = tables::scan_lists(&mut package, &types, &rels, &sheets);
@@ -285,7 +287,6 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             continue;
         }
         check_type(&types, &rel.target, WORKSHEET)?;
-        wb.check_sheet_name(&info.name, None).map_err(invalid)?;
         let sheet_rels = sheet_relationships(&mut package, &rel.target, &mut report);
         budget.links = 0;
         budget.comments = 0;
@@ -890,7 +891,8 @@ fn workbook(
                     return Err(invalid("invalid worksheet ID"));
                 }
                 let rel = b.string(255, true)?;
-                let name = b.text(31)?;
+                // Keep the usual text resource cap; sheet-name validity is repaired after parsing.
+                let name = b.text(32767)?;
                 b.finish()?;
                 links.sheets.push(name.clone());
                 sheets.push(SheetInfo { sheet_id, name, rel, visibility });

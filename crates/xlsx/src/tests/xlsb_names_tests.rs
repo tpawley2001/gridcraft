@@ -298,3 +298,23 @@ fn xlsb_malformed_name_records_do_not_shift_name_indexes() {
     assert_eq!(wb.names.len(), 1);
     assert!(report.warnings.iter().any(|w| w.contains("defined names could not be read")), "{:?}", report.warnings);
 }
+
+#[test]
+fn xlsb_repairs_sheet_names_before_decoding_references_and_names() {
+    let long = "界".repeat(40);
+    let other = "界".repeat(35);
+    let names = ["A:/?*[]\\B", "ab", "", &long, &other];
+    let data = worksheet(&[(0, vec![number(0, 7.0)])]);
+    let calc = worksheet(&[(0, vec![fmla(0, 7.0, &ref3d(0, 0, 0, true))])]);
+    let defined = name_record(0, WORKBOOK, "Source", &ref3d(0, 0, 0, false));
+    let bytes = package(&book(&names, &externals(), &[defined]), &[data.clone(), calc, data.clone(), data.clone(), data]);
+    let (wb, report) = read_xlsb(&bytes).unwrap();
+    let repaired: Vec<_> = wb.sheets.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(repaired, ["AB", "ab (2)", "Sheet3", &"界".repeat(31), &format!("{} (2)", "界".repeat(25))]);
+    assert_eq!(report.warnings.iter().filter(|w| w.contains("sheet name")).count(), 1);
+    assert_eq!(ftext(&wb, 1, "A1").as_deref(), Some("AB!A1"));
+    assert_eq!(wb.names.iter().find(|n| n.name == "Source").unwrap().formula, "AB!$A$1");
+    let (roundtrip, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(ftext(&roundtrip, 1, "A1").as_deref(), Some("AB!A1"));
+    assert_eq!(roundtrip.sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), repaired);
+}

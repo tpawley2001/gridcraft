@@ -224,12 +224,25 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         },
     };
     let mut report = ReadReport::default();
-    let g = match globals(&stream, &mut budget, &mut report) {
+    let mut g = match globals(&stream, &mut budget, &mut report) {
         Err(IoError::Format(msg)) if book && msg.contains(ENCRYPTED) => {
             return Err(invalid(format!("Excel 5.0/95 (BIFF5) workbook: {ENCRYPTED}")));
         }
         other => other?,
     };
+
+    crate::read::repair_sheet_names(g.sheets.iter_mut().map(|s| &mut s.name), &mut report);
+    // BIFF5 can also identify a local sheet by its original EXTERNSHEET name.
+    if let Some(b5) = &mut g.biff5 {
+        for entry in &mut b5.externs {
+            if let ExternKind::Sheet(name) = &mut entry.kind
+                && let Some(sheet) = g.links.sheets.iter().position(|s| s.eq_ignore_ascii_case(name)).and_then(|i| g.sheets.get(i))
+            {
+                *name = sheet.name.clone();
+            }
+        }
+    }
+    g.links.sheets = g.sheets.iter().map(|s| s.name.clone()).collect();
 
     let mut wb = Workbook::new();
     if let Some(custom) = doc_props::read(&cf, &mut wb.props, &mut report) {
@@ -301,7 +314,6 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
             model_index.push(None);
             continue;
         }
-        wb.check_sheet_name(&bs.name, None).map_err(invalid)?;
         let filter = filter_database(&g, bound);
         let Some((mut sheet, calc, views, queries)) = worksheet(&stream, bs, filter, &g, &styles, &mut budget, &mut report, false)? else {
             report.warn("Dialog sheets and unreadable sheets were skipped.");
@@ -950,7 +962,9 @@ fn worksheet(
     let mut recs = Records::new(stream, bs.pos);
     let first = recs.next_record()?.ok_or_else(|| invalid("missing sheet substream"))?;
     let (vers, dt) = bof(&first)?;
-    if vers != g.version || dt != if macro_sheet { 0x0040 } else { 0x0010 } {
+    // The globals select record layouts, including when a BIFF5 writer stamps a BIFF8 sheet BOF.
+    let compatible_version = vers == g.version || (g.version == BIFF5 && vers == BIFF8);
+    if !compatible_version || dt != if macro_sheet { 0x0040 } else { 0x0010 } {
         return Ok(None);
     }
     let mut st = SheetState {
