@@ -665,7 +665,7 @@ struct Prepared {
 }
 
 /// field_headers: 0 none, 1 present but hidden, 2 generate, 3 present and shown; missing =
-/// automatic (headers when the first value row is all text and the next is not).
+/// automatic (present but hidden when the first value row is all text and the next is not).
 fn prepare(fields: &[&Array], values: &Array, fh: Option<i64>, filter: Option<&Array>) -> R<Prepared> {
     let n = values.rows;
     for f in fields {
@@ -680,7 +680,7 @@ fn prepare(fields: &[&Array], values: &Array, fh: Option<i64>, filter: Option<&A
         Some(_) => return Err(CellError::Value),
         None => {
             if first_text && second_not {
-                3
+                1
             } else {
                 0
             }
@@ -1334,7 +1334,6 @@ mod tests {
         assert_eq!(
             rows_of(&r),
             vec![
-                vec![tv("Region"), tv("Amount")],
                 vec![tv("East"), nv(15.0)],
                 vec![tv("North"), nv(1.0)],
                 vec![tv("West"), nv(27.0)],
