@@ -93,6 +93,7 @@ mod xls_sheet_name_tests;
 mod xls_style_tests;
 mod xls_table_tests;
 mod xls_tests;
+mod xls_textbox_tests;
 mod xls_theme_tests;
 mod xls_vba_tests;
 mod xlsb_array_const_tests;
