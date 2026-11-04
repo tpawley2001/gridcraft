@@ -942,3 +942,37 @@ fn notes_take_shape_blocks_the_header_pictures_dont_use() {
     }
     assert!(notes_ids.iter().all(|b| notes_map.contains(b)), "note ids outside their drawing's blocks");
 }
+
+#[test]
+fn legacy_vml_without_control_fragments_merges_notes_and_keeps_preview_parts() {
+    let mut input = Unpacked::new(&rich_package());
+    let sheet = "xl/worksheets/sheet1.xml";
+    let original = input.text(sheet);
+    let (prefix, _) = original.split_once("<mc:AlternateContent>").unwrap();
+    input.parts.insert(sheet.into(), format!("{prefix}</worksheet>").into_bytes());
+    let files: Vec<(&str, &[u8])> = input.parts.iter().map(|(name, bytes)| (name.as_str(), bytes.as_slice())).collect();
+    let mut bytes = make_zip(&files);
+    for _ in 0..2 {
+        let (wb, _) = read_xlsx(&bytes).unwrap();
+        bytes = write_xlsx(&wb).unwrap();
+        let out = Unpacked::new(&bytes);
+        out.assert_valid();
+        let sx = out.text(sheet);
+        assert!(!sx.contains("<controls") && !sx.contains("<oleObjects"));
+        assert_eq!(sx.matches("<legacyDrawing ").count(), 1);
+        let (kind, target) = out.target(sheet, &attr_of(&sx, "legacyDrawing", "r:id"));
+        assert_eq!(kind, format!("{NS_R}/vmlDrawing"));
+        let vml = out.text(&target);
+        assert_eq!(vml.matches("ObjectType=\"Checkbox\"").count(), 1);
+        assert_eq!(vml.matches("ObjectType=\"Note\"").count(), 1);
+        assert!(!vml.contains("old note"));
+        let preview = out.target(&target, &attr_of(&vml, "v:imagedata", "o:relid")).1;
+        assert_eq!(out.parts.get(&preview).unwrap(), EMF);
+        let types = xml::parse(out.text("[Content_Types].xml").as_bytes()).unwrap();
+        let ct = "application/vnd.openxmlformats-officedocument.vmlDrawing";
+        assert!(
+            types.kids("Default").any(|d| d.attr("Extension") == Some("vml") && d.attr("ContentType") == Some(ct))
+                || types.kids("Override").any(|o| o.attr("PartName") == Some(format!("/{target}").as_str()) && o.attr("ContentType") == Some(ct))
+        );
+    }
+}

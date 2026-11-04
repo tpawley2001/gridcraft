@@ -419,10 +419,9 @@ impl KeptReader {
         if let Some(r) = rels.iter().find(|r| !r.external && is_kind(r, &["drawing"])) {
             self.drawing_anchors(cx, name, r, &mut p, &mut seen);
         }
-        // Notes have one VML drawing per sheet; another one holds the header and footer pictures.
-        let vml_drawings = rels.iter().filter(|r| is_kind(r, &["vmlDrawing"])).count();
-        let notes = rels.iter().filter(|r| is_kind(r, &["comments"])).count();
-        if rels.iter().any(|r| is_kind(r, SHEET_ELEMENT_KINDS) || is_kind(r, &["customProperty"])) || vml_drawings > notes || self.custom_views {
+        // A notes drawing may also hold controls without a worksheet <controls> element.
+        let has_vml = rels.iter().any(|r| is_kind(r, &["vmlDrawing"]));
+        if rels.iter().any(|r| is_kind(r, SHEET_ELEMENT_KINDS) || is_kind(r, &["customProperty"])) || has_vml || self.custom_views {
             self.sheet_elements(cx, part, name, &rels, &mut p, &mut seen);
         }
         (!p.is_empty()).then(|| Arc::new(p))
@@ -476,12 +475,32 @@ impl KeptReader {
                 Err(why) => cx.warn(format!("sheet \"{name}\": custom views were dropped: {why}")),
             }
         }
-        // Controls and OLE objects are drawn from shapes in the legacy VML drawing.
-        if frags.iter().any(|(slot, _)| slot != "picture") {
+        // Controls can live entirely in VML, without worksheet control fragments.
+        let needs_vml = frags.iter().any(|(slot, _)| slot != "picture");
+        let mut has_vml_shapes = false;
+        if needs_vml || scan.legacy_drawing.is_some() {
             match self.vml(cx, rels, scan.legacy_drawing.as_deref(), seen) {
-                Ok((vml, parts)) => {
-                    p.parts.extend(parts);
-                    p.vml = Some(vml);
+                Ok((mut vml, parts)) => {
+                    has_vml_shapes = std::str::from_utf8(&vml.data).is_ok_and(|text| !shape_spans(text).is_empty());
+                    if needs_vml || has_vml_shapes {
+                        // Nothing in the sheet refers to the ids of shapes kept without control
+                        // fragments: move them past the blocks the header and footer drawing uses.
+                        if !needs_vml {
+                            let hf = p
+                                .parts
+                                .iter()
+                                .filter(|q| q.content_type.eq_ignore_ascii_case(CT_VML))
+                                .map(|q| vml_block_max(&String::from_utf8_lossy(&q.data)))
+                                .max()
+                                .unwrap_or(0);
+                            if let Ok(text) = std::str::from_utf8(&vml.data) {
+                                let text = rebase_vml(text, hf);
+                                vml.data = Arc::from(text.into_bytes());
+                            }
+                        }
+                        p.parts.extend(parts);
+                        p.vml = Some(vml);
+                    }
                 }
                 Err(why) => {
                     cx.warn(format!("sheet \"{name}\": controls and embedded objects were dropped: {why}"));
@@ -514,7 +533,7 @@ impl KeptReader {
                 Err(why) => cx.warn(format!("sheet \"{name}\": {slot} were dropped: {why}")),
             }
         }
-        if p.elements.iter().any(|e| e.slot == "oleObjects" || e.slot == "controls") {
+        if (!needs_vml && has_vml_shapes) || p.elements.iter().any(|e| e.slot == "oleObjects" || e.slot == "controls") {
             cx.warn(format!("sheet \"{name}\": embedded objects and form controls are not shown; they are kept for saving"));
         } else {
             p.vml = None;
@@ -1151,6 +1170,42 @@ pub(super) fn vml_block_max(vml: &str) -> u64 {
         .map(|list| list.split(',').filter_map(|b| b.trim().parse::<u64>().ok()).max().unwrap_or(0))
         .unwrap_or(0);
     used.max(claimed)
+}
+
+/// VML whose shape ids (`_x0000_sN`) and `<o:idmap data>` blocks are moved so that every block is
+/// above `after`; unchanged when they already are.
+fn rebase_vml(vml: &str, after: u64) -> String {
+    let Some(low) = shape_numbers(vml).into_iter().map(|n| n / 1024).min() else { return vml.to_string() };
+    if low > after {
+        return vml.to_string();
+    }
+    let shift = after.saturating_add(1).saturating_sub(low);
+    let mut out = String::with_capacity(vml.len());
+    let mut rest = vml;
+    while let Some(i) = rest.find("_x0000_s") {
+        let start = i + "_x0000_s".len();
+        let tail = rest.get(start..).unwrap_or("");
+        let digits: String = tail.chars().take_while(char::is_ascii_digit).take(18).collect();
+        out.push_str(rest.get(..start).unwrap_or(""));
+        match digits.parse::<u64>() {
+            Ok(n) => {
+                let _ = write!(out, "{}", n.saturating_add(shift.saturating_mul(1024)));
+                rest = tail.get(digits.len()..).unwrap_or("");
+            }
+            Err(_) => rest = tail,
+        }
+    }
+    out.push_str(rest);
+    if let Some(i) = out.find("<o:idmap")
+        && let Some(d) = out.get(i..).and_then(|s| s.find("data=\"")).map(|d| i + d + "data=\"".len())
+        && let Some(e) = out.get(d..).and_then(|s| s.find('"')).map(|e| d + e)
+    {
+        let list = out.get(d..e).unwrap_or("");
+        let blocks: Vec<String> =
+            list.split(',').map(|b| b.trim().parse::<u64>().map_or_else(|_| b.to_string(), |b| b.saturating_add(shift).to_string())).collect();
+        out.replace_range(d..e, &blocks.join(","));
+    }
+    out
 }
 
 /// Kept VML (controls, OLE objects) plus GridCraft's note shapes: the notes get ids in a fresh
