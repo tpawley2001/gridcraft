@@ -869,7 +869,7 @@ pub fn to_html(wb: &Workbook, sheet: usize) -> Result<String> {
                 a.height.max(0.0)
             )
         };
-        for im in &sh.images {
+        for im in sh.images.iter().filter(|im| !im.data.is_empty()) {
             let _ = write!(
                 out,
                 "<img src=\"data:{};base64,{}\" alt=\"{}\" style=\"{}\">",

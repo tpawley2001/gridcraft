@@ -713,6 +713,10 @@ pub struct Image {
     pub data: std::sync::Arc<Vec<u8>>,
     pub mime: String,
     pub alt: String,
+    /// The external target of a linked picture (`a:blip r:link`, ECMA-376 Part 1 20.1.8.13), a
+    /// URL or file path, verbatim. `data` is empty for a picture that is only linked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
     /// Extensions of the picture's `a:blip` GridCraft does not model (artistic effects and
     /// background removal with their HD Photo layer, the local-dpi flag), written back on save.
     /// A picture inserted in GridCraft has none.

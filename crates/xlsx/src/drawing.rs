@@ -185,15 +185,30 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
             match obj.name.as_str() {
                 "pic" => {
                     let blip = obj.path(&["blipFill", "blip"]);
-                    let Some(rid) = blip.and_then(|b| b.attr("embed")) else { continue };
-                    let Some(rel) = rels.iter().find(|r| r.id == rid && !r.external) else {
-                        cx.warn("a linked (not embedded) picture was skipped");
-                        continue;
-                    };
-                    let target = rel.target.clone();
-                    let Some(data) = cx.pkg.read(&target)? else {
-                        cx.warn(format!("missing picture {target}"));
-                        continue;
+                    // A linked picture names its image by `r:link` (an external relationship);
+                    // "Link and Insert" carries both, the embedded copy and the link.
+                    let link = blip.and_then(|b| b.attr("link")).and_then(|rid| {
+                        let rel = rels.iter().find(|r| r.id == rid && r.external)?;
+                        Some(rel.target.clone())
+                    });
+                    let embed = blip.and_then(|b| b.attr("embed"));
+                    let (target, data) = match embed {
+                        Some(rid) => {
+                            let Some(rel) = rels.iter().find(|r| r.id == rid && !r.external) else {
+                                cx.warn("a linked (not embedded) picture was skipped");
+                                continue;
+                            };
+                            let target = rel.target.clone();
+                            let Some(data) = cx.pkg.read(&target)? else {
+                                cx.warn(format!("missing picture {target}"));
+                                continue;
+                            };
+                            (target, data)
+                        }
+                        None => match &link {
+                            Some(target) => (target.clone(), Vec::new()),
+                            None => continue,
+                        },
                     };
                     let alt = obj.path(&["nvPicPr", "cNvPr"]).and_then(|c| c.attr("descr")).unwrap_or("").to_string();
                     let exts = blip
@@ -212,6 +227,7 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                         data: data.into(),
                         mime: mime_for(&target).to_string(),
                         alt,
+                        link,
                         blip_ext,
                     });
                 }
@@ -506,8 +522,9 @@ pub fn srgb(c: &Color, theme: &Theme) -> Option<String> {
 
 /// One drawing object to write.
 pub enum Obj<'a> {
-    /// A picture, its image relationship id and its kept `a:extLst` (relationship ids rewritten).
-    Image(&'a Image, String, String),
+    /// A picture, its image relationship id, its kept `a:extLst` (relationship ids rewritten) and
+    /// the relationship id of its external link (`a:blip r:link`), if it is linked.
+    Image(&'a Image, String, String, Option<String>),
     Chart(&'a gridcraft_model::Chart, String),
     Shape(&'a Shape),
 }
@@ -563,15 +580,21 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
         }
         let id = next_id;
         let hidden = match o {
-            Obj::Image(i, _, _) => i.hidden,
+            Obj::Image(i, ..) => i.hidden,
             Obj::Chart(c, _) => c.hidden,
             Obj::Shape(s) => s.hidden,
         };
         let hidden = if hidden { " hidden=\"1\"" } else { "" };
         let close_tag;
         match o {
-            Obj::Image(img, rid, ext_list) => {
+            Obj::Image(img, rid, ext_list, link_rid) => {
                 let blip_end = if ext_list.is_empty() { "/>".to_string() } else { format!(">{ext_list}</a:blip>") };
+                let blip_ref = match (rid.is_empty(), link_rid) {
+                    (false, Some(l)) => format!("r:embed=\"{rid}\" r:link=\"{l}\""),
+                    (false, None) => format!("r:embed=\"{rid}\""),
+                    (true, Some(l)) => format!("r:link=\"{l}\""),
+                    (true, None) => String::new(),
+                };
                 let link = write_hyperlink(img.hyperlink.as_ref(), rels);
                 let name = esc_attr(&img.name.clone().unwrap_or_else(|| format!("Picture {}", id - 1)));
                 let (open, close) = anchor_open(sheet, &img.anchor);
@@ -579,7 +602,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                 s.push_str(&open);
                 let _ = write!(
                     s,
-                    "<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"{id}\" name=\"{name}\" descr=\"{}\"{hidden}>{link}</xdr:cNvPr><xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed=\"{rid}\"{blip_end}<a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>",
+                    "<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"{id}\" name=\"{name}\" descr=\"{}\"{hidden}>{link}</xdr:cNvPr><xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip {blip_ref}{blip_end}<a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>",
                     esc_attr(&img.alt),
                     xfrm(&img.anchor, "a:xfrm")
                 );

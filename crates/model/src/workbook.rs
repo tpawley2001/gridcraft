@@ -641,6 +641,7 @@ mod tests {
             mime: String::new(),
             alt: String::new(),
             blip_ext: vec![],
+            link: None,
         };
         assert_eq!(wb.next_object_id(), 1);
         if let Some(sh) = wb.sheet_mut(0) {
@@ -681,6 +682,7 @@ mod tests {
             mime: String::new(),
             alt: String::new(),
             blip_ext: vec![],
+            link: None,
         };
         if let Some(sh) = wb.sheet_mut(0) {
             sh.images.push(image(u32::MAX));

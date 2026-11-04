@@ -46,6 +46,7 @@ fn notes_share_or_split_picture_relationships() {
         mime: "image/png".into(),
         alt: String::new(),
         blip_ext: vec![],
+        link: None,
     });
     sheet.comments.insert(CellRef::new(0, 0), note(b"\x89PNG one"));
     sheet.comments.insert(CellRef::new(1, 0), note(b"\x89PNG two"));
