@@ -3,7 +3,8 @@
 //! On read, the raw bytes of unmodelled parts are kept with their content type and their
 //! relationship graph, per owner: the package root (custom document properties, ribbon
 //! customisation, add-in task panes, the sensitivity label), the workbook (custom XML, the volatile
-//! dependencies part with the RTD and CUBE topics, links to external workbooks with
+//! dependencies part with the RTD and CUBE topics, the shared workbook revision history and user
+//! names, links to external workbooks with
 //! their `<externalReferences>`, data connections, XML maps, add-in task panes with the web extension
 //! parts they show) and each sheet (query tables, cells
 //! mapped to XML elements, form controls other than the buttons, scroll bars and spin buttons
@@ -57,6 +58,7 @@ use crate::xml::{self, esc_attr};
 pub(crate) mod connections;
 mod read;
 mod rebase;
+mod revisions;
 mod strict;
 mod write;
 
@@ -112,7 +114,9 @@ const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
 /// Relationship kinds (last segment of the type) kept from the package root.
 const PACKAGE_ROOTS: &[&str] = &["custom-properties", "extensibility", "webextensiontaskpanes", "classificationlabels"];
 /// Relationship kinds kept from the workbook without a workbook element.
-const WORKBOOK_ROOTS: &[&str] = &["customXml", "connections", "xmlMaps", "volatileDependencies"];
+/// The shared workbook revision history (`revisionHeaders`, with the logs it names) is checked and
+/// written back only while the sheets are unchanged (see [`revisions`]).
+const WORKBOOK_ROOTS: &[&str] = &["customXml", "connections", "xmlMaps", "volatileDependencies", "revisionHeaders", "usernames"];
 /// Workbook relationship kinds of Office add-ins: the task panes part, which names the web
 /// extension parts it shows ([MS-OWEXML] 2.3).
 const WORKBOOK_WEB_EXTENSIONS: &[&str] = &["webextensiontaskpanes"];

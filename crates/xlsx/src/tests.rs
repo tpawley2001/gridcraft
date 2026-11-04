@@ -174,5 +174,6 @@ mod codex_day_major_font;
 mod codex_day_revision_history;
 mod codex_day_table_sort;
 mod font_scheme_tests;
+mod revision_history;
 mod table_sort_tests;
 mod workbook_options_controls;
