@@ -171,3 +171,4 @@ mod codex_day_xlsb_cell_parameter;
 mod worksheet_settings;
 
 mod workbook_options_controls;
+mod codex_day_table_sort;
