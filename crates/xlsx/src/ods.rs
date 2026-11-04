@@ -300,6 +300,7 @@ struct Import {
     spreadsheet_seen: bool,
     /// A sheet was renamed on import, so sheet references in formulas could point elsewhere.
     renamed: bool,
+    shortened_row_repeat: bool,
 }
 
 impl Import {
@@ -321,6 +322,7 @@ impl Import {
             formats: vec![],
             spreadsheet_seen: false,
             renamed: false,
+            shortened_row_repeat: false,
         }
     }
 
@@ -660,12 +662,21 @@ impl Import {
     }
 
     fn finish_row(&mut self) -> Result<(), IoError> {
-        let Some(row) = self.row.take() else { return Ok(()) };
+        let Some(mut row) = self.row.take() else { return Ok(()) };
         let Some(sheet) = self.sheet.as_mut() else { return Ok(()) };
         // Blank trailing row repeats past the sheet edge (e.g. from larger-sheet writers) are clipped.
         let end = match sheet.row.checked_add(row.repeat).filter(|n| *n <= MAX_ROWS) {
             Some(end) => end,
             None if row.cells.is_empty() => MAX_ROWS,
+            None if sheet.row < MAX_ROWS && row.cells.iter().any(|entry| !entry.cell.is_blank()) => {
+                // A valued row whose repeat exceeds the grid is read once, as in Excel.
+                row.repeat = 1;
+                if !self.shortened_row_repeat {
+                    self.report.warn("Some ODS rows repeated past the last worksheet row were read once.");
+                    self.shortened_row_repeat = true;
+                }
+                sheet.row.saturating_add(1)
+            }
             None => return Err(IoError::TooLarge("ODS exceeds worksheet height".into())),
         };
         for entry in row.cells {
