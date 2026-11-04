@@ -210,10 +210,10 @@ pub enum Format {
     Unknown,
 }
 
-/// Guesses the format from content: ODS mimetype, XLSB package content types, other ZIP packages as XLSX, text as CSV.
+/// Guesses the format from content: ODS mimetype (or manifest media type), XLSB package content types, other ZIP packages as XLSX, text as CSV.
 pub fn sniff(bytes: &[u8]) -> Format {
     if bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"PK\x05\x06") || bytes.starts_with(b"PK\x07\x08") {
-        return if ods::has_mimetype(bytes) {
+        return if ods::is_ods_package(bytes) {
             Format::Ods
         } else if xlsb::is_xlsb(bytes) {
             Format::Xlsb
