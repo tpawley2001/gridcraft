@@ -73,6 +73,7 @@ mod xls_picture_tests;
 mod xls_pivot_tests;
 mod xls_print_tests;
 mod xls_protection_tests;
+mod xls_sheet_name_tests;
 mod xls_style_tests;
 mod xls_table_tests;
 mod xls_tests;

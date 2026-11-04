@@ -536,6 +536,20 @@ fn chart_sheet_parts(cx: &mut Ctx<'_>, part: &str) -> Result<Option<(Chart, Prin
     Ok(Some((chart, print)))
 }
 
+/// Repairs binary workbook sheet names before their index-based references are decoded.
+pub(crate) fn repair_sheet_names<'a>(names: impl Iterator<Item = &'a mut String>, report: &mut ReadReport) {
+    let mut used = SheetNames::default();
+    let mut changed = false;
+    for (i, name) in names.enumerate() {
+        let repaired = used.unique(name, i);
+        changed |= repaired != *name;
+        *name = repaired;
+    }
+    if changed {
+        report.warn("Some sheet names were shortened or renamed to valid, unique sheet names.");
+    }
+}
+
 /// The sheet names an import has assigned so far, for repairing repeated ones.
 #[derive(Default)]
 pub(crate) struct SheetNames {
