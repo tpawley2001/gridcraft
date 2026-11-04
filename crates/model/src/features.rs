@@ -357,6 +357,23 @@ pub struct Comment {
     /// here, or a file without the shape) writes the default box next to the cell.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note_box: Option<NoteBox>,
+    /// A picture filling the note's box (VML `<v:fill o:relid>`), as read from the file; `None`
+    /// writes the default plain fill.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture_fill: Option<NotePictureFill>,
+}
+
+/// A picture used as a note box's fill, with the VML `<v:fill>` settings that go with it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NotePictureFill {
+    /// Encoded picture bytes, base64 in JSON; shared so copies of the sheet don't copy them.
+    #[serde(with = "crate::b64::shared")]
+    pub data: std::sync::Arc<Vec<u8>>,
+    /// MIME type from the picture part's name (empty when unknown: the bytes tell the format).
+    pub mime: String,
+    /// `<v:fill>` attributes kept as written: `o:title`, `type`, `recolor`, `color2`, `aspect`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attrs: Vec<(String, String)>,
 }
 
 /// A note box's place and size, from the note's VML shape: Excel's `<x:Anchor>` with its corners

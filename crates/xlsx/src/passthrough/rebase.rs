@@ -28,11 +28,38 @@ impl<'a> SheetKept<'a> {
         }
     }
 
-    /// GridCraft's notes VML for part `name`, merged with the kept control and object shapes.
-    pub fn notes_vml(&self, ours: String, name: &str, out: &mut Out) -> String {
-        let Some(vml) = self.vml() else { return ours };
-        self.write_vml_rels(vml, name, out);
-        merge_vml(&String::from_utf8_lossy(&vml.data), &ours)
+    /// The relationship ids of the kept VML drawing.
+    pub fn vml_rel_ids(&self) -> Vec<&str> {
+        self.vml().map(|v| v.rels.iter().map(|r| r.id.as_str()).collect()).unwrap_or_default()
+    }
+
+    /// GridCraft's notes VML for part `name`, merged with the kept control and object shapes;
+    /// `pictures` are the notes' fill pictures as (relationship id, `xl/media` file name), written
+    /// to the part's relationships with the kept ones.
+    pub fn notes_vml(&self, ours: String, name: &str, pictures: &[(String, String)], out: &mut Out) -> String {
+        let vml = self.vml();
+        let mut rels = vml.filter(|v| !v.rels.is_empty()).map(|v| part_rels_xml(&v.rels, &self.names)).unwrap_or_default();
+        if !pictures.is_empty() {
+            let mut add = String::new();
+            for (id, file) in pictures {
+                let _ = write!(add, "<Relationship Id=\"{}\" Type=\"{NS_REL}/image\" Target=\"../media/{}\"/>", esc_attr(id), esc_attr(file));
+            }
+            match rels.rfind("</Relationships>") {
+                Some(i) => rels.insert_str(i, &add),
+                None => {
+                    rels = format!(
+                        "{XML_DECL}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{add}</Relationships>"
+                    )
+                }
+            }
+        }
+        if !rels.is_empty() {
+            out.part(&rels_part_name(name), None, rels.into_bytes());
+        }
+        match vml {
+            Some(vml) => merge_vml(&String::from_utf8_lossy(&vml.data), &ours),
+            None => ours,
+        }
     }
 
     /// The kept VML drawing of a sheet without notes; its new relationship id.

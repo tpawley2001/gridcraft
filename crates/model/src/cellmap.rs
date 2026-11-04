@@ -42,6 +42,7 @@ mod tests {
                 visible: false,
                 dates: vec![],
                 note_box: None,
+                picture_fill: None,
             },
         );
         s.hyperlinks.insert(c3, Hyperlink { target: "Sheet1!A1".into(), tooltip: Some("jump".into()), external: false });
