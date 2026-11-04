@@ -150,7 +150,7 @@ impl Criterion {
         }
     }
 
-    fn matches_text(&self, v: &Value, pat: &str) -> bool {
+    fn matches_text(&self, v: &Value, pat: &str, escape_any: bool) -> bool {
         match self.op {
             Op::Eq | Op::Ne => {
                 // Blank cells hold no text: `"*"` skips them and `"<>*"` counts them.
@@ -158,7 +158,7 @@ impl Criterion {
                     Value::Text(t) => Some(t.to_string()),
                     _ => None,
                 };
-                let m = cell_text.is_some_and(|t| wildcard_match(pat, &t));
+                let m = cell_text.is_some_and(|t| wildcard_match_with_escapes(pat, &t, escape_any));
                 if self.op == Op::Eq { m } else { !m }
             }
             _ => match v {
@@ -179,6 +179,15 @@ impl Criterion {
 
     /// Whether a cell value satisfies the criterion.
     pub(crate) fn matches(&self, v: &Value) -> bool {
+        self.matches_with_escapes(v, true)
+    }
+
+    /// Database criteria escape only `*` and `?`; other tildes remain literal.
+    pub(crate) fn matches_database(&self, v: &Value) -> bool {
+        self.matches_with_escapes(v, false)
+    }
+
+    fn matches_with_escapes(&self, v: &Value, escape_any: bool) -> bool {
         let v = match v {
             Value::Array(a) => a.data.first().cloned().unwrap_or(Value::Empty),
             other => other.clone(),
@@ -197,7 +206,7 @@ impl Criterion {
                 Value::Error(x) => cmp_op(self.op, x.code().cmp(&e.code())),
                 _ => self.op == Op::Ne,
             },
-            Operand::Text(pat) => self.matches_text(&v, pat),
+            Operand::Text(pat) => self.matches_text(&v, pat, escape_any),
             Operand::CutText(kept) => self.matches_cut_text(&v, kept),
         }
     }
@@ -240,12 +249,12 @@ enum Tok {
     Star,
 }
 
-fn tokenize(pattern: &str) -> Vec<Tok> {
+fn tokenize(pattern: &str, escape_any: bool) -> Vec<Tok> {
     let mut out = Vec::new();
-    let mut it = pattern.chars();
+    let mut it = pattern.chars().peekable();
     while let Some(c) = it.next() {
         match c {
-            '~' => match it.next() {
+            '~' if escape_any || matches!(it.peek(), Some('*' | '?')) => match it.next() {
                 Some(n) => out.extend(std::iter::once(lower_char(n)).map(Tok::Char)),
                 None => out.push(Tok::Char('~')),
             },
@@ -269,12 +278,16 @@ fn lower_chars(s: &str) -> Vec<char> {
 
 /// Whether the pattern contains an unescaped wildcard.
 pub(crate) fn has_wildcards(pattern: &str) -> bool {
-    tokenize(pattern).iter().any(|t| !matches!(t, Tok::Char(_))) || pattern.contains('~')
+    tokenize(pattern, true).iter().any(|t| !matches!(t, Tok::Char(_))) || pattern.contains('~')
 }
 
 /// Case-insensitive whole-text match with `*`, `?` and `~` escapes.
 pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
-    let p = tokenize(pattern);
+    wildcard_match_with_escapes(pattern, text, true)
+}
+
+fn wildcard_match_with_escapes(pattern: &str, text: &str, escape_any: bool) -> bool {
+    let p = tokenize(pattern, escape_any);
     let t = lower_chars(text);
     let mut budget = MAX_STEPS;
     match_from(&p, &t, true, &mut budget).is_some()
@@ -329,7 +342,7 @@ fn match_from(p: &[Tok], t: &[char], whole: bool, budget: &mut u64) -> Option<us
 /// SEARCH-style find: the char index (0-based) of the first position at or after `start` where
 /// the wildcard pattern matches, case-insensitively.
 pub(crate) fn wildcard_find(pattern: &str, text: &str, start: usize) -> Option<usize> {
-    let p = tokenize(pattern);
+    let p = tokenize(pattern, true);
     let t = lower_chars(text);
     // A leading run of stars never matters for a prefix match (it consumes nothing), so
     // dropping it lets the anchor below skip linearly through the text (#2382).
@@ -437,6 +450,24 @@ mod tests {
         assert!(!m("<>*", Value::from("")));
         assert!(!m("?*", Value::Empty));
         assert!(m("<>a*", Value::Empty));
+    }
+
+    #[test]
+    fn database_tilde_escapes_are_separate() {
+        for (pattern, text, database, default) in [
+            ("=cap~~", "cap~", false, true),
+            ("=cap~~", "cap~~", true, false),
+            ("=cap~?", "cap?", true, true),
+            ("=cap~*", "cap*", true, true),
+            ("=cap~x", "cap~x", true, false),
+            ("=cap~", "cap~", true, true),
+            ("<>cap~~", "cap~", true, false),
+        ] {
+            let criterion = Criterion::parse(&Value::from(pattern));
+            let value = Value::from(text);
+            assert_eq!(criterion.matches_database(&value), database, "database: {pattern}");
+            assert_eq!(criterion.matches(&value), default, "default: {pattern}");
+        }
     }
 
     #[test]
