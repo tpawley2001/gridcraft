@@ -891,6 +891,7 @@ mod table_column_dxf_tests {
             header_row_border_dxf: None,
             table_border_dxf: None,
             totals_row_border_dxf: None,
+            sort: None,
         };
         super::shift_table_columns(&mut t, 1, 1, true);
         let dxfs: Vec<bool> = t.columns.iter().map(|c| c.data_dxf.is_some()).collect();

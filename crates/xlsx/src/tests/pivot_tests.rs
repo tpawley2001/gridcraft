@@ -92,6 +92,7 @@ fn workbook() -> Workbook {
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,
+        sort: None,
     });
     wb.names.push(DefinedName { name: "SalesData".into(), scope: None, formula: "Data!$A$1:$F$9".into(), comment: String::new(), hidden: false });
 

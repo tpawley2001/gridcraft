@@ -771,6 +771,7 @@ mod table_id_tests {
             header_row_border_dxf: None,
             table_border_dxf: None,
             totals_row_border_dxf: None,
+            sort: None,
         }
     }
 

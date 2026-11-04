@@ -172,3 +172,4 @@ mod worksheet_settings;
 
 mod workbook_options_controls;
 mod codex_day_table_sort;
+mod table_sort_tests;

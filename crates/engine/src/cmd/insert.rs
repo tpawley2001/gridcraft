@@ -392,6 +392,7 @@ fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
             header_row_border_dxf: None,
             table_border_dxf: None,
             totals_row_border_dxf: None,
+            sort: None,
         });
         cx.structural = true;
         Ok(json!({"table": name, "range": r.a1()}))

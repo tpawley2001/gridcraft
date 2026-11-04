@@ -248,6 +248,7 @@ pub fn read_table(cx: &mut Ctx<'_>, x: &El) -> Option<Table> {
         header_row_border_dxf: table_dxf(cx, x, "headerRowBorderDxfId"),
         table_border_dxf: table_dxf(cx, x, "tableBorderDxfId"),
         totals_row_border_dxf: table_dxf(cx, x, "totalsRowBorderDxfId"),
+        sort: crate::table_sort::read_table_sort(cx, x, range),
     })
 }
 

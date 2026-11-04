@@ -253,6 +253,7 @@ fn calculated_table_column_keeps_formula_and_cell_value() {
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,
+        sort: None,
     });
     let bytes = write_xlsx(&wb).unwrap();
     let mut pkg = Package::open(&bytes).unwrap();
@@ -320,6 +321,7 @@ fn this_row_references_are_written_in_long_form() {
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,
+        sort: None,
     });
     let bytes = write_xlsx(&wb).unwrap();
     let mut pkg = Package::open(&bytes).unwrap();
@@ -499,6 +501,7 @@ fn implicit_intersection_metadata_distinguishes_table_rows_and_columns() {
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,
+        sort: None,
     });
     sh.cells.set(at("A2"), Cell::value(Value::Number(3.0)));
     sh.cells.set(at("B2"), formula("[@Input]*2", 6.0));
