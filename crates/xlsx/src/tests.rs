@@ -34,6 +34,7 @@ mod locale_numfmt;
 mod malformed;
 mod multilevel_category_roundtrip;
 mod note_box;
+mod ods_no_mimetype_tests;
 mod ods_tests;
 mod page_order;
 mod page_setup_scale_zero;
