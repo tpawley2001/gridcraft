@@ -17,7 +17,15 @@ use crate::util::{A, R, as_array, has, num_val};
 use crate::{Arg, Ctx, FnSpec};
 
 /// Column index of a label in the header row.
-fn find_column(db: &Array, label: &str) -> Option<usize> {
+fn find_column(db: &Array, label: &Value) -> Option<usize> {
+    if let Value::Error(e) = label {
+        return (0..db.cols).find(|&c| matches!(db.get(0, c), Some(Value::Error(header)) if header == e));
+    }
+    let label = match label {
+        Value::Text(t) => Cow::Borrowed(t.as_ref()),
+        Value::Number(n) => Cow::Owned(gridcraft_core::number_to_text(*n)),
+        _ => return None,
+    };
     let label = label.trim();
     (0..db.cols).find(|&c| match db.get(0, c) {
         Some(Value::Text(t)) => compare_text(t.trim(), label).is_eq(),
@@ -41,7 +49,7 @@ fn field_index(db: &Array, a: &[Arg]) -> R<Option<usize>> {
             }
             Ok(Some((i as usize).saturating_sub(1)))
         }
-        Value::Text(t) => find_column(db, &t).map(Some).ok_or(CellError::Value),
+        Value::Text(t) => find_column(db, &Value::Text(t)).map(Some).ok_or(CellError::Value),
         Value::Bool(_) => Err(CellError::Value),
         Value::Error(e) => Err(e),
         _ => Ok(None),
@@ -80,11 +88,7 @@ fn matching_records(db: &Array, crit: &Array, ctx: &mut dyn Ctx) -> Vec<usize> {
         for c in 0..crit.cols {
             let Some(cell) = crit.get(r, c) else { continue };
             let Some(cr) = cell_criterion(cell) else { continue };
-            let col = match crit.get(0, c) {
-                Some(Value::Text(t)) => find_column(db, t),
-                Some(Value::Number(n)) => find_column(db, &gridcraft_core::number_to_text(*n)),
-                _ => None,
-            };
+            let col = crit.get(0, c).and_then(|header| find_column(db, header));
             conds.push((c, col, cr));
         }
         rows.push((r, conds));
@@ -95,7 +99,7 @@ fn matching_records(db: &Array, crit: &Array, ctx: &mut dyn Ctx) -> Vec<usize> {
             all_match
                 || rows.iter().any(|(r, conds)| {
                     conds.iter().all(|(c, col, cr)| match col {
-                        Some(f) => cr.matches(db.get(rec, *f).unwrap_or(&Value::Empty)),
+                        Some(f) => cr.matches_database(db.get(rec, *f).unwrap_or(&Value::Empty)),
                         // Under a label that names no field, only a formula (a computed
                         // criterion) can hold.
                         None => ctx.computed_criterion(*r, *c, db, rec).unwrap_or(false),

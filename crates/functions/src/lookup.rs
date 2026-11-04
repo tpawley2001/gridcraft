@@ -146,13 +146,14 @@ fn vh_lookup(args: &[Arg], vertical: bool) -> R<Value> {
     if let Value::Error(e) = &arg(args, 1)?.value {
         return Err(*e);
     }
-    let idx = num(args, 2)?;
+    let approx = opt_bool(args, 3, true)?;
+    // Invalid index values become #REF! after the other argument errors are checked.
+    let idx = num(args, 2).map_err(|_| CellError::Ref)?;
     // NaN too: it would pass `idx < 1.0` and become index 0 (#2163).
     if idx.is_nan() || idx < 1.0 {
         return Err(CellError::Value);
     }
     let idx = (idx.trunc() as usize).saturating_sub(1);
-    let approx = opt_bool(args, 3, true)?;
     let (keys, len) = if vertical { (column(&table, 0), table.cols) } else { (row(&table, 0), table.rows) };
     if idx >= len {
         return Err(CellError::Ref);
@@ -614,6 +615,21 @@ mod tests {
         is_text(ev("HLOOKUP", vec![n(2.0), rf(t2.clone()), n(2.0), b(false)]), "b");
         is_text(ev("HLOOKUP", vec![n(2.5), rf(t2.clone()), n(2.0)]), "b");
         is_err(ev("HLOOKUP", vec![n(2.0), rf(t2), n(3.0)]), CellError::Ref);
+    }
+
+    #[test]
+    fn vh_lookup_index_errors_and_precedence() {
+        for (name, table) in [("VLOOKUP", arr(vec![vec![nv(0.0), tv("found")]])), ("HLOOKUP", arr(vec![vec![nv(0.0)], vec![tv("found")]]))] {
+            for index in [e(CellError::Value), e(CellError::Div0), e(CellError::NA), e(CellError::Ref), e(CellError::Num), t("abc")] {
+                is_err(ev(name, vec![n(0.0), rf(table.clone()), index.clone(), b(true)]), CellError::Ref);
+                is_err(ev(name, vec![n(0.0), rf(table.clone()), index.clone(), e(CellError::NA)]), CellError::NA);
+                is_err(ev(name, vec![e(CellError::Div0), rf(table.clone()), index.clone(), e(CellError::NA)]), CellError::Div0);
+                is_err(ev(name, vec![n(0.0), e(CellError::Num), index, e(CellError::NA)]), CellError::Num);
+            }
+            is_text(ev(name, vec![n(0.0), rf(table.clone()), t("2"), b(false)]), "found");
+            is_err(ev(name, vec![n(0.0), rf(table.clone()), empty(), b(true)]), CellError::Value);
+            is_err(ev(name, vec![n(0.0), rf(table), n(3.0), b(true)]), CellError::Ref);
+        }
     }
 
     #[test]
