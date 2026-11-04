@@ -13,4 +13,6 @@ pub use recalc::{Calc, Key, evaluate, now_serial};
 #[cfg(test)]
 mod indirect_ref_array_tests;
 #[cfg(test)]
+mod lookup_database_parity_tests;
+#[cfg(test)]
 mod tests;
