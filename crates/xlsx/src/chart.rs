@@ -833,8 +833,27 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
         let bars: Vec<(usize, &Series)> = all.iter().filter(|(i, x)| !x.secondary && !is_line(kind(*i, x))).copied().collect();
         let lines: Vec<(usize, &Series)> = all.iter().filter(|(i, x)| !x.secondary && is_line(kind(*i, x))).copied().collect();
         let sec: Vec<(usize, &Series)> = all.iter().filter(|(_, x)| x.secondary).copied().collect();
-        primary_g = G::Bar { bar: false, grouping: "clustered" };
-        if !bars.is_empty() || (lines.is_empty() && sec.is_empty()) {
+        // Pie and doughnut groups only: one axis-less group per kind, in the order the kinds first appear.
+        let round = |i: usize, x: &Series| kind(i, x).map(group_for).filter(|g| matches!(g, G::Pie | G::Doughnut));
+        let mut rounds: Vec<G> = Vec::new();
+        for (i, x) in &all {
+            if let Some(g) = round(*i, x)
+                && !rounds.contains(&g)
+            {
+                rounds.push(g);
+            }
+        }
+        let all_round = !all.is_empty() && sec.is_empty() && all.iter().all(|(i, x)| round(*i, x).is_some());
+        primary_g = match rounds.first() {
+            Some(g) if all_round => *g,
+            _ => G::Bar { bar: false, grouping: "clustered" },
+        };
+        if all_round {
+            for g in &rounds {
+                let group: Vec<(usize, &Series)> = all.iter().filter(|(i, x)| round(*i, x) == Some(*g)).copied().collect();
+                s.push_str(&group_xml(*g, &group, ch, (1, 2), wb, si));
+            }
+        } else if !bars.is_empty() || (lines.is_empty() && sec.is_empty()) {
             s.push_str(&group_xml(primary_g, &bars, ch, (1, 2), wb, si));
         }
         if !lines.is_empty() {
