@@ -2387,3 +2387,46 @@ fn formulas_read_a_dirty_python_cell_after_it_is_laid_out() {
     assert_eq!((t.num("B1"), t.num("B2")), (5.0, 6.0));
     assert_eq!((t.num("A1"), t.num("A2"), t.num("A3")), (5.0, 100.0, 111.0));
 }
+
+#[test]
+fn row_of_whole_rows_lists_every_row_on_an_empty_sheet() {
+    let mut t = T::new();
+    t.set("D1", "=ROWS(ROW(1:3))");
+    assert_eq!(t.num("D1"), 3.0);
+    t.set("D2", "=COLUMNS(COLUMN(A:C))");
+    assert_eq!(t.num("D2"), 3.0);
+    // Whole columns are still trimmed to the used rows.
+    t.set("D3", "=ROWS(ROW(A:A))");
+    assert_eq!(t.num("D3"), 3.0);
+}
+
+#[test]
+fn indirect_of_text_arrays_outside_the_criteria_functions_uses_the_first_text() {
+    let mut t = T::new();
+    t.set("A1", "5");
+    t.set("A2", "7");
+    t.set("D1", "=INDIRECT({\"A1\",\"A2\"})");
+    assert_eq!(t.num("D1"), 5.0);
+    t.set("D2", "=SUM(INDIRECT({\"A2\",\"A1\"}))");
+    assert_eq!(t.num("D2"), 7.0);
+    t.set("D3", "=AREAS(INDIRECT({\"A1\",\"A2\"}))");
+    assert_eq!(t.num("D3"), 1.0);
+}
+
+#[test]
+fn reference_arrays_of_different_shapes_give_na_where_one_is_missing() {
+    let mut t = T::new();
+    t.set("A1", "a");
+    t.set("B1", "1");
+    t.set("B2", "2");
+    t.set("D1", "=INDEX(SUMIF(INDIRECT({\"A1\",\"A1\",\"A1\"}),\"a\",INDIRECT({\"B1\",\"B2\"})),1,2)");
+    assert_eq!(t.num("D1"), 2.0);
+    t.set("D2", "=INDEX(SUMIF(INDIRECT({\"A1\",\"A1\",\"A1\"}),\"a\",INDIRECT({\"B1\",\"B2\"})),1,3)");
+    assert_eq!(t.get("D2"), Value::Error(CellError::NA));
+    // A scalar range is reused for every reference.
+    t.set("D3", "=SUMPRODUCT(SUMIF(INDIRECT({\"A1\",\"A1\"}),\"a\",B1))");
+    assert_eq!(t.num("D3"), 2.0);
+    // An error in the text array is #REF! in that position.
+    t.set("D4", "=INDEX(COUNTIF(INDIRECT({\"A1\",#N/A}),\"a\"),1,2)");
+    assert_eq!(t.get("D4"), Value::Error(CellError::Ref));
+}
