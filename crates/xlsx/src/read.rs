@@ -171,10 +171,10 @@ fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], ke
         && let Some(x) = cx.optional_xml(&r.target)?
     {
         wb.theme = crate::theme::read_theme(&x);
-        if let Some(bytes) = cx.pkg.read(&r.target)? {
-            if let Err(e) = crate::theme::keep_source_xml(&mut wb.theme, &bytes) {
-                cx.warn(format!("theme source XML could not be kept: {e}"));
-            }
+        if let Some(bytes) = cx.pkg.read(&r.target)?
+            && let Err(e) = crate::theme::keep_source_xml(&mut wb.theme, &bytes)
+        {
+            cx.warn(format!("theme source XML could not be kept: {e}"));
         }
         wb.theme.preserved = kept.theme(cx, &r.target);
     }

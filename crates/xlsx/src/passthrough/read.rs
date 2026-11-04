@@ -277,7 +277,7 @@ impl KeptReader {
             return None;
         }
         let mut p = Preserved::default();
-        let result = raw_rels(cx, part).and_then(|roots| self.keep(cx, &mut p, &roots, &mut HashSet::new()));
+        let result = raw_rels(cx, part).and_then(|roots| self.keep_through(cx, &mut p, &roots, &mut HashSet::new(), REWRITTEN));
         if let Err(e) = result {
             cx.warn(format!("theme relationships could not be kept: {e}"));
             return None;
