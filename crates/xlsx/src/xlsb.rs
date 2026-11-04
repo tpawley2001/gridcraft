@@ -1521,9 +1521,7 @@ fn worksheet(
     let mut view_seen = false;
     let mut in_first_view = false;
     let mut custom_views = crate::binary_custom_views::SheetViews::default();
-    let mut active_pane = None;
-    let mut selections: Vec<(u32, CellRef)> = Vec::new();
-    let mut bad_selection = false;
+    let mut selections = Selections::default();
     let mut groups = Groups::default();
     let mut page = PageState::default();
     let mut rules = rules::Rules::default();
@@ -1543,14 +1541,7 @@ fn worksheet(
                 }
                 records.end(payload, report)?;
                 groups.resolve(&mut sheet, links, budget, report);
-                // The active pane's selection, else the last one (as the .xlsx reader does).
-                let chosen = active_pane.and_then(|p| selections.iter().find(|(pnn, _)| *pnn == p)).or(selections.last());
-                if let Some((_, at)) = chosen {
-                    sheet.view_active = *at;
-                }
-                if bad_selection {
-                    report.warn("Malformed XLSB selection records were skipped.");
-                }
+                selections.apply(&mut sheet, report);
                 if page.fit_to_page {
                     let (w, h) = page.fit.unwrap_or((1, 1));
                     sheet.print.fit_to = Some((w, h));
@@ -1703,15 +1694,8 @@ fn worksheet(
                 Err(_) => report.warn("Malformed XLSB sheet view records were skipped."),
             },
             138 => in_first_view = false,
-            151 if in_first_view => match pane(&mut sheet, payload) {
-                Ok(p) => active_pane = p,
-                Err(_) => report.warn("Malformed XLSB pane records were skipped."),
-            },
-            152 if in_first_view => match selection(payload) {
-                Ok(Some(s)) => selections.push(s),
-                Ok(None) => {}
-                Err(_) => bad_selection = true,
-            },
+            151 if in_first_view => selections.pane(pane(&mut sheet, payload), report),
+            152 if in_first_view => selections.selection(selection(payload)),
             494 => hyperlink(payload, rels, &mut sheet, budget, report),
             161 if !data => sheet_autofilter(&mut records, payload, dxfs, &mut sheet, report)?,
             tables::LIST_PART => list_part(payload, &mut parts.lists, report),
@@ -1910,6 +1894,43 @@ fn pane(sheet: &mut Sheet, payload: &[u8]) -> Result<Option<u32>, IoError> {
         }
     }
     Ok(Some(active))
+}
+
+/// The first sheet view's active pane and selections, resolved to the sheet's active cell
+/// once the worksheet ends.
+#[derive(Default)]
+struct Selections {
+    active_pane: Option<u32>,
+    cells: Vec<(u32, CellRef)>,
+    malformed: bool,
+}
+
+impl Selections {
+    fn pane(&mut self, pane: Result<Option<u32>, IoError>, report: &mut ReadReport) {
+        match pane {
+            Ok(p) => self.active_pane = p,
+            Err(_) => report.warn("Malformed XLSB pane records were skipped."),
+        }
+    }
+
+    fn selection(&mut self, selection: Result<Option<(u32, CellRef)>, IoError>) {
+        match selection {
+            Ok(Some(s)) => self.cells.push(s),
+            Ok(None) => {}
+            Err(_) => self.malformed = true,
+        }
+    }
+
+    /// The active pane's selection, else the last one (as the .xlsx reader does).
+    fn apply(&self, sheet: &mut Sheet, report: &mut ReadReport) {
+        let chosen = self.active_pane.and_then(|p| self.cells.iter().find(|(pnn, _)| *pnn == p)).or(self.cells.last());
+        if let Some((_, at)) = chosen {
+            sheet.view_active = *at;
+        }
+        if self.malformed {
+            report.warn("Malformed XLSB selection records were skipped.");
+        }
+    }
 }
 
 /// BrtSel ([MS-XLSB] 2.4.722): the pane it belongs to (`pnn`), the active cell (`rwAct`,
