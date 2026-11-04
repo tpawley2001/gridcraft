@@ -450,7 +450,17 @@ mod tests {
 
     #[test]
     fn repeated_headers_are_renamed_without_retrying_suffixes() {
-        let col = |n: &str| TableColumn { name: n.into(), totals: TotalsFn::None, totals_label: None, formula: None, unique_name: None, xml: None, header_row_dxf: None, data_dxf: None, totals_row_dxf: None };
+        let col = |n: &str| TableColumn {
+            name: n.into(),
+            totals: TotalsFn::None,
+            totals_label: None,
+            formula: None,
+            unique_name: None,
+            xml: None,
+            header_row_dxf: None,
+            data_dxf: None,
+            totals_row_dxf: None,
+        };
         let mut columns: Vec<TableColumn> = (0..10_000).map(|_| col("Total")).collect();
         columns[1] = col("total3");
         let t = Table {
