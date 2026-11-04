@@ -842,6 +842,7 @@ mod tests {
                 mime: String::new(),
                 alt: String::new(),
                 blip_ext: vec![],
+                link: None,
             }),
             ObjKind::Shape | ObjKind::Equation => s.shapes.push(Shape {
                 hidden: false,

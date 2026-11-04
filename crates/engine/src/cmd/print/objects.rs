@@ -80,7 +80,8 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
     pg.save();
     pg.clip_rect(bx, by, bw, bh);
     draw_sparklines(pg, wb, si, sh, b, block);
-    for (imi, im) in sh.images.iter().enumerate().filter(|(_, o)| !o.hidden) {
+    // A linked picture without a cached copy has no bytes to draw.
+    for (imi, im) in sh.images.iter().enumerate().filter(|(_, o)| !o.hidden && !o.data.is_empty()) {
         let r = anchor_rect(sh, &im.anchor);
         if !visible(r) {
             continue;

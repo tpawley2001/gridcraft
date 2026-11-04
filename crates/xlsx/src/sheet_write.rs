@@ -362,15 +362,19 @@ fn write_sheet_drawing(
         let dn = out.drawings;
         let mut objs: Vec<Obj<'_>> = vec![];
         for img in &sheet.images {
-            if img.data.is_empty() {
-                continue;
-            }
-            let ext = image_ext(&img.mime, &img.data);
-            out.default_type(ext, image_content_type(ext));
-            let file = out.image_part(ext, &img.data);
-            let rid = drels.add("image", &format!("../media/{file}"));
+            // A linked picture without a cached copy has no media part: only its external
+            // relationship is written.
+            let rid = if img.data.is_empty() {
+                String::new()
+            } else {
+                let ext = image_ext(&img.mime, &img.data);
+                out.default_type(ext, image_content_type(ext));
+                let file = out.image_part(ext, &img.data);
+                drels.add("image", &format!("../media/{file}"))
+            };
+            let link = img.link.as_ref().map(|t| drels.add_external("image", t));
             let ext_list = crate::drawing::write_blip_ext(&img.blip_ext, &mut drels, out);
-            objs.push(Obj::Image(img, rid, ext_list));
+            objs.push(Obj::Image(img, rid, ext_list, link));
         }
         for ch in &sheet.charts {
             out.charts += 1;

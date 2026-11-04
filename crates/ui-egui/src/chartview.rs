@@ -352,7 +352,8 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
         }
         done(start, r);
     }
-    for im in sh.images.iter().filter(|o| !o.hidden) {
+    // A linked picture without a cached copy has no bytes to draw.
+    for im in sh.images.iter().filter(|o| !o.hidden && !o.data.is_empty()) {
         let r = anchor_rect(geo, sh, &im.anchor);
         if !r.intersects(p.clip_rect()) {
             continue;
