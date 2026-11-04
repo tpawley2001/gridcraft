@@ -165,12 +165,18 @@ fn read_shared_strings(cx: &mut Ctx<'_>, wb_rels: &[Rel]) -> Result<(), IoError>
     Ok(())
 }
 
-fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel]) -> Result<(), IoError> {
+fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], kept: &mut crate::passthrough::KeptReader) -> Result<(), IoError> {
     // Theme, then styles: a font's link to the theme's body font is read against it.
     if let Some(r) = find_rel(wb_rels, "theme").cloned()
         && let Some(x) = cx.optional_xml(&r.target)?
     {
         wb.theme = crate::theme::read_theme(&x);
+        if let Some(bytes) = cx.pkg.read(&r.target)? {
+            if let Err(e) = crate::theme::keep_source_xml(&mut wb.theme, &bytes) {
+                cx.warn(format!("theme source XML could not be kept: {e}"));
+            }
+        }
+        wb.theme.preserved = kept.theme(cx, &r.target);
     }
     // Cell checkboxes live in the feature property bags, which styles refer to.
     let mut checkboxes = Vec::new();
@@ -285,7 +291,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], known_function: Option<&'a dyn Fn(&str) ->
     let mut wb = Workbook::new();
     wb.sheets.clear();
 
-    read_workbook_styles(&mut cx, &mut wb, &wb_rels)?;
+    read_workbook_styles(&mut cx, &mut wb, &wb_rels, &mut kept)?;
     read_shared_strings(&mut cx, &wb_rels)?;
 
     if let Some(r) = find_rel(&wb_rels, "person").cloned()

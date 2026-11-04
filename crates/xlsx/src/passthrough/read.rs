@@ -271,6 +271,20 @@ impl KeptReader {
         Ok(new_parts)
     }
 
+    /// The theme's relationships and their target graph, charged to the workbook's kept budget.
+    pub fn theme(&mut self, cx: &mut Ctx<'_>, part: &str) -> Option<Arc<Preserved>> {
+        if !self.on {
+            return None;
+        }
+        let mut p = Preserved::default();
+        let result = raw_rels(cx, part).and_then(|roots| self.keep(cx, &mut p, &roots, &mut HashSet::new()));
+        if let Err(e) = result {
+            cx.warn(format!("theme relationships could not be kept: {e}"));
+            return None;
+        }
+        (!p.is_empty()).then(|| Arc::new(p))
+    }
+
     /// Package-root and workbook-level content.
     pub fn workbook(&mut self, cx: &mut Ctx<'_>, wb_part: &str, wb_xml: &xml::El, file_to_model: &[Option<usize>]) -> Option<Arc<Preserved>> {
         if !self.on {

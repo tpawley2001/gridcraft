@@ -87,6 +87,10 @@ pub(super) fn part_rels_xml(rels: &[PreservedRel], names: &NameMap) -> String {
 }
 
 pub(super) fn write_parts(out: &mut Out, parts: &[PreservedPart]) -> NameMap {
+    write_parts_with_media(out, parts, false)
+}
+
+fn write_parts_with_media(out: &mut Out, parts: &[PreservedPart], theme_media: bool) -> NameMap {
     let mut names = NameMap::new();
     for p in parts {
         let key = normalize(&p.name);
@@ -94,7 +98,15 @@ pub(super) fn write_parts(out: &mut Out, parts: &[PreservedPart]) -> NameMap {
         let name = match known {
             Some(name) => name,
             None => {
-                let name = out.kept.claim(&p.name);
+                let name = if theme_media && p.content_type.starts_with("image/") {
+                    let ext = p.name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("bin");
+                    let file = out.media_part("themeImage", ext, &p.content_type, &p.data);
+                    let name = format!("xl/media/{file}");
+                    out.kept.written.insert(normalize(&name));
+                    name
+                } else {
+                    out.kept.claim(&p.name)
+                };
                 out.kept.names.entry(key.clone()).or_default().push((p.clone(), name.clone()));
                 name
             }
@@ -109,8 +121,10 @@ pub(super) fn write_parts(out: &mut Out, parts: &[PreservedPart]) -> NameMap {
         }
         let key = normalize(&new);
         if out.kept.written.contains(&key) {
-            // Written for another owner already: kept parts keep their names, so its rels name
-            // the same targets.
+            // Media bytes may have been emitted by the deduplicating writer above.
+            if theme_media && !p.rels.is_empty() {
+                out.part(&rels_part_name(&new), None, part_rels_xml(&p.rels, &names).into_bytes());
+            }
             continue;
         }
         out.kept.written.insert(key);
@@ -120,6 +134,15 @@ pub(super) fn write_parts(out: &mut Out, parts: &[PreservedPart]) -> NameMap {
         }
     }
     names
+}
+
+/// Theme XML retains its source relationship ids; only package target names may change.
+pub fn write_theme_relationships(theme: &gridcraft_model::Theme, out: &mut Out) {
+    let Some(p) = &theme.preserved else { return };
+    let names = write_parts_with_media(out, &p.parts, true);
+    if !p.rels.is_empty() {
+        out.part("xl/theme/_rels/theme1.xml.rels", None, part_rels_xml(&p.rels, &names).into_bytes());
+    }
 }
 
 /// Adds the owner's relationships; returns old id → new id.
