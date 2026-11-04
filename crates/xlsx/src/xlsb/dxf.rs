@@ -224,7 +224,7 @@ fn dxf(payload: &[u8], formats: &HashMap<u16, String>, budget: &mut Budget) -> R
     st.size = stated.size && font.size == def.size;
     st.name = stated.name && font.name == def.name;
     st.scheme = stated.scheme;
-    s.font = Font { minor: s.font.minor, ..font };
+    s.font = Font { minor: s.font.minor, major: s.font.major, ..font };
     if let Some(p) = protection {
         s.protection = p;
         s.dxf_stated.protection = p == Protection::default();

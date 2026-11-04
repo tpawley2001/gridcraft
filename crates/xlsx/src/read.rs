@@ -165,8 +165,14 @@ fn read_shared_strings(cx: &mut Ctx<'_>, wb_rels: &[Rel]) -> Result<(), IoError>
     Ok(())
 }
 
+/// The theme's (heading, body) faces, when the file has a theme part for scheme-linked fonts to follow.
+fn theme_fonts(theme: &gridcraft_model::Theme, has_theme: bool) -> Option<(&str, &str)> {
+    has_theme.then_some((theme.major_font.as_str(), theme.minor_font.as_str()))
+}
+
 fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], kept: &mut crate::passthrough::KeptReader) -> Result<(), IoError> {
-    // Theme, then styles: a font's link to the theme's body font is read against it.
+    // Theme, then styles: a font's link to the theme's heading or body font is read against it.
+    let mut has_theme = false;
     if let Some(r) = find_rel(wb_rels, "theme").cloned()
         && let Some(x) = cx.optional_xml(&r.target)?
     {
@@ -177,6 +183,7 @@ fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], ke
             cx.warn(format!("theme source XML could not be kept: {e}"));
         }
         wb.theme.preserved = kept.theme(cx, &r.target);
+        has_theme = true;
     }
     // Cell checkboxes live in the feature property bags, which styles refer to.
     let mut checkboxes = Vec::new();
@@ -187,7 +194,8 @@ fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], ke
     }
     if let Some(r) = find_rel(wb_rels, "styles").cloned() {
         if let Some(x) = cx.optional_xml(&r.target)? {
-            let StylesIn { xfs, dxfs, palette, named, num_fmts } = read_styles(&x, &checkboxes, &wb.theme.minor_font);
+            let StylesIn { xfs, dxfs, palette, named, num_fmts } =
+                read_styles(&x, &checkboxes, &wb.theme.minor_font, theme_fonts(&wb.theme, has_theme));
             cx.num_fmts = num_fmts;
             // Cell format 0 is the Normal cell format: everything on it (font, number format,
             // fill, borders, alignment, protection) is what a cell without its own format shows

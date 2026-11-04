@@ -225,6 +225,11 @@ pub struct Font {
     /// theme's minor font. Fonts derived from it (bold, a colour, a size) keep the link.
     #[serde(default = "default_minor")]
     pub minor: bool,
+    /// The font follows the theme's heading font (`<scheme val="major"/>`) while its face is the
+    /// theme's major font. Like `minor`, an explicit change of face ends the link; bold, a colour
+    /// or a size keep it. Takes precedence over `minor`.
+    #[serde(default)]
+    pub major: bool,
 }
 
 fn default_minor() -> bool {
@@ -236,7 +241,7 @@ impl Hash for Font {
     fn hash<H: Hasher>(&self, h: &mut H) {
         self.name.hash(h);
         self.size.to_bits().hash(h);
-        (self.bold, self.italic, self.underline, self.strike, self.color, self.vert, self.charset, self.family, self.minor).hash(h);
+        (self.bold, self.italic, self.underline, self.strike, self.color, self.vert, self.charset, self.family, self.minor, self.major).hash(h);
     }
 }
 
@@ -254,6 +259,7 @@ impl Default for Font {
             charset: None,
             family: None,
             minor: true,
+            major: false,
         }
     }
 }
@@ -515,6 +521,16 @@ static DEFAULT_STYLE: std::sync::LazyLock<Style> = std::sync::LazyLock::new(Styl
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_font_saved_before_the_heading_link_reads_unlinked() -> Result<(), serde_json::Error> {
+        let mut json = serde_json::to_value(Font::default())?;
+        json.as_object_mut().map(|o| o.remove("major"));
+        let f: Font = serde_json::from_value(json)?;
+        assert!(!f.major && f.minor);
+        assert_eq!(f, Font::default());
+        Ok(())
+    }
 
     #[test]
     fn interning() {

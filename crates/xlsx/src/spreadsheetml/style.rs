@@ -125,6 +125,7 @@ fn font(s: &mut Style, e: &El) {
     if let Some(name) = e.attr("FontName").map(str::trim).filter(|n| !n.is_empty() && *n != f.name) {
         f.name = name.to_string();
         f.minor = false;
+        f.major = false;
     }
     if let Some(size) = e.attr_f64("Size").filter(|v| *v > 0.0 && *v <= 409.0) {
         f.size = size as f32;
