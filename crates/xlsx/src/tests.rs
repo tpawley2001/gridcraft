@@ -31,6 +31,7 @@ mod kept_macro_dialog_sheets;
 mod legacy_active_sheet_tests;
 mod legacy_outline_settings;
 mod legacy_vml_controls_tests;
+mod linked_picture_tests;
 mod literal_category_roundtrip;
 mod locale_numfmt;
 mod malformed;
