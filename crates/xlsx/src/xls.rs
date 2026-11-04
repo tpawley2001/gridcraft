@@ -581,10 +581,21 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
                 if g.names.len() >= MAX_NAMES {
                     continue;
                 }
-                let lbl = match &g.biff5 {
+                let mut lbl = match &g.biff5 {
                     Some(b5) => label_biff5(&mut c, b5)?,
                     None => label(&mut c)?,
                 };
+                // A name that is a cell address in the 16,384-column grid (`On2`, `Fy2008`) is
+                // legal in a 256-column workbook; Excel renames it with a leading underscore
+                // when it converts the workbook, and formulas keep using the name.
+                if lbl.builtin.is_none() && !lbl.macro_name && CellRef::parse(&lbl.name).is_some() {
+                    let taken = |n: &str| g.names.iter().any(|l| l.scope == lbl.scope && l.name.eq_ignore_ascii_case(n));
+                    let mut name = format!("_{}", lbl.name);
+                    while taken(&name) {
+                        name.insert(0, '_');
+                    }
+                    lbl.name = name;
+                }
                 g.links.names.push(lbl.name.clone());
                 g.names.push(lbl);
             }
