@@ -13,13 +13,13 @@ const WORKBOOK_RELS: &str = r#"<?xml version="1.0"?><Relationships xmlns="http:/
 
 fn vml_shape(id: u32, object_type: &str, extra: &str) -> String {
     format!(
-        r#"<v:shape id="_x0000_s{id}" type="#_x0000_t201" style="position:absolute;margin-left:96pt;margin-top:15pt;width:48pt;height:15pt;z-index:1" o:button="t" fillcolor="buttonFace [67]"><v:textbox><div style="text-align:center"><font face="Calibri" size="220">Button 1</font></div></v:textbox><x:ClientData ObjectType="{object_type}"><x:Anchor>2, 0, 1, 0, 3, 0, 2, 0</x:Anchor><x:AutoFill>False</x:AutoFill>{extra}</x:ClientData></v:shape>"#
+        r##"<v:shape id="_x0000_s{id}" type="#_x0000_t201" style="position:absolute;margin-left:96pt;margin-top:15pt;width:48pt;height:15pt;z-index:1" o:button="t" fillcolor="buttonFace [67]"><v:textbox><div style="text-align:center"><font face="Calibri" size="220">Button 1</font></div></v:textbox><x:ClientData ObjectType="{object_type}"><x:Anchor>2, 0, 1, 0, 3, 0, 2, 0</x:Anchor><x:AutoFill>False</x:AutoFill>{extra}</x:ClientData></v:shape>"##
     )
 }
 
 fn vml(shapes: &str) -> String {
     format!(
-        r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shapetype id="_x0000_t201" coordsize="21600,21600" o:spt="201" path="m,l,21600r21600,l21600,xe"/>{shapes}</xml>"#
+        r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shapetype id="_x0000_t201" coordsize="21600,21600" o:spt="201" path="m,l,21600r21600,l21600,xe"/>{shapes}</xml>"##
     )
 }
 
