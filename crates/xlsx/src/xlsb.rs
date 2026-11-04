@@ -975,28 +975,38 @@ fn name_record(b: &mut Bytes<'_>) -> Result<Lbl, IoError> {
 fn rich_string(b: &mut Bytes<'_>) -> Result<String, IoError> {
     let flags = b.u8()?;
     let text = b.text(32767)?;
+    // A RichStr is always the last field of its record (BrtSSTItem,
+    // BrtCellRichSt) and neither its formatting runs nor its phonetic data
+    // are imported, so once the main text is read a short or oddly sized
+    // tail drops the rest of the record instead of refusing the file.
     if flags & 1 != 0 {
         let count = b.u32()?;
         if count > 32767 {
             return Err(invalid("too many rich-text runs"));
         }
-        b.take(count as usize * 4)?;
+        if b.take(count as usize * 4).is_err() {
+            b.rest = &[];
+            return Ok(text);
+        }
     }
     if flags & 2 != 0 {
-        b.text(32767)?;
-        let count = b.u32()?;
-        if count > 32767 {
-            return Err(invalid("too many phonetic runs"));
-        }
         // [MS-XLSB] 2.5.103 PhRun: ichFirst, ichMom, cchMom, ifnt (u16 each)
-        // then phType/alcH/unused1 (16 bits) = 10 bytes. A RichStr is always
-        // the last field of its record (BrtSSTItem, BrtCellRichSt) and
-        // phonetic data is not imported, so tolerate writers that pad runs:
-        // require the documented size, then drop whatever follows.
-        b.take(count as usize * 10)?;
+        // then phType/alcH/unused1 (16 bits) = 10 bytes per run. Writers
+        // disagree with the documented size, so read it best-effort.
+        let _ = phonetic_tail(b);
         b.rest = &[];
     }
     Ok(text)
+}
+
+fn phonetic_tail(b: &mut Bytes<'_>) -> Result<(), IoError> {
+    b.text(32767)?;
+    let count = b.u32()?;
+    if count > 32767 {
+        return Err(invalid("too many phonetic runs"));
+    }
+    b.take(count as usize * 10)?;
+    Ok(())
 }
 
 fn shared_strings(bytes: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Result<Vec<Arc<str>>, IoError> {

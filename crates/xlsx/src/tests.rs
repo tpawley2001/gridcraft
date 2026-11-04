@@ -96,6 +96,7 @@ mod xlsb_list_tests;
 mod xlsb_macro_sheet_tests;
 mod xlsb_mixed_sheets_tests;
 mod xlsb_names_tests;
+mod xlsb_phonetic_tail_tests;
 mod xlsb_pivot_tests;
 mod xlsb_print_tests;
 mod xlsb_protection_tests;

@@ -313,8 +313,9 @@ fn xlsb_declared_counts_and_decoded_text_are_bounded() {
 #[test]
 fn xlsb_phonetic_runs_use_documented_size_and_tolerate_padding() {
     // [MS-XLSB] 2.5.103: a PhRun is 10 bytes. Phonetic data is not imported, so
-    // padding after the documented runs (e.g. 12-byte runs) is ignored, while
-    // a run shorter than documented is still rejected.
+    // padding after the documented runs (e.g. 12-byte runs) is ignored. Runs
+    // shorter than documented are ignored too: Excel opens workbooks whose
+    // phonetic tails fall short of `count * 10` bytes.
     let phonetic = |runs: u32, bytes: usize| {
         let mut out = vec![2];
         out.extend(wide("ruby"));
@@ -327,7 +328,8 @@ fn xlsb_phonetic_runs_use_documented_size_and_tolerate_padding() {
         let (wb, _) = read_xlsb(&file(&worksheet(&[row(0), cell(62, 0, &padded)].concat(), &[]))).unwrap();
         assert_eq!(wb.sheets[0].value(CellRef::new(0, 0)), text("ruby"));
     }
-    assert!(read_xlsb(&file(&worksheet(&[row(0), cell(62, 0, &phonetic(2, 12))].concat(), &[]))).is_err());
+    let (wb, _) = read_xlsb(&file(&worksheet(&[row(0), cell(62, 0, &phonetic(2, 12))].concat(), &[]))).unwrap();
+    assert_eq!(wb.sheets[0].value(CellRef::new(0, 0)), text("ruby"));
 }
 
 // ---- Formulas (MS-XLSB CellParsedFormula): rgce tokens decode to formula text.
