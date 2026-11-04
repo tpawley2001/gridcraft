@@ -327,11 +327,14 @@ pub(crate) const NOTE_FILL_ATTRS: [(&str, &str); 5] =
 /// Largest picture kept as a note's fill.
 const MAX_NOTE_PICTURE: u64 = 64 * 1024 * 1024;
 
+/// A note fill picture's bytes and MIME type.
+type NotePicture = (std::sync::Arc<Vec<u8>>, String);
+
 /// The pictures a notes VML drawing names by relationship id, read once each.
 pub(crate) struct NotePictures<'p, 'a> {
     pkg: &'p mut crate::package::Package<'a>,
     rels: Vec<Rel>,
-    read: HashMap<String, Option<(std::sync::Arc<Vec<u8>>, String)>>,
+    read: HashMap<String, Option<NotePicture>>,
 }
 
 impl<'p, 'a> NotePictures<'p, 'a> {
@@ -343,7 +346,7 @@ impl<'p, 'a> NotePictures<'p, 'a> {
 
     /// The bytes and MIME type of image relationship `id`; `None` when it isn't an internal image
     /// relationship or its part can't be read.
-    fn get(&mut self, id: &str) -> Option<(std::sync::Arc<Vec<u8>>, String)> {
+    fn get(&mut self, id: &str) -> Option<NotePicture> {
         if let Some(hit) = self.read.get(id) {
             return hit.clone();
         }
