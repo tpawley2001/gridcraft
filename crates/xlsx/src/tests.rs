@@ -165,4 +165,5 @@ pub fn minimal(sheet_body: &str, extra_parts: &[(&str, &str)], wb_extra_rels: &s
     make_zip(&parts)
 }
 
+mod codex_day_worksheet_settings;
 mod codex_day_xlsb_cell_parameter;
