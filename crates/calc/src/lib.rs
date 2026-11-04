@@ -11,4 +11,6 @@ pub use eval::{Area, SPECIAL_FUNCTIONS, is_known_function};
 pub use recalc::{Calc, Key, evaluate, now_serial};
 
 #[cfg(test)]
+mod indirect_ref_array_tests;
+#[cfg(test)]
 mod tests;
