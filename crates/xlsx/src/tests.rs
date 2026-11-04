@@ -66,6 +66,7 @@ mod volatile_dependencies;
 mod webextension_passthrough;
 mod xls_autofilter_tests;
 mod xls_biff5_tests;
+mod xls_cell_address_names_tests;
 mod xls_cf12_tests;
 mod xls_chart_tests;
 mod xls_connections_tests;
