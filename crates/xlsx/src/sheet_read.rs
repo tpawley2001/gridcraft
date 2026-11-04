@@ -141,6 +141,8 @@ const MAX_DYNAMIC_CHECKS: u64 = 16_000_000;
 pub(crate) const MAX_COND_CELLS: u64 = 4_000_000;
 
 fn read_sheet_format(e: &El, sheet: &mut Sheet) {
+    sheet.default_rows_hidden = e.attr_bool("zeroHeight");
+    sheet.default_row_custom_height = e.attr_bool("customHeight");
     if let Some(h) = e.attr_f64("defaultRowHeight") {
         let px = pt_to_px(h);
         if px > 0.0 {
@@ -165,8 +167,12 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
     let rels = cx.pkg.rels(part)?;
     let mut sheet = Sheet::new(name);
     let mut st = RowState::default();
-    let res = xml::parse_streaming(&bytes, &["row"], &mut |row| {
-        read_row(cx, &mut sheet, &mut st, &row);
+    let res = xml::parse_streaming(&bytes, &["sheetFormatPr", "row"], &mut |row| {
+        if row.name == "sheetFormatPr" {
+            read_sheet_format(&row, &mut sheet);
+        } else {
+            read_row(cx, &mut sheet, &mut st, &row);
+        }
         Ok(())
     });
     let root = match res {
@@ -212,6 +218,9 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
             }
             "conditionalFormatting" => read_cf(cx, e, &mut sheet),
             "dataValidations" => {
+                sheet.validation_settings.disable_prompts = e.attr_bool("disablePrompts");
+                sheet.validation_settings.x_window = e.attr_u32("xWindow");
+                sheet.validation_settings.y_window = e.attr_u32("yWindow");
                 for v in e.kids("dataValidation") {
                     if let Some(v) = read_validation(v) {
                         sheet.validations.push(v);
@@ -244,8 +253,8 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
             "headerFooter" => read_header_footer(e, &mut sheet.print),
             "rowBreaks" => sheet.print.row_breaks = e.kids("brk").filter_map(|b| b.attr_u32("id")).filter(|&r| r > 0 && r < MAX_ROWS).collect(),
             "colBreaks" => sheet.print.col_breaks = e.kids("brk").filter_map(|b| b.attr_u32("id")).filter(|&c| c > 0 && c < MAX_COLS).collect(),
-            "sheetProtection" if e.flag("sheet", false) => {
-                sheet.protection = Some(SheetProtection {
+            "sheetProtection" => {
+                let protection = Some(SheetProtection {
                     password: read_password(e, ""),
                     legacy_password_hash: None,
                     select_locked: !e.flag("selectLockedCells", false),
@@ -259,7 +268,16 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
                     delete_rows: !e.flag("deleteRows", true),
                     sort: !e.flag("sort", true),
                     autofilter: !e.flag("autoFilter", true),
+                    objects: !e.flag("objects", false),
+                    scenarios: !e.flag("scenarios", false),
+                    insert_hyperlinks: !e.flag("insertHyperlinks", true),
+                    pivot_tables: !e.flag("pivotTables", true),
                 });
+                if e.flag("sheet", false) {
+                    sheet.protection = protection;
+                } else {
+                    sheet.inactive_protection = protection;
+                }
             }
             "drawing" => {
                 if let Some(rel) = e.attr("id").and_then(|id| rels.iter().find(|r| r.id == id)) {
@@ -470,7 +488,7 @@ fn read_row(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, row: &El) {
     {
         info.style = Some(cx.style(Some(s)));
     }
-    if info != LineInfo::default() {
+    if info != LineInfo::default() || sheet.default_rows_hidden == Some(true) {
         sheet.rows.insert(r, info);
     }
     let mut next_col = 0u32;

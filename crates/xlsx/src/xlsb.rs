@@ -2366,6 +2366,7 @@ fn sheet_protection(id: u16, payload: &[u8], sheet: &mut Sheet, report: &mut Rea
             delete_rows: delete_rows == 0,
             sort: sort == 0,
             autofilter: autofilter == 0,
+            ..Default::default()
         }))
     };
     match parse() {

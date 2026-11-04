@@ -110,6 +110,12 @@ pub struct Sheet {
     /// Default column width and row height in pixels at 96 dpi (a file stores row heights in points).
     pub default_col_width: f32,
     pub default_row_height: f32,
+    /// XLSX default visibility, kept without materializing the entire row grid.
+    #[serde(default)]
+    pub default_rows_hidden: Option<bool>,
+    /// Explicit sheetFormatPr customHeight; None lets new sheets infer it from the height.
+    #[serde(default)]
+    pub default_row_custom_height: Option<bool>,
     pub merges: Vec<RangeRef>,
     /// Frozen rows and columns (top/left).
     pub freeze: Option<(u32, u32)>,
@@ -138,6 +144,8 @@ pub struct Sheet {
     pub zoom: u16,
     pub cond_formats: Vec<CondFormat>,
     pub validations: Vec<Validation>,
+    #[serde(default)]
+    pub validation_settings: ValidationSettings,
     pub tables: Vec<Table>,
     pub autofilter: Option<AutoFilter>,
     #[serde(with = "crate::cellmap")]
@@ -159,6 +167,9 @@ pub struct Sheet {
     #[serde(default)]
     pub pivots: Vec<PivotTable>,
     pub protection: Option<SheetProtection>,
+    /// File metadata for sheetProtection with sheet=false. Never grants or restricts edits.
+    #[serde(default)]
+    pub inactive_protection: Option<SheetProtection>,
     /// Allow Edit Ranges (meaningful while the sheet is protected).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub edit_ranges: Vec<crate::EditRange>,
@@ -173,6 +184,15 @@ pub struct Sheet {
     /// tables). Goes away with the sheet; not in JSON.
     #[serde(skip)]
     pub preserved: Option<Arc<crate::preserved::Preserved>>,
+}
+
+/// Worksheet-wide validation prompt settings, independent of individual rule prompts.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ValidationSettings {
+    pub disable_prompts: Option<bool>,
+    pub x_window: Option<u32>,
+    pub y_window: Option<u32>,
 }
 
 fn yes() -> bool {
@@ -203,6 +223,8 @@ impl Sheet {
             rows: BTreeMap::new(),
             default_col_width: DEFAULT_COL_WIDTH,
             default_row_height: DEFAULT_ROW_HEIGHT,
+            default_rows_hidden: None,
+            default_row_custom_height: None,
             merges: vec![],
             freeze: None,
             tab_color: None,
@@ -219,6 +241,7 @@ impl Sheet {
             zoom: 100,
             cond_formats: vec![],
             validations: vec![],
+            validation_settings: ValidationSettings::default(),
             tables: vec![],
             autofilter: None,
             comments: BTreeMap::new(),
@@ -231,6 +254,7 @@ impl Sheet {
             controls: vec![],
             pivots: vec![],
             protection: None,
+            inactive_protection: None,
             edit_ranges: vec![],
             print: PrintSettings::default(),
             view_active: CellRef::default(),
@@ -485,12 +509,13 @@ impl Sheet {
     pub fn row_height(&self, row: u32) -> f32 {
         match self.rows.get(&row) {
             Some(i) if i.hidden => 0.0,
-            Some(LineInfo { size: Some(h), .. }) => *h,
+            Some(i) => i.size.unwrap_or(self.default_row_height),
+            _ if self.default_rows_hidden == Some(true) => 0.0,
             _ => self.default_row_height,
         }
     }
     pub fn is_row_hidden(&self, row: u32) -> bool {
-        self.rows.get(&row).is_some_and(|r| r.hidden)
+        self.rows.get(&row).map_or(self.default_rows_hidden.unwrap_or(false), |r| r.hidden)
     }
     /// Whether `row` is hidden by an applied filter: a hidden row below the header of the
     /// sheet AutoFilter while it has criteria, or a hidden data row of a filtered table.
@@ -508,11 +533,12 @@ impl Sheet {
     }
     /// Y offset (points) of the top of `row`.
     pub fn row_top(&self, row: u32) -> f64 {
-        let mut y = row as f64 * self.default_row_height as f64;
+        let default = if self.default_rows_hidden == Some(true) { 0.0 } else { self.default_row_height as f64 };
+        let mut y = row as f64 * default;
         for (r, info) in self.rows.range(..row) {
             let _ = r;
             let h = if info.hidden { 0.0 } else { info.size.unwrap_or(self.default_row_height) };
-            y += h as f64 - self.default_row_height as f64;
+            y += h as f64 - default;
         }
         y
     }
@@ -526,6 +552,18 @@ impl Sheet {
     }
     /// Row containing y (points from the top), clamped.
     pub fn row_at(&self, y: f64) -> u32 {
+        if self.default_rows_hidden == Some(true) {
+            let mut top = 0.0;
+            for (&row, info) in self.rows.range(..gridcraft_core::MAX_ROWS) {
+                if !info.hidden {
+                    top += f64::from(info.size.unwrap_or(self.default_row_height));
+                    if y < top {
+                        return row;
+                    }
+                }
+            }
+            return gridcraft_core::MAX_ROWS - 1;
+        }
         line_at(y, self.default_row_height as f64, &self.rows, gridcraft_core::MAX_ROWS)
     }
     pub fn col_at(&self, x: f64) -> u32 {

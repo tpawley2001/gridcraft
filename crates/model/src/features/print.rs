@@ -212,6 +212,15 @@ pub struct SheetProtection {
     pub delete_rows: bool,
     pub sort: bool,
     pub autofilter: bool,
+    /// Allowed actions (the inverse of XLSX protection bits).
+    #[serde(default)]
+    pub objects: bool,
+    #[serde(default)]
+    pub scenarios: bool,
+    #[serde(default)]
+    pub insert_hyperlinks: bool,
+    #[serde(default)]
+    pub pivot_tables: bool,
 }
 
 /// Review › Allow Edit Ranges: cells that stay editable on a protected sheet, with or without a
