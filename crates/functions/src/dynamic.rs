@@ -1333,12 +1333,7 @@ mod tests {
         let r = ev("GROUPBY", vec![rf(region.clone()), rf(amt.clone()), t("SUM")]);
         assert_eq!(
             rows_of(&r),
-            vec![
-                vec![tv("East"), nv(15.0)],
-                vec![tv("North"), nv(1.0)],
-                vec![tv("West"), nv(27.0)],
-                vec![tv("Total"), nv(43.0)],
-            ]
+            vec![vec![tv("East"), nv(15.0)], vec![tv("North"), nv(1.0)], vec![tv("West"), nv(27.0)], vec![tv("Total"), nv(43.0)],]
         );
         let r = ev("GROUPBY", vec![rf(region.clone()), rf(amt.clone()), n(2.0), n(1.0), n(0.0), n(-1.0)]);
         assert_eq!(rows_of(&r), vec![vec![tv("West"), nv(2.0)], vec![tv("North"), nv(1.0)], vec![tv("East"), nv(2.0)]]);
