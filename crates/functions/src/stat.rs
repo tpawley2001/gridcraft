@@ -11,7 +11,7 @@ mod descriptive;
 mod distributions;
 mod regression;
 
-pub use descriptive::{aggregate_values, aggregate_values_k};
+pub use descriptive::{aggregate_values, aggregate_values_k, subtotal_counta_values};
 use descriptive::{
     arg_nums, arg_pairs, avedev, correl, count_impl, counta_impl, countblank, devsq, frequency, geomean, harmean, intercept, kurt, large, max_of,
     mean, median, min_of, mode_mult, mode_numbers, mode_sngl, percentile_exc, percentile_inc, percentrank_impl, prob, quartile_exc, quartile_inc,
