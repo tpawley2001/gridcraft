@@ -2,7 +2,7 @@ use super::{
     AutoFilter, CellRef, Comment, Ctx, El, FilterCriterion, HashMap, Hyperlink, MAX_COLS, MAX_HYPERLINK_BYTES, MAX_HYPERLINK_CELLS, MAX_ROWS,
     NoteBox, NoteCorner, RangeRef, Rel, Sheet, Table, TableColumn, TotalsFn, XmlColumnPr, from_file, xml,
 };
-use gridcraft_model::{DateGroup, DateGrouping};
+use gridcraft_model::{DateGroup, DateGrouping, NotePictureFill};
 
 pub(super) fn read_hyperlinks(cx: &mut Ctx<'_>, name: &str, e: &El, rels: &[Rel], sheet: &mut Sheet) {
     let mut cells = 0u64;
@@ -270,21 +270,34 @@ pub(super) fn read_comments(x: &El, sheet: &mut Sheet) {
         {
             text = rest.strip_prefix('\n').unwrap_or(rest).to_string();
         }
-        sheet
-            .comments
-            .insert(cell, Comment { author, text, replies: vec![], threaded: false, resolved: false, visible: false, dates: vec![], note_box: None });
+        sheet.comments.insert(
+            cell,
+            Comment {
+                author,
+                text,
+                replies: vec![],
+                threaded: false,
+                resolved: false,
+                visible: false,
+                dates: vec![],
+                note_box: None,
+                picture_fill: None,
+            },
+        );
     }
 }
 
 /// Reads the notes' VML shapes: a shape carrying `<x:Visible/>` marks its note as shown, and its
-/// `<x:Anchor>` and style size become the note's box. Shapes may sit in groups.
-pub(crate) fn read_note_shapes(x: &El, sheet: &mut Sheet, depth: usize) {
+/// `<x:Anchor>` and style size become the note's box, and a `<v:fill>` naming a picture
+/// relationship (`o:relid`, resolved by `picture`) becomes its picture fill. Shapes may sit in
+/// groups.
+pub(crate) fn read_note_shapes(x: &El, sheet: &mut Sheet, depth: usize, picture: &mut NotePictures<'_, '_>) {
     if depth > xml::MAX_DEPTH {
         return;
     }
     for e in &x.children {
         if e.name != "shape" {
-            read_note_shapes(e, sheet, depth + 1);
+            read_note_shapes(e, sheet, depth + 1, picture);
             continue;
         }
         let Some(cd) = e.child("ClientData").filter(|cd| cd.attr("ObjectType") == Some("Note")) else { continue };
@@ -298,6 +311,66 @@ pub(crate) fn read_note_shapes(x: &El, sheet: &mut Sheet, depth: usize) {
         if let Some(anchor) = cd.child("Anchor") {
             c.note_box = note_box(&anchor.text, e.attr("style").unwrap_or(""), cell).filter(|b| *b != crate::sheet_write::DEFAULT_NOTE_BOX);
         }
+        if let Some(fill) = e.child("fill")
+            && let Some((data, mime)) = fill.attr("relid").and_then(|id| picture.get(id))
+        {
+            let attrs = NOTE_FILL_ATTRS.iter().filter_map(|(k, _)| Some((k.to_string(), fill.attr(k)?.to_string()))).collect();
+            c.picture_fill = Some(NotePictureFill { data, mime, attrs });
+        }
+    }
+}
+
+/// The `<v:fill>` attributes a note's picture fill keeps (local name, written name).
+pub(crate) const NOTE_FILL_ATTRS: [(&str, &str); 5] =
+    [("title", "o:title"), ("color2", "color2"), ("recolor", "recolor"), ("type", "type"), ("aspect", "aspect")];
+
+/// Largest picture kept as a note's fill.
+const MAX_NOTE_PICTURE: u64 = 64 * 1024 * 1024;
+
+/// The pictures a notes VML drawing names by relationship id, read once each.
+pub(crate) struct NotePictures<'p, 'a> {
+    pkg: &'p mut crate::package::Package<'a>,
+    rels: Vec<Rel>,
+    read: HashMap<String, Option<(std::sync::Arc<Vec<u8>>, String)>>,
+}
+
+impl<'p, 'a> NotePictures<'p, 'a> {
+    /// The pictures of VML part `vml` in `pkg`.
+    pub(crate) fn new(pkg: &'p mut crate::package::Package<'a>, vml: &str) -> Self {
+        let rels = pkg.rels(vml).unwrap_or_default();
+        NotePictures { pkg, rels, read: HashMap::new() }
+    }
+
+    /// The bytes and MIME type of image relationship `id`; `None` when it isn't an internal image
+    /// relationship or its part can't be read.
+    fn get(&mut self, id: &str) -> Option<(std::sync::Arc<Vec<u8>>, String)> {
+        if let Some(hit) = self.read.get(id) {
+            return hit.clone();
+        }
+        let rel = self.rels.iter().find(|r| r.id == id && r.kind == "image" && !r.external);
+        let found = rel.and_then(|rel| match self.pkg.read_optional_limited(&rel.target, MAX_NOTE_PICTURE) {
+            Ok(Some(data)) if !data.is_empty() => Some((std::sync::Arc::new(data), picture_mime(&rel.target).to_string())),
+            _ => None,
+        });
+        self.read.insert(id.to_string(), found.clone());
+        found
+    }
+}
+
+/// The MIME type a picture part's extension names; empty when unknown (the bytes decide).
+fn picture_mime(part: &str) -> &'static str {
+    let ext = part.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" | "jpe" => "image/jpeg",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "tif" | "tiff" => "image/tiff",
+        "svg" => "image/svg+xml",
+        "emf" => "image/x-emf",
+        "wmf" => "image/x-wmf",
+        "webp" => "image/webp",
+        _ => "",
     }
 }
 
@@ -345,7 +418,17 @@ pub(crate) fn read_threaded(persons: &HashMap<String, String>, x: &El, sheet: &m
                 let dates = if date.is_empty() { vec![] } else { vec![date] };
                 sheet.comments.insert(
                     cell,
-                    Comment { author, text, replies: vec![], threaded: true, resolved: t.flag("done", false), visible: false, dates, note_box: None },
+                    Comment {
+                        author,
+                        text,
+                        replies: vec![],
+                        threaded: true,
+                        resolved: t.flag("done", false),
+                        visible: false,
+                        dates,
+                        note_box: None,
+                        picture_fill: None,
+                    },
                 );
             }
         }

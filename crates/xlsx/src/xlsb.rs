@@ -2098,9 +2098,9 @@ fn comment_parts(
         .iter()
         .find(|r| r.id == id && r.kind == "vmlDrawing")
         .ok_or_else(|| invalid("missing legacy drawing relationship"))
-        .and_then(|rel| xml_part(package, rel));
+        .and_then(|rel| Ok((xml_part(package, rel)?, rel.target.clone())));
     match vml {
-        Ok(x) => crate::sheet_read::read_note_shapes(&x, sheet, 0),
+        Ok((x, part)) => crate::sheet_read::read_note_shapes(&x, sheet, 0, &mut crate::sheet_read::NotePictures::new(package, &part)),
         Err(_) => report.warn("The XLSB notes drawing could not be read; notes stay hidden with their default box."),
     }
 }
@@ -2179,7 +2179,17 @@ fn comments(bytes: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
                 budget.comments += 1;
                 out.push((
                     cell,
-                    Comment { author, text, replies: vec![], threaded: false, resolved: false, visible: false, dates: vec![], note_box: None },
+                    Comment {
+                        author,
+                        text,
+                        replies: vec![],
+                        threaded: false,
+                        resolved: false,
+                        visible: false,
+                        dates: vec![],
+                        note_box: None,
+                        picture_fill: None,
+                    },
                 ));
             }
             _ => {}

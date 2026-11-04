@@ -243,7 +243,17 @@ impl Import {
                 let text = note.child("Data").map(text_content).unwrap_or_default();
                 let author = note.attr("Author").unwrap_or_default().to_string();
                 let visible = note.flag("ShowAlways", false);
-                let comment = Comment { author, text, replies: vec![], threaded: false, resolved: false, visible, dates: vec![], note_box: None };
+                let comment = Comment {
+                    author,
+                    text,
+                    replies: vec![],
+                    threaded: false,
+                    resolved: false,
+                    visible,
+                    dates: vec![],
+                    note_box: None,
+                    picture_fill: None,
+                };
                 sheet.comments.insert(at, comment);
             }
         }

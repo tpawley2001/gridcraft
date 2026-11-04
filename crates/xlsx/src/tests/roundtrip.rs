@@ -223,6 +223,7 @@ fn sample() -> Workbook {
             visible: false,
             dates: vec![],
             note_box: None,
+            picture_fill: None,
         },
     );
     s.comments.insert(
@@ -236,6 +237,7 @@ fn sample() -> Workbook {
             visible: true,
             dates: vec![],
             note_box: None,
+            picture_fill: None,
         },
     );
     s.comments.insert(
@@ -249,6 +251,7 @@ fn sample() -> Workbook {
             visible: false,
             dates: vec!["2026-10-11T09:30:00.00".into(), String::new(), "2026-10-11T10:15:00.00".into()],
             note_box: None,
+            picture_fill: None,
         },
     );
     s.comments.insert(
@@ -262,6 +265,7 @@ fn sample() -> Workbook {
             visible: false,
             dates: vec![],
             note_box: None,
+            picture_fill: None,
         },
     );
     s.autofilter = Some(AutoFilter {
@@ -514,6 +518,7 @@ fn sample() -> Workbook {
             visible: false,
             dates: vec![],
             note_box: None,
+            picture_fill: None,
         },
     );
     wb.sheets.push(Arc::new(s3));
@@ -854,6 +859,7 @@ fn cell_text_carriage_returns_survive_xlsx_roundtrip() {
             visible: false,
             dates: vec![],
             note_box: None,
+            picture_fill: None,
         },
     );
 
@@ -1125,6 +1131,7 @@ fn bad_comment_dates_are_left_out() {
         visible: false,
         dates: vec!["\"/><evil".into()],
         note_box: None,
+        picture_fill: None,
     };
     s.comments.insert(at("A1"), c);
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();

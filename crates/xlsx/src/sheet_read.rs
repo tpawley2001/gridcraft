@@ -23,9 +23,9 @@ use crate::xml::{self, El};
 mod parts;
 mod rules;
 
+pub(crate) use parts::{NOTE_FILL_ATTRS, NotePictures, read_note_shapes, read_threaded};
 pub use parts::{read_autofilter, read_table};
 use parts::{read_comments, read_hyperlinks};
-pub(crate) use parts::{read_note_shapes, read_threaded};
 use rules::{read_cf, read_validation};
 
 struct Shared {
@@ -300,7 +300,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
     if !sheet.comments.is_empty() {
         for rel in rels.iter().filter(|r| r.kind == "vmlDrawing") {
             if let Ok(Some(x)) = cx.pkg.read_xml(&rel.target) {
-                read_note_shapes(&x, &mut sheet, 0);
+                read_note_shapes(&x, &mut sheet, 0, &mut NotePictures::new(&mut cx.pkg, &rel.target));
             }
         }
     }

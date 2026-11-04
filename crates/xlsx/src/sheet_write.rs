@@ -1,6 +1,6 @@
 //! Writing worksheet parts and the parts they own (tables, comments, drawings, charts).
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 
 use gridcraft_core::{CellError, CellRef, MAX_COLS, MAX_ROWS, RangeRef, Value};
@@ -309,7 +309,32 @@ fn write_sheet_notes(s: &mut String, sheet: &Sheet, si: usize, kept: &crate::pas
         }
         out.default_type("vml", "application/vnd.openxmlformats-officedocument.vmlDrawing");
         let vml_name = format!("xl/drawings/vmlDrawing{n}.vml");
-        let vml = kept.notes_vml(vml_xml(sheet, out.kept.notes_block(n)), &vml_name, out);
+        // Notes filled with a picture: one image relationship of the VML part per picture, its
+        // id clear of the kept relationships' ids.
+        let taken = kept.vml_rel_ids();
+        let mut fill_rels: Vec<(String, String)> = vec![];
+        let mut fills = HashMap::new();
+        for (cell, f) in sheet.comments.iter().filter_map(|(cell, c)| Some((cell, c.picture_fill.as_ref()?))) {
+            if f.data.is_empty() {
+                continue;
+            }
+            let ext = image_ext(&f.mime, &f.data);
+            out.default_type(ext, image_content_type(ext));
+            let file = out.image_part(ext, &f.data);
+            let id = match fill_rels.iter().find(|(_, t)| *t == file) {
+                Some((id, _)) => id.clone(),
+                None => {
+                    let id = (1..)
+                        .map(|k: usize| format!("rId{k}"))
+                        .find(|id| !taken.contains(&id.as_str()) && !fill_rels.iter().any(|(i, _)| i == id))
+                        .unwrap_or_default();
+                    fill_rels.push((id.clone(), file));
+                    id
+                }
+            };
+            fills.insert(*cell, id);
+        }
+        let vml = kept.notes_vml(vml_xml(sheet, out.kept.notes_block(n), &fills), &vml_name, &fill_rels, out);
         out.part(&vml_name, None, vml.into_bytes());
         rels.add("comments", &format!("../comments{n}.xml"));
         let rid = rels.add("vmlDrawing", &format!("../drawings/vmlDrawing{n}.vml"));

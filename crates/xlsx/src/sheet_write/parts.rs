@@ -418,8 +418,23 @@ fn note_anchor(cell: CellRef, b: Option<&NoteBox>) -> (String, (f64, f64)) {
     (format!("{}, {}", corner(&b.from), corner(&b.to)), b.size_pt.unwrap_or(DEFAULT_NOTE_SIZE_PT))
 }
 
-/// Legacy VML shapes Excel uses to display notes.
-pub(super) fn vml_xml(sheet: &Sheet, n: u32) -> String {
+/// A note's `<v:fill>`: its picture fill's kept settings and the image relationship `rid`, or the
+/// default plain fill.
+fn note_fill(c: &gridcraft_model::Comment, rid: Option<&String>) -> String {
+    let (Some(f), Some(rid)) = (&c.picture_fill, rid) else { return "<v:fill color2=\"#ffffe1\"/>".to_string() };
+    let mut s = format!("<v:fill o:relid=\"{}\"", esc_attr(rid));
+    for (k, name) in crate::sheet_read::NOTE_FILL_ATTRS {
+        if let Some((_, v)) = f.attrs.iter().find(|(a, _)| a == k) {
+            let _ = write!(s, " {name}=\"{}\"", esc_attr(v));
+        }
+    }
+    s.push_str("/>");
+    s
+}
+
+/// Legacy VML shapes Excel uses to display notes; `fills` gives the image relationship id of each
+/// note filled with a picture.
+pub(super) fn vml_xml(sheet: &Sheet, n: u32, fills: &HashMap<CellRef, String>) -> String {
     let mut s = format!(
         "<xml xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:x=\"urn:schemas-microsoft-com:office:excel\"><o:shapelayout v:ext=\"edit\"><o:idmap v:ext=\"edit\" data=\"{n}\"/></o:shapelayout><v:shapetype id=\"_x0000_t202\" coordsize=\"21600,21600\" o:spt=\"202\" path=\"m,l,21600r21600,l21600,xe\"><v:stroke joinstyle=\"miter\"/><v:path gradientshapeok=\"t\" o:connecttype=\"rect\"/></v:shapetype>"
     );
@@ -429,10 +444,11 @@ pub(super) fn vml_xml(sheet: &Sheet, n: u32) -> String {
         let (anchor, (w, h)) = note_anchor(*cell, c.note_box.as_ref());
         let _ = write!(
             s,
-            "<v:shape id=\"_x0000_s{id}\" type=\"#_x0000_t202\" style=\"position:absolute;margin-left:59.25pt;margin-top:1.5pt;width:{}pt;height:{}pt;z-index:{};visibility:{vis}\" fillcolor=\"#ffffe1\" o:insetmode=\"auto\"><v:fill color2=\"#ffffe1\"/><v:shadow on=\"t\" color=\"black\" obscured=\"t\"/><v:path o:connecttype=\"none\"/><v:textbox style=\"mso-direction-alt:auto\"><div style=\"text-align:left\"></div></v:textbox><x:ClientData ObjectType=\"Note\"><x:MoveWithCells/><x:SizeWithCells/><x:Anchor>{anchor}</x:Anchor><x:AutoFill>False</x:AutoFill><x:Row>{}</x:Row><x:Column>{}</x:Column>{}</x:ClientData></v:shape>",
+            "<v:shape id=\"_x0000_s{id}\" type=\"#_x0000_t202\" style=\"position:absolute;margin-left:59.25pt;margin-top:1.5pt;width:{}pt;height:{}pt;z-index:{};visibility:{vis}\" fillcolor=\"#ffffe1\" o:insetmode=\"auto\">{}<v:shadow on=\"t\" color=\"black\" obscured=\"t\"/><v:path o:connecttype=\"none\"/><v:textbox style=\"mso-direction-alt:auto\"><div style=\"text-align:left\"></div></v:textbox><x:ClientData ObjectType=\"Note\"><x:MoveWithCells/><x:SizeWithCells/><x:Anchor>{anchor}</x:Anchor><x:AutoFill>False</x:AutoFill><x:Row>{}</x:Row><x:Column>{}</x:Column>{}</x:ClientData></v:shape>",
             num(w),
             num(h),
             i + 1,
+            note_fill(c, fills.get(cell)),
             cell.row,
             cell.col,
             if c.visible { "<x:Visible/>" } else { "" }
