@@ -237,3 +237,61 @@ fn hostile_biff5_records_never_panic() {
         let _ = read_xls(&book(1252, &g, &[(b"Data", number(0, 0, 0, 1.0))]));
     }
 }
+
+/// [`book`] with each worksheet substream's BOF carrying `sheet_vers`: some writers put BIFF8's
+/// 0x0600 there under BIFF5 globals, and Excel opens those files.
+fn book_with_sheet_bof(sheet_vers: u16, sheets: &[(&[u8], Vec<u8>)]) -> Vec<u8> {
+    let boundsheet = |pos: u32, name: &[u8]| rec(0x0085, &cat(&[&pos.to_le_bytes(), &[0, 0, name.len() as u8], name]));
+    let head = cat(&[&bof(0x0500, 0x0005), &rec(0x0042, &1252u16.to_le_bytes())]);
+    let bs_len: usize = sheets.iter().map(|(n, _)| boundsheet(0, n).len()).sum();
+    let mut pos = (head.len() + bs_len + eof().len()) as u32;
+    let mut globals = head;
+    let mut bodies = vec![];
+    for (name, records) in sheets {
+        globals.extend(boundsheet(pos, name));
+        let body = cat(&[&bof(sheet_vers, 0x0010), records, &eof()]);
+        pos += body.len() as u32;
+        bodies.extend(body);
+    }
+    globals.extend(eof());
+    compound("Book", &cat(&[&globals, &bodies]))
+}
+
+#[test]
+fn biff5_sheets_whose_bof_says_biff8_are_read_as_biff5() {
+    let first = cat(&[&number(0, 0, 0, 2.5), &label(1, 0, &[b'Z', b'a', 0xE9])]);
+    let second = cat(&[&formula(0, 1, num(4.0), &cat(&[&ptg_int(2), &ptg_int(2), &[0x03]])), &label(2, 2, b"end")]);
+    let bytes = book_with_sheet_bof(0x0600, &[(b"Invoice", first), (b"Terms", second)]);
+    let (wb, _) = read_xls(&bytes).unwrap();
+    assert_eq!(wb.sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Invoice", "Terms"]);
+    assert_eq!(v(&wb, 0, "A1"), Value::number(2.5));
+    // The label is BIFF5's 8-bit text in the workbook's code page, not a BIFF8 unicode string.
+    assert_eq!(v(&wb, 0, "A2"), Value::from("Zaé"));
+    assert_eq!(ftext(&wb, 1, "B1").as_deref(), Some("2+2"));
+    assert_eq!(v(&wb, 1, "B1"), Value::number(4.0));
+    assert_eq!(v(&wb, 1, "C3"), Value::from("end"));
+    // Sheets whose BOF says BIFF5, as before.
+    let (wb, _) = read_xls(&book_with_sheet_bof(0x0500, &[(b"Only", label(0, 0, b"ok"))])).unwrap();
+    assert_eq!(v(&wb, 0, "A1"), Value::from("ok"));
+}
+
+#[test]
+fn sheet_names_longer_than_31_characters_are_shortened_not_refused() {
+    let long = b"301. exposures by cpty and agreement_301_NTTX_EXCEL.rpt";
+    assert_eq!(long.len(), 55);
+    let other = b"301. exposures by cpty and agreement (copy)";
+    let bytes = book(1252, &[], &[(long, label(0, 0, b"first")), (other, label(0, 0, b"second"))]);
+    let (wb, report) = read_xls(&bytes).unwrap();
+    assert_eq!(wb.sheets.len(), 2);
+    let names: Vec<&str> = wb.sheets.iter().map(|s| s.name.as_str()).collect();
+    for n in &names {
+        assert!(n.chars().count() <= 31, "{n:?}");
+    }
+    assert_eq!(names[0], "301. exposures by cpty and agre");
+    // The second shortens to the same 31 characters, so it is made unique.
+    assert_ne!(names[1].to_ascii_lowercase(), names[0].to_ascii_lowercase());
+    assert!(names[1].starts_with("301. exposures by cpty"), "{names:?}");
+    assert_eq!(v(&wb, 0, "A1"), Value::from("first"));
+    assert_eq!(v(&wb, 1, "A1"), Value::from("second"));
+    assert!(report.warnings.iter().any(|w| w.contains("sheet name")), "{:?}", report.warnings);
+}
