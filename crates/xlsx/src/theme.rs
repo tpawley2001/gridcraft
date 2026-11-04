@@ -160,6 +160,20 @@ pub fn keep_source_xml(t: &mut Theme, bytes: &[u8]) -> Result<(), crate::IoError
             }
         }
     }
+    // Retaining a byte-identical fallback adds no information. Keep a new workbook's theme
+    // equal after saving and reopening, including themes imported from other file formats.
+    if t.fmt_scheme_xml.as_deref() == Some(generated_format_scheme().as_str()) {
+        t.fmt_scheme_xml = None;
+    }
+    if t.object_defaults_xml.as_deref() == Some("<a:objectDefaults/>") {
+        t.object_defaults_xml = None;
+    }
+    if t.extra_clr_scheme_lst_xml.as_deref() == Some("<a:extraClrSchemeLst/>") {
+        t.extra_clr_scheme_lst_xml = None;
+    }
+    if [&t.fmt_scheme_xml, &t.object_defaults_xml, &t.extra_clr_scheme_lst_xml, &t.cust_clr_lst_xml, &t.ext_lst_xml].iter().all(|v| v.is_none()) {
+        t.xml_namespaces.clear();
+    }
     Ok(())
 }
 
@@ -216,27 +230,7 @@ pub fn write_theme(t: &Theme) -> String {
     if let Some(xml) = &t.fmt_scheme_xml {
         s.push_str(xml);
     } else {
-        // Format scheme: three entries per list, as the schema requires.
-        s.push_str("<a:fmtScheme name=\"Craft\"><a:fillStyleLst>");
-        for _ in 0..3 {
-            s.push_str("<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>");
-        }
-        s.push_str("</a:fillStyleLst><a:lnStyleLst>");
-        for w in [6350, 12700, 19050] {
-            let _ = write!(
-                s,
-                "<a:ln w=\"{w}\" cap=\"flat\" cmpd=\"sng\" algn=\"ctr\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:prstDash val=\"solid\"/></a:ln>"
-            );
-        }
-        s.push_str("</a:lnStyleLst><a:effectStyleLst>");
-        for _ in 0..3 {
-            s.push_str("<a:effectStyle><a:effectLst/></a:effectStyle>");
-        }
-        s.push_str("</a:effectStyleLst><a:bgFillStyleLst>");
-        for _ in 0..3 {
-            s.push_str("<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>");
-        }
-        s.push_str("</a:bgFillStyleLst></a:fmtScheme>");
+        s.push_str(&generated_format_scheme());
     }
     s.push_str("</a:themeElements>");
     s.push_str(t.object_defaults_xml.as_deref().unwrap_or("<a:objectDefaults/>"));
@@ -248,6 +242,33 @@ pub fn write_theme(t: &Theme) -> String {
         s.push_str(xml);
     }
     s.push_str("</a:theme>");
+    s
+}
+
+/// Original fallback format scheme, also used to recognize our own generated defaults on import.
+fn generated_format_scheme() -> String {
+    let mut s = String::new();
+    // Format scheme: three entries per list, as the schema requires.
+    s.push_str("<a:fmtScheme name=\"Craft\"><a:fillStyleLst>");
+    for _ in 0..3 {
+        s.push_str("<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>");
+    }
+    s.push_str("</a:fillStyleLst><a:lnStyleLst>");
+    for w in [6350, 12700, 19050] {
+        let _ = write!(
+            s,
+            "<a:ln w=\"{w}\" cap=\"flat\" cmpd=\"sng\" algn=\"ctr\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:prstDash val=\"solid\"/></a:ln>"
+        );
+    }
+    s.push_str("</a:lnStyleLst><a:effectStyleLst>");
+    for _ in 0..3 {
+        s.push_str("<a:effectStyle><a:effectLst/></a:effectStyle>");
+    }
+    s.push_str("</a:effectStyleLst><a:bgFillStyleLst>");
+    for _ in 0..3 {
+        s.push_str("<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>");
+    }
+    s.push_str("</a:bgFillStyleLst></a:fmtScheme>");
     s
 }
 
