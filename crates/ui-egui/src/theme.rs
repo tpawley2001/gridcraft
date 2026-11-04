@@ -64,6 +64,8 @@ pub struct Tokens {
     pub header_sel_text: Color32,
     pub header_all_bg: Color32,
     pub sel_fill: Color32,
+    /// The tint over the active cell's row (File ▸ Options ▸ General).
+    pub active_row: Color32,
     pub sel_border: Color32,
     pub input_bg: Color32,
     pub input_border: Color32,
@@ -241,6 +243,8 @@ impl Tokens {
             // Spec: selection #C9A227 at 35 %.
             sel_fill: Color32::from_rgba_unmultiplied(0xC9, 0xA2, 0x27, 0x59),
             sel_border: rgb(0xB8860B),
+            // The active row band (upstream's option), in the selection's brass.
+            active_row: pick(dark, Color32::from_rgba_unmultiplied(0xC9, 0xA2, 0x27, 0x2C), Color32::from_rgba_unmultiplied(0xD4, 0xA0, 0x17, 0x30)),
             input_bg: pick(dark, rgb(0xFFFBF0), rgb(0x0A141B)),
             input_border: pick(dark, rgb(0x8C6D46), rgb(0x3A4F5C)),
             tab_bar: pick(dark, rgb(0xF4E9D0), rgb(0x0F1B24)),

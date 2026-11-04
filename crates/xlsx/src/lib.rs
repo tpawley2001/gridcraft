@@ -53,7 +53,7 @@ use gridcraft_core::DateSystem;
 use gridcraft_model::Workbook;
 
 pub use crypto::{DecryptError, check_encryption, decrypt};
-pub use csv::{MAX_CSV_BYTES, read_csv, read_csv_with_report, write_csv, write_csv_limited};
+pub use csv::{MAX_CSV_BYTES, decode_text, read_csv, read_csv_with_report, write_csv, write_csv_limited};
 pub use dif::{read_dif, write_dif};
 pub use ods::{read_ods, read_ods_with};
 pub use package::MAX_PART;

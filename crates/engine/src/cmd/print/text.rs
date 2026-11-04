@@ -3,41 +3,57 @@ use super::{CellRef, Color, Font, HAlign, MAX_COLS, Page, Point, RangeRef, Sheet
 
 const PAD_PX: f32 = 2.0;
 
+/// Most lines [`wrap_lines`] returns (it may return one more, the rest of a paragraph).
+const MAX_WRAP_LINES: usize = 2000;
+
 /// Word-wraps `text` to `width` points.
+///
+/// Widths are kept as running sums of glyph widths (the sum `text_width` makes), so each
+/// character is measured once: re-measuring the line for every word, or the rest of an
+/// over-long word for every piece cut from it, made a long paragraph or word quadratic.
 pub(super) fn wrap_lines(text: &str, font: Font, size: f32, width: f32) -> Vec<String> {
+    let units_of = |s: &str| -> u64 { s.chars().map(|c| u64::from(font.char_width(c))).sum() };
+    let fits = |units: u64| units as f32 * size / 1000.0 <= width;
+    let space = units_of(" ");
     let mut out = Vec::new();
     for para in text.split('\n') {
         let mut line = String::new();
+        let mut line_units: u64 = 0;
         for word in para.split(' ') {
-            let cand = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
-            if line.is_empty() || gridcraft_pdf::text_width(font, size, &cand) <= width {
-                line = cand;
+            let word_units = units_of(word);
+            if line.is_empty() {
+                line.push_str(word);
+                line_units = word_units;
+            } else if fits(line_units + space + word_units) {
+                line.push(' ');
+                line.push_str(word);
+                line_units += space + word_units;
             } else {
                 out.push(std::mem::take(&mut line));
-                line = word.to_string();
+                line.push_str(word);
+                line_units = word_units;
             }
-            // Break a single over-long word by characters: one pass that adds up character
-            // widths, so the cost is linear in the word (no prefix re-measuring or re-collecting
-            // the rest of the word per emitted line).
-            if gridcraft_pdf::text_width(font, size, &line) > width && line.chars().nth(1).is_some() {
+            // Break a single over-long word by characters: each piece is the longest that fits
+            // (at least one character).
+            if !fits(line_units) && line.chars().nth(1).is_some() {
                 let mut piece = String::new();
                 let mut units: u64 = 0;
-                let limit = width * 1000.0 / size.max(f32::MIN_POSITIVE);
-                for ch in std::mem::take(&mut line).chars() {
-                    let cw = u64::from(font.char_width(ch));
-                    if !piece.is_empty() && (units + cw) as f32 > limit {
+                for c in line.chars() {
+                    let w = u64::from(font.char_width(c));
+                    if !piece.is_empty() && !fits(units + w) {
                         out.push(std::mem::take(&mut piece));
                         units = 0;
-                        if out.len() > 2000 {
+                        if out.len() > MAX_WRAP_LINES {
                             return out;
                         }
                     }
-                    piece.push(ch);
-                    units += cw;
+                    piece.push(c);
+                    units += w;
                 }
                 line = piece;
+                line_units = units;
             }
-            if out.len() > 2000 {
+            if out.len() > MAX_WRAP_LINES {
                 return out;
             }
         }

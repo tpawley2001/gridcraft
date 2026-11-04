@@ -355,6 +355,9 @@ fn workbook_pr(wb: &Workbook) -> String {
     if wb.date_system == gridcraft_core::DateSystem::D1904 {
         w.push_str(" date1904=\"1\"");
     }
+    if wb.remove_personal_info {
+        w.push_str(" filterPrivacy=\"1\"");
+    }
     if let Some(name) = &wb.code_name {
         let _ = write!(w, " codeName=\"{}\"", crate::xml::esc_attr(name));
     }
@@ -447,6 +450,9 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
     if wb.calc.precision_as_displayed {
         w.push_str(" fullPrecision=\"0\"");
     }
+    if wb.calc.r1c1 {
+        w.push_str(" refMode=\"R1C1\"");
+    }
     if out.needs_calc {
         w.push_str(" fullCalcOnLoad=\"1\"");
     }
@@ -522,13 +528,16 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
 
     // Document properties.
     let p = &wb.props;
+    // "Remove personal information on save": the author and company are not saved (#3089).
+    let private = |v: &String| if wb.remove_personal_info { String::new() } else { v.clone() };
+    let (author, company) = (private(&p.author), private(&p.company));
     let mut core = format!(
         "{XML_DECL}<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\" xmlns:dcmitype=\"http://purl.org/dc/dcmitype/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
     );
     for (tag, v) in [
         ("dc:title", &p.title),
         ("dc:subject", &p.subject),
-        ("dc:creator", &p.author),
+        ("dc:creator", &author),
         ("cp:keywords", &p.keywords),
         ("dc:description", &p.description),
         ("cp:lastModifiedBy", &p.last_modified_by),
@@ -550,8 +559,8 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
     app.push_str("<Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/extended-properties\" xmlns:vt=\"http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes\"><Application>");
     app.push_str(gridcraft_core::brand::APP_NAME);
     app.push_str("</Application>");
-    if !p.company.is_empty() {
-        let _ = write!(app, "<Company>{}</Company>", esc(&p.company));
+    if !company.is_empty() {
+        let _ = write!(app, "<Company>{}</Company>", esc(&company));
     }
     app.push_str("</Properties>");
     out.part("docProps/app.xml", Some("application/vnd.openxmlformats-officedocument.extended-properties+xml"), app.into_bytes());

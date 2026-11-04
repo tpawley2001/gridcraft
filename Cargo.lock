@@ -1949,6 +1949,7 @@ dependencies = [
  "gridcraft-engine",
  "gridcraft-mcp",
  "gridcraft-ui-egui",
+ "image",
  "log",
  "muda",
  "objc2 0.6.5",

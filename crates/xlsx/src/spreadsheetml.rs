@@ -65,7 +65,7 @@ pub fn read_spreadsheetml(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoErro
     let mut sheet_names = Vec::new();
     for (i, ws) in root.kids("Worksheet").enumerate() {
         let original = ws.attr("Name").unwrap_or_default();
-        let mut name = crate::read::unique_name(&wb, original, i);
+        let mut name = crate::read::SheetNames::of(&wb).unique(original, i);
         if wb.check_sheet_name(&name, None).is_err() {
             name = wb.next_sheet_name();
         }
