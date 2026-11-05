@@ -138,6 +138,27 @@ pub struct Theme {
     /// The body font's per-script typefaces, as (script, typeface) in file order.
     #[serde(default)]
     pub minor_font_scripts: Vec<(String, String)>,
+    /// Source format scheme, including fills, lines and effects.
+    #[serde(default)]
+    pub fmt_scheme_xml: Option<String>,
+    /// Source shape, line and text defaults.
+    #[serde(default)]
+    pub object_defaults_xml: Option<String>,
+    /// Source additional colour schemes.
+    #[serde(default)]
+    pub extra_clr_scheme_lst_xml: Option<String>,
+    /// Source custom colours.
+    #[serde(default)]
+    pub cust_clr_lst_xml: Option<String>,
+    /// Source theme extensions.
+    #[serde(default)]
+    pub ext_lst_xml: Option<String>,
+    /// Namespace declarations inherited by the source fragments (prefix, URI).
+    #[serde(default)]
+    pub xml_namespaces: Vec<(String, String)>,
+    /// Relationships and target parts used by the source theme XML.
+    #[serde(skip)]
+    pub preserved: Option<std::sync::Arc<crate::Preserved>>,
 }
 
 impl Default for Theme {
@@ -155,6 +176,13 @@ impl Default for Theme {
             minor_font_cs: String::new(),
             major_font_scripts: Vec::new(),
             minor_font_scripts: Vec::new(),
+            fmt_scheme_xml: None,
+            object_defaults_xml: None,
+            extra_clr_scheme_lst_xml: None,
+            cust_clr_lst_xml: None,
+            ext_lst_xml: None,
+            preserved: None,
+            xml_namespaces: Vec::new(),
         }
     }
 }

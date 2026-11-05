@@ -494,6 +494,7 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
         Some("application/vnd.openxmlformats-officedocument.theme+xml"),
         crate::theme::write_theme(&wb.theme).into_bytes(),
     );
+    crate::passthrough::write_theme_relationships(&wb.theme, &mut out);
     wb_rels.add("theme", "theme/theme1.xml");
     // Phonetic (furigana) data is kept per string text: the table below holds each text once, so
     // the runs of the entry with that text are written next to it (`Workbook::phonetics`).

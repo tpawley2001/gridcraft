@@ -66,6 +66,7 @@ mod sylk_tests;
 mod sylk_write_tests;
 mod table_dxfs;
 mod table_ids;
+mod theme_fmt_scheme_tests;
 mod trendline_roundtrip;
 mod volatile_dependencies;
 mod webextension_passthrough;
