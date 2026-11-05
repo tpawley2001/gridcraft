@@ -223,6 +223,7 @@ struct CellWriteInput<'a> {
     header_override: Option<&'a String>,
     spill_value: Option<&'a Value>,
     dynamic_range: Option<&'a RangeRef>,
+    data_table: Option<&'a gridcraft_model::DataTable>,
 }
 
 fn write_sheet_extensions(s: &mut String, sheet: &Sheet, prio: &[u32]) {
@@ -689,14 +690,19 @@ struct SheetCellData<'a> {
 
 fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcraft_model::StyleId) -> u32, out: &mut Out) {
     let SheetCellData { workbook, index, sheet, overrides, extra, dynamic } = data;
+    // A What-If data table's formula goes on its top-left result cell. A table whose cell the
+    // sheet does not store still gets its cell, so the file keeps the table.
+    let tables: BTreeMap<CellRef, &gridcraft_model::DataTable> =
+        sheet.data_tables.iter().filter(|t| sheet.cells.get(t.range.start).is_none_or(|c| c.formula.is_none())).map(|t| (t.range.start, t)).collect();
     // Cell storage is already row-major; sort only when extra cells need merging.
     let mut keys: Vec<(CellRef, Option<&Cell>)> = Vec::with_capacity(sheet.cells.len());
     keys.extend(sheet.cells.iter().map(|(c, cell)| (c, Some(cell))));
-    if !sheet.cell_pictures.is_empty() || !extra.is_empty() || !overrides.is_empty() || !keys.is_sorted_by_key(|(c, _)| *c) {
+    if !sheet.cell_pictures.is_empty() || !extra.is_empty() || !overrides.is_empty() || !tables.is_empty() || !keys.is_sorted_by_key(|(c, _)| *c) {
         let mut all: BTreeSet<CellRef> = keys.iter().map(|(c, _)| *c).collect();
         all.extend(sheet.cell_pictures.keys().copied());
         all.extend(extra.keys().copied());
         all.extend(overrides.keys().copied());
+        all.extend(tables.keys().copied());
         keys = all.into_iter().map(|c| (c, sheet.cells.get(c))).collect();
     }
     s.reserve(keys.len().saturating_mul(32));
@@ -763,6 +769,7 @@ fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcr
                     header_override: ov,
                     spill_value: ex,
                     dynamic_range: array.as_ref(),
+                    data_table: tables.get(&cell_ref).copied(),
                 },
                 sid,
                 out,
@@ -771,6 +778,38 @@ fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcr
         s.push_str("</row>");
     }
     s.push_str("</sheetData>");
+}
+
+/// Appends a What-If data table's `<f t="dataTable">` with the attributes Excel writes, in
+/// schema order (`dt2D` and `dtr` always, the rest only when set).
+fn push_data_table_formula(s: &mut String, t: &gridcraft_model::DataTable) {
+    s.push_str("<f t=\"dataTable\" ref=\"");
+    push_a1(s, t.range.start);
+    if !t.range.is_single() {
+        s.push(':');
+        push_a1(s, t.range.end);
+    }
+    let _ = write!(s, "\" dt2D=\"{}\" dtr=\"{}\"", t.two_d as u8, t.row as u8);
+    if t.del1 {
+        s.push_str(" del1=\"1\"");
+    }
+    if t.del2 {
+        s.push_str(" del2=\"1\"");
+    }
+    if let Some(r1) = t.r1 {
+        s.push_str(" r1=\"");
+        push_a1(s, r1);
+        s.push('"');
+    }
+    if let Some(r2) = t.r2 {
+        s.push_str(" r2=\"");
+        push_a1(s, r2);
+        s.push('"');
+    }
+    if t.ca {
+        s.push_str(" ca=\"1\"");
+    }
+    s.push_str("/>");
 }
 
 fn write_sheet_views(s: &mut String, sheet: &Sheet, selected: bool) {
@@ -840,7 +879,7 @@ fn write_sheet_views(s: &mut String, sheet: &Sheet, selected: bool) {
 }
 
 fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_model::StyleId) -> u32, out: &mut Out) {
-    let CellWriteInput { reference: c, cell, picture, header_override: ov, spill_value: extra, dynamic_range: dynamic } = input;
+    let CellWriteInput { reference: c, cell, picture, header_override: ov, spill_value: extra, dynamic_range: dynamic, data_table } = input;
     let style = cell.map(|x| sid(x.style)).unwrap_or(0);
     s.push_str("<c r=\"");
     push_a1(s, c);
@@ -929,6 +968,27 @@ fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_
             _ => out.needs_calc = true,
         }
         s.push_str("</c>");
+        return;
+    }
+    // A What-If data table's formula sits on its top-left result cell, before the cached value.
+    if let Some(table) = data_table {
+        s.push('>');
+        push_data_table_formula(s, table);
+        match &value {
+            Value::Number(n) => {
+                let _ = write!(s, "<v>{}</v></c>", num(*n));
+            }
+            Value::Text(t) => {
+                let _ = write!(s, " t=\"s\"><v>{}</v></c>", out.sst.index(t));
+            }
+            Value::Bool(b) => {
+                let _ = write!(s, " t=\"b\"><v>{}</v></c>", *b as u8);
+            }
+            Value::Error(e) => {
+                let _ = write!(s, " t=\"e\"><v>{}</v></c>", e.as_str());
+            }
+            _ => s.push_str("</c>"),
+        }
         return;
     }
     match &value {

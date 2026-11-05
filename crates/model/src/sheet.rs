@@ -156,7 +156,8 @@ pub struct Sheet {
     pub images: Vec<Image>,
     pub shapes: Vec<Shape>,
     pub sparklines: Vec<Sparkline>,
-    /// What-If data tables (`<f t="dataTable">`). Stub for the acceptance tests: G0119 implements it.
+    /// What-If data tables (`<f t="dataTable">`): the formula each table puts on its top-left
+    /// result cell, written back on save.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub data_tables: Vec<DataTable>,
     /// On-sheet slicer widgets (filter a table column by clicking value tiles).
@@ -993,7 +994,7 @@ mod picture_map {
 /// A What-If data table (Excel's `{=TABLE(row_input, column_input)}`): the result cells and its
 /// input cells as the file states them (ECMA-376 Part 1, 18.3.1.40). The result values live in
 /// the cells.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DataTable {
     /// `ref`: the result cells.
     pub range: RangeRef,
