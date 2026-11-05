@@ -23,7 +23,7 @@ use gridcraft_model::{
 };
 
 use super::drawing::{self, BStore, Blip, ShapeProps};
-use super::formula::{Links, Mode, decode};
+use super::formula::{Biff5, Links, Mode, decode};
 use super::records::{Cursor, Record, Records};
 use super::{BOF, Budget, EOF};
 use crate::{IoError, ReadReport};
@@ -185,7 +185,7 @@ impl Embedded {
     /// ends inside it (cut off), so nothing more of the sheet can be read.
     pub(super) fn chart(&mut self, recs: &mut Records<'_>, budget: &mut Budget, links: &Links, report: &mut ReadReport) -> Result<bool, IoError> {
         let anchor = self.pending.take();
-        match read(recs, budget, links, None, report)? {
+        match read(recs, budget, links, None, None, report)? {
             Read::Chart(ch) => self.charts.push((anchor, *ch)),
             Read::Skipped => {}
             Read::CutOff => return Ok(false),
@@ -256,6 +256,7 @@ pub(super) fn chart_sheet(
     pos: usize,
     budget: &mut Budget,
     links: &Links,
+    biff5: Option<&Biff5>,
     report: &mut ReadReport,
 ) -> Result<Option<(Chart, PrintSettings)>, IoError> {
     let mut recs = Records::new(stream, pos);
@@ -268,7 +269,7 @@ pub(super) fn chart_sheet(
         return Ok(None);
     }
     let mut print = PrintSettings::default();
-    Ok(match read(&mut recs, budget, links, Some(&mut print), report)? {
+    Ok(match read(&mut recs, budget, links, Some(&mut print), biff5, report)? {
         Read::Chart(ch) => Some((*ch, chart_sheet_print(&print))),
         Read::Skipped | Read::CutOff => None,
     })
@@ -291,6 +292,7 @@ fn read(
     budget: &mut Budget,
     links: &Links,
     mut print: Option<&mut PrintSettings>,
+    biff5: Option<&Biff5>,
     report: &mut ReadReport,
 ) -> Result<Read, IoError> {
     let mut records = vec![];
@@ -320,7 +322,7 @@ fn read(
             }
             _ if depth == 1 => {
                 if let Some(print) = print.as_deref_mut() {
-                    super::page_setup::read(&rec, print, &mut tab, &mut page, report);
+                    super::page_setup::read(&rec, print, &mut tab, &mut page, biff5, report);
                 }
                 records.push(rec);
             }
