@@ -161,24 +161,25 @@ fn worksheet() -> Vec<u8> {
     out
 }
 
-/// One sheet "Data"; the hidden sheet-scoped name `Sales_1` = Data!$A$1:$C$5 when `name`.
-fn book(name: bool) -> Vec<u8> {
+/// One sheet named `sheet_name`; the hidden sheet-scoped name `Sales_1` = Data!$A$1:$C$5 when
+/// `name`.
+fn book_sheet(name: bool, sheet_name: &str) -> Vec<u8> {
     let mut out = record(131, &[]);
     out.extend(record(143, &[]));
     let mut sheet = 0u32.to_le_bytes().to_vec();
     sheet.extend(1u32.to_le_bytes());
     sheet.extend(wide("s0"));
-    sheet.extend(wide("Data"));
+    sheet.extend(wide(sheet_name));
     out.extend(record(156, &sheet));
     out.extend(record(144, &[]));
+    // EXTERNALS: BrtSupSelf, then one XTI for Data.
+    out.extend(record(353, &[]));
+    out.extend(record(357, &[]));
+    let mut xti = 1u32.to_le_bytes().to_vec();
+    xti.extend([0u8; 12]);
+    out.extend(record(362, &xti));
+    out.extend(record(354, &[]));
     if name {
-        // EXTERNALS: BrtSupSelf, then one XTI for Data.
-        out.extend(record(353, &[]));
-        out.extend(record(357, &[]));
-        let mut xti = 1u32.to_le_bytes().to_vec();
-        xti.extend([0u8; 12]);
-        out.extend(record(362, &xti));
-        out.extend(record(354, &[]));
         // BrtName: fHidden, scope Data, PtgArea3d over A1:C5.
         let mut rgce = vec![0x3B];
         rgce.extend(0u16.to_le_bytes());
@@ -211,6 +212,11 @@ const CUSTOM_PROPS: &str = "docProps/custom.xml";
 
 /// An .xlsb package with optional connections, query table and custom document properties parts.
 fn package_with(connections: Option<&[u8]>, query_table: Option<&[u8]>, custom: Option<&[u8]>) -> Vec<u8> {
+    package_sheet(connections, query_table, custom, "Data")
+}
+
+/// [`package_with`] with the one sheet named `sheet_name`.
+fn package_sheet(connections: Option<&[u8]>, query_table: Option<&[u8]>, custom: Option<&[u8]>, sheet_name: &str) -> Vec<u8> {
     let custom_rel =
         if custom.is_some() { format!(r#"<Relationship Id="cust" Type="{REL}/custom-properties" Target="{CUSTOM_PROPS}"/>"#) } else { String::new() };
     let root = format!(
@@ -235,7 +241,7 @@ fn package_with(connections: Option<&[u8]>, query_table: Option<&[u8]>, custom: 
     let sheet_rels = format!(
         r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{REL}/queryTable" Target="../queryTables/queryTable1.bin"/></Relationships>"#
     );
-    let (book, sheet) = (book(query_table.is_some()), worksheet());
+    let (book, sheet) = (book_sheet(query_table.is_some(), sheet_name), worksheet());
     let mut parts: Vec<(&str, &[u8])> = vec![
         ("[Content_Types].xml", types.as_bytes()),
         ("_rels/.rels", root.as_bytes()),
@@ -457,4 +463,147 @@ fn custom_properties_and_connections_are_both_kept() {
     let resaved = unzip(&write_xlsx(&again).unwrap());
     assert_eq!(resaved.get(CUSTOM_PROPS), parts.get(CUSTOM_PROPS));
     assert!(resaved.contains_key("xl/connections.xml"));
+}
+
+// ---------------------------------------------------------------- cell parameters
+
+/// BrtBeginECParams + BrtEndECParams around the given BrtBeginECParam payloads.
+fn parameters_block(params: &[Vec<u8>]) -> Vec<u8> {
+    let mut out = record(265, &(params.len() as u32).to_le_bytes());
+    for p in params {
+        out.extend(record(267, p));
+        out.extend(record(268, &[]));
+    }
+    out.extend(record(266, &[]));
+    out
+}
+/// A BrtBeginECParam payload: `pbt` 2 (a cell), its flags, SQL type, name and formula.
+fn cell_param(flags: u16, sql_type: u16, name: &str, rgce: &[u8]) -> Vec<u8> {
+    let mut d = (flags | 2).to_le_bytes().to_vec();
+    d.extend(sql_type.to_le_bytes());
+    d.extend(0u32.to_le_bytes()); // wTypeSql data type: present, not used for a cell
+    d.extend(wide(name));
+    d.extend((rgce.len() as u32).to_le_bytes());
+    d.extend(rgce);
+    d.extend(0u32.to_le_bytes()); // cb
+    d
+}
+/// A BrtBeginECParam payload: `pbt` 0 (a prompt).
+fn prompt_param(name: &str, prompt: &str) -> Vec<u8> {
+    let mut d = 0u16.to_le_bytes().to_vec();
+    d.extend(0u16.to_le_bytes());
+    d.extend(1u32.to_le_bytes()); // fLoadPrompt
+    d.extend(wide(name));
+    d.extend(wide(prompt));
+    d
+}
+/// PtgRef3d: ixti, then RgceLoc (row, column).
+fn ref3d(ixti: u16, row: u32, col: u16) -> Vec<u8> {
+    let mut d = vec![0x3A];
+    d.extend(ixti.to_le_bytes());
+    d.extend(row.to_le_bytes());
+    d.extend(col.to_le_bytes());
+    d
+}
+/// PtgArea3d: ixti, then RgceArea (first and last row, first and last column).
+fn area3d(ixti: u16, r0: u32, r1: u32, c0: u16, c1: u16) -> Vec<u8> {
+    let mut d = vec![0x3B];
+    d.extend(ixti.to_le_bytes());
+    d.extend(r0.to_le_bytes());
+    d.extend(r1.to_le_bytes());
+    d.extend(c0.to_le_bytes());
+    d.extend(c1.to_le_bytes());
+    d
+}
+fn cell_connection(id: u32, ty: u32, params: Vec<u8>) -> Vec<u8> {
+    let props = if ty == 4 { web_props("https://example.com/t") } else { db_props(2, "DSN=Sales;", "SELECT * FROM t WHERE id=?") };
+    [ext_connection(id, ty, "Query", 0x40, None), props, params].concat()
+}
+
+#[test]
+fn cell_parameter_keeps_its_connection_and_siblings() {
+    let params = parameters_block(&[prompt_param("Region", "Which region?"), cell_param(0x0A, 4, "Customer", &ref3d(0, 1, 0))]);
+    let xlsb = package(Some(&connections_part(&[cell_connection(1, 1, params)])), None);
+    let (_, report, parts) = round_trip(&xlsb);
+    assert!(connection_warnings(&report).is_empty(), "{:?}", report.warnings);
+    let c = by_id(&connections_xml(&parts), "1");
+    let params = c.child("parameters").expect("parameters");
+    assert_eq!(params.attr("count"), Some("2"));
+    let p = params.kids("parameter").next().expect("prompt parameter");
+    assert_eq!(p.attr("name"), Some("Region"));
+    assert_eq!(p.attr("prompt"), Some("Which region?"));
+    let p = params.kids("parameter").nth(1).expect("cell parameter");
+    assert_eq!(p.attr("parameterType"), Some("cell"));
+    assert_eq!(p.attr("cell"), Some("Data!$A$2"));
+    assert_eq!(p.attr("sqlType"), Some("4"));
+    assert!(p.flag("refreshOnChange", false));
+}
+
+#[test]
+fn web_query_cell_parameter_takes_a_single_row_or_column() {
+    let params = parameters_block(&[cell_param(0, 0, "Row", &area3d(0, 2, 2, 1, 3)), cell_param(0, 0, "Col", &area3d(0, 0, 4, 2, 2))]);
+    let xlsb = package(Some(&connections_part(&[cell_connection(3, 4, params)])), None);
+    let (_, report, parts) = round_trip(&xlsb);
+    assert!(connection_warnings(&report).is_empty(), "{:?}", report.warnings);
+    let c = by_id(&connections_xml(&parts), "3");
+    let cells: Vec<_> = c.path(&["parameters"]).map(|p| p.kids("parameter").filter_map(|p| p.attr("cell")).collect()).unwrap_or_default();
+    assert_eq!(cells, ["Data!$B$3:$D$3", "Data!$C$1:$C$5"]);
+}
+
+#[test]
+fn cell_parameter_quotes_a_sheet_name_only_when_required() {
+    let params = parameters_block(&[cell_param(0, 0, "P", &ref3d(0, 1, 1))]);
+    let xlsb = package_sheet(Some(&connections_part(&[cell_connection(1, 1, params)])), None, None, "My Data");
+    let (_, report, parts) = round_trip(&xlsb);
+    assert!(connection_warnings(&report).is_empty(), "{:?}", report.warnings);
+    let p = by_id(&connections_xml(&parts), "1").path(&["parameters", "parameter"]).cloned().expect("parameter");
+    assert_eq!(p.attr("cell"), Some("'My Data'!$B$2"));
+}
+
+#[test]
+fn one_cell_area_is_a_cell_for_odbc() {
+    let params = parameters_block(&[cell_param(0, 0, "P", &area3d(0, 3, 3, 2, 2))]);
+    let xlsb = package(Some(&connections_part(&[cell_connection(1, 1, params)])), None);
+    let (_, report, parts) = round_trip(&xlsb);
+    assert!(connection_warnings(&report).is_empty(), "{:?}", report.warnings);
+    let p = by_id(&connections_xml(&parts), "1").path(&["parameters", "parameter"]).cloned().expect("parameter");
+    assert_eq!(p.attr("cell"), Some("Data!$C$4"));
+}
+
+#[test]
+fn unsupported_cell_parameters_drop_only_their_connection() {
+    // ODBC takes one cell: a range is refused.
+    let odbc_range = cell_connection(1, 1, parameters_block(&[cell_param(0, 0, "P", &area3d(0, 0, 1, 0, 1))]));
+    // A reference to another workbook (a second supporting link that is not this one).
+    let external = cell_connection(2, 1, parameters_block(&[cell_param(0, 0, "P", &ref3d(1, 0, 0))]));
+    // A formula rather than a reference.
+    let formula = cell_connection(3, 1, parameters_block(&[cell_param(0, 0, "P", &[0x1E, 1, 0, 0x1E, 2, 0, 0x03])]));
+    // A truncated formula: cce says 9 bytes, 3 follow.
+    let truncated = {
+        let mut d = 2u16.to_le_bytes().to_vec();
+        d.extend(0u16.to_le_bytes());
+        d.extend(0u32.to_le_bytes());
+        d.extend(wide("P"));
+        d.extend(9u32.to_le_bytes());
+        d.extend([0x3A, 0, 0, 0]);
+        cell_connection(4, 1, [record(265, &1u32.to_le_bytes()), record(267, &d), record(268, &[]), record(266, &[])].concat())
+    };
+    // A malformed cce: zero, and past the 16,384-byte limit.
+    let zero = cell_connection(5, 1, parameters_block(&[cell_param(0, 0, "P", &[])]));
+    let huge = {
+        let mut d = 2u16.to_le_bytes().to_vec();
+        d.extend(0u16.to_le_bytes());
+        d.extend(0u32.to_le_bytes());
+        d.extend(wide("P"));
+        d.extend(16_385u32.to_le_bytes());
+        cell_connection(6, 1, [record(265, &1u32.to_le_bytes()), record(267, &d), record(268, &[]), record(266, &[])].concat())
+    };
+    let good = cell_connection(7, 1, parameters_block(&[cell_param(0, 0, "P", &ref3d(0, 0, 0))]));
+    let xlsb = package(Some(&connections_part(&[odbc_range, external, formula, truncated, zero, huge, good])), None);
+    let (_, report, parts) = round_trip(&xlsb);
+    assert_eq!(connection_warnings(&report).len(), 1, "{:?}", report.warnings);
+    let root = connections_xml(&parts);
+    let ids: Vec<_> = root.kids("connection").filter_map(|c| c.attr("id")).collect();
+    assert_eq!(ids, ["7"]);
+    assert_eq!(by_id(&root, "7").path(&["parameters", "parameter"]).and_then(|p| p.attr("cell")), Some("Data!$A$1"));
 }
