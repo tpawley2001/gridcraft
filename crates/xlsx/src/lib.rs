@@ -45,6 +45,7 @@ pub mod testing;
 mod theme;
 mod web_publishing;
 mod write;
+mod xlm;
 mod xls;
 mod xlsb;
 mod xml;

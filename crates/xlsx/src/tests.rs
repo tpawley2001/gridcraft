@@ -71,6 +71,7 @@ mod theme_fmt_scheme_tests;
 mod trendline_roundtrip;
 mod volatile_dependencies;
 mod webextension_passthrough;
+mod xlm_names_tests;
 mod xls_autofilter_tests;
 mod xls_biff5_header_footer_tests;
 mod xls_biff5_tests;
