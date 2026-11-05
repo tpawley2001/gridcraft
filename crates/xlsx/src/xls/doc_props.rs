@@ -126,6 +126,7 @@ fn read_builtin(set: &Section<'_>, summary: bool, props: &mut DocProps) {
             (true, 12) => &mut props.created,
             (true, 13) => &mut props.modified,
             (false, 2) => &mut props.category,
+            (false, 14) => &mut props.manager,
             (false, 15) => &mut props.company,
             _ => continue,
         };

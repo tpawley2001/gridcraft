@@ -521,7 +521,9 @@ pub(crate) fn read_doc_props(pkg: &mut Package<'_>, root_rels: &[Rel], props: &m
     if let Some(r) = find_rel(root_rels, "extended-properties").cloned()
         && let Ok(Some(x)) = pkg.read_xml(&r.target)
     {
+        props.manager = x.child("Manager").map(|e| e.text.clone()).unwrap_or_default();
         props.company = x.child("Company").map(|e| e.text.clone()).unwrap_or_default();
+        props.hyperlink_base = x.child("HyperlinkBase").map(|e| e.text.clone()).unwrap_or_default();
     }
 }
 
