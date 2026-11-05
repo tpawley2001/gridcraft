@@ -335,9 +335,10 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         return Err(invalid("the workbook has no worksheets that can be read"));
     }
     wb.calc.precision_as_displayed = g.precision_as_displayed;
-    // Chart and picture ids are unique in the workbook, as the .xlsx reader numbers objects.
+    // Chart, picture and shape ids are unique in the workbook, as the .xlsx reader numbers
+    // objects (0 is never an object's id).
     let mut next_id = 1u32;
-    for sheet in wb.sheets.iter_mut().filter(|s| !s.charts.is_empty() || !s.images.is_empty()) {
+    for sheet in wb.sheets.iter_mut().filter(|s| !s.charts.is_empty() || !s.images.is_empty() || !s.shapes.is_empty()) {
         let sheet = Arc::make_mut(sheet);
         for ch in sheet.charts.iter_mut() {
             ch.id = next_id;
@@ -345,6 +346,10 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         }
         for image in sheet.images.iter_mut() {
             image.id = next_id;
+            next_id = next_id.saturating_add(1);
+        }
+        for shape in sheet.shapes.iter_mut() {
+            shape.id = next_id;
             next_id = next_id.saturating_add(1);
         }
     }

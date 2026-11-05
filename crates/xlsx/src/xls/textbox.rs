@@ -47,7 +47,7 @@ pub(super) fn read(parts: &[&[u8]], report: &mut ReadReport) -> Option<Text> {
     if (cch == 0 && cb_runs != 0) || (cch != 0 && (usize::from(cb_runs) < MIN_RUNS || cb_runs % 8 != 0)) {
         report.warn("A text box in a .xls file has malformed formatting runs; its text was kept without them.");
     }
-    let (text, complete) = chars(parts.get(1..).unwrap_or_default(), cch);
+    let (text, complete) = chars(text_parts(parts.get(1..).unwrap_or_default(), usize::from(cb_runs)), cch);
     if cch > MAX_CHARS {
         report.warn(format!("Only the first {MAX_CHARS} characters of a text box in a .xls file were imported."));
     } else if !complete {
@@ -76,15 +76,34 @@ fn anchor(flags: u16) -> Option<ShapeTextAnchor> {
     }
 }
 
-/// `cch` characters from the text `Continue` records, and whether all of them were read. Every
-/// part starts with its own compression flag; a part that ends in the middle of a character
-/// (the next part's flag then comes before its second byte) and a part with no characters at
-/// all both end the text: the `Continue` records after it are the formatting runs, whose bytes
-/// are never read as text.
+/// The `Continue` parts that hold the text. The formatting runs are the last parts, whose
+/// lengths add up to `cbRuns` ([MS-XLS] 2.4.329); the parts before them are the text. When the
+/// lengths don't add up (a damaged record), every part is offered to the text reader, which
+/// stops at the first part that holds no whole character.
+fn text_parts<'a>(parts: &'a [&'a [u8]], cb_runs: usize) -> &'a [&'a [u8]] {
+    if cb_runs == 0 {
+        return parts;
+    }
+    let mut total = 0usize;
+    for (i, part) in parts.iter().enumerate().rev() {
+        total = total.saturating_add(part.len());
+        if total == cb_runs {
+            return parts.get(..i).unwrap_or_default();
+        }
+        if total > cb_runs {
+            break;
+        }
+    }
+    parts
+}
+
+/// `cch` characters from the text `Continue` parts, and whether all of them were read. Every
+/// part starts with its own compression flag ([MS-XLS] 2.5.293); a part that ends in the middle
+/// of a character (the next part's flag then comes before its second byte) and a part with no
+/// characters at all both end the text, so the formatting runs are never read as text.
 fn chars(parts: &[&[u8]], cch: usize) -> (String, bool) {
     let want = cch.min(MAX_CHARS);
     let mut units: Vec<u16> = Vec::with_capacity(want.min(1024));
-    let mut complete = cch <= MAX_CHARS;
     for part in parts {
         if units.len() >= want {
             break;
@@ -105,13 +124,10 @@ fn chars(parts: &[&[u8]], cch: usize) -> (String, bool) {
             read += 1;
         }
         if read == 0 {
-            complete = false;
             break;
         }
     }
-    if units.len() < want {
-        complete = false;
-    }
+    let complete = cch <= MAX_CHARS && units.len() >= want;
     (String::from_utf16_lossy(&units), complete)
 }
 
@@ -166,5 +182,27 @@ mod tests {
         let (s, complete) = text(&[&[], &[0, b'o', b'k']], 2);
         assert_eq!(s, "ok");
         assert!(complete);
+    }
+
+    #[test]
+    fn the_runs_are_cut_off_by_their_declared_length() {
+        // Two characters, then a 16-byte run part whose bytes look like text: `cchText` says
+        // three, so without the cut the run's first byte would be read as a character.
+        let runs = [0u8; 16];
+        let parts: [&[u8]; 2] = [&[0, b'h', b'i'], &runs];
+        assert_eq!(text_parts(&parts, 16), &parts[..1]);
+        let (s, complete) = text(text_parts(&parts, 16), 3);
+        assert_eq!(s, "hi");
+        assert!(!complete);
+    }
+
+    #[test]
+    fn a_run_length_that_does_not_add_up_keeps_every_part() {
+        // A damaged `cbRuns` matches no suffix: the text reader still stops at the first part
+        // that holds no whole character, so the runs are not read as text.
+        let parts: [&[u8]; 2] = [&[0, b'o', b'k'], &[0u8; 16]];
+        assert_eq!(text_parts(&parts, 10), &parts[..]);
+        let (s, _) = text(text_parts(&parts, 10), 2);
+        assert_eq!(s, "ok");
     }
 }

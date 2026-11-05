@@ -192,6 +192,23 @@ fn a_named_hidden_text_box_keeps_its_name_and_hidden_state() {
 }
 
 #[test]
+fn imported_text_boxes_get_unique_nonzero_ids() {
+    // 0 is never an object's id: a shape the model can select and edit needs a real one.
+    let records = cat(&[
+        &shape(1, 2, 3, 6),
+        &obj(6),
+        &txo(3, 16, 0, 0, &[&[0, b'o', b'n', b'e'], &runs(3)]),
+        &shape(4, 7, 6, 9),
+        &obj(6),
+        &txo(3, 16, 0, 0, &[&[0, b't', b'w', b'o'], &runs(3)]),
+    ]);
+    let (wb, _) = read_xls(&xls(&records)).unwrap();
+    let shapes = &wb.sheet(0).unwrap().shapes;
+    assert!(shapes.iter().all(|s| s.id != 0), "{:?}", shapes.iter().map(|s| s.id).collect::<Vec<_>>());
+    assert_ne!(shapes[0].id, shapes[1].id);
+}
+
+#[test]
 fn a_truncated_txo_record_is_reported_and_skipped() {
     let records = cat(&[&shape(1, 2, 3, 6), &obj(6), &rec(0x01B6, &[0, 0, 0, 0])]);
     let (wb, report) = read_xls(&xls(&records)).unwrap();
