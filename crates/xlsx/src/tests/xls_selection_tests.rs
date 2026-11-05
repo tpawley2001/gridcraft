@@ -7,11 +7,13 @@ use gridcraft_model::Sheet;
 use super::xls_tests::{cat, one_sheet_with, rec, u16s};
 use crate::{read_xls, read_xlsx, write_xlsx};
 
-/// SELECTION ([MS-XLS] 2.4.248): pnn, rwAct, colAct, irefAct, cref and one Ref8U per range.
+/// SELECTION ([MS-XLS] 2.4.248): pnn, rwAct, colAct, irefAct, cref and one RefU (2.5.207:
+/// rwFirst, rwLast, colFirst and colLast as bytes, 6 bytes) per range.
 fn selection(pnn: u8, row: u16, col: u16) -> Vec<u8> {
     let mut out = vec![pnn];
     out.extend(u16s(&[row, col, 0, 1]));
-    out.extend(u16s(&[row, row, col, col]));
+    out.extend(u16s(&[row, row]));
+    out.extend([col as u8, col as u8]);
     rec(0x001D, &out)
 }
 
