@@ -9,20 +9,25 @@
 //! refreshed.
 //!
 //! Kept: ODBC, OLE DB, DAO and ADO connections (`dbPr`), web queries (`webPr` with their HTML
-//! tables), text imports (`textPr` with their fields), connection parameters given as a prompt or
-//! a value, and the query tables on a sheet that use a kept connection, with their fields and
-//! deleted fields. The query table's range is the hidden defined name the workbook part already
-//! holds. A connection or query table holding anything else (OLAP properties, parameters bound to
-//! a cell, a text import's code page given as a number, a query table's sort state…) is dropped
-//! whole with a warning: a half-translated connection makes Excel repair the file. Future-record
-//! extensions (Excel 2010 and later additions) are dropped. Out of scope: the spreadsheet data
-//! model (Power Pivot connections and `xl/model/item.data`), connections kept in custom XML, and
-//! query tables bound to a table rather than a range.
+//! tables), text imports (`textPr` with their fields), connection parameters given as a prompt, a
+//! value or a cell, and the query tables on a sheet that use a kept connection, with their fields
+//! and deleted fields. The query table's range is the hidden defined name the workbook part
+//! already holds. A cell parameter's formula is decoded with the workbook's BIFF12 formula
+//! decoder: a single cell of this workbook (ODBC and OLE DB) or a single row or column of it
+//! (web queries) becomes the `cell` attribute. A connection or query table holding anything else
+//! (OLAP properties, a cell parameter bound to a range, another workbook or a formula, a text
+//! import's code page given as a number, a query table's sort state…) is dropped whole with a
+//! warning: a half-translated connection makes Excel repair the file. Future-record extensions
+//! (Excel 2010 and later additions) are dropped. Out of scope: the spreadsheet data model (Power
+//! Pivot connections and `xl/model/item.data`), connections kept in custom XML, and query tables
+//! bound to a table rather than a range.
 
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
+use gridcraft_core::{CellRef, col_to_letters, quote_sheet};
+use gridcraft_formula::{Expr, RefKind, SheetSel};
 use gridcraft_model::Preserved;
 
 use super::{Bytes, Entry, Records, Rel, check_type};
@@ -31,6 +36,7 @@ use crate::passthrough::connections::{
     Connection, DbPr, QueryTable, QueryTableField, QueryTableRefresh, TextPr, WebPr, add_query_table_part, attr, connections_part, flag, is_xml_char,
     text_field_type,
 };
+use crate::xls::formula::{Links, Mode, decode_xlsb};
 use crate::{IoError, ReadReport};
 
 const CT_CONNECTIONS_BIN: &str = "application/vnd.ms-excel.connections";
@@ -108,8 +114,9 @@ pub(super) struct Kept {
     query_tables: u32,
 }
 
-/// Reads `xl/connections.bin` (the workbook relationship of type `connections`).
-pub(super) fn read_connections(package: &mut Package<'_>, types: &[Entry], rels: &[Rel], report: &mut ReadReport) -> Kept {
+/// Reads `xl/connections.bin` (the workbook relationship of type `connections`). `links` are the
+/// workbook's sheet and link tables, which a cell parameter's formula resolves through.
+pub(super) fn read_connections(package: &mut Package<'_>, types: &[Entry], rels: &[Rel], links: &Links, report: &mut ReadReport) -> Kept {
     let mut kept = Kept { preserved: None, ids: HashSet::new(), query_tables: 0 };
     let Some(rel) = rels.iter().find(|r| r.kind == "connections") else { return kept };
     let bytes = if rel.external || check_type(types, &rel.target, CT_CONNECTIONS_BIN).is_err() {
@@ -121,7 +128,7 @@ pub(super) fn read_connections(package: &mut Package<'_>, types: &[Entry], rels:
         report.warn(DROPPED);
         return kept;
     };
-    let (items, dropped) = connections(&bytes, report);
+    let (items, dropped) = connections(&bytes, links, report);
     if dropped {
         report.warn(DROPPED);
     }
@@ -165,7 +172,7 @@ pub(super) fn read_query_tables(
 // ---------------------------------------------------------------- connections
 
 /// The `<connection>` elements of the part with their ids, and whether any was dropped.
-fn connections(bytes: &[u8], report: &mut ReadReport) -> (Vec<(u32, String)>, bool) {
+fn connections(bytes: &[u8], links: &Links, report: &mut ReadReport) -> (Vec<(u32, String)>, bool) {
     let mut out: Vec<(u32, String)> = vec![];
     let mut dropped = false;
     let mut records = Records::new(bytes);
@@ -196,7 +203,7 @@ fn connections(bytes: &[u8], report: &mut ReadReport) -> (Vec<(u32, String)>, bo
                     dropped = true;
                     continue;
                 }
-                match connection(payload, &body) {
+                match connection(payload, &body, links) {
                     Ok((id, xml)) if !out.iter().any(|(i, _)| *i == id) => out.push((id, xml)),
                     _ => dropped = true,
                 }
@@ -228,7 +235,7 @@ fn expect_empty(it: &mut std::slice::Iter<'_, (u16, &[u8])>, id: u16) -> Res<()>
 }
 
 /// One BrtBeginExtConnection ([MS-XLSB] 2.4.80) and its records, as a `<connection>`.
-fn connection(payload: &[u8], body: &[(u16, &[u8])]) -> Res<(u32, String)> {
+fn connection(payload: &[u8], body: &[(u16, &[u8])], links: &Links) -> Res<(u32, String)> {
     let mut b = Bytes::new(payload);
     let refreshed = b.u8()?;
     let min_refreshable = b.u8()?;
@@ -263,7 +270,7 @@ fn connection(payload: &[u8], body: &[(u16, &[u8])]) -> Res<(u32, String)> {
             }
             BEGIN_WEB_PROPS if db.is_none() && web.is_none() && txt.is_none() => web = Some(web_props(p, &mut it)?),
             BEGIN_TXT_WIZ if db.is_none() && web.is_none() && txt.is_none() => txt = Some(text_props(p, &mut it)?),
-            BEGIN_PARAMS if params.is_none() && (db.is_some() || web.is_some()) => params = Some(parameters(p, &mut it)?),
+            BEGIN_PARAMS if params.is_none() && (db.is_some() || web.is_some()) => params = Some(parameters(p, &mut it, ty, links)?),
             _ => return Err(Skip),
         }
     }
@@ -491,8 +498,9 @@ fn text_props(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>) -> Re
     Ok(t.xml())
 }
 
-/// BrtBeginECParams ([MS-XLSB] 2.4.64) and its parameters, as `<parameters>`.
-fn parameters(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>) -> Res<String> {
+/// BrtBeginECParams ([MS-XLSB] 2.4.64) and its parameters, as `<parameters>`. `ty` is the
+/// connection's DBType, which decides the shape a cell parameter may have.
+fn parameters(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>, ty: u32, links: &Links) -> Res<String> {
     let mut b = Bytes::new(payload);
     let count = b.u32()?;
     b.finish()?;
@@ -503,7 +511,7 @@ fn parameters(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>) -> Re
         match rid {
             END_PARAMS if p.is_empty() => break,
             BEGIN_PARAM => {
-                x.push_str(&parameter(p)?);
+                x.push_str(&parameter(p, ty, links)?);
                 expect_empty(it, END_PARAM)?;
                 n = n.saturating_add(1);
             }
@@ -516,8 +524,9 @@ fn parameters(payload: &[u8], it: &mut std::slice::Iter<'_, (u16, &[u8])>) -> Re
     Ok(format!("<parameters count=\"{count}\">{x}</parameters>"))
 }
 
-/// BrtBeginECParam ([MS-XLSB] 2.4.63) as `<parameter>`. Parameters read from a cell are not kept.
-fn parameter(payload: &[u8]) -> Res<String> {
+/// BrtBeginECParam ([MS-XLSB] 2.4.63) as `<parameter>`: a prompt (`pbt` 0), a value (`pbt` 1) or
+/// a cell (`pbt` 2).
+fn parameter(payload: &[u8], ty: u32, links: &Links) -> Res<String> {
     let mut b = Bytes::new(payload);
     let flags = b.u16()?;
     let sql_type = b.u16()? as i16;
@@ -525,6 +534,8 @@ fn parameter(payload: &[u8]) -> Res<String> {
     let (data_type, load_prompt) = match kind {
         0 => (0, b.u32()?),
         1 => (b.u32()?, 0),
+        // The data type is present but not used: the cell's value is read at refresh.
+        2 => (b.u32()?, 0),
         _ => return Err(Skip),
     };
     let name = text(&mut b, 255)?;
@@ -532,6 +543,22 @@ fn parameter(payload: &[u8]) -> Res<String> {
     attr(&mut x, "name", &name);
     if sql_type != 0 {
         let _ = write!(x, " sqlType=\"{sql_type}\"");
+    }
+    if kind == 2 {
+        let cce = b.u32()?;
+        if !(1..=16_384).contains(&cce) {
+            return Err(Skip);
+        }
+        let rgce = b.take(cce as usize)?;
+        let cb = b.u32()?;
+        let rgcb = b.take(usize::try_from(cb).map_err(|_| Skip)?)?;
+        b.finish()?;
+        let cell = cell_reference(rgce, rgcb, ty, links)?;
+        attr(&mut x, "parameterType", "cell");
+        attr(&mut x, "cell", &cell);
+        flag(&mut x, "refreshOnChange", flags & 0x08 != 0);
+        x.push_str("/>");
+        return Ok(x);
     }
     if kind == 0 {
         if load_prompt == 1 {
@@ -565,6 +592,28 @@ fn parameter(payload: &[u8]) -> Res<String> {
     b.finish()?;
     x.push_str("/>");
     Ok(x)
+}
+
+/// A cell parameter's ParameterParsedFormula ([MS-XLSB] 2.5.98.14) as the `cell` attribute
+/// (ECMA-376 Part 1 §18.13.6): a reference to this workbook without the leading `=`. ODBC and
+/// OLE DB take one cell; a web query takes one row or one column. Anything else (another
+/// workbook, a deleted sheet, a formula) refuses the whole connection.
+fn cell_reference(rgce: &[u8], rgcb: &[u8], ty: u32, links: &Links) -> Res<String> {
+    let Expr::Ref(r) = decode_xlsb(rgce, rgcb, CellRef::new(0, 0), Mode::Cell, links).map_err(|_| Skip)? else {
+        return Err(Skip);
+    };
+    let SheetSel::Named(sheet) = &r.sheet else { return Err(Skip) };
+    let cell = |a: &gridcraft_formula::Anchor| format!("${}${}", col_to_letters(a.col), a.row as u64 + 1);
+    let body = match &r.kind {
+        RefKind::Cell(a) => cell(a),
+        // A one-cell area is a single cell; a web query also takes one row or one column.
+        RefKind::Range(a, b) if a.row == b.row && a.col == b.col => cell(a),
+        RefKind::Range(a, b) if ty == DB_WEB && (a.row == b.row || a.col == b.col) => format!("{}:{}", cell(a), cell(b)),
+        RefKind::Cols(a, _, b, _) if ty == DB_WEB && a == b => format!("${}:${}", col_to_letters(*a), col_to_letters(*b)),
+        RefKind::Rows(a, _, b, _) if ty == DB_WEB && a == b => format!("${}:${}", a + 1, b + 1),
+        _ => return Err(Skip),
+    };
+    Ok(format!("{}!{body}", quote_sheet(sheet)))
 }
 
 // ---------------------------------------------------------------- query tables

@@ -191,7 +191,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let (styles, formats) = import_styles(&mut package, &types, &rels, &mut wb, &mut budget, &mut report);
     let dxfs = dxf::import(&mut package, &types, &rels, &mut budget, &mut report);
     let mut caches = pivot::Caches::new(&cache_ids, &rels, formats, wb.date_system);
-    let mut kept_connections = connections::read_connections(&mut package, &types, &rels, &mut report);
+    let mut kept_connections = connections::read_connections(&mut package, &types, &rels, &links, &mut report);
     crate::passthrough::merge_preserved(&mut wb.preserved, kept_connections.preserved.take());
     let sst_rels: Vec<_> = rels.iter().filter(|r| r.kind == "sharedStrings").collect();
     if sst_rels.len() > 1 {
