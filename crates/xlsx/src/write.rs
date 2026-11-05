@@ -495,6 +495,8 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
     // CT_Workbook: customWorkbookViews after calcPr (and oleSize), before pivotCaches.
     w.push_str(&kept.custom_views);
     w.push_str(&pivots.workbook_xml(&mut wb_rels));
+    // CT_Workbook: after pivotCaches/smartTagTypes, before fileRecoveryPr/webPublishObjects/extLst.
+    crate::web_publishing::write(wb, &mut w);
     let exts = crate::passthrough::workbook_elements(wb, "ext");
     if !exts.is_empty() {
         let _ = write!(w, "<extLst>{exts}</extLst>");
