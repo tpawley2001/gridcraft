@@ -20,12 +20,13 @@ use std::sync::Arc;
 use gridcraft_core::CellRef;
 use gridcraft_model::{
     Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, Image, LegendPos, Orientation, PreservedPart, PreservedRel,
-    PreservedSheet, PrintSettings, Series, Sheet, Visibility, Workbook,
+    PreservedSheet, PrintSettings, Series, Shape, ShapeFormat, ShapeKind, Sheet, Visibility, Workbook,
 };
 
 use super::drawing::{self, BStore, Blip, ShapeProps};
 use super::formula::{Biff5, Links, Mode, decode};
 use super::records::{Cursor, Record, Records};
+use super::textbox::{self, Text};
 use super::{BOF, Budget, EOF};
 use crate::{IoError, ReadReport};
 
@@ -77,8 +78,9 @@ const BRAI: u16 = 0x1051;
 const BOP_POP: u16 = 0x1061;
 const SI_INDEX: u16 = 0x1065;
 
-/// Obj `ot` values ([MS-XLS] 2.5.152 FtCmo): a chart, a picture and a note.
+/// Obj `ot` values ([MS-XLS] 2.5.152 FtCmo): a chart, a text box, a picture and a note.
 const OT_CHART: u16 = 0x0005;
+const OT_TEXT_BOX: u16 = 0x0006;
 const OT_PICTURE: u16 = 0x0008;
 const OT_NOTE: u16 = 0x0019;
 /// OfficeArtClientAnchorSheet record type ([MS-XLS] 2.5.193).
@@ -147,15 +149,24 @@ fn client_anchor(data: &[u8]) -> Option<(ClientAnchor, ShapeProps)> {
     found
 }
 
-/// A worksheet's embedded charts and pictures, collected while its substream is read.
+/// A text box's shape, before its TxO record has been read.
+struct PendingTextBox {
+    anchor: ClientAnchor,
+    props: ShapeProps,
+}
+
+/// A worksheet's embedded charts, pictures and text boxes, collected while its substream is read.
 #[derive(Default)]
 pub(super) struct Embedded {
     /// The last drawing shape's anchor and properties, until an Obj record claims them.
     anchor: Option<(ClientAnchor, ShapeProps)>,
     /// The anchor of the chart Obj whose substream comes next.
     pending: Option<ClientAnchor>,
+    /// The shape of the text box Obj whose TxO record comes next.
+    pending_text: Option<PendingTextBox>,
     charts: Vec<(Option<ClientAnchor>, Chart)>,
     pictures: Vec<(ClientAnchor, ShapeProps)>,
+    text_boxes: Vec<(ClientAnchor, ShapeProps, Text)>,
 }
 
 impl Embedded {
@@ -166,7 +177,8 @@ impl Embedded {
         }
     }
 
-    /// An Obj record: a chart or picture takes the shape's anchor; other shapes are reported.
+    /// An Obj record: a chart, picture or text box takes the shape's anchor; other shapes are
+    /// reported.
     pub(super) fn obj(&mut self, rec: &Record<'_>, report: &mut ReadReport) {
         let ot = rec.parts.first().and_then(|p| u16_at(p, 4));
         let anchor = self.anchor.take();
@@ -177,8 +189,21 @@ impl Embedded {
                     self.pictures.push(a);
                 }
             }
+            Some(OT_TEXT_BOX) => {
+                // A text box without its drawing shape has no anchor to place it with.
+                self.pending_text = anchor.map(|(anchor, props)| PendingTextBox { anchor, props });
+            }
             Some(OT_NOTE) => {}
             _ => report.warn("Shapes in .xls files are not imported yet."),
+        }
+    }
+
+    /// A TxO record: the text of the text box whose Obj record came before it. A TxO without one
+    /// is a form control's, which isn't imported.
+    pub(super) fn txo(&mut self, rec: &Record<'_>, report: &mut ReadReport) {
+        let Some(PendingTextBox { anchor, props }) = self.pending_text.take() else { return };
+        if let Some(text) = textbox::read(&rec.parts, report) {
+            self.text_boxes.push((anchor, props, text));
         }
     }
 
@@ -226,6 +251,31 @@ impl Embedded {
         // A damaged store was reported when it was read.
         if skipped && !store.damaged {
             report.warn("Some pictures in .xls files use a format that isn't imported (only PNG and JPEG are).");
+        }
+        let mut rotated = false;
+        for (a, props, text) in self.text_boxes {
+            let format = ShapeFormat { align: text.align, anchor: text.anchor, ..ShapeFormat::default() };
+            // `rot` 1 is stacked text and 2 and 3 turn the box; the model has no vertical-text
+            // field, so the text stays upright and horizontal (never right-to-left).
+            if text.rotation != 0 {
+                rotated = true;
+            }
+            sheet.shapes.push(Shape {
+                hidden: props.hidden,
+                hyperlink: None,
+                name: props.name,
+                id: 0,
+                kind: ShapeKind::TextBox,
+                anchor: place(sheet, &a),
+                fill: Color::Auto,
+                line: Color::Auto,
+                text: text.text,
+                format,
+                math: Default::default(),
+            });
+        }
+        if rotated {
+            report.warn("The rotation of text boxes in .xls files is not imported; their text was kept upright.");
         }
     }
 }

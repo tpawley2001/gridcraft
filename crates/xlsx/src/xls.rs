@@ -38,6 +38,7 @@ mod protection;
 mod records;
 mod styles;
 mod tables;
+mod textbox;
 mod validation;
 
 pub(crate) use chart::{ChartSheet, add_chart_sheets};
@@ -334,9 +335,10 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         return Err(invalid("the workbook has no worksheets that can be read"));
     }
     wb.calc.precision_as_displayed = g.precision_as_displayed;
-    // Chart and picture ids are unique in the workbook, as the .xlsx reader numbers objects.
+    // Chart, picture and shape ids are unique in the workbook, as the .xlsx reader numbers
+    // objects (0 is never an object's id).
     let mut next_id = 1u32;
-    for sheet in wb.sheets.iter_mut().filter(|s| !s.charts.is_empty() || !s.images.is_empty()) {
+    for sheet in wb.sheets.iter_mut().filter(|s| !s.charts.is_empty() || !s.images.is_empty() || !s.shapes.is_empty()) {
         let sheet = Arc::make_mut(sheet);
         for ch in sheet.charts.iter_mut() {
             ch.id = next_id;
@@ -344,6 +346,10 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         }
         for image in sheet.images.iter_mut() {
             image.id = next_id;
+            next_id = next_id.saturating_add(1);
+        }
+        for shape in sheet.shapes.iter_mut() {
+            shape.id = next_id;
             next_id = next_id.saturating_add(1);
         }
     }
@@ -1331,6 +1337,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x001C => report.warn("Cell comments in .xls files are not imported yet."),
         0x00EC => st.charts.drawing(rec),
         0x005D => st.charts.obj(rec, report),
+        0x01B6 => st.charts.txo(rec, report),
         // DVAL is only a header; import actual DV records regardless of its declared count.
         0x01BE => validation::read(&mut c, st, budget, report)?,
         0x01B0 | 0x0879 => st.cond.header(&c.rest(), rec.id == 0x0879),
