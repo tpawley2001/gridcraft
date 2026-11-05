@@ -355,9 +355,12 @@ pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out, macros: 
     let Some(p) = wb.preserved.as_deref() else { return WorkbookKept::default() };
     let (live, dropped): (Vec<&PreservedSheet>, Vec<&PreservedSheet>) = p.sheets.iter().partition(|s| kept_sheet_usable(wb, p, s, macros));
     let root_of = |s: &PreservedSheet| p.rels.iter().find(|r| r.id == s.rel_id);
-    let dropped_ids: HashSet<&str> = dropped.iter().map(|s| s.rel_id.as_str()).collect();
-    // Parts reached only by dropped sheets go with them.
-    let mut gone: HashSet<String> = dropped.iter().filter_map(|s| root_of(s)).flat_map(|r| reachable(p, r)).collect();
+    // The revision history names sheets by id: it goes when the sheets changed.
+    let stale = super::revisions::stale_roots(wb, p, dropped.is_empty());
+    let dropped_roots: Vec<&PreservedRel> = dropped.iter().filter_map(|s| root_of(s)).chain(stale).collect();
+    let dropped_ids: HashSet<&str> = dropped_roots.iter().map(|r| r.id.as_str()).collect();
+    // Parts reached only by dropped sheets (and stale history) go with them.
+    let mut gone: HashSet<String> = dropped_roots.iter().flat_map(|r| reachable(p, r)).collect();
     if !gone.is_empty() {
         let others = p.rels.iter().filter(|r| !dropped_ids.contains(r.id.as_str())).flat_map(|r| reachable(p, r));
         for n in others {

@@ -312,8 +312,17 @@ impl KeptReader {
         }
         let wb_rels = raw_rels(cx, wb_part).unwrap_or_default();
         for r in wb_rels.iter().filter(|r| is_kind(r, WORKBOOK_ROOTS)) {
-            if let Err(why) = self.keep(cx, &mut p, std::slice::from_ref(r), &mut seen) {
-                cx.warn(format!("{} part {} was dropped: {why}", kind(&r.rel_type), r.target));
+            let history = is_kind(r, &[revisions::REVISION_HEADERS]);
+            let kept = if history { revisions::check_headers(cx, r) } else { Ok(()) };
+            match kept.and_then(|()| self.keep(cx, &mut p, std::slice::from_ref(r), &mut seen)) {
+                Ok(()) if history && !p.elements.iter().any(|e| e.slot == revisions::SHEETS_SLOT) => {
+                    p.elements.push(revisions::sheets_snapshot(wb_xml, file_to_model));
+                    cx.warn(
+                        "the shared workbook revision history is kept as it is; it is dropped on save if sheets are added, deleted, moved or renamed",
+                    );
+                }
+                Ok(()) => {}
+                Err(why) => cx.warn(format!("{} part {} was dropped: {why}", kind(&r.rel_type), r.target)),
             }
         }
         // Office add-in task panes: the task panes part and the web extension parts it names.
