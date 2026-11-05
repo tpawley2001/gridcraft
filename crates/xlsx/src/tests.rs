@@ -65,6 +65,7 @@ mod strict_passthrough;
 mod sylk_tests;
 mod sylk_write_tests;
 mod table_dxfs;
+mod table_header_space_tests;
 mod table_ids;
 mod theme_fmt_scheme_tests;
 mod trendline_roundtrip;

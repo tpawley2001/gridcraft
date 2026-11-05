@@ -29,7 +29,7 @@ pub(crate) fn table_columns(t: &Table) -> Vec<String> {
     let mut next: HashMap<String, u32> = HashMap::new();
     (0..w)
         .map(|i| {
-            let base = t.columns.get(i).map(|c| c.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| format!("Column{}", i + 1));
+            let base = t.columns.get(i).map(|c| c.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Column{}", i + 1));
             let lower = base.to_lowercase();
             if used.insert(lower.clone()) {
                 return base;
