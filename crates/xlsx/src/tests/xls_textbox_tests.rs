@@ -177,6 +177,23 @@ fn rotation_is_reported_and_the_text_is_kept() {
 }
 
 #[test]
+fn stacked_text_is_not_right_to_left() {
+    // `rot` 1 is stacked text, not right-to-left: the text stays upright and its direction
+    // unchanged, so Latin text is not reordered or right-aligned on save.
+    let records = cat(&[&shape(1, 2, 3, 6), &obj(6), &txo(4, 16, 0, 1, &[&[0, b'v', b'e', b'r', b't'], &runs(4)])]);
+    let (wb, report) = read_xls(&xls(&records)).unwrap();
+    let shape = &wb.sheet(0).unwrap().shapes[0];
+    assert!(!shape.format.rtl);
+    assert_eq!(shape.text, "vert");
+    assert!(report.warnings.iter().any(|w| w.contains("rotation of text boxes")), "{:?}", report.warnings);
+    let out = write_xlsx(&wb).unwrap();
+    let (back, _) = read_xlsx(&out).unwrap();
+    let shape = &back.sheet(0).unwrap().shapes[0];
+    assert!(!shape.format.rtl);
+    assert_eq!(shape.text, "vert");
+}
+
+#[test]
 fn a_named_hidden_text_box_keeps_its_name_and_hidden_state() {
     let records = cat(&[&named_hidden_shape(1, 2, 3, 6, "Caption"), &obj(6), &txo(3, 16, 0, 0, &[&[0, b'h', b'i', b'!'], &runs(3)])]);
     let (wb, _) = read_xls(&xls(&records)).unwrap();

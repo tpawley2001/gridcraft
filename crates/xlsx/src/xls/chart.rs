@@ -254,12 +254,11 @@ impl Embedded {
         }
         let mut rotated = false;
         for (a, props, text) in self.text_boxes {
-            let mut format = ShapeFormat { align: text.align, anchor: text.anchor, ..ShapeFormat::default() };
-            // `rot` 1 is stacked (vertical) text, which the model writes as right-to-left text
-            // in a box with no width to wrap in; 2 and 3 turn the box, which it doesn't model.
+            let format = ShapeFormat { align: text.align, anchor: text.anchor, ..ShapeFormat::default() };
+            // `rot` 1 is stacked text and 2 and 3 turn the box; the model has no vertical-text
+            // field, so the text stays upright and horizontal (never right-to-left).
             if text.rotation != 0 {
                 rotated = true;
-                format.rtl = text.rotation == 1;
             }
             sheet.shapes.push(Shape {
                 hidden: props.hidden,
