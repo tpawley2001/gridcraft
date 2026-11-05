@@ -1137,6 +1137,8 @@ pub enum ShapeTextAnchor {
 pub struct ShapeFormat {
     /// No outline (`a:ln/a:noFill`), whatever `Shape::line` says.
     pub no_line: bool,
+    /// No fill (`a:noFill` in `xdr:spPr`), whatever `Shape::fill` says.
+    pub no_fill: bool,
     /// Text size in points (`a:rPr sz` / 100); `None` is the default size.
     pub font_size: Option<f32>,
     pub bold: bool,

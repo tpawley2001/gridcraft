@@ -428,6 +428,7 @@ fn sample() -> Workbook {
         text: "box".into(),
         format: ShapeFormat {
             no_line: true,
+            no_fill: false,
             font_size: Some(20.0),
             bold: true,
             italic: true,
