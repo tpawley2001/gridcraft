@@ -1308,14 +1308,15 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
             }
         }
         0x001D => {
-            // SELECTION ([MS-XLS] 2.4.248): pnn, rwAct, colAct, irefAct, cref, then Ref8U entries.
+            // SELECTION ([MS-XLS] 2.4.248): pnn, rwAct, colAct, irefAct, cref, then RefU entries
+            // (2.5.207: rwFirst, rwLast, colFirst, colLast = 6 bytes each).
             // A truncated record is skipped; the sheet keeps its cells.
             let mut parse = || -> Result<(u8, u16, u16), IoError> {
                 let (pnn, row, col) = (c.u8()?, c.u16()?, c.u16()?);
                 c.skip(2)?; // irefAct.
                 let count = c.u16()?; // cref.
                 for _ in 0..count {
-                    c.skip(8)?;
+                    c.skip(6)?;
                 }
                 Ok((pnn, row, col))
             };
