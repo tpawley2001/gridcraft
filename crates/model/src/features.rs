@@ -1286,6 +1286,7 @@ mod tests {
     #[test]
     fn chart_without_hole_size_keeps_the_legacy_hole() {
         let chart = Chart {
+            hidden: false,
             id: 1,
             kind: ChartKind::Doughnut,
             anchor: Anchor::default(),
@@ -1303,6 +1304,7 @@ mod tests {
             source: None,
             by_rows: false,
             pivot: None,
+            scale: Default::default(),
         };
         let mut json = serde_json::to_value(&chart).expect("serialize chart");
         json.as_object_mut().expect("chart object").remove("hole_size");
