@@ -36,6 +36,7 @@ impl Protection {
             delete_rows: allowed(9),
             sort: allowed(11),
             autofilter: allowed(12),
+            ..Default::default()
         })
     }
 }

@@ -133,24 +133,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
 
     write_sheet_views(&mut s, sheet, selected);
 
-    // sheetFormatPr
-    let max_row_outline = sheet.rows.values().map(|r| r.outline).max().unwrap_or(0);
-    let max_col_outline = sheet.cols.values().map(|r| r.outline).max().unwrap_or(0);
-    s.push_str("<sheetFormatPr");
-    if (sheet.default_col_width - gridcraft_model::DEFAULT_COL_WIDTH).abs() > 0.01 {
-        let _ = write!(s, " defaultColWidth=\"{}\"", num(px_to_col_width(sheet.default_col_width)));
-    }
-    let _ = write!(s, " defaultRowHeight=\"{}\"", num(px_to_pt(sheet.default_row_height)));
-    if (sheet.default_row_height - gridcraft_model::DEFAULT_ROW_HEIGHT).abs() > 0.01 {
-        s.push_str(" customHeight=\"1\"");
-    }
-    if max_row_outline > 0 {
-        let _ = write!(s, " outlineLevelRow=\"{max_row_outline}\"");
-    }
-    if max_col_outline > 0 {
-        let _ = write!(s, " outlineLevelCol=\"{max_col_outline}\"");
-    }
-    s.push_str("/>");
+    write_sheet_format(&mut s, sheet);
 
     // cols: runs of identical settings.
     if !sheet.cols.is_empty() {
@@ -536,12 +519,45 @@ fn write_sheet_printing<'a>(s: &mut String, sheet: &'a Sheet, rels: &mut Rels, o
     kept
 }
 
+/// Writes sparse worksheet defaults without expanding row records.
+fn write_sheet_format(s: &mut String, sheet: &Sheet) {
+    // sheetFormatPr
+    let max_row_outline = sheet.rows.values().map(|r| r.outline).max().unwrap_or(0);
+    let max_col_outline = sheet.cols.values().map(|r| r.outline).max().unwrap_or(0);
+    s.push_str("<sheetFormatPr");
+    if (sheet.default_col_width - gridcraft_model::DEFAULT_COL_WIDTH).abs() > 0.01 {
+        let _ = write!(s, " defaultColWidth=\"{}\"", num(px_to_col_width(sheet.default_col_width)));
+    }
+    let _ = write!(s, " defaultRowHeight=\"{}\"", num(px_to_pt(sheet.default_row_height)));
+    if let Some(custom) = sheet.default_row_custom_height {
+        let _ = write!(s, " customHeight=\"{}\"", u8::from(custom));
+    } else if (sheet.default_row_height - gridcraft_model::DEFAULT_ROW_HEIGHT).abs() > 0.01 {
+        s.push_str(" customHeight=\"1\"");
+    }
+    if let Some(hidden) = sheet.default_rows_hidden {
+        let _ = write!(s, " zeroHeight=\"{}\"", u8::from(hidden));
+    }
+    if max_row_outline > 0 {
+        let _ = write!(s, " outlineLevelRow=\"{max_row_outline}\"");
+    }
+    if max_col_outline > 0 {
+        let _ = write!(s, " outlineLevelCol=\"{max_col_outline}\"");
+    }
+    s.push_str("/>");
+}
+
 /// Writes protection, filter, merges, conditional formats, validations and links; returns the
 /// conditional formats' priorities and where `<customSheetViews>` goes (before `<mergeCells>`).
 fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut Out) -> (Vec<u32>, usize) {
     // sheetProtection
-    if let Some(p) = &sheet.protection {
-        s.push_str("<sheetProtection sheet=\"1\" objects=\"1\" scenarios=\"1\"");
+    if let Some(p) = sheet.protection.as_ref().or(sheet.inactive_protection.as_ref()) {
+        let _ = write!(
+            s,
+            "<sheetProtection sheet=\"{}\" objects=\"{}\" scenarios=\"{}\"",
+            u8::from(sheet.protection.is_some()),
+            u8::from(!p.objects),
+            u8::from(!p.scenarios)
+        );
         for (attr, allowed) in [
             ("formatCells", p.format_cells),
             ("formatColumns", p.format_columns),
@@ -552,6 +568,8 @@ fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut O
             ("deleteRows", p.delete_rows),
             ("sort", p.sort),
             ("autoFilter", p.autofilter),
+            ("insertHyperlinks", p.insert_hyperlinks),
+            ("pivotTables", p.pivot_tables),
         ] {
             if allowed {
                 let _ = write!(s, " {attr}=\"0\"");
@@ -605,8 +623,18 @@ fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut O
         );
     }
     let vals: Vec<&Validation> = sheet.validations.iter().filter(|v| !v.ranges.is_empty()).collect();
-    if !vals.is_empty() {
-        let _ = write!(s, "<dataValidations count=\"{}\">", vals.len());
+    let settings = &sheet.validation_settings;
+    if !vals.is_empty() || settings.disable_prompts.is_some() || settings.x_window.is_some() || settings.y_window.is_some() {
+        let _ = write!(s, "<dataValidations count=\"{}\"", vals.len());
+        if let Some(disabled) = settings.disable_prompts {
+            let _ = write!(s, " disablePrompts=\"{}\"", u8::from(disabled));
+        }
+        for (name, value) in [("xWindow", settings.x_window), ("yWindow", settings.y_window)] {
+            if let Some(value) = value {
+                let _ = write!(s, " {name}=\"{value}\"");
+            }
+        }
+        s.push('>');
         for v in vals {
             s.push_str(&validation_xml(v));
         }
@@ -686,14 +714,14 @@ fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcr
         };
         let info = match row_infos.next_if(|(entry_row, _)| **entry_row == row) {
             Some((_, info)) => *info,
-            None => LineInfo::default(),
+            None => LineInfo { hidden: sheet.default_rows_hidden.unwrap_or(false), ..LineInfo::default() },
         };
         let first = next;
         while keys.get(next).is_some_and(|(cell, _)| cell.row == row) {
             next += 1;
         }
         let cells = keys.get(first..next).unwrap_or_default();
-        if cells.is_empty() && info == LineInfo::default() {
+        if cells.is_empty() && info == LineInfo::default() && sheet.default_rows_hidden != Some(true) {
             continue;
         }
         s.push_str("<row r=\"");
@@ -705,8 +733,8 @@ fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcr
         if let Some(h) = info.size {
             let _ = write!(s, " ht=\"{}\"{}", num(px_to_pt(h)), if info.custom { " customHeight=\"1\"" } else { "" });
         }
-        if info.hidden {
-            s.push_str(" hidden=\"1\"");
+        if info.hidden || sheet.default_rows_hidden == Some(true) {
+            let _ = write!(s, " hidden=\"{}\"", u8::from(info.hidden));
         }
         if info.outline > 0 {
             let _ = write!(s, " outlineLevel=\"{}\"", info.outline.min(7));
