@@ -144,6 +144,11 @@ struct Custom {
     skipped: bool,
 }
 
+/// Names Office reserves in the user-defined set ([MS-OSHARED]): the hyperlink table,
+/// a document GUID and the hyperlink base. They are not custom properties, so they are left out
+/// without counting as dropped.
+const OFFICE_RESERVED: &[&str] = &["_PID_HLINKS", "_PID_GUID", "_PID_LINKBASE"];
+
 /// Builds the custom properties part from the user-defined set; `Err` when the set is damaged.
 fn user_defined(set: &Section<'_>) -> Result<Custom, ()> {
     // Property 0 is the dictionary ([MS-OLEPS] 2.17), naming each property; 1 is the code page
@@ -162,6 +167,9 @@ fn user_defined(set: &Section<'_>) -> Result<Custom, ()> {
             skipped = true;
             continue;
         };
+        if OFFICE_RESERVED.contains(&name.as_str()) {
+            continue;
+        }
         let Some((tag, value)) = typed_value(v, set.codepage).filter(|_| !name.is_empty()) else {
             skipped = true;
             continue;
