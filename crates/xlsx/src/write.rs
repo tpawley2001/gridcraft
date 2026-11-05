@@ -597,8 +597,10 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
     app.push_str("<Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/extended-properties\" xmlns:vt=\"http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes\"><Application>");
     app.push_str(gridcraft_core::brand::APP_NAME);
     app.push_str("</Application>");
-    if !company.is_empty() {
-        let _ = write!(app, "<Company>{}</Company>", esc(&company));
+    for (tag, value) in [("Manager", &p.manager), ("Company", &company), ("HyperlinkBase", &p.hyperlink_base)] {
+        if !value.is_empty() {
+            let _ = write!(app, "<{tag}>{}</{tag}>", esc(value));
+        }
     }
     app.push_str("</Properties>");
     out.part("docProps/app.xml", Some("application/vnd.openxmlformats-officedocument.extended-properties+xml"), app.into_bytes());

@@ -206,6 +206,12 @@ pub struct DocProps {
     pub created: String,
     #[serde(default)]
     pub modified: String,
+    /// app.xml `Manager` (.xls: DocumentSummaryInformation PIDSI_MANAGER).
+    #[serde(default)]
+    pub manager: String,
+    /// app.xml `HyperlinkBase`: the base relative hyperlinks resolve against.
+    #[serde(default)]
+    pub hyperlink_base: String,
 }
 
 /// One phonetic (furigana) run of a string item (`<rPh>`): the reading `text` and the range of the
