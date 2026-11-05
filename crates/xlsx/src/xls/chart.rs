@@ -5,7 +5,8 @@
 //! references, so their values follow the cells.
 //!
 //! Read: the chart group type (Bar, Line, Pie, Area, Scatter, Radar and their stacked, 100%,
-//! doughnut and bubble forms), each series' name, values, categories and bubble sizes (BRAI
+//! doughnut and bubble forms), pie/doughnut first slice angles and doughnut hole sizes (Pie),
+//! each series' name, values, categories and bubble sizes (BRAI
 //! references, or the literal values the substream caches), the chart and axis titles (Text +
 //! ObjectLink + SeriesText), the legend's side, value axis bounds (ValueRange), major gridlines,
 //! series colours that aren't automatic (LineFormat, AreaFormat) and value data labels
@@ -380,7 +381,7 @@ enum Block {
 enum GroupType {
     Bar { transpose: bool, stacked: bool, percent: bool },
     Line { stacked: bool, percent: bool },
-    Pie { donut: bool },
+    Pie { angle: u16, donut: u16 },
     Area { stacked: bool, percent: bool },
     Scatter { bubbles: bool },
     Radar,
@@ -804,6 +805,19 @@ impl Parser {
         }
         let text = |link: u16| self.texts.iter().find(|t| t.link == Some(link)).and_then(|t| t.text.clone()).filter(|t| !t.is_empty());
         let kind = if combo { ChartKind::Combo } else { used.first().and_then(|g| kinds.get(*g)).copied().unwrap_or_default() };
+        let pie = if combo {
+            used.iter().filter_map(|gi| self.groups.get(*gi)).find_map(|g| match g.ty {
+                Some(GroupType::Pie { angle, donut }) => Some((angle, donut)),
+                _ => None,
+            })
+        } else {
+            used.first().and_then(|gi| self.groups.get(*gi)).and_then(|g| match g.ty {
+                Some(GroupType::Pie { angle, donut }) => Some((angle, donut)),
+                _ => None,
+            })
+        };
+        let (first_slice_angle, hole_size) =
+            pie.map_or((0, 75), |(angle, donut)| (angle % 360, if donut == 0 { 75 } else { donut.clamp(10, 90) as u8 }));
         let (width, height) = self.frame.filter(|(w, h)| *w > 0.0 && *h > 0.0).unwrap_or((480.0, 288.0));
         if !matches!(kind, ChartKind::Scatter | ChartKind::ScatterLines | ChartKind::Bubble) {
             self.scale.x = AxisScale::default();
@@ -819,8 +833,8 @@ impl Parser {
             data_labels: self.value_labels,
             gridlines: self.gridlines,
             style: 2,
-            hole_size: 75,
-            first_slice_angle: 0,
+            hole_size,
+            first_slice_angle,
             x_title: text(3),
             y_title: text(2),
             source: None,
@@ -845,16 +859,13 @@ fn group_type(id: u16, c: &mut Cursor<'_, '_>) -> Result<GroupType, Skip> {
             let (stacked, percent) = (f & 1 != 0, f & 2 != 0);
             if id == LINE { GroupType::Line { stacked, percent } } else { GroupType::Area { stacked, percent } }
         }
-        PIE => {
-            c.u16()?;
-            GroupType::Pie { donut: c.u16()? != 0 }
-        }
+        PIE => GroupType::Pie { angle: c.u16()?, donut: c.u16()? },
         SCATTER => {
             c.u32()?;
             GroupType::Scatter { bubbles: c.u16()? & 1 != 0 }
         }
         // Pie of pie and bar of pie: drawn as a pie.
-        BOP_POP => GroupType::Pie { donut: false },
+        BOP_POP => GroupType::Pie { angle: 0, donut: 0 },
         SURF => GroupType::Unsupported("surface"),
         _ => GroupType::Radar,
     })
@@ -892,8 +903,8 @@ fn kind_of(g: &Group, members: &[&Ser]) -> ChartKind {
         Some(GroupType::Area { percent: true, .. }) => ChartKind::AreaStacked100,
         Some(GroupType::Area { stacked: true, .. }) => ChartKind::AreaStacked,
         Some(GroupType::Area { .. }) => ChartKind::Area,
-        Some(GroupType::Pie { donut: true }) => ChartKind::Doughnut,
-        Some(GroupType::Pie { donut: false }) => ChartKind::Pie,
+        Some(GroupType::Pie { donut: 0, .. }) => ChartKind::Pie,
+        Some(GroupType::Pie { .. }) => ChartKind::Doughnut,
         Some(GroupType::Scatter { bubbles: true }) => ChartKind::Bubble,
         Some(GroupType::Scatter { .. }) if members.iter().any(|s| s.line.is_some_and(|(_, drawn)| drawn)) => ChartKind::ScatterLines,
         Some(GroupType::Scatter { .. }) => ChartKind::Scatter,
