@@ -279,3 +279,51 @@ fn xls_truncated_streams_never_panic() {
         read_xls(&xls(None, Some(&bad))).unwrap();
     }
 }
+
+/// A `VT_BLOB` (0x41) value: its byte count, then the bytes.
+fn blob(data: &[u8]) -> Vec<u8> {
+    typed(0x41, &[&(data.len() as u32).to_le_bytes()[..], data].concat())
+}
+
+/// Office keeps its own reserved entries in the user-defined set ([MS-OSHARED]): the hyperlink
+/// table `_PID_HLINKS`, the hyperlink base `_PID_LINKBASE` and `_PID_GUID`, each a `VT_BLOB`.
+/// They are not the user's custom properties: they are not written to `docProps/custom.xml`
+/// (Excel lists none of them under File > Info > Properties > Custom) and leaving them out is not
+/// reported as dropped. Real .xls files from the GovDocs1 set carry them (52 of 251 warned).
+#[test]
+fn xls_office_reserved_blobs_are_not_reported_as_dropped() {
+    let user = [
+        codepage(1252),
+        (0, dictionary(&[(2, b"Owner"), (3, b"_PID_HLINKS"), (4, b"_PID_GUID"), (5, b"_PID_LINKBASE")])),
+        (2, text(0x1e, b"Ops\0")),
+        (3, blob(&[0x03, 0, 0, 0, 0x06, 0, 0, 0])),
+        (4, blob(&[0x4c, 0, 0, 0, b'{', 0, b'}', 0])),
+        (5, blob(&[0x02, 0, 0, 0, 0, 0, 0, 0])),
+    ];
+    let (wb, report) = read(Some(&user));
+    let got = properties(&custom_part(&wb).unwrap());
+    let got: Vec<_> = got.iter().map(|(p, n, _, v)| (p.as_str(), n.as_str(), v.as_str())).collect();
+    assert_eq!(got, [("2", "Owner", "Ops")]);
+    assert_eq!(custom_warnings(&report), 0, "{:?}", report.warnings);
+}
+
+/// A set holding only Office's reserved entries gives no custom properties part and no warning.
+#[test]
+fn xls_only_office_reserved_blobs_give_no_part_and_no_warning() {
+    let user = [codepage(1252), (0, dictionary(&[(2, b"_PID_HLINKS"), (3, b"_PID_GUID")])), (2, blob(&[0; 8])), (3, blob(&[0; 4]))];
+    let (wb, report) = read(Some(&user));
+    assert!(custom_part(&wb).is_none());
+    assert_eq!(custom_warnings(&report), 0, "{:?}", report.warnings);
+}
+
+/// Guard: a blob under a user's own name is still a custom property that can't be kept, and still
+/// warns once; a name that only looks reserved (another case, or no leading underscore) is the user's.
+#[test]
+fn xls_user_named_blobs_still_warn() {
+    for name in [&b"Logo"[..], b"_pid_hlinks", b"PID_HLINKS"] {
+        let user = [codepage(1252), (0, dictionary(&[(2, b"Owner"), (3, name)])), (2, text(0x1e, b"Ops\0")), (3, blob(&[0; 4]))];
+        let (wb, report) = read(Some(&user));
+        assert_eq!(properties(&custom_part(&wb).unwrap()).len(), 1);
+        assert_eq!(custom_warnings(&report), 1, "{name:?}: {:?}", report.warnings);
+    }
+}
