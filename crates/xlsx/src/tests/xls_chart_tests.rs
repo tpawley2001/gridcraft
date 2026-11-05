@@ -91,7 +91,7 @@ fn series_text(s: &str) -> Vec<u8> {
 
 /// A series with name, values and categories in column `col` (rows 2-5, names in row 1,
 /// categories in column A), drawn by chart group 0, plus `extra` records in its block.
-fn series(col: u16, extra: &[u8]) -> Vec<u8> {
+pub(super) fn series(col: u16, extra: &[u8]) -> Vec<u8> {
     cat(&[
         &rec(0x1003, &u16s(&[1, 1, 4, 4, 1, 0])),
         &begin(),
@@ -125,7 +125,7 @@ fn bar(flags: u16) -> Vec<u8> {
 }
 
 /// A chart substream: the series, title, then one axis parent with a value axis and the group.
-fn chart(series: &[u8], group: &[u8], extra: &[u8]) -> Vec<u8> {
+pub(super) fn chart(series: &[u8], group: &[u8], extra: &[u8]) -> Vec<u8> {
     cat(&[
         &bof(0x0020),
         &rec(0x1002, &u32s(&[0, 0, 360 << 16, 216 << 16])),
@@ -187,7 +187,7 @@ fn worksheet(charts: &[u8]) -> Vec<u8> {
     cat(&[&bof(0x0010), &cells(), charts, &eof()])
 }
 
-fn embedded(chart_stream: &[u8]) -> Vec<u8> {
+pub(super) fn embedded(chart_stream: &[u8]) -> Vec<u8> {
     book(&[("Sheet1", 0, worksheet(&cat(&[&drawing(), &obj(5), chart_stream])))])
 }
 
@@ -196,7 +196,7 @@ pub(super) fn column_chart() -> Vec<u8> {
     chart(&two, &bar(0), &text(1, "Quarterly sales"))
 }
 
-fn read(file: &[u8]) -> (Workbook, Vec<String>) {
+pub(super) fn read(file: &[u8]) -> (Workbook, Vec<String>) {
     let (wb, report) = read_xls(file).unwrap();
     (wb, report.warnings)
 }
