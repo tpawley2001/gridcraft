@@ -972,6 +972,12 @@ fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_
     }
     // A What-If data table's formula sits on its top-left result cell, before the cached value.
     if let Some(table) = data_table {
+        match &value {
+            Value::Text(_) => s.push_str(" t=\"s\""),
+            Value::Bool(_) => s.push_str(" t=\"b\""),
+            Value::Error(_) => s.push_str(" t=\"e\""),
+            _ => {}
+        }
         s.push('>');
         push_data_table_formula(s, table);
         match &value {
@@ -979,13 +985,13 @@ fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_
                 let _ = write!(s, "<v>{}</v></c>", num(*n));
             }
             Value::Text(t) => {
-                let _ = write!(s, " t=\"s\"><v>{}</v></c>", out.sst.index(t));
+                let _ = write!(s, "<v>{}</v></c>", out.sst.index(t));
             }
             Value::Bool(b) => {
-                let _ = write!(s, " t=\"b\"><v>{}</v></c>", *b as u8);
+                let _ = write!(s, "<v>{}</v></c>", *b as u8);
             }
             Value::Error(e) => {
-                let _ = write!(s, " t=\"e\"><v>{}</v></c>", e.as_str());
+                let _ = write!(s, "<v>{}</v></c>", e.as_str());
             }
             _ => s.push_str("</c>"),
         }

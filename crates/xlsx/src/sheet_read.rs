@@ -604,13 +604,11 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
     }
     let dynamic = c.attr("cm").is_some();
     let f = c.child("f");
-    if f.is_some_and(|f| f.attr("t") == Some("dataTable")) {
-        // A What-If data table is one `<f t="dataTable">` on the top-left result cell; the other
-        // cells of `ref` carry only values. It is kept as the sheet's record and written back,
-        // not as a cell formula.
-        if let Some(f) = f {
-            read_data_table(sheet, f, pos);
-        }
+    // A What-If data table is one `<f t="dataTable">` on the top-left result cell; the other
+    // cells of `ref` carry only values. It is kept as the sheet's record and written back,
+    // not as a cell formula.
+    if let Some(f) = f.filter(|f| f.attr("t") == Some("dataTable")) {
+        read_data_table(sheet, f, pos);
     }
     let formula = f.and_then(|f| read_formula(cx, st, f, pos, dynamic));
     // A `PY(index,0|1)` formula is a Python cell whose code is a script of the Python part. The
