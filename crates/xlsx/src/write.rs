@@ -445,7 +445,7 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
     let mut wb_rels = Rels::default();
     let (sheets_xml, kept, pivots) = write_sheets(wb, &mut out, active, &mut wb_rels, kind);
 
-    let names = write_defined_names(wb, &kept, &out.chart_names);
+    let names = write_defined_names(wb, &kept, &out.chart_names, kind);
 
     let mut w = format!("{XML_DECL}<workbook xmlns=\"{NS_MAIN}\" xmlns:r=\"{NS_REL}\">");
     // A workbook read from a file keeps its <fileVersion> as it was: Excel trusts the saved values
@@ -678,17 +678,21 @@ fn write_sheets(
     (sheets_xml, kept, pivots)
 }
 
-fn write_defined_names(wb: &Workbook, kept: &crate::passthrough::WorkbookKept, chart_names: &[String]) -> String {
+fn write_defined_names(wb: &Workbook, kept: &crate::passthrough::WorkbookKept, chart_names: &[String], kind: XlsxKind) -> String {
     // Defined names, then print areas and titles.
     let mut names = String::new();
     let mut seen = std::collections::HashSet::new();
-    for n in &wb.names {
+    let omitted = if kind.is_macro_enabled() { Default::default() } else { crate::xlm::omitted_names(wb) };
+    for (i, n) in wb.names.iter().enumerate() {
         if n.name.is_empty() || !seen.insert((n.name.to_ascii_lowercase(), n.scope)) {
             continue;
         }
         if let Some(sc) = n.scope
             && sc >= wb.sheets.len()
         {
+            continue;
+        }
+        if omitted.contains(&i) {
             continue;
         }
         let _ = write!(names, "<definedName name=\"{}\"", esc_attr(&n.name));
