@@ -139,7 +139,19 @@ impl<'h> Evaluator<'h> {
                 Err(e) => return err(e),
             }
         };
-        match gridcraft_formula::parse(&text) {
+        let mut parsed = gridcraft_formula::parse(&text);
+        if !matches!(&parsed, Ok(Expr::Ref(_) | Expr::Name(_) | Expr::Struct(_))) {
+            // INDIRECT text accepts existing sheet names that cell formulas require quoted.
+            // Keep quoted and external workbook prefixes on their usual parsing path.
+            if let Some((sheet, reference)) = text.rsplit_once('!')
+                && !sheet.starts_with('\'')
+                && !sheet.contains(['[', ']'])
+                && self.host.workbook().sheet_index(sheet).is_some()
+            {
+                parsed = gridcraft_formula::parse(&format!("'{}'!{reference}", sheet.replace('\'', "''")));
+            }
+        }
+        match parsed {
             Ok(Expr::Ref(_)) if !a1_ok => err(CellError::Ref),
             Ok(e @ (Expr::Ref(_) | Expr::Name(_) | Expr::Struct(_))) => match self.eval(&e) {
                 r @ Ev::R(_) => r,
@@ -474,5 +486,40 @@ impl<'h> Evaluator<'h> {
             return Ev::V(gridcraft_functions::subtotal_counta_values(&values));
         }
         Ev::V(gridcraft_functions::aggregate_values(func, &values))
+    }
+}
+
+#[cfg(test)]
+mod indirect_text_tests {
+    use super::*;
+    use gridcraft_model::{Sheet, Workbook};
+
+    #[test]
+    fn indirect_sheet_prefix_retry_preserves_reference_rules() {
+        let mut wb = Workbook::new();
+        for name in ["1Month", "1O'Brien", "1!Month"] {
+            let mut sheet = Sheet::new(name);
+            sheet.set_value(CellRef::new(0, 0), Value::Number(7.0));
+            wb.sheets.push(Arc::new(sheet));
+        }
+        for formula in [
+            "=INDIRECT(\"1month!a1\")",
+            "=INDIRECT(\"1O'Brien!A1\")",
+            "=INDIRECT(\"1!Month!A1\")",
+            "=INDIRECT(\"1month!R1C1\",FALSE)",
+            "=INDIRECT(\"'1O''Brien'!A1\")",
+        ] {
+            assert_eq!(crate::evaluate(&wb, 0, CellRef::new(0, 0), formula), Value::Number(7.0), "{formula}");
+        }
+        for formula in [
+            "=INDIRECT(\"1month!A1\",FALSE)",
+            "=INDIRECT(\"[Book]1Month!A1\")",
+            "=INDIRECT(\"1Month!A0\")",
+            "=INDIRECT(\"'1Month!A1\")",
+            "=INDIRECT(\"1Missing!A1\")",
+        ] {
+            assert_eq!(crate::evaluate(&wb, 0, CellRef::new(0, 0), formula), Value::Error(CellError::Ref), "{formula}");
+        }
+        assert!(gridcraft_formula::parse("=1Month!A1").is_err());
     }
 }
