@@ -280,7 +280,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     let mut macro_sheets: Vec<macro_sheet::MacroSheet> = vec![];
     for (bound, bs) in g.sheets.iter().enumerate() {
         if bs.kind == 2 {
-            match chart::chart_sheet(&stream, bs.pos, &mut budget, &g.links, &mut report)? {
+            match chart::chart_sheet(&stream, bs.pos, &mut budget, &g.links, g.biff5.as_ref(), &mut report)? {
                 Some((chart, print)) => {
                     chart_sheets.push(chart::ChartSheet { name: bs.name.clone(), visibility: bs.visibility, before: wb.sheets.len(), chart, print });
                     chart_bounds.push(bound);
@@ -1108,7 +1108,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
     if st.g.biff5.is_none() {
         st.queries.record(rec);
     }
-    if page_setup::read(rec, &mut st.sheet.print, &mut st.sheet.tab_color, &mut st.page, report) {
+    if page_setup::read(rec, &mut st.sheet.print, &mut st.sheet.tab_color, &mut st.page, st.g.biff5.as_ref(), report) {
         return Ok(());
     }
     match rec.id {

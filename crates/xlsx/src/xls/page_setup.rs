@@ -7,6 +7,7 @@
 use gridcraft_core::{MAX_COLS, MAX_ROWS};
 use gridcraft_model::{Color, Orientation, PrintSettings};
 
+use super::formula::Biff5;
 use super::records::{Cursor, Record};
 use crate::ReadReport;
 use crate::tables::{INDEXED, paper_name};
@@ -50,14 +51,22 @@ impl PageState {
     }
 }
 
-/// Reads one page setup record into the sheet; `false` when `id` isn't one of them.
-pub(super) fn read(rec: &Record<'_>, pr: &mut PrintSettings, tab: &mut Option<Color>, page: &mut PageState, report: &mut ReadReport) -> bool {
+/// Reads one page setup record into the sheet; `false` when `id` isn't one of them. `biff5` is
+/// the workbook's BIFF5 tables when the file is Excel 5.0/95 (its Header/Footer text is 8-bit).
+pub(super) fn read(
+    rec: &Record<'_>,
+    pr: &mut PrintSettings,
+    tab: &mut Option<Color>,
+    page: &mut PageState,
+    biff5: Option<&Biff5>,
+    report: &mut ReadReport,
+) -> bool {
     let mut c = Cursor::new(&rec.parts);
     let ok = match rec.id {
         SETUP => setup(&mut c, pr, page),
         LEFT_MARGIN | RIGHT_MARGIN | TOP_MARGIN | BOTTOM_MARGIN => margin(&mut c, rec.id, pr),
-        HEADER => header_footer_text(&mut c).map(|t| pr.header = t),
-        FOOTER => header_footer_text(&mut c).map(|t| pr.footer = t),
+        HEADER => header_footer_text(&mut c, biff5).map(|t| pr.header = t),
+        FOOTER => header_footer_text(&mut c, biff5).map(|t| pr.footer = t),
         HEADER_FOOTER => header_footer(&mut c, pr),
         PRINT_GRID => flag(&mut c).map(|on| pr.gridlines = on),
         PRINT_ROW_COL => flag(&mut c).map(|on| pr.headings = on),
@@ -138,12 +147,20 @@ fn margin(c: &mut Cursor<'_, '_>, id: u16, pr: &mut PrintSettings) -> Option<()>
     Some(())
 }
 
-/// Header / Footer (2.4.136, 2.4.124): empty for none, else an XLUnicodeString.
-fn header_footer_text(c: &mut Cursor<'_, '_>) -> Option<String> {
+/// Header / Footer (2.4.136, 2.4.124): empty for none, else an XLUnicodeString; in BIFF5 a
+/// 1-byte count and that many bytes in the workbook code page.
+fn header_footer_text(c: &mut Cursor<'_, '_>, biff5: Option<&Biff5>) -> Option<String> {
     if c.remaining() == 0 {
         return Some(String::new());
     }
-    Some(c.string().ok()?.chars().take(MAX_HF_CHARS).collect())
+    let text = match biff5 {
+        Some(b5) => {
+            let cch = usize::from(c.u8().ok()?);
+            b5.text(&c.bytes(cch).ok()?)
+        }
+        None => c.string().ok()?,
+    };
+    Some(text.chars().take(MAX_HF_CHARS).collect())
 }
 
 /// HeaderFooter (2.4.137): FrtHeader, guidSView, flags, four counts, then the even and first
