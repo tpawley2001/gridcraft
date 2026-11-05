@@ -141,6 +141,10 @@ pub struct Out {
     pub drawings: u32,
     pub tables: u32,
     pub comments: u32,
+    /// VML drawings written, the last VML shape-id block used, and control properties parts.
+    pub vmls: u32,
+    pub vml_block: u32,
+    pub ctrl_props: u32,
     /// Authors of threaded comments, in first-use order; written to `xl/persons/person.xml`.
     pub persons: Vec<String>,
     /// The table ids of the workbook, by sheet and table index, decided before any sheet is
@@ -388,6 +392,9 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
         drawings: 0,
         tables: 0,
         comments: 0,
+        vmls: 0,
+        vml_block: 0,
+        ctrl_props: 0,
         persons: vec![],
         table_ids: table_ids(wb)?,
         dynamic_arrays: false,

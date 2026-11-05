@@ -6,7 +6,8 @@
 //! dependencies part with the RTD and CUBE topics, links to external workbooks with
 //! their `<externalReferences>`, data connections, XML maps, add-in task panes with the web extension
 //! parts they show) and each sheet (query tables, cells
-//! mapped to XML elements, form controls, ActiveX controls, OLE objects, the sheet background,
+//! mapped to XML elements, form controls other than the buttons, scroll bars and spin buttons
+//! `controls.rs` models, ActiveX controls, OLE objects, the sheet background,
 //! printer settings and worksheet custom properties (add-in tags such as `ORB_SHEETNAME`), with the
 //! sheet's `<customProperties>`, `<picture>`, `<oleObjects>` and `<controls>` XML, the `r:id` of
 //! `<pageSetup>`, the legacy VML shapes those controls need, the DrawingML anchors of the sheet's drawing

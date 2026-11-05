@@ -817,6 +817,8 @@ impl Parser {
             data_labels: self.value_labels,
             gridlines: self.gridlines,
             style: 2,
+            hole_size: 75,
+            first_slice_angle: 0,
             x_title: text(3),
             y_title: text(2),
             source: None,

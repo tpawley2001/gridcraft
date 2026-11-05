@@ -17,6 +17,7 @@ mod binary_filter;
 mod cfb;
 mod chart;
 mod chartex;
+mod controls;
 mod crypto;
 mod csv;
 mod dif;
