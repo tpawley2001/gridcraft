@@ -66,7 +66,10 @@ pub use strict::strict_rel_type_to_transitional;
 use strict::{Untranslatable, is_xml_part, to_transitional};
 #[cfg(test)]
 pub(crate) use write::sheet_names_in;
-pub use write::{KeptOut, SheetIds, WorkbookKept, custom_view_guids, custom_workbook_views, workbook_elements, write_package_rels, write_workbook};
+pub use write::{
+    KeptOut, SheetIds, WorkbookKept, custom_view_guids, custom_workbook_views, workbook_elements, write_package_rels, write_theme_relationships,
+    write_workbook,
+};
 
 /// Most bytes kept for one workbook.
 pub const MAX_KEPT_TOTAL: usize = 256 * 1024 * 1024;

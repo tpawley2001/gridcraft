@@ -1,4 +1,4 @@
-//! `theme1.xml`: colour scheme and font scheme.
+//! `theme1.xml`: editable colours and fonts, with source format styles and extensions.
 //!
 //! In the file the colour scheme is ordered dk1, lt1, dk2, lt2, accent1–6, hlink, folHlink,
 //! while cell colour `theme` indices (and the model's `Theme.colors`) use lt1, dk1, lt2, dk2, ….
@@ -90,6 +90,93 @@ pub fn read_theme(root: &El) -> Theme {
     t
 }
 
+/// Keep only the unmodelled theme elements; colours and fonts remain editable.
+/// Offsets refer to the UTF-8 source so whitespace, prefixes and attribute spelling survive.
+pub fn keep_source_xml(t: &mut Theme, bytes: &[u8]) -> Result<(), crate::IoError> {
+    use quick_xml::{Reader, XmlVersion, events::Event};
+    let data = crate::xml::to_utf8(bytes);
+    let text = std::str::from_utf8(&data).map_err(|e| crate::IoError::Xml(e.to_string()))?;
+    let mut reader = Reader::from_str(text);
+    let mut path: Vec<String> = Vec::new();
+    let mut capture: Option<(String, usize, usize)> = None;
+    let mut element_decls = Vec::new();
+    loop {
+        let start = usize::try_from(reader.buffer_position()).map_err(|e| crate::IoError::Xml(e.to_string()))?;
+        let event = reader.read_event().map_err(|e| crate::IoError::Xml(e.to_string()))?;
+        match event {
+            Event::Start(ref e) | Event::Empty(ref e) => {
+                let name = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
+                if path.len() >= crate::xml::MAX_DEPTH {
+                    return Err(crate::IoError::Xml("theme XML nested too deeply".into()));
+                }
+                if path.is_empty() || (path.len() == 1 && name == "themeElements") {
+                    for a in e.attributes().flatten() {
+                        let key = a.key.as_ref();
+                        let prefix = if key == b"xmlns" { Some("") } else { key.strip_prefix(b"xmlns:").and_then(|p| std::str::from_utf8(p).ok()) };
+                        if let Some(prefix) = prefix {
+                            let uri = a.normalized_value(XmlVersion::Explicit1_0).map_err(|e| crate::IoError::Xml(e.to_string()))?;
+                            let decl = (prefix.to_string(), uri.into_owned());
+                            if path.is_empty() {
+                                t.xml_namespaces.push(decl);
+                            } else {
+                                element_decls.push((decl.0, esc_attr(&decl.1)));
+                            }
+                        }
+                    }
+                }
+                let slot = (path.len() == 1 && matches!(name.as_str(), "objectDefaults" | "extraClrSchemeLst" | "custClrLst" | "extLst"))
+                    || (path.len() == 2 && path.last().is_some_and(|p| p == "themeElements") && name == "fmtScheme");
+                if capture.is_none() && slot {
+                    capture = Some((name.clone(), start, path.len()));
+                }
+                if matches!(event, Event::Start(_)) {
+                    path.push(name);
+                }
+            }
+            Event::End(_) => {
+                path.pop();
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        if capture.as_ref().is_some_and(|(_, _, depth)| path.len() == *depth) {
+            let end = usize::try_from(reader.buffer_position()).map_err(|e| crate::IoError::Xml(e.to_string()))?;
+            if let Some((slot, start, _)) = capture.take()
+                && let Some(fragment) = text.get(start..end)
+            {
+                let xml = if slot == "fmtScheme" && !element_decls.is_empty() {
+                    crate::passthrough::with_decls(fragment, &element_decls)
+                } else {
+                    fragment.to_string()
+                };
+                match slot.as_str() {
+                    "fmtScheme" => t.fmt_scheme_xml = Some(xml),
+                    "objectDefaults" => t.object_defaults_xml = Some(xml),
+                    "extraClrSchemeLst" => t.extra_clr_scheme_lst_xml = Some(xml),
+                    "custClrLst" => t.cust_clr_lst_xml = Some(xml),
+                    "extLst" => t.ext_lst_xml = Some(xml),
+                    _ => {}
+                }
+            }
+        }
+    }
+    // Retaining a byte-identical fallback adds no information. Keep a new workbook's theme
+    // equal after saving and reopening, including themes imported from other file formats.
+    if t.fmt_scheme_xml.as_deref() == Some(generated_format_scheme().as_str()) {
+        t.fmt_scheme_xml = None;
+    }
+    if t.object_defaults_xml.as_deref() == Some("<a:objectDefaults/>") {
+        t.object_defaults_xml = None;
+    }
+    if t.extra_clr_scheme_lst_xml.as_deref() == Some("<a:extraClrSchemeLst/>") {
+        t.extra_clr_scheme_lst_xml = None;
+    }
+    if [&t.fmt_scheme_xml, &t.object_defaults_xml, &t.extra_clr_scheme_lst_xml, &t.cust_clr_lst_xml, &t.ext_lst_xml].iter().all(|v| v.is_none()) {
+        t.xml_namespaces.clear();
+    }
+    Ok(())
+}
+
 /// The `<a:font script typeface>` entries of a font collection, in file order. A hostile file is
 /// held to [`MAX_SCRIPT_FONTS`] entries of at most [`MAX_SCRIPT_FONT_CHARS`] characters each.
 fn script_fonts(collection: &El) -> Vec<(String, String)> {
@@ -105,7 +192,22 @@ fn script_fonts_xml(fonts: &[(String, String)]) -> String {
 pub fn write_theme(t: &Theme) -> String {
     let mut s = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
     let name = if t.name.is_empty() { "Craft" } else { &t.name };
-    let _ = write!(s, "<a:theme xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" name=\"{}\"><a:themeElements>", esc_attr(name));
+    let _ = write!(s, "<a:theme xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" name=\"{}\"", esc_attr(name));
+    for (prefix, uri) in &t.xml_namespaces {
+        if prefix == "a" {
+            continue;
+        }
+        if prefix.is_empty() {
+            let _ = write!(s, " xmlns=\"{}\"", esc_attr(uri));
+        } else {
+            let _ = write!(s, " xmlns:{}=\"{}\"", prefix, esc_attr(uri));
+        }
+    }
+    let fragments = [&t.fmt_scheme_xml, &t.object_defaults_xml, &t.extra_clr_scheme_lst_xml, &t.cust_clr_lst_xml, &t.ext_lst_xml];
+    if fragments.iter().filter_map(|x| x.as_deref()).any(|x| x.contains("r:")) && !t.xml_namespaces.iter().any(|(p, _)| p == "r") {
+        let _ = write!(s, " xmlns:r=\"{}\"", crate::write::NS_REL);
+    }
+    s.push_str("><a:themeElements>");
     let _ = write!(s, "<a:clrScheme name=\"{}\">", esc_attr(name));
     for (slot, idx) in SLOTS {
         let rgb = t.colors.get(idx).copied().unwrap_or(0) & 0xFFFFFF;
@@ -125,6 +227,27 @@ pub fn write_theme(t: &Theme) -> String {
         esc_attr(&t.minor_font_cs),
         script_fonts_xml(&t.minor_font_scripts)
     );
+    if let Some(xml) = &t.fmt_scheme_xml {
+        s.push_str(xml);
+    } else {
+        s.push_str(&generated_format_scheme());
+    }
+    s.push_str("</a:themeElements>");
+    s.push_str(t.object_defaults_xml.as_deref().unwrap_or("<a:objectDefaults/>"));
+    s.push_str(t.extra_clr_scheme_lst_xml.as_deref().unwrap_or("<a:extraClrSchemeLst/>"));
+    if let Some(xml) = &t.cust_clr_lst_xml {
+        s.push_str(xml);
+    }
+    if let Some(xml) = &t.ext_lst_xml {
+        s.push_str(xml);
+    }
+    s.push_str("</a:theme>");
+    s
+}
+
+/// Original fallback format scheme, also used to recognize our own generated defaults on import.
+fn generated_format_scheme() -> String {
+    let mut s = String::new();
     // Format scheme: three entries per list, as the schema requires.
     s.push_str("<a:fmtScheme name=\"Craft\"><a:fillStyleLst>");
     for _ in 0..3 {
@@ -145,13 +268,75 @@ pub fn write_theme(t: &Theme) -> String {
     for _ in 0..3 {
         s.push_str("<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>");
     }
-    s.push_str("</a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>");
+    s.push_str("</a:bgFillStyleLst></a:fmtScheme>");
     s
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_fragments_keep_prefixes_whitespace_and_schema_order() -> Result<(), crate::IoError> {
+        let source = r#"<d:theme xmlns:d="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:x="urn:theme:test" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><d:themeElements xmlns:y="urn:theme:local?x=1&amp;y=2"><d:clrScheme/><d:fontScheme/><d:fmtScheme name='Original'>
+<!-- retained --> <d:fillStyleLst><y:fill x:flag='yes'/></d:fillStyleLst></d:fmtScheme></d:themeElements><d:objectDefaults/><d:extraClrSchemeLst><d:extraClrScheme/></d:extraClrSchemeLst><d:custClrLst/><d:extLst><d:ext uri='test'><x:payload r:link='externalLink'/></d:ext></d:extLst></d:theme>"#;
+        let mut theme = read_theme(&crate::xml::parse(source.as_bytes())?);
+        keep_source_xml(&mut theme, source.as_bytes())?;
+        theme.minor_font = "Test Body".into();
+        let saved = write_theme(&theme);
+        let parsed = crate::xml::parse(saved.as_bytes())?;
+        assert_eq!(
+            parsed.children.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["themeElements", "objectDefaults", "extraClrSchemeLst", "custClrLst", "extLst"]
+        );
+        assert!(saved.contains("<!-- retained --> <d:fillStyleLst><y:fill x:flag='yes'/>"));
+        assert!(saved.contains(r#"xmlns:d="http://schemas.openxmlformats.org/drawingml/2006/main""#));
+        assert!(saved.contains(r#"xmlns:x="urn:theme:test""#));
+        assert!(saved.contains(r#"xmlns:y="urn:theme:local?x=1&amp;y=2""#));
+        assert!(saved.contains(r#"<a:latin typeface="Test Body"/>"#));
+        let mut again = read_theme(&parsed);
+        keep_source_xml(&mut again, saved.as_bytes())?;
+        assert_eq!(again.fmt_scheme_xml, theme.fmt_scheme_xml);
+        assert_eq!(again.ext_lst_xml, theme.ext_lst_xml);
+        Ok(())
+    }
+
+    #[test]
+    fn external_theme_relationship_keeps_its_id_across_two_saves() -> Result<(), Box<dyn std::error::Error>> {
+        use std::io::Read as _;
+        let original = crate::write_xlsx(&gridcraft_model::Workbook::new())?;
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(&original))?;
+        let mut package = crate::package::ZipOut::new();
+        for i in 0..zip.len() {
+            let mut part = zip.by_index(i)?;
+            let mut bytes = Vec::new();
+            part.read_to_end(&mut bytes)?;
+            if part.name() == "xl/theme/theme1.xml" {
+                let xml = String::from_utf8(bytes)?;
+                bytes = xml
+                    .replace("<a:objectDefaults/>", r#"<a:objectDefaults><a:spDef><a:blip r:link="externalLink"/></a:spDef></a:objectDefaults>"#)
+                    .replace("<a:theme ", r#"<a:theme xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" "#)
+                    .into_bytes();
+            }
+            package.add(part.name(), &bytes)?;
+        }
+        package.add("xl/theme/_rels/theme1.xml.rels", br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="externalLink" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="https://example.invalid/picture?a=1&amp;b=2" TargetMode="External"/></Relationships>"#)?;
+        let mut bytes = package.finish()?;
+        for _ in 0..2 {
+            let (wb, _) = crate::read_xlsx(&bytes)?;
+            bytes = crate::write_xlsx(&wb)?;
+            let mut pkg = crate::package::Package::open(&bytes)?;
+            let rels = pkg.rels("xl/theme/theme1.xml")?;
+            assert_eq!(rels.len(), 1);
+            let rel = rels.first().ok_or("missing theme relationship")?;
+            assert_eq!(rel.id, "externalLink");
+            assert!(rel.external);
+            assert_eq!(rel.target, "https://example.invalid/picture?a=1&b=2");
+            let theme = pkg.read("xl/theme/theme1.xml")?.ok_or("missing theme")?;
+            assert!(String::from_utf8(theme)?.contains(r#"r:link="externalLink""#));
+        }
+        Ok(())
+    }
 
     /// A Japanese Office theme: the heading font sets latin, ea and cs; the body font only ea.
     const EA_THEME: &str = r#"<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme"><a:themeElements><a:clrScheme name="Office"/><a:fontScheme name="Office"><a:majorFont><a:latin typeface="Calibri"/><a:ea typeface="游ゴシック"/><a:cs typeface="Arial"/></a:majorFont><a:minorFont><a:ea typeface="ＭＳ Ｐゴシック"/></a:minorFont></a:fontScheme></a:themeElements></a:theme>"#;
