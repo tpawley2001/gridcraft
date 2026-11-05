@@ -75,6 +75,7 @@ mod xls_biff5_header_footer_tests;
 mod xls_biff5_tests;
 mod xls_cell_address_names_tests;
 mod xls_cf12_tests;
+mod xls_chart_pie_angle_tests;
 mod xls_chart_tests;
 mod xls_connections_tests;
 mod xls_custom_views_tests;
