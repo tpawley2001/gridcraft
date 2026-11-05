@@ -156,6 +156,9 @@ pub struct Sheet {
     pub images: Vec<Image>,
     pub shapes: Vec<Shape>,
     pub sparklines: Vec<Sparkline>,
+    /// What-If data tables (`<f t="dataTable">`). Stub for the acceptance tests: G0119 implements it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub data_tables: Vec<DataTable>,
     /// On-sheet slicer widgets (filter a table column by clicking value tiles).
     #[serde(default)]
     pub slicers: Vec<Slicer>,
@@ -250,6 +253,7 @@ impl Sheet {
             images: vec![],
             shapes: vec![],
             sparklines: vec![],
+            data_tables: vec![],
             slicers: vec![],
             controls: vec![],
             pivots: vec![],
@@ -984,4 +988,27 @@ mod picture_map {
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<BTreeMap<CellRef, Arc<CellPicture>>, D::Error> {
         Ok(Vec::<(CellRef, Arc<CellPicture>)>::deserialize(deserializer)?.into_iter().collect())
     }
+}
+
+/// A What-If data table (Excel's `{=TABLE(row_input, column_input)}`): the result cells and its
+/// input cells as the file states them (ECMA-376 Part 1, 18.3.1.40). The result values live in
+/// the cells.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataTable {
+    /// `ref`: the result cells.
+    pub range: RangeRef,
+    /// `dt2D`: a two-variable table.
+    pub two_d: bool,
+    /// `dtr`: a one-variable table whose input values run along a row.
+    pub row: bool,
+    /// `r1`: the first input cell.
+    pub r1: Option<CellRef>,
+    /// `r2`: the second input cell (two-variable tables).
+    pub r2: Option<CellRef>,
+    /// `del1`: the first input cell was deleted.
+    pub del1: bool,
+    /// `del2`: the second input cell was deleted.
+    pub del2: bool,
+    /// `ca`: calculate always.
+    pub ca: bool,
 }
