@@ -205,6 +205,7 @@ fn table(raw: Raw, sheet: &Sheet, budget: &mut Budget) -> Result<Option<Table>, 
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,
+        sort: None,
     };
     // Column names one per column, non-empty and unique, as they will be saved.
     let names = table_columns(&t);

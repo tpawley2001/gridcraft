@@ -372,6 +372,7 @@ fn sample() -> Workbook {
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,
+        sort: None,
     });
     let png = b"\x89PNG\r\n\x1a\n0000IHDRfake".to_vec();
     s.images.push(Image {
@@ -939,6 +940,7 @@ fn writing_repairs_invalid_models() {
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,
+        sort: None,
     });
     s.cells.set(at("B2"), Cell { value: Value::Number(1.0), formula: None, style: StyleId(9999), py: None });
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
@@ -1235,6 +1237,7 @@ fn table_newline_column_and_backslash_name_survive() {
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,
+        sort: None,
     });
     s.cells.set(at("D1"), Cell::formula(Formula::new("COUNTA(\\_Prime.1[Name])")));
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
@@ -1297,6 +1300,7 @@ fn header_and_totals_table_without_data_row_survives() {
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,
+        sort: None,
     });
     let (back, report) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
     assert!(report.warnings.is_empty(), "{:?}", report.warnings);
@@ -1582,6 +1586,7 @@ fn a_table_filter_criteria_survive_a_round_trip() {
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,
+        sort: None,
     });
     // The dropdown of a table's header cell installs the sheet AutoFilter over the table's
     // range, and `data.filterBy` stores its criteria there.
@@ -1642,6 +1647,7 @@ fn a_partial_sheet_filter_is_not_folded_into_a_table() {
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,
+        sort: None,
     });
     s.autofilter =
         Some(AutoFilter { range: rr("B1:B3"), criteria: vec![(0, FilterCriterion::Values { values: vec!["East".into()], blanks: false })] });

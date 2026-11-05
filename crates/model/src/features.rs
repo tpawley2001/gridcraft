@@ -8,9 +8,11 @@ use crate::style::{Color, Style};
 
 mod pivot;
 mod print;
+mod table_sort;
 
 pub use pivot::{PivotCalcField, PivotDateGroup, PivotField, PivotFilter, PivotFunc, PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue};
 pub use print::{ChartSheetPrint, EditRange, HfPage, LineInfo, Orientation, PageOrder, PrintSettings, SheetProtection, password_hash};
+pub use table_sort::{MAX_CUSTOM_LIST_CHARS, MAX_SORT_CONDITIONS, SortBy, SortCondition, TableSort};
 
 // ---------------------------------------------------------------- tables
 
@@ -123,6 +125,9 @@ pub struct Table {
     pub table_border_dxf: Option<Style>,
     #[serde(default)]
     pub totals_row_border_dxf: Option<Style>,
+    /// Saved sort settings (`<sortState>`), kept for the round trip.
+    #[serde(default)]
+    pub sort: Option<TableSort>,
 }
 
 impl Table {

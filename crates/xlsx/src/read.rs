@@ -6,7 +6,7 @@ use std::sync::Arc;
 use gridcraft_core::{DateSystem, RangeRef};
 use gridcraft_model::{
     CalcMode, CellPicture, Chart, ChartSheetPrint, DefinedName, PhoneticString, PrintSettings, Sheet, ShowObjects, Style, StyleId, StyleTable,
-    Visibility, Workbook, WorkbookView,
+    UpdateLinks, Visibility, Workbook, WorkbookOptions, WorkbookView,
 };
 
 use crate::package::{Package, Rel};
@@ -165,8 +165,14 @@ fn read_shared_strings(cx: &mut Ctx<'_>, wb_rels: &[Rel]) -> Result<(), IoError>
     Ok(())
 }
 
+/// The theme's (heading, body) faces, when the file has a theme part for scheme-linked fonts to follow.
+fn theme_fonts(theme: &gridcraft_model::Theme, has_theme: bool) -> Option<(&str, &str)> {
+    has_theme.then_some((theme.major_font.as_str(), theme.minor_font.as_str()))
+}
+
 fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], kept: &mut crate::passthrough::KeptReader) -> Result<(), IoError> {
-    // Theme, then styles: a font's link to the theme's body font is read against it.
+    // Theme, then styles: a font's link to the theme's heading or body font is read against it.
+    let mut has_theme = false;
     if let Some(r) = find_rel(wb_rels, "theme").cloned()
         && let Some(x) = cx.optional_xml(&r.target)?
     {
@@ -177,6 +183,7 @@ fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], ke
             cx.warn(format!("theme source XML could not be kept: {e}"));
         }
         wb.theme.preserved = kept.theme(cx, &r.target);
+        has_theme = true;
     }
     // Cell checkboxes live in the feature property bags, which styles refer to.
     let mut checkboxes = Vec::new();
@@ -187,7 +194,8 @@ fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], ke
     }
     if let Some(r) = find_rel(wb_rels, "styles").cloned() {
         if let Some(x) = cx.optional_xml(&r.target)? {
-            let StylesIn { xfs, dxfs, palette, named, num_fmts } = read_styles(&x, &checkboxes, &wb.theme.minor_font);
+            let StylesIn { xfs, dxfs, palette, named, num_fmts } =
+                read_styles(&x, &checkboxes, &wb.theme.minor_font, theme_fonts(&wb.theme, has_theme));
             cx.num_fmts = num_fmts;
             // Cell format 0 is the Normal cell format: everything on it (font, number format,
             // fill, borders, alignment, protection) is what a cell without its own format shows
@@ -226,6 +234,28 @@ fn workbook_xml(pkg: &mut Package<'_>, part: &str) -> Result<El, IoError> {
     Ok(xml)
 }
 
+/// Only recognized, typed values enter the model; malformed values use schema defaults.
+fn read_workbook_options(p: &El) -> WorkbookOptions {
+    WorkbookOptions {
+        auto_compress_pictures: p.attr_bool("autoCompressPictures"),
+        discard_image_edit_data: p.attr_bool("discardImageEditData"),
+        default_image_dpi: p.attr_u32("defaultImageDpi"),
+        update_links: match p.attr("updateLinks") {
+            Some("userSet") => Some(UpdateLinks::UserSet),
+            Some("never") => Some(UpdateLinks::Never),
+            Some("always") => Some(UpdateLinks::Always),
+            _ => None,
+        },
+        show_ink_annotation: p.attr_bool("showInkAnnotation"),
+        hide_pivot_field_list: p.attr_bool("hidePivotFieldList"),
+        show_pivot_chart_filter: p.attr_bool("showPivotChartFilter"),
+        show_border_unselected_tables: p.attr_bool("showBorderUnselectedTables"),
+        check_compatibility: p.attr_bool("checkCompatibility"),
+        date_compatibility: p.attr_bool("dateCompatibility"),
+        default_theme_version: p.attr_u32("defaultThemeVersion"),
+    }
+}
+
 /// Read workbook-level settings before processing the individual sheets.
 fn read_workbook_properties(cx: &mut Ctx<'_>, wb: &mut Workbook, xml: &El) {
     if let Some(p) = xml.child("workbookPr") {
@@ -239,6 +269,7 @@ fn read_workbook_properties(cx: &mut Ctx<'_>, wb: &mut Workbook, xml: &El) {
             _ => ShowObjects::All,
         };
         wb.code_name = p.attr("codeName").filter(|n| !n.is_empty()).map(str::to_string);
+        wb.options = read_workbook_options(p);
     }
     wb.date_system = cx.date_system;
     if let Some(c) = xml.child("calcPr") {

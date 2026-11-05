@@ -181,10 +181,19 @@ pub(super) fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, out: &m
         let _ = write!(s, " connectionId=\"{c}\"");
     }
     s.push('>');
+    let mut sort = crate::table_sort::current_sort(t).map(|st| (st.in_autofilter, crate::table_sort::sort_state_xml(st, out)));
     if t.header_row && t.filter_button {
         let end_row = if t.totals_row { t.range.end.row.saturating_sub(1).max(t.range.start.row) } else { t.range.end.row };
         let r = RangeRef::new(t.range.start, CellRef::new(end_row, t.range.end.col));
-        s.push_str(&autofilter_xml(r, &t.filter, out));
+        let af = autofilter_xml(r, &t.filter, out);
+        match sort.take_if(|(nested, _)| *nested) {
+            Some((_, x)) => s.push_str(&crate::table_sort::nest_in_autofilter(&af, &x)),
+            None => s.push_str(&af),
+        }
+    }
+    // Directly under `<table>`, or there when the AutoFilter it sat in is gone.
+    if let Some((_, x)) = sort {
+        s.push_str(&x);
     }
     let _ = write!(s, "<tableColumns count=\"{}\">", cols.len());
     for (i, name) in cols.iter().enumerate() {
@@ -503,6 +512,7 @@ mod tests {
             header_row_border_dxf: None,
             table_border_dxf: None,
             totals_row_border_dxf: None,
+            sort: None,
         };
         let names = table_columns(&t);
         assert_eq!(names.len(), 10_000);

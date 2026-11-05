@@ -371,6 +371,7 @@ fn table(bytes: &[u8], ctx: Context<'_>, dxfs: &[Style], report: &mut ReadReport
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,
+        sort: None,
     };
     while let Some((id, payload)) = records.next(report)? {
         match id {

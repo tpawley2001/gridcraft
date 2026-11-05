@@ -165,6 +165,13 @@ pub fn minimal(sheet_body: &str, extra_parts: &[(&str, &str)], wb_extra_rels: &s
     make_zip(&parts)
 }
 
+mod codex_day_workbook_options;
 mod codex_day_worksheet_settings;
 mod codex_day_xlsb_cell_parameter;
 mod worksheet_settings;
+
+mod codex_day_major_font;
+mod codex_day_table_sort;
+mod font_scheme_tests;
+mod table_sort_tests;
+mod workbook_options_controls;

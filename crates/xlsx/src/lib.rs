@@ -38,6 +38,7 @@ mod sheet_write;
 mod spreadsheetml;
 mod styles;
 mod sylk;
+mod table_sort;
 mod tables;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;

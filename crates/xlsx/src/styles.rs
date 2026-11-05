@@ -93,7 +93,10 @@ pub fn read_font(e: &El, palette: &[u32]) -> Font {
         .and_then(|c| c.attr_u32("val"))
         .and_then(|v| u8::try_from(v).ok())
         .filter(|v| *v <= MAX_FONT_FAMILY && *v != DEFAULT_FONT_FAMILY);
-    f.minor = e.child_val("scheme") == Some("minor");
+    // `major` and `minor` link the face to the theme; `none`, a missing or an unknown value keep the stated face.
+    let scheme = e.child_val("scheme");
+    f.major = scheme == Some("major");
+    f.minor = scheme == Some("minor");
     f.color = opt_color(e.child("color"), palette);
     // Text 1 (dk1) is what "automatic" font colour means in practice.
     if f.color == Color::Theme(1, 0) {
@@ -314,7 +317,9 @@ fn read_xf(xf: &El, fonts: &[Font], fills: &[Fill], borders: &[Borders], fmts: &
 /// `checkboxes`: for each `xfComplement` index, whether it is a checkbox (see
 /// [`crate::feature_bags::checkbox_complements`]); empty when the file has no feature property bags.
 /// `minor_font`: the theme's body font, which fonts with `<scheme val="minor"/>` follow.
-pub fn read_styles(root: &El, checkboxes: &[bool], minor_font: &str) -> StylesIn {
+/// `theme_fonts`: the (heading, body) faces of the file's own theme part, when it has one: a
+/// scheme-linked font shows the theme's face even when its cached `<name>` is stale.
+pub fn read_styles(root: &El, checkboxes: &[bool], minor_font: &str, theme_fonts: Option<(&str, &str)>) -> StylesIn {
     let mut palette: Vec<u32> = INDEXED.to_vec();
     if let Some(ix) = root.path(&["colors", "indexedColors"]) {
         let custom: Vec<u32> = ix
@@ -339,7 +344,10 @@ pub fn read_styles(root: &El, checkboxes: &[bool], minor_font: &str) -> StylesIn
     // The scheme link only means something on a font in the body face; elsewhere it stays as a new font has it.
     let body_font = |e: &El| {
         let mut f = read_font(e, &palette);
-        f.minor |= f.name != minor_font;
+        resolve_scheme_face(&mut f, theme_fonts);
+        if !f.major {
+            f.minor |= f.name != minor_font;
+        }
         f
     };
     let fonts: Vec<Font> = root.child("fonts").map(|f| f.kids("font").map(body_font).collect()).unwrap_or_default();
@@ -361,6 +369,21 @@ pub fn read_styles(root: &El, checkboxes: &[bool], minor_font: &str) -> StylesIn
     }
     let dxfs = root.child("dxfs").map(|d| d.kids("dxf").map(|x| read_dxf(x, &palette, &fmts)).collect()).unwrap_or_default();
     StylesIn { xfs, dxfs, palette, named, num_fmts: fmts }
+}
+
+/// A font linked to the theme's heading or body font takes the theme's face (ECMA-376 §18.8.35).
+fn resolve_scheme_face(f: &mut Font, theme_fonts: Option<(&str, &str)>) {
+    let Some((major, minor)) = theme_fonts else { return };
+    let face = if f.major {
+        major
+    } else if f.minor {
+        minor
+    } else {
+        return;
+    };
+    if !face.is_empty() && f.name != face {
+        f.name = face.to_string();
+    }
 }
 
 /// One differential format (`dxf`): the style it sets over a cell's own.
@@ -388,7 +411,7 @@ fn read_dxf(x: &El, palette: &[u32], fmts: &HashMap<u32, String>) -> Style {
         st.name = has_name && name == def.name;
         st.scheme = e.child_val("scheme").map(str::to_string);
         // A differential font's scheme is in `dxf_stated`.
-        s.font = Font { name, size, minor: s.font.minor, ..f };
+        s.font = Font { name, size, minor: s.font.minor, major: s.font.major, ..f };
     }
     if let Some(n) = x.child("numFmt") {
         if let Some(code) = n.attr("formatCode") {
@@ -429,9 +452,9 @@ pub fn color_attrs(c: &Color) -> String {
     }
 }
 
-/// `minor`: the font follows the theme's body font (`<scheme val="minor"/>`). `dxf`: a
+/// `scheme`: the theme font the face follows (`<scheme val="major"/>` or `"minor"`), if any. `dxf`: a
 /// differential format's font, which writes only what it states.
-fn font_xml(f: &Font, dxf: Option<&DxfStated>, minor: bool) -> String {
+fn font_xml(f: &Font, dxf: Option<&DxfStated>, scheme: Option<&str>) -> String {
     let stated = dxf.cloned().unwrap_or_default();
     let mut s = String::from("<font>");
     for (on, said, tag) in [(f.bold, stated.bold, "b"), (f.italic, stated.italic, "i"), (f.strike, stated.strike, "strike")] {
@@ -469,8 +492,8 @@ fn font_xml(f: &Font, dxf: Option<&DxfStated>, minor: bool) -> String {
         if let Some(charset) = f.charset {
             let _ = write!(s, "<charset val=\"{charset}\"/>");
         }
-        if minor {
-            s.push_str("<scheme val=\"minor\"/>");
+        if let Some(sc) = scheme {
+            let _ = write!(s, "<scheme val=\"{sc}\"/>");
         }
     } else {
         if stated.name || f.name != def.name {
@@ -488,6 +511,18 @@ fn font_xml(f: &Font, dxf: Option<&DxfStated>, minor: bool) -> String {
     }
     s.push_str("</font>");
     s
+}
+
+/// The `<scheme>` a cell font writes: the heading link while its face is still the theme's heading
+/// font, else the body link (always tried for the Normal font) while it is the body font.
+fn font_scheme(f: &Font, normal: bool, theme: &gridcraft_model::Theme) -> Option<&'static str> {
+    if f.major && f.name == theme.major_font {
+        Some("major")
+    } else if (normal || f.minor) && f.name == theme.minor_font {
+        Some("minor")
+    } else {
+        None
+    }
 }
 
 fn fill_xml(f: &Fill, dxf: bool) -> String {
@@ -735,7 +770,7 @@ pub fn write_styles(wb: &Workbook, dxfs: &[Style], extra_fmts: &[String]) -> (St
             || st.name
             || st.scheme.is_some()
         {
-            dx.push_str(&font_xml(&d.font, Some(st), false));
+            dx.push_str(&font_xml(&d.font, Some(st), None));
         }
         if d.num_fmt != def.num_fmt {
             let id = nf.id(d.num_fmt.as_str());
@@ -773,7 +808,7 @@ pub fn write_styles(wb: &Workbook, dxfs: &[Style], extra_fmts: &[String]) -> (St
     for (i, f) in fonts.iter().enumerate() {
         // A Normal font in the theme's body face follows the theme, as Excel writes it (#805); so
         // does every other body-face font that kept the scheme link (#2517).
-        s.push_str(&font_xml(f, None, (i == 0 || f.minor) && f.name == wb.theme.minor_font));
+        s.push_str(&font_xml(f, None, font_scheme(f, i == 0, &wb.theme)));
     }
     let _ = write!(s, "</fonts><fills count=\"{}\">", fills.len());
     for f in &fills {
