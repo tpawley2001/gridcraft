@@ -18,6 +18,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use gridcraft_core::CellRef;
+use gridcraft_core::color::INDEXED;
 use gridcraft_model::{
     Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, Image, LegendPos, Orientation, PreservedPart, PreservedRel,
     PreservedSheet, PrintSettings, Series, Shape, ShapeFormat, ShapeKind, Sheet, Visibility, Workbook,
@@ -214,25 +215,45 @@ pub(super) struct Embedded {
     text_boxes: Vec<(ClientAnchor, ShapeProps, Text)>,
     shapes: Vec<(ClientAnchor, ShapeProps, ShapeKind, Option<Text>)>,
     /// The workbook's colour table, for the shapes' palette colours.
-    palette: [u32; 64],
+    palette: Palette,
+}
+
+/// A workbook's 64-entry colour table: the built-in one unless the file's PALETTE record replaces
+/// its entries.
+#[derive(Clone, Copy)]
+struct Palette([u32; 64]);
+
+impl Default for Palette {
+    fn default() -> Self {
+        Palette(INDEXED)
+    }
 }
 
 impl Embedded {
     /// An `Embedded` with the workbook's colour table (the palette the cell-format reader uses
     /// for icv: the defaults or the PALETTE record).
     pub(super) fn new(palette: [u32; 64]) -> Self {
-        Embedded { palette, ..Default::default() }
+        Embedded { palette: Palette(palette), ..Embedded::default() }
     }
     /// An MsoDrawing record: remembers its shape's anchor and properties.
     pub(super) fn drawing(&mut self, rec: &Record<'_>) {
+        self.flush_shape();
         if let Some(a) = client_anchor(&rec.parts.concat()) {
             self.anchor = Some(a);
         }
     }
 
+    /// A drawn shape whose Obj record had no TxO after it: imported with empty text.
+    fn flush_shape(&mut self) {
+        if let Some(PendingShape { anchor, props, kind }) = self.pending_shape.take() {
+            self.shapes.push((anchor, props, kind, None));
+        }
+    }
+
     /// An Obj record: a chart, picture, text box or drawn shape takes the shape's anchor; form
-        /// controls and other objects are reported.
+    /// controls and other objects are reported.
     pub(super) fn obj(&mut self, rec: &Record<'_>, report: &mut ReadReport) {
+        self.flush_shape();
         let ot = rec.parts.first().and_then(|p| u16_at(p, 4));
         let anchor = self.anchor.take();
         match ot {
@@ -291,7 +312,8 @@ impl Embedded {
     /// Places the charts, pictures, text boxes and drawn shapes on the sheet (its column widths
     /// and row heights are known by now). Pictures whose blip isn't a PNG or JPEG in the store are
     /// skipped with one warning.
-    pub(super) fn finish(self, sheet: &mut Sheet, store: &BStore, report: &mut ReadReport) {
+    pub(super) fn finish(mut self, sheet: &mut Sheet, store: &BStore, report: &mut ReadReport) {
+        self.flush_shape();
         for (anchor, mut ch) in self.charts {
             if let Some(a) = anchor {
                 ch.anchor = place(sheet, &a);
@@ -345,7 +367,7 @@ impl Embedded {
             });
         }
         // The same palette the cell-format reader resolves icv with.
-        let table = self.palette;
+        let table = self.palette.0;
         for (a, props, kind, text) in self.shapes {
             let (fill, line) = (drawing::art_color(props.fill_color, &table), drawing::art_color(props.line_color, &table));
             // A line or arrow is never filled, whatever its fill properties say.
@@ -354,7 +376,7 @@ impl Embedded {
                 Some(t) => ShapeFormat { align: t.align, anchor: t.anchor, no_fill, no_line: props.no_line, ..ShapeFormat::default() },
                 None => ShapeFormat { no_fill, no_line: props.no_line, ..ShapeFormat::default() },
             };
-            if text.is_some_and(|t| t.rotation != 0) {
+            if text.as_ref().is_some_and(|t| t.rotation != 0) {
                 rotated = true;
             }
             sheet.shapes.push(Shape {
