@@ -562,6 +562,30 @@ fn holds_written_text(tb: &El, src: &str) -> bool {
     crate::xml::parse(written.as_bytes()).is_ok_and(|w| body_text(&w) == body_text(tb))
 }
 
+/// A shape's `a:bodyPr`: text rotation, direction, wrapping and insets as read (absent ones stay
+/// absent) and the vertical anchor attribute `anchor`.
+fn write_body_pr(s: &mut String, f: &ShapeFormat, anchor: &str) {
+    s.push_str("<a:bodyPr");
+    if let Some(r) = f.text_rotation {
+        let _ = write!(s, " rot=\"{r}\"");
+    }
+    if let Some(v) = f.vert {
+        let _ = write!(s, " vert=\"{}\"", v.xml());
+    }
+    // Square wrapping is the schema default, so an absent `wrap` stays absent.
+    match f.wrap {
+        Some(ShapeTextWrap::None) => s.push_str(" wrap=\"none\""),
+        Some(ShapeTextWrap::Square) => s.push_str(" wrap=\"square\""),
+        None => {}
+    }
+    for (k, v) in [("lIns", f.inset_left), ("tIns", f.inset_top), ("rIns", f.inset_right), ("bIns", f.inset_bottom)] {
+        if let Some(v) = v {
+            let _ = write!(s, " {k}=\"{v}\"");
+        }
+    }
+    let _ = write!(s, " rtlCol=\"0\"{anchor}/>");
+}
+
 /// The opening `<xdr:twoCellAnchor>` for a model anchor, carrying Excel's `editAs` when the mode
 /// is not the default: omitted for "Move and size with cells", `editAs="oneCell"` for "Move but
 /// don't size", `editAs="absolute"` for "Don't move or size". (Excel writes pictures this way;
@@ -781,25 +805,9 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                         None if sh.kind == ShapeKind::TextBox => " anchor=\"t\"",
                         None => "",
                     };
-                    s.push_str("<xdr:txBody><a:bodyPr");
-                    if let Some(r) = f.text_rotation {
-                        let _ = write!(s, " rot=\"{r}\"");
-                    }
-                    if let Some(v) = f.vert {
-                        let _ = write!(s, " vert=\"{}\"", v.xml());
-                    }
-                    // Square wrapping is the schema default, so an absent `wrap` stays absent.
-                    match f.wrap {
-                        Some(ShapeTextWrap::None) => s.push_str(" wrap=\"none\""),
-                        Some(ShapeTextWrap::Square) => s.push_str(" wrap=\"square\""),
-                        None => {}
-                    }
-                    for (k, v) in [("lIns", f.inset_left), ("tIns", f.inset_top), ("rIns", f.inset_right), ("bIns", f.inset_bottom)] {
-                        if let Some(v) = v {
-                            let _ = write!(s, " {k}=\"{v}\"");
-                        }
-                    }
-                    let _ = write!(s, " rtlCol=\"0\"{anchor}/><a:lstStyle/>");
+                    s.push_str("<xdr:txBody>");
+                    write_body_pr(&mut s, f, anchor);
+                    s.push_str("<a:lstStyle/>");
                     let algn = match f.align {
                         None => "",
                         Some(ShapeTextAlign::Left) => " algn=\"l\"",
