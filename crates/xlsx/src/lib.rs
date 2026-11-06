@@ -51,8 +51,6 @@ mod xlsb;
 mod xml;
 
 #[cfg(test)]
-mod data_table_edge_tests;
-#[cfg(test)]
 mod tests;
 
 use gridcraft_core::DateSystem;
