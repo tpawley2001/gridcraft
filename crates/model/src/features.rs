@@ -611,8 +611,8 @@ impl Default for ChartDataTable {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Chart {
     /// Opaque DrawingML theme override copied with this chart; preserved without rendering.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub theme_override: Option<Vec<u8>>,
+    #[serde(default, with = "crate::b64::opt", skip_serializing_if = "Option::is_none")]
+    pub theme_override: Option<std::sync::Arc<Vec<u8>>>,
     /// Hidden drawing objects stay in the workbook but are not displayed or printed.
     #[serde(default)]
     pub hidden: bool,

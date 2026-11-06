@@ -414,7 +414,7 @@ fn write_sheet_drawing(
                     out.part(
                         &format!("xl/theme/themeOverride{k}.xml"),
                         Some("application/vnd.openxmlformats-officedocument.themeOverride+xml"),
-                        bytes.clone(),
+                        bytes.as_ref().clone(),
                     );
                     crels.add("themeOverride", &format!("../theme/themeOverride{k}.xml"));
                 }
