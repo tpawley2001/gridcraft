@@ -185,6 +185,7 @@ not kept from the source file (the reader assigns workbook object ids); Excel do
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-06 | minor | XLSX What-If data tables (`<f t="dataTable">`, ECMA-376 18.3.1.40) survive open + save: every attribute (`ref`, `dt2D`, `dtr`, `r1`, `r2`, `del1`, `del2`, `ca`) is read onto the sheet and written back on the top-left result cell, so a table stays a table instead of turning into static values; the results are not recalculated (`data_table_formula_tests.rs`). |
 | 2026-11-05 | minor | XLSX What-If data tables (`<f t="dataTable">`, ECMA-376 18.3.1.40) survive open + save: every attribute (`ref`, `dt2D`, `dtr`, `r1`, `r2`, `del1`, `del2`, `ca`) is read onto the sheet and written back on the top-left result cell, so a table stays a table instead of turning into static values; the results are not recalculated (`data_table_formula_tests.rs`). |
 | 2026-11-05 | minor | `.xls` import renames defined names that aren't valid in an `.xlsx` workbook (a space, a leading `?` or digit, a `-`) the way Excel renames cell-address names, with one warning per file, so the saved file opens without repairs; formulas keep using the names, and a name that can't be made valid is skipped |
 | 2026-11-05 | minor | Manager and Hyperlink base document properties survive XLSX open + save (also read from XLSB); `.xls` Manager (DocumentSummaryInformation PID 14) survives Save As `.xlsx`. `_PID_LINKBASE` remains unsupported. |
