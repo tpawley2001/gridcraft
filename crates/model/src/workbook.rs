@@ -46,6 +46,34 @@ pub enum UpdateLinks {
     Always,
 }
 
+/// `workbookProtection` settings besides the structure lock ([`Workbook::protected_structure`]
+/// and [`Workbook::structure_password`] stay the authority for it).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorkbookLocks {
+    /// An explicit `lockStructure="0"` (kept as written when the structure isn't protected).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lock_structure: Option<bool>,
+    /// `lockWindows`, when the attribute was present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lock_windows: Option<bool>,
+    /// `lockRevision`, when the attribute was present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lock_revision: Option<bool>,
+    /// The workbook password while the structure isn't protected (it then guards only windows).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workbook_password: Option<crate::PasswordHash>,
+    /// The revisions password (`revisionsPassword` or the `revisions…` hash group).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revisions_password: Option<crate::PasswordHash>,
+}
+
+impl WorkbookLocks {
+    pub fn is_default(&self) -> bool {
+        *self == WorkbookLocks::default()
+    }
+}
+
 /// Additional XLSX `workbookPr` settings (ECMA-376 Part 1 §18.2.28).
 /// `None` leaves the attribute absent, using the schema default; `Some` retains
 /// an explicit value, including false and defaults. These are preservation settings.
@@ -288,6 +316,10 @@ pub struct Workbook {
     /// Password of the structure protection (XLSX `workbookProtection`), never the password.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structure_password: Option<crate::PasswordHash>,
+    /// The rest of `workbookProtection`: window and revision locks and passwords that structure
+    /// protection doesn't own, kept across an open + save (not enforced).
+    #[serde(default, skip_serializing_if = "WorkbookLocks::is_default")]
+    pub locks: WorkbookLocks,
     /// Custom fill lists (Options › Custom Lists) beyond the built-in ones.
     pub custom_lists: Vec<Vec<String>>,
     /// Named cell styles (Cell Styles gallery): name → style.
@@ -427,6 +459,7 @@ impl Workbook {
             props: DocProps::default(),
             protected_structure: false,
             structure_password: None,
+            locks: WorkbookLocks::default(),
             custom_lists: vec![],
             cell_styles: vec![],
             phonetics: vec![],
@@ -648,6 +681,26 @@ fn spell_calls(e: Expr, lambdas: &[String]) -> Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workbook_locks_are_additive_in_json() -> Result<(), Box<dyn std::error::Error>> {
+        let mut wb = Workbook::new();
+        assert!(wb.locks.is_default());
+        wb.locks = WorkbookLocks {
+            lock_structure: Some(false),
+            lock_windows: Some(true),
+            lock_revision: Some(false),
+            workbook_password: Some(crate::PasswordHash::Legacy(0xCBEB)),
+            revisions_password: Some(crate::PasswordHash::Legacy(0x1234)),
+        };
+        let json = serde_json::to_string(&wb)?;
+        assert_eq!(serde_json::from_str::<Workbook>(&json)?.locks, wb.locks);
+        // JSON written before the field existed still loads.
+        let mut value: serde_json::Value = serde_json::from_str(&json)?;
+        value.as_object_mut().ok_or("none")?.remove("locks");
+        assert!(serde_json::from_value::<Workbook>(value)?.locks.is_default());
+        Ok(())
+    }
 
     #[test]
     fn phonetics_are_additive_in_json() -> Result<(), Box<dyn std::error::Error>> {

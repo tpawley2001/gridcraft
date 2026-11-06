@@ -192,3 +192,61 @@ mod workbook_options_controls;
 mod worksheet_settings;
 
 mod codex_day_protection;
+
+mod workbook_protection_locks {
+    use super::minimal;
+    use crate::package::Package;
+    use crate::xml::{El, parse};
+    use crate::{read_xlsx, write_xlsx};
+
+    fn saved(body: &str) -> El {
+        let (wb, _) = read_xlsx(&minimal("<sheetData/>", &[], "", body)).unwrap();
+        let bytes = write_xlsx(&wb).unwrap();
+        parse(&Package::open(&bytes).unwrap().read("xl/workbook.xml").unwrap().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn invalid_lock_booleans_are_omitted() {
+        let x = saved(r#"<workbookProtection lockWindows="maybe" lockRevision="1"/>"#);
+        let p = x.child("workbookProtection").unwrap();
+        assert!(p.attr("lockWindows").is_none());
+        assert!(p.attr("lockStructure").is_none());
+        assert_eq!(p.attr_bool("lockRevision"), Some(true));
+    }
+
+    #[test]
+    fn lowercase_legacy_hex_is_written_canonical() {
+        let x = saved(r#"<workbookProtection lockWindows="1" workbookPassword="cbeb" revisionsPassword="abcd"/>"#);
+        let p = x.child("workbookProtection").unwrap();
+        assert_eq!(p.attr("workbookPassword"), Some("CBEB"));
+        assert_eq!(p.attr("revisionsPassword"), Some("ABCD"));
+    }
+
+    #[test]
+    fn malformed_password_never_unprotects() {
+        let (wb, _) = read_xlsx(&minimal(
+            "<sheetData/>",
+            &[],
+            "",
+            r#"<workbookProtection lockStructure="1" lockRevision="1" workbookPassword="zz" revisionsPassword="q"/>"#,
+        ))
+        .unwrap();
+        assert!(wb.protected_structure);
+        assert!(!wb.structure_password.as_ref().unwrap().verify("").unwrap_or(false));
+        assert!(!wb.locks.revisions_password.as_ref().unwrap().verify("").unwrap_or(false));
+        assert_eq!(wb.locks.lock_revision, Some(true));
+    }
+
+    #[test]
+    fn structure_lock_is_written_once_with_window_lock() {
+        let x = saved(r#"<workbookProtection lockStructure="1" lockWindows="1" workbookPassword="CBEB"/><bookViews><workbookView/></bookViews>"#);
+        assert_eq!(x.kids("workbookProtection").count(), 1);
+        let p = x.child("workbookProtection").unwrap();
+        assert_eq!(p.attr_bool("lockStructure"), Some(true));
+        assert_eq!(p.attr_bool("lockWindows"), Some(true));
+        assert_eq!(p.attr("workbookPassword"), Some("CBEB"));
+        let names: Vec<&str> = x.children.iter().map(|c| c.name.as_str()).collect();
+        let at = |n: &str| names.iter().position(|c| *c == n).unwrap();
+        assert!(at("workbookProtection") < at("bookViews"));
+    }
+}

@@ -455,10 +455,7 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
     let file_version = crate::passthrough::workbook_elements(wb, "fileVersion");
     w.push_str(if file_version.is_empty() { "<fileVersion appName=\"gridcraft\"/>" } else { &file_version });
     w.push_str(&workbook_pr(wb));
-    if wb.protected_structure {
-        let pw = wb.structure_password.as_ref().map(|h| crate::sheet_write::password_attrs(h, "workbook")).unwrap_or_default();
-        let _ = write!(w, "<workbookProtection{pw} lockStructure=\"1\"/>");
-    }
+    w.push_str(&workbook_protection(wb));
     let _ = write!(w, "<bookViews><workbookView activeTab=\"{}\"", kept.file_index(active));
     w.push_str(&workbook_view_attrs(wb));
     let _ = write!(w, "/></bookViews><sheets>{sheets_xml}</sheets>");
@@ -813,4 +810,30 @@ mod table_id_tests {
         assert_eq!(xml.attr_u32("id"), Some(7));
         assert!(saved.read("xl/tables/table2.xml").unwrap().is_none());
     }
+}
+
+/// `<workbookProtection>` (ECMA-376 Part 1 §18.2.29): the structure lock from
+/// [`Workbook::protected_structure`], plus the window and revision locks and passwords kept from
+/// the file. Empty when there is nothing to write.
+fn workbook_protection(wb: &Workbook) -> String {
+    let locks = &wb.locks;
+    if !wb.protected_structure && locks.is_default() {
+        return String::new();
+    }
+    let workbook_password = if wb.protected_structure { wb.structure_password.as_ref() } else { locks.workbook_password.as_ref() };
+    let mut w = String::from("<workbookProtection");
+    if let Some(h) = workbook_password {
+        w.push_str(&crate::sheet_write::password_attrs(h, "workbook"));
+    }
+    if let Some(h) = &locks.revisions_password {
+        w.push_str(&crate::sheet_write::password_attrs(h, "revisions"));
+    }
+    let lock_structure = if wb.protected_structure { Some(true) } else { locks.lock_structure.filter(|on| !on) };
+    for (name, on) in [("lockStructure", lock_structure), ("lockWindows", locks.lock_windows), ("lockRevision", locks.lock_revision)] {
+        if let Some(on) = on {
+            let _ = write!(w, " {name}=\"{}\"", u8::from(on));
+        }
+    }
+    w.push_str("/>");
+    w
 }
