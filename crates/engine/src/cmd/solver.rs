@@ -333,3 +333,5 @@ fn run(s: &mut Session, p: &Json) -> Result<Json> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_alldifferent;
