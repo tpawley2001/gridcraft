@@ -360,7 +360,8 @@ fn note_shape(e: &El, cd: &El) -> NoteShape {
         .and_then(|w| w.trim().strip_suffix("pt")?.trim().parse::<f64>().ok())
         .filter(|w| w.is_finite() && (0.0..=1584.0).contains(w));
     NoteShape {
-        fill_color: e.attr("fillcolor").and_then(vml_hex_color),
+        // The usual note yellow is what a note without a kept colour writes.
+        fill_color: e.attr("fillcolor").and_then(vml_hex_color).filter(|c| c != "#ffffe1"),
         stroke_color: e.attr("strokecolor").and_then(vml_hex_color),
         stroke_weight_pt: weight,
         filled: on_off("filled"),
