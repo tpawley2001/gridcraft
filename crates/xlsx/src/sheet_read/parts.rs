@@ -182,6 +182,9 @@ pub fn read_autofilter(cx: &mut Ctx<'_>, e: &El) -> Option<AutoFilter> {
     Some(AutoFilter { range, criteria })
 }
 
+/// Longest table `comment` Excel accepts, in characters.
+pub(crate) const TABLE_COMMENT_MAX: usize = 32767;
+
 pub fn read_table(cx: &mut Ctx<'_>, x: &El) -> Option<Table> {
     let range = x.attr("ref").and_then(RangeRef::parse)?;
     let name = x.attr("displayName").or_else(|| x.attr("name")).unwrap_or("Table").to_string();
@@ -258,6 +261,11 @@ pub fn read_table(cx: &mut Ctx<'_>, x: &El) -> Option<Table> {
         table_border_dxf: table_dxf(cx, x, "tableBorderDxfId"),
         totals_row_border_dxf: table_dxf(cx, x, "totalsRowBorderDxfId"),
         sort: crate::table_sort::read_table_sort(cx, x, range),
+        // ST_Xstring limited to 32767 characters; a longer comment is dropped, not cut.
+        comment: x.attr("comment").map(xml::decode_xstring).filter(|c| c.chars().count() <= TABLE_COMMENT_MAX),
+        insert_row: x.attr_bool("insertRow"),
+        insert_row_shift: x.attr_bool("insertRowShift"),
+        published: x.attr_bool("published"),
     })
 }
 

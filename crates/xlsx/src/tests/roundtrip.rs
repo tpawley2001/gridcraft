@@ -375,6 +375,10 @@ fn sample() -> Workbook {
         table_border_dxf: None,
         totals_row_border_dxf: None,
         sort: None,
+        comment: None,
+        insert_row: None,
+        insert_row_shift: None,
+        published: None,
     });
     let png = b"\x89PNG\r\n\x1a\n0000IHDRfake".to_vec();
     s.images.push(Image {
@@ -945,6 +949,10 @@ fn writing_repairs_invalid_models() {
         table_border_dxf: None,
         totals_row_border_dxf: None,
         sort: None,
+        comment: None,
+        insert_row: None,
+        insert_row_shift: None,
+        published: None,
     });
     s.cells.set(at("B2"), Cell { value: Value::Number(1.0), formula: None, style: StyleId(9999), py: None });
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
@@ -1242,6 +1250,10 @@ fn table_newline_column_and_backslash_name_survive() {
         table_border_dxf: None,
         totals_row_border_dxf: None,
         sort: None,
+        comment: None,
+        insert_row: None,
+        insert_row_shift: None,
+        published: None,
     });
     s.cells.set(at("D1"), Cell::formula(Formula::new("COUNTA(\\_Prime.1[Name])")));
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
@@ -1305,6 +1317,10 @@ fn header_and_totals_table_without_data_row_survives() {
         table_border_dxf: None,
         totals_row_border_dxf: None,
         sort: None,
+        comment: None,
+        insert_row: None,
+        insert_row_shift: None,
+        published: None,
     });
     let (back, report) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
     assert!(report.warnings.is_empty(), "{:?}", report.warnings);
@@ -1591,6 +1607,10 @@ fn a_table_filter_criteria_survive_a_round_trip() {
         table_border_dxf: None,
         totals_row_border_dxf: None,
         sort: None,
+        comment: None,
+        insert_row: None,
+        insert_row_shift: None,
+        published: None,
     });
     // The dropdown of a table's header cell installs the sheet AutoFilter over the table's
     // range, and `data.filterBy` stores its criteria there.
@@ -1652,6 +1672,10 @@ fn a_partial_sheet_filter_is_not_folded_into_a_table() {
         table_border_dxf: None,
         totals_row_border_dxf: None,
         sort: None,
+        comment: None,
+        insert_row: None,
+        insert_row_shift: None,
+        published: None,
     });
     s.autofilter =
         Some(AutoFilter { range: rr("B1:B3"), criteria: vec![(0, FilterCriterion::Values { values: vec!["East".into()], blanks: false })] });
@@ -1922,4 +1946,15 @@ fn remove_personal_information_is_kept_and_honoured() {
     let book = pkg.read_xml("xl/workbook.xml").unwrap().unwrap();
     assert_eq!(book.child("workbookPr").and_then(|p| p.attr("filterPrivacy")), None);
     assert!(String::from_utf8(pkg.read("docProps/core.xml").unwrap().unwrap()).unwrap().contains("Jane Example"));
+}
+
+#[test]
+fn oversize_table_comment_is_omitted_not_truncated() {
+    let mut wb = sample();
+    let t = wb.sheets.iter_mut().find_map(|s| Arc::make_mut(s).tables.first_mut()).unwrap();
+    t.comment = Some("x".repeat(32768));
+    t.published = Some(false);
+    let x = String::from_utf8(Package::open(&write_xlsx(&wb).unwrap()).unwrap().read("xl/tables/table1.xml").unwrap().unwrap()).unwrap();
+    assert!(!x.contains("comment="));
+    assert!(x.contains(r#"published="0""#));
 }

@@ -131,6 +131,16 @@ pub struct Table {
     /// Saved sort settings (`<sortState>`), kept for the round trip.
     #[serde(default)]
     pub sort: Option<TableSort>,
+    /// The table's `comment` (at most 32767 characters), kept for the round trip.
+    #[serde(default)]
+    pub comment: Option<String>,
+    /// `insertRow`, `insertRowShift` and `published` as saved; `None` when the file didn't say.
+    #[serde(default)]
+    pub insert_row: Option<bool>,
+    #[serde(default)]
+    pub insert_row_shift: Option<bool>,
+    #[serde(default)]
+    pub published: Option<bool>,
 }
 
 impl Table {
@@ -1295,6 +1305,13 @@ mod trendline_forecast_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn table_json_without_metadata_still_reads() {
+        let json = r#"{"id":1,"name":"T","range":{"start":{"row":0,"col":0},"end":{"row":1,"col":0}},"header_row":true,"totals_row":false,"columns":[],"style":"","banded_rows":false,"banded_cols":false,"first_col":false,"last_col":false,"filter_button":false}"#;
+        let t: Table = serde_json::from_str(json).expect("old table JSON");
+        assert_eq!((t.comment, t.insert_row, t.insert_row_shift, t.published), (None, None, None, None));
+    }
 
     #[test]
     fn chart_without_hole_size_keeps_the_legacy_hole() {
