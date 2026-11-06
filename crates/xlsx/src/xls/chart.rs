@@ -84,7 +84,7 @@ const OT_CHART: u16 = 0x0005;
 const OT_TEXT_BOX: u16 = 0x0006;
 const OT_PICTURE: u16 = 0x0008;
 const OT_NOTE: u16 = 0x0019;
-/// A line, rectangle, oval, Office Art object, arc and polygon.
+/// A line, rectangle, oval and Office Art object (the drawn shapes that are imported).
 const OT_LINE: u16 = 0x0001;
 const OT_RECTANGLE: u16 = 0x0002;
 const OT_OVAL: u16 = 0x0003;
@@ -92,7 +92,7 @@ const OT_OFFICE_ART: u16 = 0x001E;
 /// Form controls: button, check box, option button, edit box, label, spinner, scroll bar, list,
 /// group box and drop-down (an AutoFilter arrow is a drop-down too).
 const OT_FORM_CONTROLS: [u16; 10] = [0x0007, 0x000B, 0x000C, 0x000D, 0x000E, 0x0010, 0x0011, 0x0012, 0x0013, 0x0014];
-/// OfficeArtClientAnchorSheet record type ([MS-LS] 2.5.193).
+/// OfficeArtClientAnchorSheet record type ([MS-XLS] 2.5.193).
 const CLIENT_ANCHOR: u16 = 0xF010;
 
 /// Whether a BOF record opens a chart substream.
@@ -235,10 +235,12 @@ impl Embedded {
     pub(super) fn new(palette: [u32; 64]) -> Self {
         Embedded { palette: Palette(palette), ..Embedded::default() }
     }
-    /// An MsoDrawing record: remembers its shape's anchor and properties.
+    /// An MsoDrawing record: remembers its shape's anchor and properties. Only a record that
+    /// starts a new shape (it carries an anchor) ends the pending drawn shape: the one holding a
+    /// shape's text-box client data comes between its Obj and its TxO.
     pub(super) fn drawing(&mut self, rec: &Record<'_>) {
-        self.flush_shape();
         if let Some(a) = client_anchor(&rec.parts.concat()) {
+            self.flush_shape();
             self.anchor = Some(a);
         }
     }
