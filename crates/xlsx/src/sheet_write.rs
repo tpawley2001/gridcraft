@@ -408,6 +408,16 @@ fn write_sheet_drawing(
                 let mut crels = Rels::default();
                 crels.add_uri(crate::chartex::REL_STYLE, &format!("style{n}.xml"));
                 crels.add_uri(crate::chartex::REL_COLORS, &format!("colors{n}.xml"));
+                if let Some(bytes) = &ch.theme_override {
+                    out.theme_overrides = out.theme_overrides.saturating_add(1);
+                    let k = out.theme_overrides;
+                    out.part(
+                        &format!("xl/theme/themeOverride{k}.xml"),
+                        Some("application/vnd.openxmlformats-officedocument.themeOverride+xml"),
+                        bytes.clone(),
+                    );
+                    crels.add("themeOverride", &format!("../theme/themeOverride{k}.xml"));
+                }
                 out.part(&format!("xl/charts/_rels/chart{n}.xml.rels"), None, crels.xml().into_bytes());
                 drels.add("chart", &format!("../charts/chart{n}.xml"))
             };

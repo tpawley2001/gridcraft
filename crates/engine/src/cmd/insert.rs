@@ -850,6 +850,7 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
         }
     });
     let chart = Chart {
+        theme_override: None,
         hidden: false,
         id,
         kind,

@@ -23,6 +23,69 @@ mod blip_ext;
 pub use blip_ext::write as write_blip_ext;
 mod ink;
 
+/// The chart's own theme is optional and stays opaque (ECMA-376 Part 1 §14.2.8).
+fn read_theme_override(cx: &mut Ctx<'_>, chart_part: &str) -> Result<Option<Vec<u8>>, IoError> {
+    let Some(rel) = cx.pkg.rels(chart_part)?.into_iter().find(|r| r.kind == "themeOverride" && !r.external) else {
+        return Ok(None);
+    };
+    match cx.pkg.read_optional_limited(&rel.target, 4 * 1024 * 1024) {
+        Ok(Some(bytes)) if valid_theme_override(&bytes) => Ok(Some(bytes)),
+        Ok(None) => Ok(None),
+        Ok(Some(_)) => {
+            cx.warn(format!("chart theme override {} was dropped: invalid XML or root element", rel.target));
+            Ok(None)
+        }
+        Err(e) => {
+            cx.warn(format!("chart theme override {} was dropped: {e}", rel.target));
+            Ok(None)
+        }
+    }
+}
+
+fn valid_theme_override(bytes: &[u8]) -> bool {
+    use quick_xml::events::Event;
+
+    // The general XML reader recovers truncated parts. Overrides must instead be complete
+    // documents, with one root, matching end tags and bounded nesting.
+    let data = crate::xml::to_utf8(bytes);
+    let mut reader = quick_xml::Reader::from_reader(data.as_ref());
+    let mut depth = 0usize;
+    let mut seen_root = false;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Empty(e)) if depth == 0 => {
+                if seen_root || e.local_name().as_ref() != b"themeOverride" || e.attributes().any(|a| a.is_err()) {
+                    return false;
+                }
+                seen_root = true;
+            }
+            Ok(Event::Start(e)) if depth == 0 => {
+                if seen_root || e.local_name().as_ref() != b"themeOverride" || e.attributes().any(|a| a.is_err()) {
+                    return false;
+                }
+                seen_root = true;
+                depth = 1;
+            }
+            Ok(Event::Start(e)) => {
+                if e.attributes().any(|a| a.is_err()) {
+                    return false;
+                }
+                depth = depth.saturating_add(1);
+                if depth > 256 {
+                    return false;
+                }
+            }
+            Ok(Event::Empty(e)) if e.attributes().any(|a| a.is_err()) => return false,
+            Ok(Event::CData(_) | Event::GeneralRef(_)) if depth == 0 => return false,
+            Ok(Event::End(_)) => depth = depth.saturating_sub(1),
+            Ok(Event::Text(t)) if depth == 0 && !t.as_ref().iter().all(u8::is_ascii_whitespace) => return false,
+            Ok(Event::Eof) => return seen_root && depth == 0,
+            Err(_) => return false,
+            _ => {}
+        }
+    }
+}
+
 // ---------------------------------------------------------------- reading
 
 fn emu_px(v: Option<i64>) -> f32 {
@@ -244,6 +307,9 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                             let chartex = uri.contains("chartex");
                             match if chartex { crate::chartex::read_chartex(&cx_xml) } else { crate::chart::read_chart(&cx_xml) } {
                                 Some(mut ch) => {
+                                    if !chartex {
+                                        ch.theme_override = read_theme_override(cx, &target)?;
+                                    }
                                     ch.id = cx.next_object_id();
                                     ch.anchor = anchor;
                                     ch.hidden = obj.path(&["nvGraphicFramePr", "cNvPr"]).is_some_and(|p| p.flag("hidden", false));
@@ -799,5 +865,47 @@ pub fn image_content_type(ext: &str) -> &'static str {
         "wmf" => "image/x-wmf",
         "webp" => "image/webp",
         _ => "image/png",
+    }
+}
+
+#[cfg(test)]
+mod theme_override_tests {
+    use super::{read_theme_override, valid_theme_override};
+    use crate::package::Package;
+    use crate::read::Ctx;
+    use std::io::{Cursor, Write};
+
+    #[test]
+    fn override_requires_one_complete_xml_root() {
+        assert!(valid_theme_override(b"<a:themeOverride xmlns:a=\"urn:test\"/>"));
+        assert!(valid_theme_override(b"<themeOverride><fontScheme/></themeOverride>"));
+        for bad in [
+            "<themeOverride>",
+            "<themeOverride><fontScheme></themeOverride>",
+            "<themeOverride/><themeOverride/>",
+            "<themeOverride/>trailing text",
+            "<themeOverride bad/>",
+            "<themeOverride><![CDATA[unfinished",
+        ] {
+            assert!(!valid_theme_override(bad.as_bytes()), "{bad}");
+        }
+    }
+
+    #[test]
+    fn override_size_limit_warns_and_keeps_the_workbook_readable() {
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file("xl/charts/_rels/chart1.xml.rels", zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(br#"<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/themeOverride" Target="../theme/themeOverride1.xml"/></Relationships>"#).unwrap();
+        zip.start_file("xl/theme/themeOverride1.xml", zip::write::SimpleFileOptions::default()).unwrap();
+        let mut payload = b"<themeOverride>".to_vec();
+        payload.resize(4 * 1024 * 1024, b' ');
+        payload.extend_from_slice(b"</themeOverride>");
+        zip.write_all(&payload).unwrap();
+        let bytes = zip.finish().unwrap().into_inner();
+        let mut cx = Ctx::new(Package::open(&bytes).unwrap());
+        assert!(read_theme_override(&mut cx, "xl/charts/chart1.xml").unwrap().is_none());
+        assert_eq!(cx.report.warnings.len(), 1);
+        assert!(cx.report.warnings.first().unwrap().contains("theme override"));
+        assert!(cx.pkg.read("xl/charts/_rels/chart1.xml.rels").unwrap().is_some());
     }
 }

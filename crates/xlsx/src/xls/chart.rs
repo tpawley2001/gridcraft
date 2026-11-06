@@ -994,6 +994,7 @@ impl Parser {
             self.scale.x = AxisScale::default();
         }
         Ok(Chart {
+            theme_override: None,
             hidden: false,
             id: 0,
             kind,

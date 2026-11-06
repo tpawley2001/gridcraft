@@ -441,6 +441,7 @@ fn sample() -> Workbook {
         },
     });
     let base_chart = Chart {
+        theme_override: None,
         hidden: false,
         id: 20,
         kind: ChartKind::ColumnClustered,
