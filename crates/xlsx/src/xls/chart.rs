@@ -83,7 +83,15 @@ const OT_CHART: u16 = 0x0005;
 const OT_TEXT_BOX: u16 = 0x0006;
 const OT_PICTURE: u16 = 0x0008;
 const OT_NOTE: u16 = 0x0019;
-/// OfficeArtClientAnchorSheet record type ([MS-XLS] 2.5.193).
+/// A line, rectangle, oval, Office Art object, arc and polygon.
+const OT_LINE: u16 = 0x0001;
+const OT_RECTANGLE: u16 = 0x0002;
+const OT_OVAL: u16 = 0x0003;
+const OT_OFFICE_ART: u16 = 0x001E;
+/// Form controls: button, check box, option button, edit box, label, spinner, scroll bar, list,
+/// group box and drop-down (an AutoFilter arrow is a drop-down too).
+const OT_FORM_CONTROLS: [u16; 10] = [0x0007, 0x000B, 0x000C, 0x000D, 0x000E, 0x0010, 0x0011, 0x0012, 0x0013, 0x0014];
+/// OfficeArtClientAnchorSheet record type ([MS-LS] 2.5.193).
 const CLIENT_ANCHOR: u16 = 0xF010;
 
 /// Whether a BOF record opens a chart substream.
@@ -131,7 +139,9 @@ fn client_anchor(data: &[u8]) -> Option<(ClientAnchor, ShapeProps)> {
             continue;
         }
         if ty == drawing::FSP {
-            props = ShapeProps::default();
+            // The instance is the shape type ([MS-ODRAW] 2.2.40); the properties that follow it
+            // are its shape's.
+            props = ShapeProps { shape_type: ver >> 4, ..ShapeProps::default() };
         } else if ty == drawing::FOPT || ty == drawing::TERTIARY_FOPT {
             let end = body.saturating_add(usize::try_from(len).unwrap_or(usize::MAX)).min(data.len());
             drawing::fopt(ver >> 4, data.get(body..end).unwrap_or_default(), &mut props);
@@ -155,7 +165,40 @@ struct PendingTextBox {
     props: ShapeProps,
 }
 
-/// A worksheet's embedded charts, pictures and text boxes, collected while its substream is read.
+/// A drawn shape, before its TxO record (if any) has been read.
+struct PendingShape {
+    anchor: ClientAnchor,
+    props: ShapeProps,
+    kind: ShapeKind,
+}
+
+/// The model kind of a drawn shape: the Obj `ot` for the BIFF8 kinds, the OfficeArtFSP instance
+/// (the shape type) for an Office Art object. `None` is a kind that isn't imported.
+fn shape_kind(ot: u16, props: &ShapeProps) -> Option<ShapeKind> {
+    // A line with an arrowhead is an arrow; a straight connector (32) is a line.
+    let line = if props.arrow { ShapeKind::Arrow } else { ShapeKind::Line };
+    match ot {
+        OT_LINE => Some(line),
+        OT_RECTANGLE => Some(match props.shape_type {
+            2 => ShapeKind::RoundedRectangle,
+            _ => ShapeKind::Rectangle,
+        }),
+        OT_OVAL => Some(ShapeKind::Ellipse),
+        OT_OFFICE_ART => match props.shape_type {
+            1 => Some(ShapeKind::Rectangle),
+            2 => Some(ShapeKind::RoundedRectangle),
+            3 => Some(ShapeKind::Ellipse),
+            5 => Some(ShapeKind::Triangle),
+            20 => Some(line),
+            32 => Some(line),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A worksheet's embedded charts, pictures, text boxes and drawn shapes, collected while its
+/// substream is read.
 #[derive(Default)]
 pub(super) struct Embedded {
     /// The last drawing shape's anchor and properties, until an Obj record claims them.
@@ -164,12 +207,22 @@ pub(super) struct Embedded {
     pending: Option<ClientAnchor>,
     /// The shape of the text box Obj whose TxO record comes next.
     pending_text: Option<PendingTextBox>,
+    /// The drawn shape whose TxO record (if any) comes next.
+    pending_shape: Option<PendingShape>,
     charts: Vec<(Option<ClientAnchor>, Chart)>,
     pictures: Vec<(ClientAnchor, ShapeProps)>,
     text_boxes: Vec<(ClientAnchor, ShapeProps, Text)>,
+    shapes: Vec<(ClientAnchor, ShapeProps, ShapeKind, Option<Text>)>,
+    /// The workbook's colour table, for the shapes' palette colours.
+    palette: [u32; 64],
 }
 
 impl Embedded {
+    /// An `Embedded` with the workbook's colour table (the palette the cell-format reader uses
+    /// for icv: the defaults or the PALETTE record).
+    pub(super) fn new(palette: [u32; 64]) -> Self {
+        Embedded { palette, ..Default::default() }
+    }
     /// An MsoDrawing record: remembers its shape's anchor and properties.
     pub(super) fn drawing(&mut self, rec: &Record<'_>) {
         if let Some(a) = client_anchor(&rec.parts.concat()) {
@@ -177,8 +230,8 @@ impl Embedded {
         }
     }
 
-    /// An Obj record: a chart, picture or text box takes the shape's anchor; other shapes are
-    /// reported.
+    /// An Obj record: a chart, picture, text box or drawn shape takes the shape's anchor; form
+        /// controls and other objects are reported.
     pub(super) fn obj(&mut self, rec: &Record<'_>, report: &mut ReadReport) {
         let ot = rec.parts.first().and_then(|p| u16_at(p, 4));
         let anchor = self.anchor.take();
@@ -194,16 +247,32 @@ impl Embedded {
                 self.pending_text = anchor.map(|(anchor, props)| PendingTextBox { anchor, props });
             }
             Some(OT_NOTE) => {}
-            _ => report.warn("Shapes in .xls files are not imported yet."),
+            Some(ot) if OT_FORM_CONTROLS.contains(&ot) => report.warn("Form controls in .xls files are not imported yet."),
+            Some(ot) => {
+                // A shape without its drawing shape has no anchor to place it with.
+                if let Some((anchor, props)) = anchor
+                    && let Some(kind) = shape_kind(ot, &props)
+                {
+                    self.pending_shape = Some(PendingShape { anchor, props, kind });
+                } else {
+                    report.warn("Shapes in .xls files are not imported yet.");
+                }
+            }
+            None => report.warn("Shapes in .xls files are not imported yet."),
         }
     }
 
-    /// A TxO record: the text of the text box whose Obj record came before it. A TxO without one
-    /// is a form control's, which isn't imported.
+    /// A TxO record: the text of the text box or drawn shape whose Obj record came before it. A
+    /// TxO without one is a form control's, which isn't imported.
     pub(super) fn txo(&mut self, rec: &Record<'_>, report: &mut ReadReport) {
-        let Some(PendingTextBox { anchor, props }) = self.pending_text.take() else { return };
-        if let Some(text) = textbox::read(&rec.parts, report) {
-            self.text_boxes.push((anchor, props, text));
+        let text = textbox::read(&rec.parts, report);
+        if let Some(PendingTextBox { anchor, props }) = self.pending_text.take() {
+            if let Some(text) = text {
+                self.text_boxes.push((anchor, props, text));
+            }
+        } else if let Some(PendingShape { anchor, props, kind }) = self.pending_shape.take() {
+            // A line has no text of its own; its TxO, if any, is ignored.
+            self.shapes.push((anchor, props, kind, if kind == ShapeKind::Line || kind == ShapeKind::Arrow { None } else { text }));
         }
     }
 
@@ -219,8 +288,9 @@ impl Embedded {
         Ok(true)
     }
 
-    /// Places the charts and pictures on the sheet (its column widths and row heights are known
-    /// by now). Pictures whose blip isn't a PNG or JPEG in the store are skipped with one warning.
+    /// Places the charts, pictures, text boxes and drawn shapes on the sheet (its column widths
+    /// and row heights are known by now). Pictures whose blip isn't a PNG or JPEG in the store are
+    /// skipped with one warning.
     pub(super) fn finish(self, sheet: &mut Sheet, store: &BStore, report: &mut ReadReport) {
         for (anchor, mut ch) in self.charts {
             if let Some(a) = anchor {
@@ -270,6 +340,33 @@ impl Embedded {
                 fill: Color::Auto,
                 line: Color::Auto,
                 text: text.text,
+                format,
+                math: Default::default(),
+            });
+        }
+        // The same palette the cell-format reader resolves icv with.
+        let table = self.palette;
+        for (a, props, kind, text) in self.shapes {
+            let (fill, line) = (drawing::art_color(props.fill_color, &table), drawing::art_color(props.line_color, &table));
+            // A line or arrow is never filled, whatever its fill properties say.
+            let no_fill = matches!(kind, ShapeKind::Line | ShapeKind::Arrow) || props.no_fill;
+            let format = match &text {
+                Some(t) => ShapeFormat { align: t.align, anchor: t.anchor, no_fill, no_line: props.no_line, ..ShapeFormat::default() },
+                None => ShapeFormat { no_fill, no_line: props.no_line, ..ShapeFormat::default() },
+            };
+            if text.is_some_and(|t| t.rotation != 0) {
+                rotated = true;
+            }
+            sheet.shapes.push(Shape {
+                hidden: props.hidden,
+                hyperlink: None,
+                name: props.name,
+                id: 0,
+                kind,
+                anchor: place(sheet, &a),
+                fill,
+                line,
+                text: text.map_or(String::new(), |t| t.text),
                 format,
                 math: Default::default(),
             });
