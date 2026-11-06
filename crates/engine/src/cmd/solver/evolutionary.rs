@@ -149,6 +149,28 @@ fn random_permutations(x: &mut [f64], groups: &[Vec<usize>], rng: &mut Rng) -> b
     false
 }
 
+/// Permutation crossover copies one parent; mutation swaps two positions.
+fn inherit_permutations(x: &mut [f64], pa: &[f64], different: &[Vec<usize>], mutation: f64, rng: &mut Rng) {
+    // Copy the same parent's entire permutation component, including overlaps.
+    for j in different.iter().flatten() {
+        if let (Some(v), Some(a)) = (x.get_mut(*j), pa.get(*j)) {
+            *v = *a;
+        }
+    }
+    for group in different {
+        if rng.uniform() < mutation {
+            let (Some(a), Some(b)) = (group.get(rng.below(group.len())), group.get(rng.below(group.len()))) else { continue };
+            if *a < x.len() && *b < x.len() {
+                x.swap(*a, *b);
+                // A swap in overlapping constraints is kept only if all remain permutations.
+                if !permutations(&x, different) {
+                    x.swap(*a, *b);
+                }
+            }
+        }
+    }
+}
+
 /// The Evolutionary method within `lo..hi` from `x0`.
 pub(super) fn evolutionary(
     ev: &mut Evaluator,
@@ -247,24 +269,7 @@ pub(super) fn evolutionary(
                     v
                 })
                 .collect();
-            // Copy the same parent's entire permutation component, including overlaps.
-            for j in different.iter().flatten() {
-                if let (Some(v), Some(a)) = (x.get_mut(*j), pa.get(*j)) {
-                    *v = *a;
-                }
-            }
-            for group in different {
-                if rng.uniform() < o.mutation {
-                    let (Some(a), Some(b)) = (group.get(rng.below(group.len())), group.get(rng.below(group.len()))) else { continue };
-                    if *a < x.len() && *b < x.len() {
-                        x.swap(*a, *b);
-                        // A swap in overlapping constraints is kept only if all remain permutations.
-                        if !permutations(&x, different) {
-                            x.swap(*a, *b);
-                        }
-                    }
-                }
-            }
+            inherit_permutations(&mut x, &pa, different, o.mutation, &mut rng);
             se.repair(&mut x);
             match se.score(x) {
                 Some(m) => next.push(m),
