@@ -1,6 +1,6 @@
 # Function parity: worksheet functions and formulas
 
-> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-04 · **Change:** minor (GROUPBY/PIVOTBY automatic headers are hidden (G0099); INDIRECT of an array of texts in the criteria functions; earlier: GROUPBY total depth 2 or more adds subtotals; earlier: Python cells are edited in the formula bar; earlier: the Python errors `#PYTHON!`, `#BUSY!`, `#TIMEOUT!` and `#BLOCKED!`, and a Python in cells row; earlier: YEARFRAC basis 0 February-end rule, MOD quotient limit, PERCENTRANK significance; earlier: edge cases matched to Excel: base conversions, BITLSHIFT/BITRSHIFT, UNICHAR noncharacters, UPPER/LOWER/PROPER casing, FIXED/DOLLAR output, F/T/GAMMA/WEIBULL/BETA distributions, BINOM trial cap, HARMEAN; earlier: ECMA.CEILING listed with USDOLLAR as not on Microsoft's list; earlier: IMSQRT reproduces the stray real part Excel gives for negative reals) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-05 · **Change:** minor (IF's omitted result argument is an empty value; earlier: GROUPBY/PIVOTBY automatic headers are hidden (G0099); INDIRECT of an array of texts in the criteria functions; earlier: GROUPBY total depth 2 or more adds subtotals; earlier: Python cells are edited in the formula bar; earlier: the Python errors `#PYTHON!`, `#BUSY!`, `#TIMEOUT!` and `#BLOCKED!`, and a Python in cells row; earlier: YEARFRAC basis 0 February-end rule, MOD quotient limit, PERCENTRANK significance; earlier: edge cases matched to Excel: base conversions, BITLSHIFT/BITRSHIFT, UNICHAR noncharacters, UPPER/LOWER/PROPER casing, FIXED/DOLLAR output, F/T/GAMMA/WEIBULL/BETA distributions, BINOM trial cap, HARMEAN; earlier: ECMA.CEILING listed with USDOLLAR as not on Microsoft's list; earlier: IMSQRT reproduces the stray real part Excel gives for negative reals) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's worksheet functions, category by category, against GridCraft's function library. Part of
 [target-app-parity.md](target-app-parity.md); gaps feed [gaps.md](gaps.md).
@@ -135,6 +135,9 @@ inputs, so large finite middle values do not become `#NUM!` merely because their
 Sorting, argument coercion and error propagation are unchanged; this is a numerical correction
 under the documented median rule, not an extreme-value comparison against desktop Excel.
 
+`IF` with an omitted result argument (`IF(c,,"x")`, `IF(c,"x",)`) returns an empty value, as in
+Excel: a cell showing it shows 0, while CONCATENATE joins it as "".
+
 Work to close (16–26 h in total): the in-scope missing functions (10–16 h with the table above),
 an oracle corpus of Excel-computed results per function (owner runs Excel on generated
 workbooks; results checked in as data, not Excel files) and fixing what it finds (6–10 h).
@@ -143,6 +146,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-05 | minor | IF returns an empty value for an omitted value_if_true / value_if_false, so CONCATENATE joins it as ""; a cell showing the IF result still shows 0 |
 | 2026-11-04 | minor | SUBTOTAL 3 and 103 (COUNTA) count a cell holding an error instead of returning it, as in Excel; SUBTOTAL's other function numbers and AGGREGATE are unchanged |
 | 2026-11-04 | minor | G0099: GROUPBY and PIVOTBY omit a detected header row from both data and output when `field_headers` is omitted, matching Excel mode 1; explicit modes and detection rules are unchanged. |
 | 2026-11-03 | minor | INDIRECT of an array of texts gives an array of references to SUMIF, COUNTIF, AVERAGEIF and the *IFS functions, which return one result per reference; `ROW(1:3)` lists all three rows on a sheet whose used range is smaller |

@@ -151,12 +151,12 @@ impl<'h> Evaluator<'h> {
         }
         match condition.to_bool() {
             Ok(true) => match args.get(1) {
-                Some(Expr::Missing) => Ev::V(Value::Number(0.0)),
+                Some(Expr::Missing) => Ev::V(Value::Empty),
                 Some(expression) => self.eval(expression),
                 None => Ev::V(Value::Bool(true)),
             },
             Ok(false) => match args.get(2) {
-                Some(Expr::Missing) => Ev::V(Value::Number(0.0)),
+                Some(Expr::Missing) => Ev::V(Value::Empty),
                 Some(expression) => self.eval(expression),
                 None => Ev::V(Value::Bool(false)),
             },

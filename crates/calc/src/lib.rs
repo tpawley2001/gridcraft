@@ -13,6 +13,8 @@ pub use recalc::{Calc, Key, evaluate, now_serial};
 #[cfg(test)]
 mod groupby_auto_headers_tests;
 #[cfg(test)]
+mod if_omitted_branch_tests;
+#[cfg(test)]
 mod indirect_ref_array_tests;
 #[cfg(test)]
 mod lookup_database_parity_tests;
