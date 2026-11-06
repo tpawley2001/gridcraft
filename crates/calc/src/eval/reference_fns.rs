@@ -507,6 +507,9 @@ mod indirect_text_tests {
             "=INDIRECT(\"1O'Brien!A1\")",
             "=INDIRECT(\"1!Month!A1\")",
             "=INDIRECT(\"1month!R1C1\",FALSE)",
+            "=SUM(INDIRECT(\"1month!R1C1:R2C1\",FALSE))",
+            "=INDIRECT(\"1O'Brien!R1C1\",FALSE)",
+            "=INDIRECT(\"1!Month!RC\",FALSE)",
             "=INDIRECT(\"'1O''Brien'!A1\")",
         ] {
             assert_eq!(crate::evaluate(&wb, 0, CellRef::new(0, 0), formula), Value::Number(7.0), "{formula}");
@@ -514,6 +517,7 @@ mod indirect_text_tests {
         for formula in [
             "=INDIRECT(\"1month!A1\",FALSE)",
             "=INDIRECT(\"[Book]1Month!A1\")",
+            "=INDIRECT(\"[Book]1Month!R1C1\",FALSE)",
             "=INDIRECT(\"1Month!A0\")",
             "=INDIRECT(\"'1Month!A1\")",
             "=INDIRECT(\"1Missing!A1\")",

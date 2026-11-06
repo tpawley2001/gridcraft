@@ -1,6 +1,6 @@
 # Function parity: worksheet functions and formulas
 
-> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-06 · **Change:** minor (INDIRECT unquoted digit-leading sheet names; IF's omitted result argument is an empty value; earlier: GROUPBY/PIVOTBY automatic headers are hidden (G0099); INDIRECT of an array of texts in the criteria functions; earlier: GROUPBY total depth 2 or more adds subtotals; earlier: Python cells are edited in the formula bar; earlier: the Python errors `#PYTHON!`, `#BUSY!`, `#TIMEOUT!` and `#BLOCKED!`, and a Python in cells row; earlier: YEARFRAC basis 0 February-end rule, MOD quotient limit, PERCENTRANK significance; earlier: edge cases matched to Excel: base conversions, BITLSHIFT/BITRSHIFT, UNICHAR noncharacters, UPPER/LOWER/PROPER casing, FIXED/DOLLAR output, F/T/GAMMA/WEIBULL/BETA distributions, BINOM trial cap, HARMEAN; earlier: ECMA.CEILING listed with USDOLLAR as not on Microsoft's list; earlier: IMSQRT reproduces the stray real part Excel gives for negative reals) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-06 · **Change:** minor (INDIRECT unquoted digit-leading sheet names; INDIRECT unquoted digit-leading sheet names; IF's omitted result argument is an empty value; earlier: GROUPBY/PIVOTBY automatic headers are hidden (G0099); INDIRECT of an array of texts in the criteria functions; earlier: GROUPBY total depth 2 or more adds subtotals; earlier: Python cells are edited in the formula bar; earlier: the Python errors `#PYTHON!`, `#BUSY!`, `#TIMEOUT!` and `#BLOCKED!`, and a Python in cells row; earlier: YEARFRAC basis 0 February-end rule, MOD quotient limit, PERCENTRANK significance; earlier: edge cases matched to Excel: base conversions, BITLSHIFT/BITRSHIFT, UNICHAR noncharacters, UPPER/LOWER/PROPER casing, FIXED/DOLLAR output, F/T/GAMMA/WEIBULL/BETA distributions, BINOM trial cap, HARMEAN; earlier: ECMA.CEILING listed with USDOLLAR as not on Microsoft's list; earlier: IMSQRT reproduces the stray real part Excel gives for negative reals) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's worksheet functions, category by category, against GridCraft's function library. Part of
 [target-app-parity.md](target-app-parity.md); gaps feed [gaps.md](gaps.md).
@@ -146,6 +146,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-06 | minor | INDIRECT resolves unquoted existing sheet names starting with a digit, including A1 and converted R1C1 text. |
 | 2026-11-05 | minor | INDIRECT resolves unquoted existing sheet names starting with a digit, including A1 and converted R1C1 text. |
 | 2026-11-05 | minor | IF returns an empty value for an omitted value_if_true / value_if_false, so CONCATENATE joins it as ""; a cell showing the IF result still shows 0 |
 | 2026-11-04 | minor | SUBTOTAL 3 and 103 (COUNTA) count a cell holding an error instead of returning it, as in Excel; SUBTOTAL's other function numbers and AGGREGATE are unchanged |
