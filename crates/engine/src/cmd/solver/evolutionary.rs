@@ -163,7 +163,7 @@ fn inherit_permutations(x: &mut [f64], pa: &[f64], different: &[Vec<usize>], mut
             if *a < x.len() && *b < x.len() {
                 x.swap(*a, *b);
                 // A swap in overlapping constraints is kept only if all remain permutations.
-                if !permutations(&x, different) {
+                if !permutations(x, different) {
                     x.swap(*a, *b);
                 }
             }
