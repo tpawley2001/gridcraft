@@ -377,6 +377,18 @@ pub struct Borders {
     pub bottom: BorderLine,
     pub diag_down: BorderLine,
     pub diag_up: BorderLine,
+    /// Inside horizontal line (`<horizontal>`, ECMA-376 §18.8.4): the line drawn between the rows
+    /// of a range this format is applied to. Meaningful in differential formats, where it can be
+    /// set while every outer edge is empty.
+    #[serde(default)]
+    pub horizontal: BorderLine,
+    /// Inside vertical line (`<vertical>`), between the columns of a range.
+    #[serde(default)]
+    pub vertical: BorderLine,
+    /// `<border outline>`: whether the outer edges of the range are drawn. The schema default is
+    /// true; `None` keeps an absent attribute absent, so an import doesn't invent a value.
+    #[serde(default)]
+    pub outline: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]

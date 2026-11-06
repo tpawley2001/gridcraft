@@ -1009,6 +1009,7 @@ fn xlsb_formats_borders_are_imported() {
             right: BorderLine::default(),
             diag_down: green,
             diag_up: green,
+            ..Borders::default()
         }
     );
     assert_eq!(style_at(&wb, "C1").borders, Borders::default());
