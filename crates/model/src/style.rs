@@ -393,6 +393,14 @@ pub struct Alignment {
     pub indent: u8,
     /// Degrees -90..=90, or 255 for vertical stacked text.
     pub rotation: i16,
+    /// `justifyLastLine`: justify the last line of justified/distributed text. `None` when the
+    /// file doesn't state it, so a stated `false` survives a save.
+    #[serde(default)]
+    pub justify_last_line: Option<bool>,
+    /// `relativeIndent`: a differential format's signed indent adjustment, separate from the
+    /// absolute `indent`. `None` when not stated.
+    #[serde(default)]
+    pub relative_indent: Option<i32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -521,6 +529,14 @@ static DEFAULT_STYLE: std::sync::LazyLock<Style> = std::sync::LazyLock::new(Styl
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_alignment_saved_before_justify_last_line_and_relative_indent_reads_unset() -> Result<(), serde_json::Error> {
+        let a: Alignment = serde_json::from_str(r#"{"h":"Right","v":"Top","wrap":true,"shrink":false,"indent":2,"rotation":0}"#)?;
+        assert_eq!((a.justify_last_line, a.relative_indent), (None, None));
+        assert_eq!(a.indent, 2);
+        Ok(())
+    }
 
     #[test]
     fn a_font_saved_before_the_heading_link_reads_unlinked() -> Result<(), serde_json::Error> {

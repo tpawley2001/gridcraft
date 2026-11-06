@@ -271,6 +271,8 @@ fn read_alignment(a: &El) -> Alignment {
         shrink: a.flag("shrinkToFit", false),
         indent: a.attr_u32("indent").unwrap_or(0).min(250) as u8,
         rotation: 0,
+        justify_last_line: a.attr_bool("justifyLastLine"),
+        relative_indent: a.attr("relativeIndent").and_then(|v| v.trim().parse::<i32>().ok()),
     };
     if let Some(r) = a.attr_i64("textRotation") {
         al.rotation = match r {
@@ -647,6 +649,12 @@ fn alignment_xml(a: &Alignment) -> Option<String> {
     }
     if a.shrink {
         s.push_str(" shrinkToFit=\"1\"");
+    }
+    if let Some(j) = a.justify_last_line {
+        let _ = write!(s, " justifyLastLine=\"{}\"", j as u8);
+    }
+    if let Some(r) = a.relative_indent {
+        let _ = write!(s, " relativeIndent=\"{r}\"");
     }
     s.push_str("/>");
     Some(s)
