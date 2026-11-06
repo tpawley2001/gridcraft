@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
 use gridcraft_model::{
-    Anchor, AnchorMode, Color, DrawingHyperlink, Image, Shape, ShapeFormat, ShapeKind, ShapeTextAlign, ShapeTextAnchor, Sheet, Theme,
+    Anchor, AnchorMode, Color, DrawingHyperlink, Image, Shape, ShapeFormat, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextVert, ShapeTextWrap,
+    Sheet, Theme,
 };
 
 use crate::IoError;
@@ -423,6 +424,21 @@ fn read_text_format(body: Option<&El>) -> ShapeFormat {
         "b" => ShapeTextAnchor::Bottom,
         _ => ShapeTextAnchor::Top,
     });
+    if let Some(b) = body.child("bodyPr") {
+        // ST_Coordinate32 / ST_Angle: signed 32-bit integers; anything else is dropped.
+        let int = |k: &str| b.attr(k).and_then(|v| v.parse::<i32>().ok());
+        f.inset_left = int("lIns");
+        f.inset_top = int("tIns");
+        f.inset_right = int("rIns");
+        f.inset_bottom = int("bIns");
+        f.text_rotation = int("rot");
+        f.wrap = b.attr("wrap").and_then(|w| match w {
+            "none" => Some(ShapeTextWrap::None),
+            "square" => Some(ShapeTextWrap::Square),
+            _ => None,
+        });
+        f.vert = b.attr("vert").and_then(ShapeTextVert::from_xml);
+    }
     let ppr = body.kids("p").next().and_then(|p| p.child("pPr"));
     f.align = ppr.and_then(|p| p.attr("algn")).map(|a| match a {
         "ctr" => ShapeTextAlign::Center,
@@ -765,7 +781,25 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                         None if sh.kind == ShapeKind::TextBox => " anchor=\"t\"",
                         None => "",
                     };
-                    let _ = write!(s, "<xdr:txBody><a:bodyPr wrap=\"square\" rtlCol=\"0\"{anchor}/><a:lstStyle/>");
+                    s.push_str("<xdr:txBody><a:bodyPr");
+                    if let Some(r) = f.text_rotation {
+                        let _ = write!(s, " rot=\"{r}\"");
+                    }
+                    if let Some(v) = f.vert {
+                        let _ = write!(s, " vert=\"{}\"", v.xml());
+                    }
+                    // Square wrapping is the schema default, so an absent `wrap` stays absent.
+                    match f.wrap {
+                        Some(ShapeTextWrap::None) => s.push_str(" wrap=\"none\""),
+                        Some(ShapeTextWrap::Square) => s.push_str(" wrap=\"square\""),
+                        None => {}
+                    }
+                    for (k, v) in [("lIns", f.inset_left), ("tIns", f.inset_top), ("rIns", f.inset_right), ("bIns", f.inset_bottom)] {
+                        if let Some(v) = v {
+                            let _ = write!(s, " {k}=\"{v}\"");
+                        }
+                    }
+                    let _ = write!(s, " rtlCol=\"0\"{anchor}/><a:lstStyle/>");
                     let algn = match f.align {
                         None => "",
                         Some(ShapeTextAlign::Left) => " algn=\"l\"",
