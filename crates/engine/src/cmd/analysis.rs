@@ -1970,7 +1970,7 @@ mod tests {
     use gridcraft_core::{CellRef, Value};
     use serde_json::{Value as Json, json};
 
-    use super::{MAX_OUTCOMES, call, f64_of, pmf_table};
+    use super::{CMD, MAX_OUTCOMES, call, f64_of, pmf_table};
     use crate::Session;
 
     fn s() -> Session {
