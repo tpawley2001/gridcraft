@@ -379,6 +379,49 @@ pub struct Comment {
     /// writes the default plain fill.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub picture_fill: Option<NotePictureFill>,
+    /// The note shape's VML colours, outline and placement flags, as read from the file; `None`
+    /// (a note made here, or one with the default look) writes the default shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_shape: Option<NoteShape>,
+}
+
+/// A note shape's VML appearance and placement, kept from the file so a save doesn't reset them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NoteShape {
+    /// `fillcolor` as six-digit `#rrggbb`; `None` writes the default note colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_color: Option<String>,
+    /// `strokecolor` as six-digit `#rrggbb`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_color: Option<String>,
+    /// `strokeweight` in points.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_weight_pt: Option<f64>,
+    /// `filled`: `Some(false)` when the box has no fill.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filled: Option<bool>,
+    /// `stroked`: `Some(false)` when the box has no outline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroked: Option<bool>,
+    /// `<x:MoveWithCells>`: the box moves with the cells under it.
+    #[serde(default)]
+    pub move_with_cells: bool,
+    /// `<x:SizeWithCells>`: the box resizes with the cells under it.
+    #[serde(default)]
+    pub size_with_cells: bool,
+}
+
+impl NoteShape {
+    /// The look and placement written for a note without kept metadata.
+    pub const DEFAULT: NoteShape = NoteShape {
+        fill_color: None,
+        stroke_color: None,
+        stroke_weight_pt: None,
+        filled: None,
+        stroked: None,
+        move_with_cells: true,
+        size_with_cells: true,
+    };
 }
 
 /// A picture used as a note box's fill, with the VML `<v:fill>` settings that go with it.
@@ -1371,6 +1414,15 @@ mod tests {
         let json = r#"{"id":1,"name":"T","range":{"start":{"row":0,"col":0},"end":{"row":1,"col":0}},"header_row":true,"totals_row":false,"columns":[],"style":"","banded_rows":false,"banded_cols":false,"first_col":false,"last_col":false,"filter_button":false}"#;
         let t: Table = serde_json::from_str(json).expect("old table JSON");
         assert_eq!((t.comment, t.insert_row, t.insert_row_shift, t.published), (None, None, None, None));
+    }
+
+    #[test]
+    fn a_comment_saved_before_note_shapes_still_reads() {
+        let json = r#"{"author":"A","text":"t","replies":[],"threaded":false,"resolved":false,"visible":false}"#;
+        let c: Comment = serde_json::from_str(json).unwrap();
+        assert_eq!(c.note_shape, None);
+        let s: NoteShape = serde_json::from_str("{}").unwrap();
+        assert!(!s.move_with_cells && !s.size_with_cells && s.fill_color.is_none());
     }
 
     #[test]

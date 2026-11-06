@@ -21,6 +21,7 @@ fn note(data: &[u8]) -> Comment {
         dates: vec![],
         note_box: None,
         picture_fill: Some(NotePictureFill { data: Arc::new(data.to_vec()), mime: "image/png".into(), attrs: vec![("type".into(), "frame".into())] }),
+        note_shape: None,
     }
 }
 

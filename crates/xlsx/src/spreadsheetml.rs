@@ -253,6 +253,7 @@ impl Import {
                     dates: vec![],
                     note_box: None,
                     picture_fill: None,
+                    note_shape: None,
                 };
                 sheet.comments.insert(at, comment);
             }

@@ -154,6 +154,7 @@ fn hostile_threaded_comments_persons_and_note_vml() {
         dates: vec![],
         note_box: None,
         picture_fill: None,
+        note_shape: None,
     };
     s.comments.insert(CellRef::new(0, 0), c(true));
     s.comments.insert(CellRef::new(1, 1), c(false));

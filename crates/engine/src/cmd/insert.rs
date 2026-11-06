@@ -1460,6 +1460,7 @@ fn comment(s: &mut Session, p: &Json, threaded: bool) -> Result<Json> {
                 dates: vec![],
                 note_box: None,
                 picture_fill: None,
+                note_shape: None,
             },
         );
         Ok(json!({"cell": at.a1()}))

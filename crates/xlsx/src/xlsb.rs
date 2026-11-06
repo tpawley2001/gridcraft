@@ -2191,6 +2191,7 @@ fn comments(bytes: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
                         dates: vec![],
                         note_box: None,
                         picture_fill: None,
+                        note_shape: None,
                     },
                 ));
             }

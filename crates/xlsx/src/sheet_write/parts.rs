@@ -449,6 +449,34 @@ fn note_fill(c: &gridcraft_model::Comment, rid: Option<&String>) -> String {
     s
 }
 
+/// A note shape's colour and outline attributes (the fill colour defaults to the usual note
+/// yellow).
+fn note_shape_attrs(n: &gridcraft_model::NoteShape) -> String {
+    let mut s = format!("fillcolor=\"{}\"", esc_attr(n.fill_color.as_deref().unwrap_or("#ffffe1")));
+    if let Some(c) = &n.stroke_color {
+        let _ = write!(s, " strokecolor=\"{}\"", esc_attr(c));
+    }
+    if let Some(w) = n.stroke_weight_pt {
+        let _ = write!(s, " strokeweight=\"{}pt\"", num(w));
+    }
+    for (k, v) in [("filled", n.filled), ("stroked", n.stroked)] {
+        if let Some(on) = v {
+            let _ = write!(s, " {k}=\"{}\"", if on { "t" } else { "f" });
+        }
+    }
+    s
+}
+
+/// A note's `<x:MoveWithCells/>` and `<x:SizeWithCells/>` flags, each written only when on.
+fn note_placement(n: &gridcraft_model::NoteShape) -> &'static str {
+    match (n.move_with_cells, n.size_with_cells) {
+        (true, true) => "<x:MoveWithCells/><x:SizeWithCells/>",
+        (true, false) => "<x:MoveWithCells/>",
+        (false, true) => "<x:SizeWithCells/>",
+        (false, false) => "",
+    }
+}
+
 /// Legacy VML shapes Excel uses to display notes (numbered from `base + 1`), followed by the
 /// form control shapes `controls`. `idmap` lists the shape blocks the drawing uses; `fills` gives
 /// the image relationship id of each note filled with a picture.
@@ -460,13 +488,16 @@ pub(super) fn vml_xml(sheet: &Sheet, idmap: &str, base: u64, controls: &str, fil
         let id = base + 1 + i as u64;
         let vis = if c.visible { "visible" } else { "hidden" };
         let (anchor, (w, h)) = note_anchor(*cell, c.note_box.as_ref());
+        let shape = c.note_shape.as_ref().unwrap_or(&gridcraft_model::NoteShape::DEFAULT);
         let _ = write!(
             s,
-            "<v:shape id=\"_x0000_s{id}\" type=\"#_x0000_t202\" style=\"position:absolute;margin-left:59.25pt;margin-top:1.5pt;width:{}pt;height:{}pt;z-index:{};visibility:{vis}\" fillcolor=\"#ffffe1\" o:insetmode=\"auto\">{}<v:shadow on=\"t\" color=\"black\" obscured=\"t\"/><v:path o:connecttype=\"none\"/><v:textbox style=\"mso-direction-alt:auto\"><div style=\"text-align:left\"></div></v:textbox><x:ClientData ObjectType=\"Note\"><x:MoveWithCells/><x:SizeWithCells/><x:Anchor>{anchor}</x:Anchor><x:AutoFill>False</x:AutoFill><x:Row>{}</x:Row><x:Column>{}</x:Column>{}</x:ClientData></v:shape>",
+            "<v:shape id=\"_x0000_s{id}\" type=\"#_x0000_t202\" style=\"position:absolute;margin-left:59.25pt;margin-top:1.5pt;width:{}pt;height:{}pt;z-index:{};visibility:{vis}\" {} o:insetmode=\"auto\">{}<v:shadow on=\"t\" color=\"black\" obscured=\"t\"/><v:path o:connecttype=\"none\"/><v:textbox style=\"mso-direction-alt:auto\"><div style=\"text-align:left\"></div></v:textbox><x:ClientData ObjectType=\"Note\">{}<x:Anchor>{anchor}</x:Anchor><x:AutoFill>False</x:AutoFill><x:Row>{}</x:Row><x:Column>{}</x:Column>{}</x:ClientData></v:shape>",
             num(w),
             num(h),
             i + 1,
+            note_shape_attrs(shape),
             note_fill(c, fills.get(cell)),
+            note_placement(shape),
             cell.row,
             cell.col,
             if c.visible { "<x:Visible/>" } else { "" }

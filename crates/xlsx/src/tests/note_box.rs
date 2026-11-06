@@ -96,6 +96,7 @@ fn a_new_note_gets_the_default_box() {
         dates: vec![],
         note_box: None,
         picture_fill: None,
+        note_shape: None,
     };
     wb.sheet_mut(0).unwrap().comments.insert(b2(), note);
     let vml = written_vml(&write_xlsx(&wb).unwrap());
