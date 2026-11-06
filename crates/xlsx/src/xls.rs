@@ -179,6 +179,9 @@ pub(crate) struct Lbl {
     pub future_function: bool,
     /// The zero-based sheet the name is local to; `None` for workbook scope.
     pub scope: Option<usize>,
+    /// Set when the name can't be imported (`.xls` only): it keeps its slot so formulas that
+    /// refer to names by index stay aligned, but it isn't added to the workbook.
+    pub skip: bool,
     pub rgce: Vec<u8>,
     pub rgcb: Vec<u8>,
 }
@@ -587,33 +590,25 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
                 if g.names.len() >= MAX_NAMES {
                     continue;
                 }
-                let mut lbl = match &g.biff5 {
+                let lbl = match &g.biff5 {
                     Some(b5) => label_biff5(&mut c, b5)?,
                     None => label(&mut c)?,
                 };
-                // A name that is a cell address in the 16,384-column grid (`On2`, `Fy2008`) is
-                // legal in a 256-column workbook; Excel renames it with a leading underscore
-                // when it converts the workbook, and formulas keep using the name.
-                if lbl.builtin.is_none() && !lbl.macro_name && CellRef::parse(&lbl.name).is_some() {
-                    let taken = |n: &str| g.names.iter().any(|l| l.scope == lbl.scope && l.name.eq_ignore_ascii_case(n));
-                    let mut name = format!("_{}", lbl.name);
-                    while taken(&name) {
-                        name.insert(0, '_');
-                    }
-                    lbl.name = name;
-                }
-                g.links.names.push(lbl.name.clone());
                 g.names.push(lbl);
             }
             _ => {}
         }
     }
     g.pictures = drawing::bstore(&drawing_group, budget, report);
-    // The same test `defined_names` applies, before any cell formula is decoded.
+    rename_invalid_names(&mut g, report);
+    // The same test `defined_names` applies, before any cell formula is decoded. A name that was
+    // skipped (unnameable) is marked the same way, so formulas using it keep their saved result.
     let skipped = g
         .names
         .iter()
-        .map(|l| !l.rgce.is_empty() && decode_version(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &g.links, g.biff5.as_ref()).is_err())
+        .map(|l| {
+            l.skip || (!l.rgce.is_empty() && decode_version(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &g.links, g.biff5.as_ref()).is_err())
+        })
         .collect();
     g.links.skipped = skipped;
     Ok(g)
@@ -752,7 +747,89 @@ fn lbl(flags: u16, raw: String, itab: u16, cce: usize, rest: &[u8], trailing: us
     let extra = rest.get(cce..).unwrap_or(&[]);
     let rgcb = extra.get(..extra.len().saturating_sub(trailing)).unwrap_or(&[]).to_vec();
     let scope = usize::from(itab).checked_sub(1);
-    Lbl { name, builtin, hidden: flags & 1 != 0, macro_name: flags & 0x000A != 0, future_function: false, scope, rgce, rgcb }
+    Lbl { name, builtin, hidden: flags & 1 != 0, macro_name: flags & 0x000A != 0, future_function: false, scope, skip: false, rgce, rgcb }
+}
+
+/// Whether `n` is a legal defined name in an `.xlsx` workbook: the same rule as the engine's
+/// `formulas.defineName` (first character a letter, `_` or `\`; other characters letters, digits,
+/// `_`, `.`, `\` or `?`; not a cell address or R1C1-like; at most 255 characters).
+fn valid_name(n: &str) -> bool {
+    let mut chars = n.chars();
+    let Some(first) = chars.next() else { return false };
+    if !(first.is_alphabetic() || first == '_' || first == '\\') {
+        return false;
+    }
+    if n.chars().count() > 255 || CellRef::parse(n).is_some() || is_r1c1(n) {
+        return false;
+    }
+    n.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '\\' | '?'))
+}
+
+/// Looks like an R1C1 reference (`R`, `C`, `RC`, `R2`, `C3`, `R1C1`), which Excel doesn't accept
+/// as a name.
+fn is_r1c1(n: &str) -> bool {
+    let digits = |s: &str| s.bytes().take_while(u8::is_ascii_digit).count();
+    let mut rest = n;
+    if let Some(r) = rest.strip_prefix(['R', 'r']) {
+        rest = r.get(digits(r)..).unwrap_or("");
+    }
+    if let Some(c) = rest.strip_prefix(['C', 'c']) {
+        rest = c.get(digits(c)..).unwrap_or("");
+    }
+    rest.is_empty() && !n.is_empty()
+}
+
+/// Renames the defined names that aren't legal in an `.xlsx` workbook (a space, a leading `?` or
+/// digit, a `-`): other office suites write such NAME records, and Excel refuses the saved file
+/// until it repairs it. Every character that can't be in a name becomes `_`, a bad first character
+/// gets a `_` in front, and a clash with another name of the same scope gets more `_` in front.
+/// Valid names never move; formulas refer to names by index, so they follow. A name that is still
+/// invalid (empty, or over 255 characters) is skipped.
+fn rename_invalid_names(g: &mut Globals, report: &mut ReadReport) {
+    let mut renamed = false;
+    // The names that are valid as they are, per scope: they keep theirs, so a renamed name moves
+    // out of their way (Excel compares names case-insensitively).
+    let mut taken: HashMap<Option<usize>, HashSet<String>> = HashMap::new();
+    for lbl in g.names.iter() {
+        if lbl.builtin.is_none() && !lbl.macro_name && valid_name(&lbl.name) {
+            taken.entry(lbl.scope).or_default().insert(lbl.name.to_ascii_lowercase());
+        }
+    }
+    for lbl in g.names.iter_mut() {
+        if lbl.builtin.is_some() || lbl.macro_name || valid_name(&lbl.name) {
+            continue;
+        }
+        // An empty name has nothing to rename.
+        if lbl.name.is_empty() {
+            lbl.skip = true;
+            report.warn("A defined name isn't valid in .xlsx workbooks and was skipped.");
+            continue;
+        }
+        let mut name: String = lbl.name.chars().map(|c| if c.is_alphanumeric() || matches!(c, '_' | '.' | '\\' | '?') { c } else { '_' }).collect();
+        let first = name.chars().next();
+        if !matches!(first, Some(c) if c.is_alphabetic() || c == '_' || c == '\\') {
+            name.insert(0, '_');
+        }
+        if CellRef::parse(&name).is_some() || is_r1c1(&name) {
+            name.insert(0, '_');
+        }
+        let used = taken.entry(lbl.scope).or_default();
+        while used.contains(&name.to_ascii_lowercase()) {
+            name.insert(0, '_');
+        }
+        if valid_name(&name) {
+            used.insert(name.to_ascii_lowercase());
+            lbl.name = name;
+            renamed = true;
+        } else {
+            lbl.skip = true;
+            report.warn("A defined name isn't valid in .xlsx workbooks and was skipped.");
+        }
+    }
+    if renamed {
+        report.warn("Some defined names aren't valid in .xlsx workbooks and were renamed (spaces and other characters became underscores).");
+    }
+    g.links.names = g.names.iter().map(|l| l.name.clone()).collect();
 }
 
 fn shared_strings(c: &mut Cursor<'_, '_>, budget: &mut Budget) -> Result<Vec<Arc<str>>, IoError> {
@@ -1448,7 +1525,7 @@ pub(crate) fn add_defined_names(
                 None => continue,
             },
         };
-        if lbl.future_function {
+        if lbl.future_function || lbl.skip {
             continue;
         }
         let text = match decode(lbl) {

@@ -972,3 +972,47 @@ fn xls_cf_truncated_or_unknown_rules_are_skipped_without_panicking() {
     assert!(!report.warnings.is_empty());
     assert_eq!(v(&wb, 0, "A1"), Value::Number(7.0));
 }
+
+#[test]
+fn xls_names_that_cannot_be_made_valid_are_skipped() {
+    // An empty name and one over the 255-character limit can't be renamed into a legal `.xlsx`
+    // name: they are skipped with a warning, and formulas that use them keep their saved results
+    // instead of calculating to #NAME?.
+    let lbl = |name: &str, rgce: &[u8]| {
+        rec(0x0018, &cat(&[&u16s(&[0]), &[0, name.len() as u8], &u16s(&[rgce.len() as u16, 0, 0]), &[0; 4], &[0], name.as_bytes(), rgce]))
+    };
+    let ref3d = |r: u16| cat(&[&[0x3A], &0u16.to_le_bytes(), &u16s(&[r, 0])]);
+    let name_ptg = |i: u32| cat(&[&[0x43], &i.to_le_bytes()]);
+    let long = "a".repeat(256);
+    let boundsheet = |pos: u32| rec(0x0085, &cat(&[&pos.to_le_bytes(), &[0, 0, 6, 0], b"Sheet1"]));
+    let globals = |pos: u32| {
+        cat(&[
+            &bof(0x0005),
+            &boundsheet(pos),
+            &rec(0x01AE, &u16s(&[1, 0x0401])),
+            &rec(0x0017, &cat(&[&u16s(&[1]), &u16s(&[0, 0, 0])])),
+            &lbl("Rate", &ref3d(0)),
+            &lbl("", &ref3d(1)),
+            &lbl(&long, &ref3d(2)),
+            &eof(),
+        ])
+    };
+    let sheet = cat(&[
+        &bof(0x0010),
+        &rec(0x0203, &cat(&[&cell(0, 0, 0), &10.0f64.to_le_bytes()])),
+        &formula(0, 1, num(10.0), &name_ptg(1)),
+        &formula(1, 1, num(20.0), &name_ptg(2)),
+        &formula(2, 1, num(30.0), &name_ptg(3)),
+        &eof(),
+    ]);
+    let pos = globals(0).len() as u32;
+    let (wb, report) = read_xls(&compound("Workbook", &cat(&[&globals(pos), &sheet]))).unwrap();
+    let names: Vec<_> = wb.names.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["Rate"]);
+    assert!(report.warnings.iter().any(|w| w.contains("defined name") && w.contains("skipped")), "{:?}", report.warnings);
+    assert_eq!(ftext(&wb, "B1").as_deref(), Some("Rate"));
+    assert_eq!(ftext(&wb, "B2"), None);
+    assert_eq!(ftext(&wb, "B3"), None);
+    assert_eq!(v(&wb, 0, "B2"), Value::Number(20.0));
+    assert_eq!(v(&wb, 0, "B3"), Value::Number(30.0));
+}

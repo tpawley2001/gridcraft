@@ -925,6 +925,7 @@ fn workbook(
                         macro_name: false,
                         future_function: false,
                         scope: None,
+                        skip: false,
                         rgce: vec![],
                         rgcb: vec![],
                     }
@@ -969,6 +970,7 @@ fn name_record(b: &mut Bytes<'_>) -> Result<Lbl, IoError> {
         macro_name: flags & 0x000A != 0,
         future_function: flags & 0x0002_0000 != 0,
         scope: if itab == u32::MAX { None } else { usize::try_from(itab).ok() },
+        skip: false,
         rgce,
         rgcb,
     })
