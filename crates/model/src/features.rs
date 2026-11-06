@@ -11,7 +11,10 @@ mod print;
 mod table_sort;
 
 pub use pivot::{PivotCalcField, PivotDateGroup, PivotField, PivotFilter, PivotFunc, PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue};
-pub use print::{ChartSheetPrint, EditRange, HfPage, LineInfo, Orientation, PageOrder, PrintSettings, SheetProtection, password_hash};
+pub use print::{
+    ChartSheetPrint, EditRange, HfPage, LineInfo, Orientation, PageOrder, PrintComments, PrintErrors, PrintOutput, PrintSettings, SheetProtection,
+    password_hash,
+};
 pub use table_sort::{MAX_CUSTOM_LIST_CHARS, MAX_SORT_CONDITIONS, SortBy, SortCondition, TableSort};
 
 // ---------------------------------------------------------------- tables

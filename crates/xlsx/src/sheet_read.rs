@@ -889,6 +889,29 @@ pub(crate) fn read_paper(e: &El, pr: &mut gridcraft_model::PrintSettings) {
     if let Some(p) = e.attr_u32("paperSize").and_then(paper_name) {
         pr.paper = p.to_string();
     }
+    pr.output = read_print_output(e);
+}
+
+/// The supplemental `pageSetup` attributes, each kept only when it's a valid `xsd:boolean`,
+/// `xsd:unsignedInt` or enumeration value.
+fn read_print_output(e: &El) -> gridcraft_model::PrintOutput {
+    let flag = |k: &str| match e.attr(k)?.trim() {
+        "1" | "true" => Some(true),
+        "0" | "false" => Some(false),
+        _ => None,
+    };
+    gridcraft_model::PrintOutput {
+        black_and_white: flag("blackAndWhite"),
+        draft: flag("draft"),
+        cell_comments: e.attr("cellComments").and_then(|v| gridcraft_model::PrintComments::parse(v.trim())),
+        errors: e.attr("errors").and_then(|v| gridcraft_model::PrintErrors::parse(v.trim())),
+        first_page_number: e.attr_u32("firstPageNumber"),
+        use_first_page_number: flag("useFirstPageNumber"),
+        horizontal_dpi: e.attr_u32("horizontalDpi"),
+        vertical_dpi: e.attr_u32("verticalDpi"),
+        copies: e.attr_u32("copies"),
+        use_printer_defaults: flag("usePrinterDefaults"),
+    }
 }
 
 /// `<headerFooter>` (worksheets and chart sheets).

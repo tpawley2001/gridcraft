@@ -511,6 +511,7 @@ fn write_sheet_printing<'a>(s: &mut String, sheet: &'a Sheet, rels: &mut Rels, o
         let _ = write!(s, " pageOrder=\"{}\"", p.page_order.id());
     }
     let _ = write!(s, " orientation=\"{}\"", if p.orientation == Orientation::Landscape { "landscape" } else { "portrait" });
+    write_print_output(s, &p.output);
     if let Some(id) = kept.page_setup_id() {
         let _ = write!(s, " r:id=\"{id}\"");
     }
@@ -528,6 +529,34 @@ fn write_sheet_printing<'a>(s: &mut String, sheet: &'a Sheet, rels: &mut Rels, o
     }
 
     kept
+}
+
+/// The supplemental `pageSetup` attributes a file stated, in `CT_PageSetup` order.
+fn write_print_output(s: &mut String, o: &gridcraft_model::PrintOutput) {
+    let flags = [
+        ("usePrinterDefaults", o.use_printer_defaults),
+        ("blackAndWhite", o.black_and_white),
+        ("draft", o.draft),
+        ("useFirstPageNumber", o.use_first_page_number),
+    ];
+    let numbers =
+        [("firstPageNumber", o.first_page_number), ("horizontalDpi", o.horizontal_dpi), ("verticalDpi", o.vertical_dpi), ("copies", o.copies)];
+    for (a, v) in flags {
+        if let Some(v) = v {
+            let _ = write!(s, " {a}=\"{}\"", u8::from(v));
+        }
+    }
+    if let Some(c) = o.cell_comments {
+        let _ = write!(s, " cellComments=\"{}\"", c.id());
+    }
+    if let Some(e) = o.errors {
+        let _ = write!(s, " errors=\"{}\"", e.id());
+    }
+    for (a, v) in numbers {
+        if let Some(v) = v {
+            let _ = write!(s, " {a}=\"{v}\"");
+        }
+    }
 }
 
 /// Writes sparse worksheet defaults without expanding row records.

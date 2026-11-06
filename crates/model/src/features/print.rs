@@ -53,6 +53,102 @@ pub struct PrintSettings {
     /// sheet is more than one page wide and tall.
     #[serde(default)]
     pub page_order: PageOrder,
+    /// Page Setup output options kept from a file (print-in-black-and-white, draft, comments and
+    /// errors policy, first page number, printer resolution, copies). Each is unset unless stated.
+    #[serde(default, skip_serializing_if = "PrintOutput::is_empty")]
+    pub output: PrintOutput,
+}
+
+/// Supplemental `pageSetup` attributes (ECMA-376 `CT_PageSetup`). Every field is `None` unless
+/// the file stated it, so explicit `false` and `0` survive a save as written.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrintOutput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub black_and_white: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_comments: Option<PrintComments>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub errors: Option<PrintErrors>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_page_number: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_first_page_number: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub horizontal_dpi: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_dpi: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copies: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_printer_defaults: Option<bool>,
+}
+
+impl PrintOutput {
+    pub fn is_empty(&self) -> bool {
+        *self == PrintOutput::default()
+    }
+}
+
+/// How cell comments print (`ST_CellComments`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PrintComments {
+    None,
+    AsDisplayed,
+    AtEnd,
+}
+
+impl PrintComments {
+    pub fn id(self) -> &'static str {
+        match self {
+            PrintComments::None => "none",
+            PrintComments::AsDisplayed => "asDisplayed",
+            PrintComments::AtEnd => "atEnd",
+        }
+    }
+    pub fn parse(id: &str) -> Option<PrintComments> {
+        match id {
+            "none" => Some(PrintComments::None),
+            "asDisplayed" => Some(PrintComments::AsDisplayed),
+            "atEnd" => Some(PrintComments::AtEnd),
+            _ => None,
+        }
+    }
+}
+
+/// How error values print (`ST_PrintError`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PrintErrors {
+    #[serde(rename = "displayed")]
+    Displayed,
+    #[serde(rename = "blank")]
+    Blank,
+    #[serde(rename = "dash")]
+    Dash,
+    #[serde(rename = "NA")]
+    Na,
+}
+
+impl PrintErrors {
+    pub fn id(self) -> &'static str {
+        match self {
+            PrintErrors::Displayed => "displayed",
+            PrintErrors::Blank => "blank",
+            PrintErrors::Dash => "dash",
+            PrintErrors::Na => "NA",
+        }
+    }
+    pub fn parse(id: &str) -> Option<PrintErrors> {
+        match id {
+            "displayed" => Some(PrintErrors::Displayed),
+            "blank" => Some(PrintErrors::Blank),
+            "dash" => Some(PrintErrors::Dash),
+            "NA" => Some(PrintErrors::Na),
+            _ => None,
+        }
+    }
 }
 
 fn yes() -> bool {
@@ -187,6 +283,7 @@ impl Default for PrintSettings {
             hf_scale_with_doc: true,
             hf_align_with_margins: true,
             page_order: PageOrder::DownThenOver,
+            output: PrintOutput::default(),
         }
     }
 }
@@ -304,5 +401,32 @@ mod tests {
         assert!(saved.as_object_mut().unwrap().remove("page_order").is_some());
         p = serde_json::from_value(saved).unwrap();
         assert_eq!(p, PrintSettings::default());
+    }
+
+    #[test]
+    fn output_options_round_trip_json_and_old_json_loads_unset() {
+        let output = PrintOutput {
+            black_and_white: Some(false),
+            cell_comments: Some(PrintComments::AtEnd),
+            errors: Some(PrintErrors::Na),
+            first_page_number: Some(u32::MAX),
+            copies: Some(0),
+            ..Default::default()
+        };
+        let p = PrintSettings { output, ..Default::default() };
+        let saved = serde_json::to_value(&p).unwrap();
+        assert_eq!(saved["output"]["errors"], "NA");
+        assert_eq!(saved["output"]["cell_comments"], "atEnd");
+        assert_eq!(serde_json::from_value::<PrintSettings>(saved).unwrap(), p);
+        let plain = serde_json::to_value(PrintSettings::default()).unwrap();
+        assert!(plain.get("output").is_none());
+        assert_eq!(serde_json::from_value::<PrintSettings>(plain).unwrap().output, PrintOutput::default());
+        for e in [PrintErrors::Displayed, PrintErrors::Blank, PrintErrors::Dash, PrintErrors::Na] {
+            assert_eq!(PrintErrors::parse(e.id()), Some(e));
+        }
+        for c in [PrintComments::None, PrintComments::AsDisplayed, PrintComments::AtEnd] {
+            assert_eq!(PrintComments::parse(c.id()), Some(c));
+        }
+        assert_eq!(PrintErrors::parse("na"), None);
     }
 }
