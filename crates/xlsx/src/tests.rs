@@ -254,3 +254,4 @@ mod codex_day_alignment_extras;
 mod codex_day_font_effects;
 mod codex_day_print_options;
 mod codex_day_table_metadata;
+mod codex_day_text_body;
