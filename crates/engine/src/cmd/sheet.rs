@@ -201,6 +201,7 @@ fn shift_sheet_features(sh: &mut Sheet, axis: Axis, at: u32, count: u32, insert:
         }
         None => false,
     });
+    shift_data_tables(sh, map_range, map_cell);
     if let Some(pa) = sh.print.print_area {
         sh.print.print_area = map_range(pa);
     }
@@ -768,9 +769,30 @@ pub(super) fn shift_cell_features(sh: &mut Sheet, e: &Edit) {
             sp.cell = c;
         }
     }
+    shift_data_tables(sh, |r| map_range(r, e), map_cell);
     if let Some(pa) = sh.print.print_area {
         sh.print.print_area = map_range(pa, e);
     }
+}
+
+/// What-If data tables follow their result cells and input cells; a table whose result cells are
+/// all deleted goes, and a deleted input cell is marked deleted (`#REF!`) as the file states it.
+fn shift_data_tables(sh: &mut Sheet, map_range: impl Fn(RangeRef) -> Option<RangeRef>, map_cell: impl Fn(CellRef) -> Option<CellRef>) {
+    sh.data_tables.retain_mut(|dt| {
+        let Some(r) = map_range(dt.range) else { return false };
+        dt.range = r;
+        for (input, deleted) in [(&mut dt.r1, &mut dt.del1), (&mut dt.r2, &mut dt.del2)] {
+            if let Some(c) = *input
+                && !*deleted
+            {
+                match map_cell(c) {
+                    Some(n) => *input = Some(n),
+                    None => *deleted = true,
+                }
+            }
+        }
+        true
+    });
 }
 
 /// Columns inserted inside a table become new table columns (with names no other column has);

@@ -603,7 +603,14 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
         return;
     }
     let dynamic = c.attr("cm").is_some();
-    let formula = c.child("f").and_then(|f| read_formula(cx, st, f, pos, dynamic));
+    let f = c.child("f");
+    // A What-If data table is one `<f t="dataTable">` on the top-left result cell; the other
+    // cells of `ref` carry only values. It is kept as the sheet's record and written back,
+    // not as a cell formula.
+    if let Some(f) = f.filter(|f| f.attr("t") == Some("dataTable")) {
+        read_data_table(sheet, f, pos);
+    }
+    let formula = f.and_then(|f| read_formula(cx, st, f, pos, dynamic));
     // A `PY(index,0|1)` formula is a Python cell whose code is a script of the Python part. The
     // older `PY("…",0|1)` form is read from the formula's own text: the formula parser would fold
     // line breaks in the code. A formula naming a script the part lacks keeps only its cached
@@ -643,6 +650,23 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
         None => value,
     };
     sheet.cells.set(pos, Cell { value, formula: formula.map(Arc::new), style, py });
+}
+
+/// Reads a What-If data table's `<f t="dataTable">` (ECMA-376 Part 1, 18.3.1.40) onto the sheet.
+/// The cell keeps its value and style; the table is not a cell formula.
+fn read_data_table(sheet: &mut Sheet, f: &El, pos: CellRef) {
+    let range = f.attr("ref").and_then(RangeRef::parse).unwrap_or(RangeRef::cell(pos));
+    let input = |k: &str| f.attr(k).and_then(|v| CellRef::parse(v.trim()));
+    sheet.data_tables.push(gridcraft_model::DataTable {
+        range,
+        two_d: f.flag("dt2D", false),
+        row: f.flag("dtr", false),
+        r1: input("r1"),
+        r2: input("r2"),
+        del1: f.flag("del1", false),
+        del2: f.flag("del2", false),
+        ca: f.flag("ca", false),
+    });
 }
 
 fn read_formula(cx: &mut Ctx<'_>, st: &mut RowState, f: &El, pos: CellRef, dynamic: bool) -> Option<Formula> {
@@ -711,10 +735,8 @@ fn read_formula_text(cx: &mut Ctx<'_>, st: &mut RowState, f: &El, pos: CellRef, 
             }
             Some(fm)
         }
-        "dataTable" => {
-            cx.warn("what-if data tables are not supported; kept their values");
-            None
-        }
+        // Recorded by `read_data_table`; the cell keeps its value.
+        "dataTable" => None,
         _ => {
             if text.is_empty() {
                 None
@@ -887,6 +909,10 @@ pub(crate) fn read_header_footer(e: &El, pr: &mut gridcraft_model::PrintSettings
     pr.hf_scale_with_doc = e.flag("scaleWithDoc", true);
     pr.hf_align_with_margins = e.flag("alignWithMargins", true);
 }
+
+#[cfg(test)]
+#[path = "tests/data_table_edge_tests.rs"]
+mod data_table_edge_tests;
 
 #[cfg(test)]
 mod tests {
