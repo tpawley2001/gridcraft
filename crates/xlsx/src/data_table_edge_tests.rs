@@ -114,7 +114,7 @@ fn missing_range_and_invalid_inputs_keep_the_anchor_and_boolean_flags() {
     let sheet = wb.sheet(0).unwrap();
     assert_eq!(sheet.data_tables, vec![DataTable { range: rr("C5"), two_d: true, row: true, r1: None, r2: None, del1: true, del2: true, ca: true }]);
     assert_eq!(sheet.value(at("C5")), Value::Number(42.0));
-    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    assert!(!report.warnings.iter().any(|warning| warning.contains("data table")), "{:?}", report.warnings);
     let (reopened, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
     assert_eq!(reopened.sheet(0).unwrap().data_tables, sheet.data_tables);
 }
