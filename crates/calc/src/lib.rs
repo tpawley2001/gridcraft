@@ -17,6 +17,8 @@ mod if_omitted_branch_tests;
 #[cfg(test)]
 mod indirect_ref_array_tests;
 #[cfg(test)]
+mod indirect_sheet_name_tests;
+#[cfg(test)]
 mod lookup_database_parity_tests;
 #[cfg(test)]
 mod subtotal_counta_error_tests;
