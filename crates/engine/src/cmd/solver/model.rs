@@ -14,6 +14,7 @@ pub(super) enum Rel {
     Ge,
     Int,
     Bin,
+    Dif,
 }
 
 impl Rel {
@@ -24,6 +25,7 @@ impl Rel {
             "=" | "==" | "eq" => Some(Rel::Eq),
             "int" | "integer" => Some(Rel::Int),
             "bin" | "binary" => Some(Rel::Bin),
+            "dif" | "alldifferent" | "alldiff" => Some(Rel::Dif),
             _ => None,
         }
     }
@@ -34,6 +36,7 @@ impl Rel {
             Rel::Ge => ">=",
             Rel::Int => "int",
             Rel::Bin => "bin",
+            Rel::Dif => "dif",
         }
     }
     /// The relation code of the saved model (`solver_relN`), as in Solver's VBA `SolverAdd`.
@@ -44,6 +47,7 @@ impl Rel {
             Rel::Ge => 3,
             Rel::Int => 4,
             Rel::Bin => 5,
+            Rel::Dif => 6,
         }
     }
     fn from_code(c: &str) -> Option<Rel> {
@@ -53,6 +57,7 @@ impl Rel {
             "3" => Some(Rel::Ge),
             "4" => Some(Rel::Int),
             "5" => Some(Rel::Bin),
+            "6" => Some(Rel::Dif),
             _ => None,
         }
     }
@@ -193,7 +198,15 @@ fn split_constraint(t: &str) -> Option<(String, Rel, String)> {
         return Some((a.trim().into(), Rel::Eq, b.trim().into()));
     }
     let lower = t.trim().to_ascii_lowercase();
-    for (suffix, rel) in [("integer", Rel::Int), ("binary", Rel::Bin), ("int", Rel::Int), ("bin", Rel::Bin)] {
+    for (suffix, rel) in [
+        ("alldifferent", Rel::Dif),
+        ("alldiff", Rel::Dif),
+        ("dif", Rel::Dif),
+        ("integer", Rel::Int),
+        ("binary", Rel::Bin),
+        ("int", Rel::Int),
+        ("bin", Rel::Bin),
+    ] {
         if let Some(a) = lower.strip_suffix(suffix) {
             let a = a.trim();
             return Some((t.trim().get(..a.len())?.trim().to_string(), rel, String::new()));
@@ -221,7 +234,7 @@ fn parse_constraint(wb: &Workbook, sheet: usize, c: &Json) -> Result<Constraint>
         return Err(EngineError::Other("Constraint cells must be on the objective cell's sheet.".into()));
     }
     let (rhs, rhs_text) = match rel {
-        Rel::Int | Rel::Bin => (Rhs::None, String::new()),
+        Rel::Int | Rel::Bin | Rel::Dif => (Rhs::None, String::new()),
         _ => match &rhs_json {
             Json::Number(n) => {
                 let v = n.as_f64().filter(|v| v.is_finite()).ok_or_else(|| bad(CMD, "the constraint's right side must be a number"))?;
@@ -299,11 +312,15 @@ pub(super) fn parse_model(s: &Session, p: &Json) -> Result<Model> {
             if scalar > MAX_CONSTRAINTS {
                 return Err(EngineError::Other(format!("Too many constraints (at most {MAX_CONSTRAINTS} cells).")));
             }
-            if matches!(c.rel, Rel::Int | Rel::Bin) && c.lhs.iter().any(|x| !vars.contains(x)) {
-                return Err(EngineError::Other("Integer and binary constraints must be on variable cells.".into()));
+            if matches!(c.rel, Rel::Int | Rel::Bin | Rel::Dif) && c.lhs.iter().any(|x| !vars.contains(x)) {
+                return Err(EngineError::Other("Integer, binary and AllDifferent constraints must be on variable cells.".into()));
             }
             cons.push(c);
         }
+    }
+    // Bound distinctness search and permutation storage even for repeated constraints.
+    if cons.iter().filter(|c| c.rel == Rel::Dif).map(|c| c.lhs.len()).sum::<usize>() > 64 {
+        return Err(EngineError::Other("AllDifferent constraints support at most 64 cells in total.".into()));
     }
     let non_negative = bool_param(p, "nonNegative").unwrap_or(true);
     let method = match str_param(p, "method").unwrap_or("grg").to_ascii_lowercase().replace([' ', '_', '-'], "").as_str() {
@@ -345,7 +362,7 @@ pub fn sensitivity_applies(p: &Json) -> bool {
                 Json::Object(_) => str_param(c, "op").or_else(|| str_param(c, "relation")).and_then(Rel::parse),
                 _ => None,
             };
-            matches!(rel, Some(Rel::Int | Rel::Bin))
+            matches!(rel, Some(Rel::Int | Rel::Bin | Rel::Dif))
         })
     });
     !integer && !matches!(method.as_str(), "evolutionary" | "evo" | "genetic") && !matches!(goal.as_str(), "value" | "valueof" | "value of")
@@ -424,7 +441,9 @@ pub(super) fn save_model(wb: &mut Workbook, m: &Model) {
         put(format!("solver_rel{k}"), c.rel.code().to_string());
         let rhs = match &c.rhs {
             Rhs::None => {
-                if c.rel == Rel::Bin {
+                if c.rel == Rel::Dif {
+                    "\"AllDifferent\"".to_string()
+                } else if c.rel == Rel::Bin {
                     "\"binary\"".to_string()
                 } else {
                     "\"integer\"".to_string()
@@ -484,7 +503,7 @@ pub fn saved_model(wb: &Workbook, sheet: usize) -> Option<Json> {
         };
         let lhs = local(lhs);
         constraints.push(match rel {
-            Rel::Int | Rel::Bin => json!(format!("{lhs} {}", rel.text())),
+            Rel::Int | Rel::Bin | Rel::Dif => json!(format!("{lhs} {}", rel.text())),
             _ => {
                 let rhs = get(&format!("solver_rhs{k}")).unwrap_or_default();
                 let rhs = if num_text(&rhs).is_some() { rhs } else { local(rhs) };
@@ -540,7 +559,7 @@ pub(super) fn model_params(wb: &Workbook, m: &Model) -> Json {
         .cons
         .iter()
         .map(|c| match c.rel {
-            Rel::Int | Rel::Bin => json!(format!("{} {}", c.lhs_text, c.rel.text())),
+            Rel::Int | Rel::Bin | Rel::Dif => json!(format!("{} {}", c.lhs_text, c.rel.text())),
             _ => json!(format!("{} {} {}", c.lhs_text, c.rel.text(), c.rhs_text)),
         })
         .collect();
@@ -572,6 +591,13 @@ pub(super) fn model_params(wb: &Workbook, m: &Model) -> Json {
 
 // ---------------------------------------------------------------- model on cells
 
+/// A numeric, integral, unique range bounded by its cell count is a permutation.
+fn dif_formula(lhs: &str) -> String {
+    format!(
+        "=AND(COUNT({lhs})=ROWS({lhs})*COLUMNS({lhs}),{lhs}=INT({lhs}),MIN({lhs})>=1,MAX({lhs})<=ROWS({lhs})*COLUMNS({lhs}),SUMPRODUCT(1/COUNTIF({lhs},{lhs}))=ROWS({lhs})*COLUMNS({lhs}))"
+    )
+}
+
 /// The cells Save Model writes, top to bottom, as formula text.
 pub(super) fn model_formulas(m: &Model) -> Result<Vec<String>> {
     // A comma inside a quoted sheet name (`'Sales, West'!$A$1`) doesn't start another area.
@@ -591,6 +617,7 @@ pub(super) fn model_formulas(m: &Model) -> Result<Vec<String>> {
         }
         let lhs = abs_text(None, &c.lhs_text);
         rows.push(match (c.rel, &c.rhs) {
+            (Rel::Dif, _) => dif_formula(&lhs),
             (Rel::Int, _) => format!("=AND({lhs}=INT({lhs}))"),
             (Rel::Bin, _) => format!("=AND(({lhs}=0)+({lhs}=1))"),
             (rel, Rhs::Cells(_)) => format!("=AND({lhs}{}{})", rel.text(), abs_text(None, &c.rhs_text)),
@@ -690,6 +717,13 @@ fn read_options_row(model: &mut Json, list: &str) -> Result<()> {
 
 /// One constraint row of Save Model (`AND(relation)`) as a `data.solver` constraint.
 fn read_constraint_row(t: String) -> Result<String> {
+    // Match the entire generated predicate, so an edited formula cannot silently lose tests.
+    if let Some(rest) = t.strip_prefix("AND(COUNT(")
+        && let Some((lhs, _)) = split_unquoted(rest, ")=ROWS(")
+        && dif_formula(lhs).trim_start_matches('=') == t
+    {
+        return Ok(format!("{} dif", local_refs(lhs)));
+    }
     let t = call_args(&t, "AND").unwrap_or(t);
     if let Some((x, y)) = split_unquoted(&t, "=INT(").or_else(|| split_unquoted(&t, "=int(")) {
         if y.strip_suffix(')') != Some(x) {

@@ -140,6 +140,7 @@ struct Bounds<'a> {
 /// Runs the model's method for `goal` within `lo..hi` from `x0`.
 fn optimise(ev: &mut Evaluator, m: &Model, goal: Goal, x0: &[f64], bounds: Bounds, gap: f64) -> Solve {
     let Bounds { lo, hi, integer } = bounds;
+    let different = build_problem(m).different;
     let any_int = integer.iter().any(|b| *b);
     let mut not_linear = false;
     let mut evo_end = None;
@@ -155,7 +156,7 @@ fn optimise(ev: &mut Evaluator, m: &Model, goal: Goal, x0: &[f64], bounds: Bound
                 Err(_) => Outcome::Limit,
                 Ok(SimplexProgram { c, rows, mut work, .. }) => {
                     let mut relax = |l: &[f64], h: &[f64]| solve_lp(&c, &rows, l, h, &mut work);
-                    if any_int { branch_and_bound(lo, hi, integer, MAX_NODES_LP, gap, &mut relax).0 } else { relax(lo, hi) }
+                    if any_int { branch_and_bound(lo, hi, integer, &different, MAX_NODES_LP, gap, &mut relax).0 } else { relax(lo, hi) }
                 }
             },
             Method::Grg => {
@@ -165,13 +166,13 @@ fn optimise(ev: &mut Evaluator, m: &Model, goal: Goal, x0: &[f64], bounds: Bound
                         project(&mut start, l, h);
                         nlp(ev, &start, l, h, goal)
                     };
-                    branch_and_bound(lo, hi, integer, MAX_NODES_NLP, gap, &mut relax).0
+                    branch_and_bound(lo, hi, integer, &different, MAX_NODES_NLP, gap, &mut relax).0
                 } else {
                     nlp(ev, x0, lo, hi, goal)
                 }
             }
             Method::Evolutionary => {
-                let (out, end) = evolutionary(ev, x0, lo, hi, integer, goal, &m.evo);
+                let (out, end) = evolutionary(ev, x0, bounds, &different, goal, &m.evo);
                 evo_end = Some(end);
                 out
             }
@@ -335,3 +336,6 @@ fn run(s: &mut Session, p: &Json) -> Result<Json> {
 mod tests;
 #[cfg(test)]
 mod tests_alldifferent;
+
+#[cfg(test)]
+mod tests_dif_edges;

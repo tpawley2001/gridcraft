@@ -74,6 +74,7 @@ pub(super) struct Problem {
     pub(super) hi: Vec<f64>,
     pub(super) integer: Vec<bool>,
     pub(super) rows: Vec<Row>,
+    pub(super) different: Vec<Vec<usize>>,
 }
 
 /// Splits the constraints into variable bounds and general rows.
@@ -84,21 +85,25 @@ pub(super) fn build_problem(m: &Model) -> Problem {
     let mut has_lower = vec![false; n];
     let mut integer = vec![false; n];
     let mut rows = Vec::new();
+    let mut different = Vec::new();
     let var_index = |c: &CellRef| m.vars.iter().position(|v| v == c);
     for c in &m.cons {
+        if c.rel == Rel::Dif {
+            different.push(c.lhs.iter().filter_map(var_index).collect());
+        }
         for (k, cell) in c.lhs.iter().enumerate() {
             let j = var_index(cell);
             match c.rel {
-                Rel::Int | Rel::Bin => {
+                Rel::Int | Rel::Bin | Rel::Dif => {
                     if let Some(j) = j {
                         if let Some(b) = integer.get_mut(j) {
                             *b = true;
                         }
-                        if c.rel == Rel::Bin
+                        if matches!(c.rel, Rel::Bin | Rel::Dif)
                             && let (Some(l), Some(h), Some(hl)) = (lo.get_mut(j), hi.get_mut(j), has_lower.get_mut(j))
                         {
-                            *l = l.max(0.0);
-                            *h = h.min(1.0);
+                            *l = l.max(if c.rel == Rel::Dif { 1.0 } else { 0.0 });
+                            *h = h.min(if c.rel == Rel::Dif { c.lhs.len() as f64 } else { 1.0 });
                             *hl = true;
                         }
                     }
@@ -140,5 +145,5 @@ pub(super) fn build_problem(m: &Model) -> Problem {
             }
         }
     }
-    Problem { lo, hi, integer, rows }
+    Problem { lo, hi, integer, rows, different }
 }

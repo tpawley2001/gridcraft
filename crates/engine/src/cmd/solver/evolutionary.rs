@@ -2,7 +2,7 @@ use super::lp::{Outcome, Row, Sense};
 use super::model::{EvoOptions, Goal};
 use super::nlp::{project, shape, violation};
 use super::problem::Evaluator;
-use super::{MAX_POPULATION, MIN_POPULATION, PRECISION};
+use super::{Bounds, MAX_POPULATION, MIN_POPULATION, PRECISION};
 
 // ---------------------------------------------------------------- evolutionary
 
@@ -77,6 +77,7 @@ struct EvoSearch<'a> {
     lo: Vec<f64>,
     hi: Vec<f64>,
     integer: &'a [bool],
+    different: &'a [Vec<usize>],
     tol: f64,
 }
 
@@ -84,6 +85,10 @@ impl EvoSearch<'_> {
     /// Clamps into the box and rounds integer variables.
     fn repair(&self, x: &mut [f64]) {
         for (j, v) in x.iter_mut().enumerate() {
+            // Bounds are scored for permutation cells: clamping would introduce duplicates.
+            if self.different.iter().any(|g| g.contains(&j)) {
+                continue;
+            }
             let (l, h) = (self.lo.get(j).copied().unwrap_or(0.0), self.hi.get(j).copied().unwrap_or(0.0));
             *v = if v.is_finite() { v.clamp(l, h) } else { l };
             if self.integer.get(j).copied().unwrap_or(false) {
@@ -96,23 +101,64 @@ impl EvoSearch<'_> {
     fn score(&mut self, x: Vec<f64>) -> Option<Member> {
         let p = self.ev.eval(&x)?;
         let (phi, cons) = shape(&p, &self.rows, self.goal);
-        let viol = violation(&cons, &self.senses);
+        let mut viol = violation(&cons, &self.senses);
+        for ((v, l), h) in x.iter().zip(&self.lo).zip(&self.hi) {
+            viol += (l - v).max(0.0) + (v - h).max(0.0);
+        }
+        if !permutations(&x, self.different) {
+            viol = f64::INFINITY;
+        }
         let phi = if phi.is_finite() { phi } else { f64::INFINITY };
         let viol = if viol.is_finite() && cons.iter().all(|c| c.is_finite()) { viol } else { f64::INFINITY };
         Some(Member { x, phi, viol })
     }
 }
 
+/// Check all groups, including overlapping constraints.
+fn permutations(x: &[f64], groups: &[Vec<usize>]) -> bool {
+    groups.iter().all(|group| {
+        let mut seen = vec![false; group.len()];
+        group.iter().all(|j| {
+            let Some(v) = x.get(*j).filter(|v| v.is_finite() && **v >= 1.0 && **v <= group.len() as f64 && v.fract() == 0.0) else { return false };
+            let Some(slot) = seen.get_mut(*v as usize - 1) else { return false };
+            !std::mem::replace(slot, true)
+        })
+    })
+}
+
+fn random_permutations(x: &mut [f64], groups: &[Vec<usize>], rng: &mut Rng) -> bool {
+    // Overlapping groups can invalidate an earlier shuffle; bound retries and keep only
+    // candidates satisfying every group. Failure is a search limit, not infeasibility.
+    for _ in 0..128 {
+        for group in groups {
+            let mut values: Vec<f64> = (1..=group.len()).map(|v| v as f64).collect();
+            for k in (1..values.len()).rev() {
+                let j = rng.below(k + 1);
+                values.swap(k, j);
+            }
+            for (j, v) in group.iter().zip(values) {
+                if let Some(cell) = x.get_mut(*j) {
+                    *cell = v;
+                }
+            }
+        }
+        if permutations(x, groups) {
+            return true;
+        }
+    }
+    false
+}
+
 /// The Evolutionary method within `lo..hi` from `x0`.
 pub(super) fn evolutionary(
     ev: &mut Evaluator,
     x0: &[f64],
-    lo: &[f64],
-    hi: &[f64],
-    integer: &[bool],
+    bounds: Bounds,
+    different: &[Vec<usize>],
     goal: Goal,
     o: &EvoOptions,
 ) -> (Outcome, EvoEnd) {
+    let Bounds { lo, hi, integer } = bounds;
     let rows = ev.rows.clone();
     let senses: Vec<Sense> = rows.iter().map(|r| r.sense).collect();
     let scale = rows.iter().map(|r| r.rhs_const.abs()).fold(1.0, f64::max);
@@ -126,18 +172,29 @@ pub(super) fn evolutionary(
         return (Outcome::Infeasible, EvoEnd::Converged);
     }
     let span: Vec<f64> = blo.iter().zip(&bhi).map(|(l, h)| (h - l).max(1e-9)).collect();
-    let mut se = EvoSearch { ev, rows, senses, goal, lo: blo, hi: bhi, integer, tol: PRECISION * scale };
+    let mut se = EvoSearch { ev, rows, senses, goal, lo: blo, hi: bhi, integer, different, tol: PRECISION * scale };
     let mut rng = Rng::new(o.seed);
     let size = o.population.clamp(MIN_POPULATION, MAX_POPULATION);
     let tol = se.tol;
     let mut end = EvoEnd::Budget;
     // The first generation: the start and random points in the box.
     let mut pop: Vec<Member> = Vec::with_capacity(size);
+    if !random_permutations(&mut start, different, &mut rng) {
+        return (Outcome::Limit, EvoEnd::Budget);
+    }
     se.repair(&mut start);
+    let permutation_start = start.clone();
     let mut next_x = Some(start);
     while pop.len() < size {
         let x = next_x.take().unwrap_or_else(|| {
             let mut x: Vec<f64> = se.lo.iter().zip(&se.hi).map(|(l, h)| rng.between(*l, *h)).collect();
+            if !random_permutations(&mut x, different, &mut rng) {
+                for j in different.iter().flatten() {
+                    if let (Some(v), Some(a)) = (x.get_mut(*j), permutation_start.get(*j)) {
+                        *v = *a;
+                    }
+                }
+            }
             se.repair(&mut x);
             x
         });
@@ -190,6 +247,24 @@ pub(super) fn evolutionary(
                     v
                 })
                 .collect();
+            // Copy the same parent's entire permutation component, including overlaps.
+            for j in different.iter().flatten() {
+                if let (Some(v), Some(a)) = (x.get_mut(*j), pa.get(*j)) {
+                    *v = *a;
+                }
+            }
+            for group in different {
+                if rng.uniform() < o.mutation {
+                    let (Some(a), Some(b)) = (group.get(rng.below(group.len())), group.get(rng.below(group.len()))) else { continue };
+                    if *a < x.len() && *b < x.len() {
+                        x.swap(*a, *b);
+                        // A swap in overlapping constraints is kept only if all remain permutations.
+                        if !permutations(&x, different) {
+                            x.swap(*a, *b);
+                        }
+                    }
+                }
+            }
             se.repair(&mut x);
             match se.score(x) {
                 Some(m) => next.push(m),
