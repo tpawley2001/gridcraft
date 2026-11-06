@@ -193,6 +193,7 @@ mod web_publishing_tests;
 mod workbook_options_controls;
 mod worksheet_settings;
 
+mod codex_day_border_extras;
 mod codex_day_protection;
 
 mod workbook_protection_locks {
