@@ -536,6 +536,7 @@ fn chartex_parts_as_excel_expects_them() {
     let mut wb = gridcraft_model::Workbook::new();
     let mut sheet = gridcraft_model::Sheet::new("Data");
     sheet.charts.push(Chart {
+        theme_override: None,
         hidden: false,
         id: 1,
         kind: ChartKind::Waterfall,
@@ -602,6 +603,7 @@ fn doughnut_writes_every_series_as_a_ring_with_hole_and_angle() {
     let mut wb = gridcraft_model::Workbook::new();
     let mut sheet = gridcraft_model::Sheet::new("Data");
     sheet.charts.push(Chart {
+        theme_override: None,
         id: 1,
         hidden: false,
         kind: ChartKind::Doughnut,

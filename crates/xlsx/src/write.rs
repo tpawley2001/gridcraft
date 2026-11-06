@@ -134,6 +134,7 @@ pub struct Out {
     pub sst: Sst,
     pub images: u32,
     pub charts: u32,
+    pub theme_overrides: u32,
     /// The workbook's file name, which a PivotChart's link to its PivotTable names in brackets.
     pub book_name: String,
     /// References of chartex parts, defined as hidden `_xlchart.v1.N` names.
@@ -415,6 +416,7 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
         sst: Sst::default(),
         images: 0,
         charts: 0,
+        theme_overrides: 0,
         book_name: book_name.filter(|n| !n.is_empty() && !n.contains(['[', ']'])).unwrap_or(DEFAULT_BOOK_NAME).to_string(),
         chart_names: vec![],
         drawings: 0,

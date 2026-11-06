@@ -265,6 +265,7 @@ pub fn read_chart(root: &El) -> Option<Chart> {
     let first_slice_angle =
         plot.child("pieChart").or(doughnut).and_then(|g| g.child_val("firstSliceAng")).and_then(|v| v.trim().parse::<u16>().ok()).unwrap_or(0) % 360;
     Some(Chart {
+        theme_override: None,
         hidden: false,
         id: 0,
         kind,

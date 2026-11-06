@@ -34,6 +34,7 @@ fn literal_category_with_separators_survives_save() {
         })
         .collect();
     s.charts.push(Chart {
+        theme_override: None,
         hidden: false,
         id: 1,
         kind: ChartKind::ColumnClustered,

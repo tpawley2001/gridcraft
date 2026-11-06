@@ -183,6 +183,7 @@ const REWRITTEN: &[&str] = &[
     "chartstyle",
     "chartcolorstyle",
     "chartusershapes",
+    "themeoverride",
     "table",
     "pivottable",
     "pivotcachedefinition",
@@ -232,6 +233,7 @@ const KEPT_SHEET_GRAPH: &[&str] = &[
     "chartstyle",
     "chartcolorstyle",
     "chartusershapes",
+    "themeoverride",
     "vmldrawing",
     "comments",
 ];

@@ -23,6 +23,7 @@ fn workbook(categories: &str, values: &str) -> Workbook {
         s.set_value(CellRef::new(r, 2), Value::Number(i as f64 + 1.0));
     }
     s.charts.push(Chart {
+        theme_override: None,
         hidden: false,
         id: 1,
         kind: ChartKind::Line,
