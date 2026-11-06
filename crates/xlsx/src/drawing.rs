@@ -341,6 +341,7 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
     let text = obj.child("txBody").map(body_text).unwrap_or_default();
     let mut format = read_text_format(obj.child("txBody"));
     format.no_line = ln.is_some_and(|l| l.child("noFill").is_some());
+    format.no_fill = sp.child("noFill").is_some();
     Some(Shape { hidden: false, hyperlink: None, name: None, id: 0, kind, anchor, fill, line, text, format, math: Default::default() })
 }
 
@@ -666,7 +667,9 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                     if tx { " txBox=\"1\"" } else { "" },
                     xfrm(&sh.anchor, "a:xfrm")
                 );
-                if let Some(c) = srgb(&sh.fill, theme) {
+                if sh.format.no_fill {
+                    s.push_str("<a:noFill/>");
+                } else if let Some(c) = srgb(&sh.fill, theme) {
                     let _ = write!(s, "<a:solidFill>{c}</a:solidFill>");
                 }
                 let line_c = srgb(&sh.line, theme);

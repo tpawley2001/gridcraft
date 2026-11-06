@@ -7,6 +7,8 @@
 
 use std::sync::Arc;
 
+use gridcraft_model::Color;
+
 use super::{Budget, MAX_PICTURE_BYTES};
 use crate::ReadReport;
 
@@ -20,15 +22,31 @@ pub(super) const FSP: u16 = 0xF00A;
 pub(super) const FOPT: u16 = 0xF00B;
 pub(super) const TERTIARY_FOPT: u16 = 0xF122;
 
-/// Property ids ([MS-ODRAW] 2.3): the BStore index, the shape's name and description, and the
-/// group shape boolean properties.
+/// Property ids ([MS-ODRAW] 2.3): the BStore index, the shape's name and description, the group
+/// shape boolean properties, the fill and line colours, the fill and line style boolean
+/// properties and the line's arrowheads.
 const PROP_PIB: u16 = 0x0104;
 const PROP_NAME: u16 = 0x0380;
 const PROP_DESCRIPTION: u16 = 0x0381;
 const PROP_GROUP_BOOLEANS: u16 = 0x03BF;
+const PROP_FILL_COLOR: u16 = 0x0181;
+const PROP_FILL_BOOLEANS: u16 = 0x01BF;
+const PROP_LINE_COLOR: u16 = 0x01C0;
+const PROP_LINE_START_ARROWHEAD: u16 = 0x01D0;
+const PROP_LINE_END_ARROWHEAD: u16 = 0x01D1;
+const PROP_LINE_BOOLEANS: u16 = 0x01FF;
 /// GroupShapeBooleanProperties: `fHidden` and `fUsefHidden`.
 const HIDDEN: u32 = 0x0000_0002;
 const USE_HIDDEN: u32 = 0x0002_0000;
+/// FillStyleBooleanProperties: `fFilled` and `fUsefFilled`.
+const FILLED: u32 = 0x0000_0010;
+const USE_FILLED: u32 = 0x0010_0000;
+/// LineStyleBooleanProperties: `fLine` and `fUsefLine`.
+const LINE: u32 = 0x0000_0008;
+const USE_LINE: u32 = 0x0008_0000;
+/// OfficeArtCOLORREF ([MS-ODRAW] 2.2.22): the `fSchemeIndex` flag, whose red byte is then the
+/// BIFF8 colour index.
+const COLOR_SCHEME_INDEX: u32 = 0x0000_0008;
 
 /// BStore entries read at most.
 const MAX_ENTRIES: usize = 65_536;
@@ -168,6 +186,36 @@ pub(super) struct ShapeProps {
     pub name: Option<String>,
     pub alt: Option<String>,
     pub hidden: bool,
+    /// The OfficeArtFSP instance: the shape type ([MS-ODRAW] 2.2.40, msospt*).
+    pub shape_type: u16,
+    /// fillColor and lineColor as OfficeArtCOLORREFs, whatever their flags say.
+    pub fill_color: Option<u32>,
+    pub line_color: Option<u32>,
+    /// FillStyleBooleanProperties: `fUsefFilled` set and `fFilled` clear.
+    pub no_fill: bool,
+    /// LineStyleBooleanProperties: `fUsefLine` set and `fLine` clear.
+    pub no_line: bool,
+    /// lineStartArrowhead and lineEndArrowhead are not `none` (0).
+    pub arrow: bool,
+}
+
+/// An OfficeArtCOLORREF as a model colour: bytes red, green, blue, flags. With `fSchemeIndex` the
+/// red byte is the BIFF8 colour index (icv) into the workbook's colour table; system colours
+/// (icv 64 and up) and any other flag are automatic.
+pub(super) fn art_color(op: Option<u32>, table: &[u32; 64]) -> Color {
+    let Some(op) = op else { return Color::Auto };
+    let (red, green, blue, flags) = (op & 0xFF, (op >> 8) & 0xFF, (op >> 16) & 0xFF, (op >> 24) & 0xFF);
+    if flags == 0 {
+        return Color::Rgb((red << 16) | (green << 8) | blue);
+    }
+    if flags & COLOR_SCHEME_INDEX != 0 {
+        // icv 8..=63 is the palette; 64 and up are system colours.
+        return match usize::try_from(red) {
+            Ok(icv) if (8..64).contains(&icv) => table.get(icv).map_or(Color::Auto, |c| Color::Rgb(*c)),
+            _ => Color::Auto,
+        };
+    }
+    Color::Auto
 }
 
 /// Reads an OfficeArtFOPT (or tertiary FOPT) body with `count` properties into `props`: a table
@@ -188,6 +236,11 @@ pub(super) fn fopt(count: u16, body: &[u8], props: &mut ShapeProps) {
             PROP_NAME if is_complex => props.name = utf16(data),
             PROP_DESCRIPTION if is_complex => props.alt = utf16(data),
             PROP_GROUP_BOOLEANS if op & USE_HIDDEN != 0 => props.hidden = op & HIDDEN != 0,
+            PROP_FILL_COLOR if !is_complex => props.fill_color = Some(op),
+            PROP_LINE_COLOR if !is_complex => props.line_color = Some(op),
+            PROP_FILL_BOOLEANS if !is_complex => props.no_fill = op & USE_FILLED != 0 && op & FILLED == 0,
+            PROP_LINE_BOOLEANS if !is_complex => props.no_line = op & USE_LINE != 0 && op & LINE == 0,
+            PROP_LINE_START_ARROWHEAD | PROP_LINE_END_ARROWHEAD if !is_complex => props.arrow |= op != 0,
             _ => {}
         }
         complex = complex.saturating_add(extra);

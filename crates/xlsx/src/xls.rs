@@ -1082,7 +1082,7 @@ fn worksheet(
         page: page_setup::PageState::default(),
         autofilter: autofilter::State::default(),
         tables: tables::SheetTables::default(),
-        charts: chart::Embedded::default(),
+        charts: chart::Embedded::new(g.styles.color_table()),
         pivots: pivot::Views::default(),
         queries: connections::Blocks::default(),
         selections: vec![],
