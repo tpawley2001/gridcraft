@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{Cell, NumFmt, Sheet};
+use gridcraft_model::{Anchor, Cell, Chart, ChartKind, LegendPos, NumFmt, Series, Sheet};
 use serde_json::{Value as Json, json};
 
 use super::whatif::parse_range;
@@ -69,7 +69,7 @@ pub fn specs() -> Vec<CommandSpec> {
         "Data Analysis…",
         ["Data", "Analysis"],
         None,
-        "{tool: anovaSingle|anovaTwoFactorWith|anovaTwoFactorWithout|correlation|covariance|descriptive|exponentialSmoothing|fTest|fourierAnalysis|histogram|movingAverage|randomNumberGeneration|rankPercentile|regression|sampling|tTestPaired|tTestEqual|tTestUnequal|zTest (or the tool's label), output?: \"E1\" (top-left of the report; default a new sheet), newSheet?: name, outputTo?: range|newSheet (picks between the two), overwrite?: bool (else non-empty output cells are refused), labels?: bool (first row/column holds names), groupedBy?: columns|rows, …tool params} — range tools take `range`; descriptive: summary? (default true), confidence?: 95, kthLargest?, kthSmallest?; histogram: bins?: range (default evenly spaced), pareto?, cumulative?; regression: inputY, inputX, constantZero?, confidence?: 95, residuals?, standardizedResiduals?, normalProbability?; movingAverage: interval? (3), standardErrors?; exponentialSmoothing: damping? (0.3), standardErrors?; t-tests and fTest: range1, range2, alpha? (0.05), hypothesizedDifference? (0); anovaSingle: alpha?; anovaTwoFactorWithout: range, labels? (the first row holds column names and the first column row names), alpha?; anovaTwoFactorWith: range (first row and column hold labels), rowsPerSample, alpha?; zTest: range1, range2, variance1, variance2 (known variances), alpha?, hypothesizedDifference?; fourierAnalysis: range (one row or column of 2^k numbers or complex text, at most 4096), inverse?; randomNumberGeneration: variables? (1), count (per variable; not for patterned), distribution: uniform{from, to} | normal{mean, standardDeviation} | bernoulli{p} | binomial{p, trials} | poisson{lambda} | patterned{from, to, step, repeatEach, repeatSequence} | discrete{valueRange: two columns of value and probability}, seed? (whole number, not for patterned; the same seed repeats the numbers; the result reports the seed used), at most 1,000,000 numbers; sampling: range, method?: periodic|random, period (periodic), samples (random, with replacement), seed?. Writes static values. No `tool` → {tools} (the menu opens the dialog).",
+        "{tool: anovaSingle|anovaTwoFactorWith|anovaTwoFactorWithout|correlation|covariance|descriptive|exponentialSmoothing|fTest|fourierAnalysis|histogram|movingAverage|randomNumberGeneration|rankPercentile|regression|sampling|tTestPaired|tTestEqual|tTestUnequal|zTest (or the tool's label), output?: \"E1\" (top-left of the report; default a new sheet), newSheet?: name, outputTo?: range|newSheet (picks between the two), overwrite?: bool (else non-empty output cells are refused), labels?: bool (first row/column holds names), groupedBy?: columns|rows, …tool params} — range tools take `range`; descriptive: summary? (default true), confidence?: 95, kthLargest?, kthSmallest?; histogram: bins?: range (default evenly spaced), pareto?, cumulative?, chartOutput?: bool (default false); regression: inputY, inputX, constantZero?, confidence?: 95, residuals?, standardizedResiduals?, normalProbability?; movingAverage: interval? (3), standardErrors?, chartOutput?: bool (default false); exponentialSmoothing: damping? (0.3), standardErrors?, chartOutput?: bool (default false); t-tests and fTest: range1, range2, alpha? (0.05), hypothesizedDifference? (0); anovaSingle: alpha?; anovaTwoFactorWithout: range, labels? (the first row holds column names and the first column row names), alpha?; anovaTwoFactorWith: range (first row and column hold labels), rowsPerSample, alpha?; zTest: range1, range2, variance1, variance2 (known variances), alpha?, hypothesizedDifference?; fourierAnalysis: range (one row or column of 2^k numbers or complex text, at most 4096), inverse?; randomNumberGeneration: variables? (1), count (per variable; not for patterned), distribution: uniform{from, to} | normal{mean, standardDeviation} | bernoulli{p} | binomial{p, trials} | poisson{lambda} | patterned{from, to, step, repeatEach, repeatSequence} | discrete{valueRange: two columns of value and probability}, seed? (whole number, not for patterned; the same seed repeats the numbers; the result reports the seed used), at most 1,000,000 numbers; sampling: range, method?: periodic|random, period (periodic), samples (random, with replacement), seed?. Writes static values. No `tool` → {tools} (the menu opens the dialog).",
         has_doc,
         run
     )]
@@ -1744,6 +1744,86 @@ fn sampling(s: &Session, p: &Json, seed: Option<u64>) -> Result<Grid> {
 
 // ---------------------------------------------------------------- output
 
+/// Builds references only after the report rectangle has been checked to fit the sheet.
+fn report_chart(s: &Session, p: &Json, tool: &str, sheet_name: &str, rect: RangeRef) -> Result<Option<Chart>> {
+    if !flag(p, "chartOutput") || !matches!(tool, "histogram" | "movingAverage" | "exponentialSmoothing") {
+        return Ok(None);
+    }
+    let chart_col =
+        rect.end.col.checked_add(1).filter(|c| *c < MAX_COLS).ok_or_else(|| bad(CMD, "the chart doesn't fit to the right of the report"))?;
+    let reference = |name: &str, range: RangeRef| {
+        let cell = |c: CellRef| format!("${}${}", gridcraft_core::col_to_letters(c.col), u64::from(c.row) + 1);
+        format!("{}!{}:{}", gridcraft_formula::quote_sheet(name), cell(range.start), cell(range.end))
+    };
+    let series = |name: &str, values: String, categories: Option<String>, cumulative: bool| Series {
+        name: Some(name.into()),
+        values,
+        categories,
+        bubble_sizes: None,
+        color: None,
+        secondary: cumulative,
+        kind: cumulative.then_some(ChartKind::Line),
+        smooth: false,
+        quartiles: Default::default(),
+        trendlines: Vec::new(),
+    };
+    let histogram = tool == "histogram";
+    let title = match tool {
+        "histogram" => "Histogram",
+        "movingAverage" => "Moving Average",
+        _ => "Exponential Smoothing",
+    };
+    let mut data = Vec::new();
+    if histogram {
+        let cumulative = flag(p, "cumulative");
+        let col = rect.start.col + if flag(p, "pareto") { if cumulative { 3 } else { 2 } } else { 0 };
+        let column = |c| reference(sheet_name, RangeRef::new(CellRef::new(rect.start.row + 1, c), CellRef::new(rect.end.row, c)));
+        let categories = Some(column(col));
+        data.push(series("Frequency", column(col + 1), categories.clone(), false));
+        if cumulative {
+            data.push(series("Cumulative %", column(col + 2), categories, true));
+        }
+    } else {
+        let (si, mut input) = input_range(s, p, &["range", "input"])?;
+        if flag(p, "labels") {
+            if input.width() > 1 {
+                input.start.col += 1;
+            } else {
+                input.start.row += 1;
+            }
+            if input.start.row > input.end.row || input.start.col > input.end.col {
+                return Err(bad(CMD, "the input range holds no data points"));
+            }
+        }
+        let input_sheet = s.doc()?.wb.sheet(si).ok_or(EngineError::NoDocument)?;
+        data.push(series("Actual", reference(&input_sheet.name, input), None, false));
+        let forecast = RangeRef::new(rect.start, CellRef::new(rect.end.row, rect.start.col));
+        data.push(series("Forecast", reference(sheet_name, forecast), None, false));
+    }
+    Ok(Some(Chart {
+        id: s.doc()?.wb.next_object_id(),
+        theme_override: None,
+        hidden: false,
+        kind: if histogram { ChartKind::ColumnClustered } else { ChartKind::Line },
+        anchor: Anchor { cell: CellRef::new(rect.start.row, chart_col), dx: 0.0, dy: 0.0, width: 480.0, height: 288.0, mode: Default::default() },
+        title: Some(title.into()),
+        series: data,
+        legend: LegendPos::Right,
+        x_title: Some(if histogram { "Bin" } else { "Data Point" }.into()),
+        y_title: Some(if histogram { "Frequency" } else { "Value" }.into()),
+        data_labels: false,
+        data_table: None,
+        gridlines: true,
+        style: 1,
+        hole_size: 75,
+        first_slice_angle: 0,
+        source: None,
+        by_rows: false,
+        pivot: None,
+        scale: Default::default(),
+    }))
+}
+
 /// Writes the report at `output` (refusing to overwrite data unless `overwrite`) or on a new
 /// sheet.
 fn write_report(s: &mut Session, p: &Json, tool: &str, g: Grid) -> Result<Json> {
@@ -1801,6 +1881,7 @@ fn write_report(s: &mut Session, p: &Json, tool: &str, g: Grid) -> Result<Json> 
         return Err(EngineError::Other(format!("The output range {} {OVERWRITE_ERROR}; pass overwrite: true to replace it.", rect.a1())));
     }
     let sheet_name = new_sheet.clone().or_else(|| d.wb.sheet(si).map(|sh| sh.name.clone())).unwrap_or_default();
+    let chart = report_chart(s, p, tool, &sheet_name, rect)?;
     let new_index = edit(s, |cx| {
         let pct_fmt = NumFmt::new("0.00%");
         if let Some(name) = &new_sheet {
@@ -1824,6 +1905,9 @@ fn write_report(s: &mut Session, p: &Json, tool: &str, g: Grid) -> Result<Json> 
             let style = pct_styles.get(&cell).copied().unwrap_or_else(|| sh.style_id(cell));
             sh.set_cell(cell, Cell { value: v.clone(), formula: None, style, py: None });
             touched.push(cell);
+        }
+        if let Some(chart) = chart {
+            sh.charts.push(chart);
         }
         for c in touched {
             cx.touch(si, c);
@@ -2544,6 +2628,45 @@ mod tests {
         // A random distribution still refuses the bad seed.
         let bad = json!({"tool": "randomNumberGeneration", "distribution": "uniform", "count": 2, "seed": "abc", "outputTo": "newSheet"});
         assert!(s.execute("data.analysisToolPak", bad).is_err());
+    }
+
+    #[test]
+    fn chart_output_horizontal_labels_ids_and_redo() {
+        let mut s = s();
+        s.execute("range.setValues", json!({"range": "A1", "values": [["Series", 1, 2, 3, 4]]})).unwrap();
+        for tool in ["movingAverage", "exponentialSmoothing"] {
+            s.execute(CMD, json!({"tool": tool, "range": "Sheet1!A1:E1", "labels": true, "newSheet": "O'Brien", "chartOutput": true})).unwrap();
+            let sh = s.doc().unwrap().wb.sheets.last().unwrap();
+            let ch = sh.charts.first().unwrap();
+            assert_eq!(ch.series[0].values, "Sheet1!$B$1:$E$1");
+            assert_eq!(ch.series[1].values, "'O''Brien'!$A$1:$A$4");
+            assert_eq!((ch.anchor.width, ch.anchor.height, ch.anchor.dx, ch.anchor.dy), (480.0, 288.0, 0.0, 0.0));
+            let id = ch.id;
+            s.execute("edit.undo", json!({})).unwrap();
+            s.execute("edit.redo", json!({})).unwrap();
+            assert_eq!(s.doc().unwrap().wb.sheets.last().unwrap().charts.first().unwrap().id, id);
+            s.execute("edit.undo", json!({})).unwrap();
+        }
+        for output in ["G1", "I1"] {
+            s.execute(CMD, json!({"tool": "movingAverage", "range": "Sheet1!B1:E1", "output": output, "chartOutput": true})).unwrap();
+        }
+        let charts = &s.doc().unwrap().wb.sheet(0).unwrap().charts;
+        assert_ne!(charts[0].id, charts[1].id);
+    }
+
+    #[test]
+    fn chart_output_is_opt_in_and_refuses_an_anchor_outside_the_sheet() {
+        let mut s = s();
+        s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2], [3]]})).unwrap();
+        for tool in ["movingAverage", "exponentialSmoothing"] {
+            s.execute(CMD, json!({"tool": tool, "range": "A1:A3", "output": "C1"})).unwrap();
+            assert!(s.doc().unwrap().wb.sheet(0).unwrap().charts.is_empty());
+            s.execute("edit.undo", json!({})).unwrap();
+            assert!(s.execute(CMD, json!({"tool": tool, "range": "A1:A3", "output": "XFD1", "chartOutput": true})).is_err());
+            assert!(v(&s, "XFD1").is_empty());
+        }
+        s.execute(CMD, json!({"tool": "descriptive", "range": "A1:A3", "output": "C1", "chartOutput": true})).unwrap();
+        assert!(s.doc().unwrap().wb.sheet(0).unwrap().charts.is_empty());
     }
 
     #[test]

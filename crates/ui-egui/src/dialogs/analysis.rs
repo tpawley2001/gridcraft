@@ -63,6 +63,7 @@ fn toolpak_fields(tool: &str, values: &Map<String, Json>) -> Vec<Field> {
             labels(),
             Check { key: "pareto", label: "Pareto (sorted histogram)" },
             Check { key: "cumulative", label: "Cumulative Percentage" },
+            Check { key: "chartOutput", label: "Chart Output" },
         ],
         "correlation" | "covariance" | "rankPercentile" => vec![range(), grouped(), labels()],
         "anovaSingle" => vec![range(), grouped(), labels(), Text { key: "alpha", label: "Alpha:" }],
@@ -88,7 +89,13 @@ fn toolpak_fields(tool: &str, values: &Map<String, Json>) -> Vec<Field> {
             Check { key: "normalProbability", label: "Normal Probability" },
         ],
         "movingAverage" => {
-            vec![range(), labels(), Text { key: "interval", label: "Interval:" }, Check { key: "standardErrors", label: "Standard Errors" }]
+            vec![
+                range(),
+                labels(),
+                Text { key: "interval", label: "Interval:" },
+                Check { key: "standardErrors", label: "Standard Errors" },
+                Check { key: "chartOutput", label: "Chart Output" },
+            ]
         }
         "randomNumberGeneration" => {
             let dist = values.get("distribution").and_then(Json::as_str).unwrap_or("uniform");
@@ -150,7 +157,13 @@ fn toolpak_fields(tool: &str, values: &Map<String, Json>) -> Vec<Field> {
         }
         "fourierAnalysis" => vec![range(), labels(), Check { key: "inverse", label: "Inverse" }],
         "exponentialSmoothing" => {
-            vec![range(), labels(), Text { key: "damping", label: "Damping factor:" }, Check { key: "standardErrors", label: "Standard Errors" }]
+            vec![
+                range(),
+                labels(),
+                Text { key: "damping", label: "Damping factor:" },
+                Check { key: "standardErrors", label: "Standard Errors" },
+                Check { key: "chartOutput", label: "Chart Output" },
+            ]
         }
         "fTest" => {
             let mut v = two();
