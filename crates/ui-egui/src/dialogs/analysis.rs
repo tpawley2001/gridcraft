@@ -312,9 +312,14 @@ pub(super) fn analysis_toolpak(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Di
                 }
             } else {
                 let mut t = d.values.get(key).and_then(Json::as_str).unwrap_or("").to_string();
-                if ui.add(egui::TextEdit::singleline(&mut t).desired_width(160.0)).labelled_by(r.id).changed() {
+                let response = ui.add(egui::TextEdit::singleline(&mut t).desired_width(160.0)).labelled_by(r.id);
+                if response.changed() || response.clicked() {
                     d.values.insert(key.into(), json!(t));
                     d.values.insert("outputTo".into(), json!(choice));
+                    // Naming a new sheet ends range picking, just like its radio button.
+                    if d.refs.target.as_deref() == Some("output") {
+                        d.refs.target = None;
+                    }
                 }
             }
         });
