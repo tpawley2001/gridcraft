@@ -911,6 +911,10 @@ pub(crate) fn read_header_footer(e: &El, pr: &mut gridcraft_model::PrintSettings
 }
 
 #[cfg(test)]
+#[path = "tests/data_table_edge_tests.rs"]
+mod data_table_edge_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
