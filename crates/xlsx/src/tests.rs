@@ -15,6 +15,7 @@ mod chart_combo_pie_doughnut;
 mod chart_data_table;
 mod chart_ref_offsets;
 mod chart_sheet_print_tests;
+mod chart_theme_override_tests;
 mod code_name_tests;
 mod controls_tests;
 mod csv_tests;
