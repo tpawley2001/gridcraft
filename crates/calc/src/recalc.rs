@@ -207,6 +207,12 @@ impl Calc {
 
     /// Updates the graph for cells whose content changed and recalculates what depends on them.
     pub fn cells_changed(&mut self, wb: &mut Workbook, changed: &[Key]) {
+        self.cells_changed_dirty(wb, changed);
+    }
+
+    /// [`Calc::cells_changed`], returning the formulas it recalculated (the edited formulas
+    /// and everything that reads the edited cells, directly or through other formulas).
+    pub fn cells_changed_dirty(&mut self, wb: &mut Workbook, changed: &[Key]) -> Vec<Key> {
         let mut cleared: Vec<(usize, RangeRef)> = Vec::new();
         for &k in changed {
             let formula = wb.sheet(k.0).and_then(|s| s.cell(k.1)).and_then(|c| c.formula.clone());
@@ -257,8 +263,8 @@ impl Calc {
         if wb.calc.mode == CalcMode::Manual {
             // Only the edited formulas themselves are evaluated.
             let own: Vec<Key> = changed.iter().copied().filter(|k| self.graph.nodes.contains_key(k)).collect();
-            self.run(wb, own, false);
-            return;
+            self.run(wb, own.clone(), false);
+            return own;
         }
         let mut seeds: Vec<Key> = changed.to_vec();
         let mut emptied: Vec<Key> = Vec::new();
@@ -304,10 +310,11 @@ impl Calc {
         let dirty = self.dirty_closure(wb, &seeds, &areas);
         let t1 = prof_now();
         let n = dirty.len();
-        self.run(wb, dirty, false);
+        self.run(wb, dirty.clone(), false);
         if std::env::var_os("GRIDCRAFT_PROFILE").is_some() {
             eprintln!("recalc: {} seeds, closure {} cells {:.1} ms, run {:.1} ms", seeds.len(), n, t1 - t0, prof_now() - t1);
         }
+        dirty
     }
 
     /// The formulas to recalculate after `seeds` and every cell of `areas` changed: the seeds

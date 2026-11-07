@@ -443,13 +443,21 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
         eprintln!("commit: edit {:?}, {} changed", since(t0), changed.len());
     }
     let recalculated = structural || !changed.is_empty();
-    if structural {
+    // What the edit touched, for the data tables: `None` (everything) after a structural edit.
+    let touched = if structural {
         d.calc.recalc_all(&mut wb);
+        None
     } else if !changed.is_empty() {
-        d.calc.cells_changed(&mut wb, &changed);
-    }
+        let mut dirty = d.calc.cells_changed_dirty(&mut wb, &changed);
+        dirty.extend_from_slice(&changed);
+        Some(dirty)
+    } else {
+        Some(Vec::new())
+    };
     if recalculated && wb.calc.mode == gridcraft_model::CalcMode::Automatic {
-        crate::cmd::whatif::recalc_data_tables(&mut d.calc, &mut wb);
+        d.last_data_tables_recalculated = crate::cmd::whatif::recalc_data_tables(&mut d.calc, &mut wb, touched);
+    } else if recalculated {
+        d.last_data_tables_recalculated = 0;
     }
     controls::sync_linked_values(&mut wb);
     if let Some(t0) = t0 {

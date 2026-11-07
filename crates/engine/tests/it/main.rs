@@ -12,6 +12,7 @@ mod cross_sheet_cut;
 mod csv_export_budget;
 mod custom_filter_blanks;
 mod custom_view_freeze;
+mod data_table_dirty;
 mod data_table_recalc;
 mod data_table_shift;
 mod dynamicmetadata;
