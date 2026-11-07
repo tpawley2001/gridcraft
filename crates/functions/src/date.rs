@@ -747,6 +747,9 @@ mod tests {
         close(ev("DATEVALUE", vec![t("2020-01-01")]), 43831.0);
         close(ev("DATEVALUE", vec![t("1/2/2020 10:00")]), 43832.0);
         close(ev("DATEVALUE", vec![t("4-Mar-2026")]), d(2026.0, 3.0, 4.0));
+        // A month name then a valid day of that month is a day in the current year.
+        let year = gridcraft_core::parse::current_year() as f64;
+        close(ev("DATEVALUE", vec![t("FEB-01")]), d(year, 2.0, 1.0));
         is_err(ev("DATEVALUE", vec![t("hello")]), CellError::Value);
         is_err(ev("DATEVALUE", vec![t("123")]), CellError::Value);
         is_err(ev("DATEVALUE", vec![n(43831.0)]), CellError::Value);
