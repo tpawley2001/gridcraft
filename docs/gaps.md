@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-07 · **Change:** minor (§7: Excel 5.0/95 (BIFF5) `.xls` fonts, fills, borders and alignment are read; XLSX What-If text results use inline formula strings; G0130: chart theme overrides use base64 in JSON and share bytes across copies; chart theme overrides survive XLSX open + save; G0119: XLSX What-If data tables survive open + save; G0141: Evolutionary Solver Population report; G0130: chart theme overrides use base64 in JSON and share bytes across copies; chart theme overrides survive XLSX open + save; G0119: XLSX What-If data tables survive open + save; G0140: the Data Table dialog; G0130: chart theme overrides use base64 in JSON and share bytes across copies; chart theme overrides survive XLSX open + save; G0119: XLSX What-If data tables survive open + save; Analysis ToolPak chart output for Histogram, Moving Average and Exponential Smoothing; chart theme overrides survive XLSX open + save; XLSX What-If data tables survive open + save; §13: Solver AllDifferent constraints; chart theme overrides survive XLSX open + save; XLSX What-If data tables survive open + save; What-If data tables recalculate live and refuse edits to part of a table; chart theme overrides use base64 in JSON and share bytes across copies; chart theme overrides survive XLSX open + save; XLSX What-If data tables survive open + save; `.xls` rectangles, ovals, lines and arrows open as shapes and save as `.xlsx`; INDIRECT unquoted digit-leading sheet names; INDIRECT unquoted digit-leading sheet names; INDIRECT unquoted digit-leading sheet names; IF omitted scalar results join as empty text; Manager and Hyperlink base survive XLSX open + save; `.xls` Manager survives Save As `.xlsx`; macro-free saves omit XLM names and their dependents; `.xls` text boxes keep their text and anchors through Save As `.xlsx`; `.xls` pie and doughnut charts keep their first slice angle and hole size; XLSX web publishing preferences survive open and save; XLSX workbook image, link, display and compatibility options survive saving (G0108); XLSX worksheet defaults, inactive protection permissions and validation prompt positions survive saving (G0107); §19: XLSB cell-bound query parameters keep their connections on Save As `.xlsx`; XLSX theme format schemes and picture fills survive saves; legacy VML form controls without worksheet `<controls>` survive XLSX saves; GROUPBY/PIVOTBY automatic headers are hidden (G0099); ODS valued rows repeated past the worksheet height read once with one warning per file; `.xls` empty LABEL strings without a final flags byte open; binary workbook sheet compatibility (G0092); `.xls` and XLSB Custom Views survive saving as `.xlsx`; SYLK export added; §7: `.xls` query tables and their data connections kept on save as .xlsx; DIF typed-value import and active-sheet export; SYLK import: values, R1C1 formulas, number formats and column widths; §7: `.xls` imports Excel 2007+ AutoFilter criteria (value lists, colour, icon, above/below average); §17: equations; earlier: §13: Solver Sensitivity report; earlier: §4: chart resizing is no longer a gap; earlier: §13: Analysis ToolPak has all 19 tools; earlier: §4: chart data tables implemented with XLSX round-trip and print/PDF; earlier: §13: Solver Options; earlier: §13: Solver Load/Save Model and Reset All; earlier: §19: XLSB data connections and query tables kept on save as .xlsx; .xls and .xlsb keep Allow Edit Ranges and their passwords on XLSX save; §7: Excel 5.0/95 (BIFF5) `.xls` workbooks open; §19: XLSB imports pictures, shapes, text boxes and charts; §7: `.xls` imports PivotTables that refresh and save as PivotTables; §19: XLSB CF/DV formulas keep other sheets, names and array constants; §7: `.xls` imports embedded charts and chart sheets as live charts; §7, §19: binary workbook window settings imported; `.xls` and `.xlsb` import document properties; §19: XLSB structured references, table calculated column and custom totals formulas imported; §19: XLSB imports data validation and conditional formatting; §7: `.xls` import reads tables; §4: chart data tables implemented with XLSX round-trip and print/PDF; §13: Solver Options, Load/Save Model and Reset All; §19: XLSB array constants and memory caches import as live formulas; §3: Office add-in content (web extension anchors and task panes) survives XLSX saves; §3, §17: XLSX grouped drawing objects kept on save; §7: `.xls` imports the sheet AutoFilter; XLSB imports sheet and workbook structure protection and calculation settings; XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §19: XLSB imports print setup, margins, print options, headers/footers and page breaks; XLSB workbook themes and theme tab colours imported; §19: XLSB imports tables and AutoFilters; `.xls` and `.xlsb` restore the saved active visible sheet; §7: `.xls` imports sheet protection, allowed actions and workbook structure protection; §7: `.xls` import reads Excel 2007+ conditional formats (CF12/CFEx); §7: `.xls` import reads page setup, margins, headers/footers, print options, page breaks and the tab colour; §19: XLSB imports hyperlinks and notes; §19: XLSB imports defined names and other-sheet references; §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas; §19: XLSB imports shared and array formulas; §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas; §19: XLSB imports column widths, row heights, hidden and outlined rows/columns, default sizes, frozen panes, sheet view options and tab colours; §3: XLSX keeps the volatile dependencies part (RTD and CUBE topics) on save; §19: XLSB imports fonts, fills, borders, alignment and protection; XLSX saved table ids never reuse a single mapped XML cell id (Excel repair prompt); §7: `.xls` import reads conditional formatting; §19: XLSB imports number formats; §7: `.xls` data validation imported; §19: XLSB imports cell formulas including text constants; hidden DrawingML objects keep their hidden flag on save and are left out of rendering and printing; §3: worksheet custom properties survive XLSX saves; §3, §17: XLSX SmartArt graphics kept on save; `check` accepts fragment-only relationship targets; XLSX zero page setup scale uses the default 100%; XLSX object click hyperlinks preserved; §8: PivotTable Enable show details; earlier: PivotTable Show Details) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-07 · **Change:** minor (doc cleanup: merged duplicated rows and sentences)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -99,27 +99,21 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - Workbook window display settings now import from the first `.xls` Window1 / `.xlsb` BrtBookView: sheet tabs, scroll bars and tab ratio survive Save As `.xlsx` (`binary_workbook_view_tests.rs`).
 - Document properties from `.xls` OLEPS streams (including Manager) and `.xlsb` OPC parts (including Manager and Hyperlink base) survive Save As `.xlsx`.
 - `.xls` query tables (ODBC, OLE DB, web, text imports) and their connections survive Save As `.xlsx`; parameter queries, saved sorts, OLAP and DAO/ADO sources are dropped with a warning.
-- **Evidence:** #121: Excel 97-2003 (BIFF8) `.xls` files now open (values, formulas, number
-  formats, merges, sizes, names, data validation, conditional formats (cell-value and formula rules), tables); fonts,
-  formats, merges, sizes, names, and cell formatting: fonts, fills, borders, alignment); exact theme colours (XFExt), charts, pictures, comments, conditional
-  formats, validation are not read, and `.xls` is never written. Password-encrypted
-  formats, merges, sizes, names, data validation, conditional formats (cell-value and formula rules),
-  the sheet AutoFilter (range, simple criteria and Excel 2007+ value list, colour, icon and average filters)); fonts,
-  formats, merges, sizes, names, sheet protection (allowed actions and legacy passwords), workbook
-  structure protection, Allow Edit Ranges (titles, references and legacy passwords), data validation,
-  conditional formats (cell-value and formula rules)); fonts,
-  formats, merges, sizes, names, data validation, conditional formats including the Excel 2007+
-  kinds (colour scales, data bars, icon sets, top/bottom, average, text and date rules)); fonts,
-  fills, borders, charts, pictures, comments are not read, and `.xls` is never written. Password-encrypted
-  formats, merges, sizes, names, data validation, conditional formats (cell-value and formula rules), page setup,
-  margins, headers/footers, print options, manual page breaks, tab colour); fonts,
-  fills, borders, charts, pictures, comments, Excel 2007+ conditional formats (CF12/CFEx)
-  are not read, and `.xls` is never written. Excel 5.0/95 (BIFF5) files open through the same
-  reader (values, number formats, names and formulas; 8-bit text in Windows-1252, 1251 or 1256);
-  BIFF2-4 files are refused. Password-encrypted
+- **Evidence:** #121: Excel 97-2003 (BIFF8) `.xls` files open with values, formulas, number
+  formats, merges, sizes, names, cell formatting (fonts, fills, borders, alignment, exact theme
+  colours from XFExt), the sheet AutoFilter (range, simple criteria and Excel 2007+ value list,
+  colour, icon and average filters), sheet protection (allowed actions and legacy passwords),
+  workbook structure protection, Allow Edit Ranges (titles, references and legacy passwords), data
+  validation, conditional formats including the Excel 2007+ kinds (colour scales, data bars, icon
+  sets, top/bottom, average, text and date rules), page setup, margins, headers/footers, print
+  options, manual page breaks and tab colour, plus the charts, pictures, shapes and query tables
+  listed above. Comments/notes, hyperlinks and freeze panes are not read, and `.xls` is never
+  written. Excel 5.0/95 (BIFF5) files open through the same reader (values, number formats, cell
+  formatting, names and formulas; 8-bit code-page text); BIFF2-4 files are refused. Password-encrypted
   `.xlsx` workbooks (Agile and Standard encryption) open with their password since #11, but are
-  saved without it: GridCraft can't write an encrypted file yet. Encrypted `.xls` (FILEPASS) and
-  RC4-encrypted files are still refused with a message.
+  saved without it: GridCraft can't write an encrypted file yet. `.xls` files encrypted with Excel's
+  default password (XOR, RC4, RC4 CryptoAPI) now open without a prompt, as Excel does; `.xls` files
+  encrypted with any other password (FILEPASS) are still refused with a message.
 - **Impact:** common in finance, government and anything older than 2007; encrypted files are
   routine in business.
 - **Estimate:** 14–21 h (`.xls` objects 10–15, encryption 4–6). [file-format-parity.md](file-format-parity.md)
@@ -160,8 +154,11 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   data model (`data.fromWeb`, `data.relationships` missing). **Estimate:** 60–100 h.
 
 ### 13. Analysis tools: Solver, Analysis ToolPak, Forecast Sheet (F)
-- XLSX What-If data tables retain their definitions and cached values through open + save, with text results saved as inline formula strings (`t="str"`); Data › What-If Analysis › Data Table… (and keytips A W T, D T) opens the Data Table dialog (row/column input cells over the selection); recalculation remains follow-up work.
-- What-If data tables (`{=TABLE()}`, one- and two-variable, from `data.dataTable` or an XLSX file) recalculate live and refuse edits to part of their result cells; the Data Table dialog remains follow-up work.
+- What-If data tables: XLSX data tables keep their definitions and cached values through open +
+  save, with text results saved as inline formula strings (`t="str"`); `{=TABLE()}` one- and
+  two-variable tables (from `data.dataTable` or an XLSX file) recalculate live and refuse edits to
+  part of their result cells; Data › What-If Analysis › Data Table… (and keytips A W T, D T) opens
+  the Data Table dialog (row/column input cells over the selection).
 - Forecast Sheet (`data.forecastSheet`) and the FORECAST.ETS family are in, including Forecast
   Start (hindcast, #785).
 - Solver (`data.solver`, #327) has Simplex LP with integer/binary branch and bound, a local
@@ -170,14 +167,10 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   successful solve and its reports share one Undo step (#1050). Load/Save Model writes the
   model on cells of its sheet and reads it back; Reset All removes it. Solver Options sets the
   evaluation limit, Integer Optimality and the Evolutionary options, which are saved with the
-  model. AllDifferent constraints remain.
-  model. AllDifferent constraints and the Population report remain.
-- The Analysis ToolPak (`data.analysisToolPak`) has all 19 of Excel's tools; Histogram/Moving Average/Exponential Smoothing chart output is in; Regression plots remain. **Estimate:** 12–20 h.
   model. AllDifferent (`dif`) constraints enforce permutations of 1..N with Simplex LP,
   GRG integer branch and bound, and Evolutionary permutation search (64 constraint cells maximum);
-  the dialog and saved models support them. The Population report remains.
-- The Analysis ToolPak (`data.analysisToolPak`) has all 19 of Excel's tools; their chart output
-  remains. **Estimate:** 12–20 h.
+  the dialog and saved models support them.
+- The Analysis ToolPak (`data.analysisToolPak`) has all 19 of Excel's tools; Histogram/Moving Average/Exponential Smoothing chart output is in; Regression plots remain. **Estimate:** 12–20 h.
 
 ### 14. Page Layout view and print polish (U, F)
 - XLSX `pageSetup scale="0"` uses the default 100% and is omitted on save.
