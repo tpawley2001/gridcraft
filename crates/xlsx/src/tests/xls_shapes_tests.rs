@@ -155,3 +155,72 @@ fn a_shape_obj_without_a_drawing_record_is_skipped() {
     let (wb, _) = read_xls(&xls(&obj(OT_RECTANGLE))).unwrap();
     assert!(wb.sheet(0).unwrap().shapes.is_empty());
 }
+
+// --- form controls (P03-069/P03-070) ---
+
+/// An Obj record of kind `ot` whose FtCmo flags are `flags` (bit 8 = fUIObj, bit 0 = fLocked).
+fn obj_flags(ot: u16, flags: u16) -> Vec<u8> {
+    rec(0x005D, &cat(&[&u16s(&[0x15, 0x12, ot, 1, flags]), &[0; 12], &u16s(&[0, 0])]))
+}
+
+/// FtCmo flags measured on real files: AutoFilter / list-validation arrows (fUIObj set), a
+/// user drop-down (fUIObj clear) and a button.
+const UI_ARROW_FLAGS: u16 = 0x2101;
+const USER_DROP_DOWN_FLAGS: u16 = 0x2011;
+const BUTTON_FLAGS: u16 = 0x4001;
+
+#[test]
+fn autofilter_and_validation_arrows_are_not_reported_as_form_controls() {
+    let arrows: Vec<Vec<u8>> = (0..3u16).map(|c| cat(&[&shape(201, &[], c, 0, c + 1, 1), &obj_flags(OT_DROP_DOWN, UI_ARROW_FLAGS)])).collect();
+    let refs: Vec<&[u8]> = arrows.iter().map(|a| a.as_slice()).collect();
+    let (wb, report) = read_xls(&xls(&cat(&refs))).unwrap();
+    let sheet = wb.sheet(0).unwrap();
+    assert!(sheet.shapes.is_empty());
+    assert!(sheet.controls.is_empty());
+    assert!(!report.warnings.iter().any(|w| w.contains("Form controls")), "{:?}", report.warnings);
+    assert!(!report.warnings.iter().any(|w| w.contains("Shapes in .xls")), "{:?}", report.warnings);
+}
+
+#[test]
+fn a_user_drop_down_without_fuiobj_is_still_reported() {
+    let drop_down = cat(&[&shape(201, &[], 3, 0, 4, 1), &obj_flags(OT_DROP_DOWN, USER_DROP_DOWN_FLAGS)]);
+    let (_, report) = read_xls(&xls(&drop_down)).unwrap();
+    assert!(report.warnings.iter().any(|w| w.contains("Form controls in .xls files are not imported yet.")), "{:?}", report.warnings);
+}
+
+#[test]
+fn a_button_opens_as_a_form_control_with_its_caption() {
+    let button = cat(&[&shape(201, &[], 1, 2, 3, 4), &obj_flags(OT_BUTTON, BUTTON_FLAGS), &txo("Run report")]);
+    let (wb, report) = read_xls(&xls(&button)).unwrap();
+    let sheet = wb.sheet(0).unwrap();
+    assert!(sheet.shapes.is_empty(), "a button is a control, not a shape");
+    assert_eq!(sheet.controls.len(), 1, "{:?}", report.warnings);
+    let c = &sheet.controls[0];
+    assert_eq!(c.kind, gridcraft_model::ControlKind::Button);
+    assert_eq!(c.text, "Run report");
+    assert_eq!(c.anchor.cell, CellRef::new(2, 1), "top-left of the drawing anchor (B3)");
+    assert!(c.locked);
+    assert!(!report.warnings.iter().any(|w| w.contains("Form controls")), "{:?}", report.warnings);
+}
+
+#[test]
+fn two_buttons_keep_their_own_captions_and_distinct_ids() {
+    let a = cat(&[&shape(201, &[], 0, 0, 2, 1), &obj_flags(OT_BUTTON, BUTTON_FLAGS), &txo("Load")]);
+    let b = cat(&[&shape(201, &[], 0, 3, 2, 4), &obj_flags(OT_BUTTON, BUTTON_FLAGS), &txo("Save")]);
+    let (wb, _) = read_xls(&xls(&cat(&[&a, &b]))).unwrap();
+    let controls = &wb.sheet(0).unwrap().controls;
+    let texts: Vec<&str> = controls.iter().map(|c| c.text.as_str()).collect();
+    assert_eq!(texts, ["Load", "Save"]);
+    assert_ne!(controls[0].id, controls[1].id);
+}
+
+#[test]
+fn a_button_survives_save_as_xlsx() {
+    let button = cat(&[&shape(201, &[], 1, 2, 3, 4), &obj_flags(OT_BUTTON, BUTTON_FLAGS), &txo("Go")]);
+    let (wb, _) = read_xls(&xls(&button)).unwrap();
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    let controls = &back.sheet(0).unwrap().controls;
+    assert_eq!(controls.len(), 1);
+    assert_eq!((controls[0].kind, controls[0].text.as_str()), (gridcraft_model::ControlKind::Button, "Go"));
+    assert_eq!(controls[0].anchor.cell, CellRef::new(2, 1));
+}
