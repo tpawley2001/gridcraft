@@ -99,6 +99,7 @@ mod xls_chart_tests;
 mod xls_codepages_tests;
 mod xls_connections_tests;
 mod xls_custom_views_tests;
+mod xls_data_table_tests;
 mod xls_date_filter_tests;
 mod xls_default_password_tests;
 mod xls_doc_props_codepage_tests;

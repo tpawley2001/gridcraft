@@ -1013,6 +1013,12 @@ struct SheetState<'g> {
     selections: Vec<(u8, CellRef)>,
     /// A SELECTION record was cut short.
     bad_selection: bool,
+    /// The result ranges of the What-If data tables read so far (a repeated one is skipped).
+    data_table_ranges: HashSet<RangeRef>,
+    /// A data table result cell (PtgTbl) was read, and a TABLE record was read: a result cell
+    /// whose sheet has no TABLE record lost its table, which is reported.
+    data_table_cell: bool,
+    data_table_record: bool,
 }
 
 impl SheetState<'_> {
@@ -1169,6 +1175,9 @@ fn worksheet(
         queries: connections::Blocks::default(),
         selections: vec![],
         bad_selection: false,
+        data_table_ranges: HashSet::new(),
+        data_table_cell: false,
+        data_table_record: false,
     };
     let mut custom_views = crate::binary_custom_views::SheetViews::default();
     let mut depth = 1usize;
@@ -1230,6 +1239,9 @@ fn worksheet(
     }
     if st.bad_selection {
         report.warn("Malformed .xls selection records were skipped.");
+    }
+    if st.data_table_cell && !st.data_table_record {
+        st.unsupported("what-if data tables");
     }
     st.sheet.autofilter = std::mem::take(&mut st.autofilter).finish(filter, report);
     std::mem::take(&mut st.charts).finish(&mut st.sheet, &g.pictures, report);
@@ -1381,7 +1393,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x000C => st.calc.set_max_iterations(u32::from(c.u16()?)),
         0x0011 => st.calc.iterative = c.u16()? == 1,
         0x0010 => st.calc.set_max_change(c.f64()?),
-        0x0236 => report.warn("What-if data tables are not supported; their values were kept."),
+        0x0236 => data_table(&rec.parts, st, report),
         0x00E5 => {
             let n = usize::from(c.u16()?);
             for _ in 0..n.min(c.remaining() / 8) {
@@ -1568,6 +1580,12 @@ fn formula_cell(c: &mut Cursor<'_, '_>, st: &mut SheetState<'_>, budget: &mut Bu
     if string_result {
         st.pending_string = Some((pos, style));
     }
+    // PtgTbl: a What-If data table's result cell. The table is read from its TABLE record; the
+    // cell keeps only its value, as in `.xlsx`.
+    if st.g.biff5.is_none() && f.rgce.len() == 5 && f.rgce.first() == Some(&0x02) {
+        st.data_table_cell = true;
+        return Ok(());
+    }
     // PtgExp: part of a shared or array formula anchored at another cell.
     if f.rgce.len() == 5 && f.rgce.first() == Some(&0x01) {
         let get = |i: usize| f.rgce.get(i).copied().unwrap_or(0);
@@ -1577,6 +1595,51 @@ fn formula_cell(c: &mut Cursor<'_, '_>, st: &mut SheetState<'_>, budget: &mut Bu
     }
     st.attach(pos, &f, Mode::Cell, None);
     Ok(())
+}
+
+/// The most What-If data tables kept on one sheet.
+const MAX_DATA_TABLES: usize = 65_536;
+
+/// A BIFF8 TABLE record ([MS-XLS] 2.4.319; BIFF5 tables keep only their values): one What-If data table, mapped to the model as the
+/// `.xlsx` `<f t="dataTable">` attributes are. A malformed record is skipped with a warning; a
+/// second table with the same result range is skipped.
+fn data_table(parts: &[&[u8]], st: &mut SheetState<'_>, report: &mut ReadReport) {
+    if st.g.biff5.is_some() {
+        report.warn("What-if data tables are not supported; their values were kept.");
+        return;
+    }
+    st.data_table_record = true;
+    match parse_data_table(parts) {
+        Some(t) => {
+            if st.data_table_ranges.len() < MAX_DATA_TABLES && st.data_table_ranges.insert(t.range) {
+                st.sheet.data_tables.push(t);
+            }
+        }
+        None => report.warn("Malformed .xls What-if data table records were skipped; their values were kept."),
+    }
+}
+
+fn parse_data_table(parts: &[&[u8]]) -> Option<gridcraft_model::DataTable> {
+    let mut c = Cursor::new(parts);
+    let (r0, r1) = (c.u16().ok()?, c.u16().ok()?);
+    let (c0, c1) = (c.u8().ok()?, c.u8().ok()?);
+    let (flags, inp_r1, inp_c1, inp_r2, inp_c2) = (c.u16().ok()?, c.u16().ok()?, c.u16().ok()?, c.u16().ok()?, c.u16().ok()?);
+    // Columns are read as one byte, so only the input cells can lie past IV.
+    if r1 < r0 || c1 < c0 || u32::from(inp_c1) >= XLS_MAX_COLS || u32::from(inp_c2) >= XLS_MAX_COLS {
+        return None;
+    }
+    let cell = |r: u16, c: u16| CellRef::new(u32::from(r), u32::from(c));
+    let two_d = flags & 0x0008 != 0;
+    Some(gridcraft_model::DataTable {
+        range: RangeRef::new(cell(r0, u16::from(c0)), cell(r1, u16::from(c1))),
+        two_d,
+        row: flags & 0x0004 != 0,
+        r1: Some(cell(inp_r1, inp_c1)),
+        r2: two_d.then(|| cell(inp_r2, inp_c2)),
+        del1: flags & 0x0010 != 0,
+        del2: flags & 0x0020 != 0,
+        ca: flags & 0x0001 != 0,
+    })
 }
 
 /// The range of one worksheet's `_FilterDatabase` built-in name ([MS-XLS] 2.4.150), which is the
