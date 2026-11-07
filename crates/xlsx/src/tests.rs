@@ -250,3 +250,4 @@ mod workbook_protection_locks {
         assert!(at("workbookProtection") < at("bookViews"));
     }
 }
+mod codex_day_print_options;
