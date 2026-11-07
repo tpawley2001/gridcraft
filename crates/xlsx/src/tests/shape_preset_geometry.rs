@@ -15,7 +15,7 @@ fn anchor(row: u32, shape: &str) -> String {
     )
 }
 
-fn sp(id: u32, name: &str, geom: &str, text: &str) -> String {
+pub(super) fn sp(id: u32, name: &str, geom: &str, text: &str) -> String {
     let tx = if text.is_empty() {
         String::new()
     } else {
@@ -26,7 +26,7 @@ fn sp(id: u32, name: &str, geom: &str, text: &str) -> String {
     )
 }
 
-fn drawing(shapes: &[String]) -> String {
+pub(super) fn drawing(shapes: &[String]) -> String {
     let mut body = String::new();
     for (i, s) in shapes.iter().enumerate() {
         body.push_str(&anchor(i as u32 * 4, s));
@@ -36,7 +36,7 @@ fn drawing(shapes: &[String]) -> String {
     )
 }
 
-fn read_drawing(drawing: &str) -> Workbook {
+pub(super) fn read_drawing(drawing: &str) -> Workbook {
     let rels = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>"#;
     let bytes = minimal(
         r#"<sheetData/><drawing r:id="rId1"/>"#,
@@ -47,7 +47,7 @@ fn read_drawing(drawing: &str) -> Workbook {
     read_xlsx(&bytes).unwrap().0
 }
 
-fn written_drawing(wb: &Workbook) -> String {
+pub(super) fn written_drawing(wb: &Workbook) -> String {
     let bytes = write_xlsx(wb).unwrap();
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
     let mut drawing = String::new();
@@ -56,12 +56,12 @@ fn written_drawing(wb: &Workbook) -> String {
 }
 
 /// The `prst` values of the written drawing's `a:prstGeom` elements, in document order.
-fn presets(xml: &str) -> Vec<String> {
+pub(super) fn presets(xml: &str) -> Vec<String> {
     xml.match_indices("<a:prstGeom prst=\"").map(|(i, m)| xml[i + m.len()..].split('"').next().unwrap().to_string()).collect()
 }
 
 /// The `a:avLst` body that follows the n-th `a:prstGeom` (empty for `<a:avLst/>`).
-fn guides(xml: &str, n: usize) -> String {
+pub(super) fn guides(xml: &str, n: usize) -> String {
     let (i, _) = xml.match_indices("<a:prstGeom ").nth(n).expect("prstGeom");
     let rest = &xml[i..xml[i..].find("</a:prstGeom>").map_or(xml.len(), |e| i + e)];
     match (rest.find("<a:avLst>"), rest.find("</a:avLst>")) {
