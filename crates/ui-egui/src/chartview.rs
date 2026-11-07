@@ -337,6 +337,21 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
                 crate::equation::paint_shape(p, r, sp, wb, geo.z);
                 label = false;
             }
+            ShapeKind::Freeform => {
+                // The outline through each command's end point (curves and arcs are not drawn
+                // as curves); without paths, the bounding rectangle.
+                let paths = sp.geometry.as_ref().map(|g| g.paths.as_slice()).unwrap_or_default();
+                if paths.is_empty() {
+                    p.rect_filled(r, 0.0, fill);
+                    p.rect_stroke(r, 0.0, Stroke::new(1.0, line), StrokeKind::Inside);
+                }
+                for (pts, closed) in freeform_outlines(paths, r) {
+                    if pts.len() >= 2 {
+                        let stroke = PathStroke::new(1.0, line);
+                        p.add(if closed { PathShape::closed_line(pts, stroke) } else { PathShape::line(pts, stroke) });
+                    }
+                }
+            }
             ShapeKind::Line | ShapeKind::Arrow => {
                 p.line_segment([r.left_top(), r.right_bottom()], Stroke::new(2.0, line));
                 if sp.kind == ShapeKind::Arrow {
@@ -404,6 +419,40 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
         done(start, r);
     }
     painted
+}
+
+/// A freeform's paths in screen space: each subpath's points (every command's end point, the
+/// path's `w` × `h` stretched to `r`) and whether it is closed. Unstroked paths and paths without a
+/// size are left out.
+fn freeform_outlines(paths: &[gridcraft_engine::model::GeometryPath], r: Rect) -> Vec<(Vec<Pos2>, bool)> {
+    use gridcraft_engine::model::PathCommand;
+    let mut out = Vec::new();
+    for path in paths.iter().filter(|p| p.stroke && p.w > 0 && p.h > 0) {
+        let at = |(x, y): (i64, i64)| pos2(r.left() + r.width() * (x as f32 / path.w as f32), r.top() + r.height() * (y as f32 / path.h as f32));
+        let mut cur: Vec<Pos2> = Vec::new();
+        for c in &path.commands {
+            match c {
+                PathCommand::MoveTo(x, y) => {
+                    if !cur.is_empty() {
+                        out.push((std::mem::take(&mut cur), false));
+                    }
+                    cur.push(at((*x, *y)));
+                }
+                PathCommand::LineTo(x, y) => cur.push(at((*x, *y))),
+                PathCommand::CubicBezTo([.., e]) | PathCommand::QuadBezTo([.., e]) => cur.push(at(*e)),
+                PathCommand::ArcTo { .. } => {}
+                PathCommand::Close => {
+                    if !cur.is_empty() {
+                        out.push((std::mem::take(&mut cur), true));
+                    }
+                }
+            }
+        }
+        if !cur.is_empty() {
+            out.push((cur, false));
+        }
+    }
+    out
 }
 
 /// Geometry of a slicer's parts within its screen rect.

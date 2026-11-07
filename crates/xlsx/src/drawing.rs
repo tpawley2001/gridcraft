@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
 use gridcraft_model::{
-    Anchor, AnchorMode, Color, DrawingHyperlink, Image, Shape, ShapeFormat, ShapeGeometry, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextVert,
-    ShapeTextWrap, Sheet, Theme,
+    Anchor, AnchorMode, Color, DrawingHyperlink, GeometryPath, Image, PathCommand, Shape, ShapeFormat, ShapeGeometry, ShapeKind, ShapeTextAlign,
+    ShapeTextAnchor, ShapeTextVert, ShapeTextWrap, Sheet, Theme,
 };
 
 use crate::IoError;
@@ -373,16 +373,111 @@ fn write_preset_geometry(s: &mut String, prst: &str, geometry: Option<&ShapeGeom
     s.push_str("</a:prstGeom>");
 }
 
+/// A shape's custom geometry paths (`a:custGeom/a:pathLst/a:path`, ECMA-376 Part 1 §20.1.9.15),
+/// coordinates as written. `None` without a path, or when a coordinate is a guide name rather than
+/// a number (guides aren't evaluated) or a command is unknown: the shape then keeps the rectangle
+/// fallback.
+fn read_custom_paths(geom: &El) -> Option<Vec<GeometryPath>> {
+    let mut paths = Vec::new();
+    for path in geom.child("pathLst")?.children.iter().filter(|p| p.name == "path") {
+        let pt = |c: &El| c.attr_i64("x").zip(c.attr_i64("y"));
+        let pts = |c: &El| c.children.iter().filter(|p| p.name == "pt").map(pt).collect::<Option<Vec<_>>>();
+        let mut commands = Vec::new();
+        for c in &path.children {
+            commands.push(match c.name.as_str() {
+                "moveTo" => {
+                    let (x, y) = c.child("pt").and_then(pt)?;
+                    PathCommand::MoveTo(x, y)
+                }
+                "lnTo" => {
+                    let (x, y) = c.child("pt").and_then(pt)?;
+                    PathCommand::LineTo(x, y)
+                }
+                "cubicBezTo" => PathCommand::CubicBezTo(pts(c)?.try_into().ok()?),
+                "quadBezTo" => PathCommand::QuadBezTo(pts(c)?.try_into().ok()?),
+                "arcTo" => {
+                    PathCommand::ArcTo { w_r: c.attr_i64("wR")?, h_r: c.attr_i64("hR")?, st_ang: c.attr_i64("stAng")?, sw_ang: c.attr_i64("swAng")? }
+                }
+                "close" => PathCommand::Close,
+                _ => return None,
+            });
+        }
+        let size = |k: &str| match path.attr(k) {
+            None => Some(0),
+            Some(_) => path.attr_i64(k).filter(|v| *v >= 0),
+        };
+        paths.push(GeometryPath {
+            w: size("w")?,
+            h: size("h")?,
+            fill: path.attr("fill") != Some("none"),
+            stroke: path.attr_bool("stroke").unwrap_or(true),
+            commands,
+        });
+    }
+    (!paths.is_empty()).then_some(paths)
+}
+
+/// A freeform's `a:custGeom`: its paths as read, no guides, the text box the whole shape.
+fn write_custom_geometry(s: &mut String, paths: &[GeometryPath]) {
+    s.push_str("<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l=\"l\" t=\"t\" r=\"r\" b=\"b\"/><a:pathLst>");
+    for p in paths {
+        let _ = write!(s, "<a:path w=\"{}\" h=\"{}\"", p.w, p.h);
+        if !p.fill {
+            s.push_str(" fill=\"none\"");
+        }
+        if !p.stroke {
+            s.push_str(" stroke=\"0\"");
+        }
+        s.push('>');
+        let pt = |s: &mut String, (x, y): (i64, i64)| {
+            let _ = write!(s, "<a:pt x=\"{x}\" y=\"{y}\"/>");
+        };
+        for c in &p.commands {
+            match c {
+                PathCommand::MoveTo(x, y) => {
+                    s.push_str("<a:moveTo>");
+                    pt(s, (*x, *y));
+                    s.push_str("</a:moveTo>");
+                }
+                PathCommand::LineTo(x, y) => {
+                    s.push_str("<a:lnTo>");
+                    pt(s, (*x, *y));
+                    s.push_str("</a:lnTo>");
+                }
+                PathCommand::CubicBezTo(ps) => {
+                    s.push_str("<a:cubicBezTo>");
+                    ps.iter().for_each(|p| pt(s, *p));
+                    s.push_str("</a:cubicBezTo>");
+                }
+                PathCommand::QuadBezTo(ps) => {
+                    s.push_str("<a:quadBezTo>");
+                    ps.iter().for_each(|p| pt(s, *p));
+                    s.push_str("</a:quadBezTo>");
+                }
+                PathCommand::ArcTo { w_r, h_r, st_ang, sw_ang } => {
+                    let _ = write!(s, "<a:arcTo wR=\"{w_r}\" hR=\"{h_r}\" stAng=\"{st_ang}\" swAng=\"{sw_ang}\"/>");
+                }
+                PathCommand::Close => s.push_str("<a:close/>"),
+            }
+        }
+        s.push_str("</a:path>");
+    }
+    s.push_str("</a:pathLst></a:custGeom>");
+}
+
 fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
     let sp = obj.child("spPr")?;
     if let Some(shape) = ink::read(obj, anchor) {
         return Some(shape);
     }
+    // A freeform (custom geometry with at least one path that isn't an ink stroke).
+    let custom = sp.child("custGeom").and_then(read_custom_paths);
     let prst = sp.child("prstGeom").and_then(|g| g.attr("prst")).unwrap_or("rect");
     let tx_box = obj.path(&["nvSpPr", "cNvSpPr"]).is_some_and(|c| c.flag("txBox", false));
     let ln = sp.child("ln");
     let arrow = ln.is_some_and(|l| l.child("tailEnd").or_else(|| l.child("headEnd")).is_some_and(|t| t.attr("type").is_some_and(|v| v != "none")));
     let kind = match prst {
+        _ if custom.is_some() => ShapeKind::Freeform,
         _ if tx_box => ShapeKind::TextBox,
         "roundRect" => ShapeKind::RoundedRectangle,
         "ellipse" => ShapeKind::Ellipse,
@@ -393,19 +488,22 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
     };
     // A preset the kind doesn't name (a star, a callout, a flowchart box), or one with adjust
     // values, is kept as read so Save writes it back unchanged.
-    let geometry = sp.child("prstGeom").and_then(|g| {
-        let adjust: Vec<(String, String)> = g
-            .child("avLst")
-            .map(|av| {
-                av.children
-                    .iter()
-                    .filter(|gd| gd.name == "gd")
-                    .map(|gd| (gd.attr("name").unwrap_or("").to_string(), gd.attr("fmla").unwrap_or("").to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let known = matches!(prst, "rect" | "roundRect" | "ellipse" | "triangle" | "line" | "straightConnector1");
-        (!known || !adjust.is_empty()).then(|| ShapeGeometry { preset: prst.to_string(), adjust })
+    let custom = custom.map(|paths| ShapeGeometry { paths, ..ShapeGeometry::default() });
+    let geometry = custom.or_else(|| {
+        sp.child("prstGeom").and_then(|g| {
+            let adjust: Vec<(String, String)> = g
+                .child("avLst")
+                .map(|av| {
+                    av.children
+                        .iter()
+                        .filter(|gd| gd.name == "gd")
+                        .map(|gd| (gd.attr("name").unwrap_or("").to_string(), gd.attr("fmla").unwrap_or("").to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let known = matches!(prst, "rect" | "roundRect" | "ellipse" | "triangle" | "line" | "straightConnector1");
+            (!known || !adjust.is_empty()).then(|| ShapeGeometry { preset: prst.to_string(), adjust, paths: Vec::new() })
+        })
     });
     // An equation: GridCraft's own source while the marker in the description still matches the
     // body (another application that edits the Office Math, or the text of a box without Office
@@ -802,7 +900,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                     ShapeKind::Line | ShapeKind::Arrow => ("line", false),
                     // Equations are written by `write_equation`; this arm keeps the match whole.
                     ShapeKind::TextBox | ShapeKind::Equation => ("rect", true),
-                    ShapeKind::Icon | ShapeKind::Ink => ("rect", false),
+                    ShapeKind::Icon | ShapeKind::Ink | ShapeKind::Freeform => ("rect", false),
                 };
                 let _ = write!(
                     s,
@@ -810,7 +908,10 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                     if tx { " txBox=\"1\"" } else { "" },
                     xfrm(&sh.anchor, "a:xfrm")
                 );
-                write_preset_geometry(&mut s, prst, sh.geometry.as_ref());
+                match sh.geometry.as_ref().filter(|g| sh.kind == ShapeKind::Freeform && !g.paths.is_empty()) {
+                    Some(g) => write_custom_geometry(&mut s, &g.paths),
+                    None => write_preset_geometry(&mut s, prst, sh.geometry.as_ref()),
+                }
                 if sh.format.no_fill {
                     s.push_str("<a:noFill/>");
                 } else if let Some(c) = srgb(&sh.fill, theme) {
@@ -987,5 +1088,34 @@ mod theme_override_tests {
         assert_eq!(cx.report.warnings.len(), 1);
         assert!(cx.report.warnings.first().unwrap().contains("theme override"));
         assert!(cx.pkg.read("xl/charts/_rels/chart1.xml.rels").unwrap().is_some());
+    }
+}
+
+#[cfg(test)]
+mod custom_geometry_tests {
+    use super::{read_custom_paths, write_custom_geometry};
+    use gridcraft_model::PathCommand;
+
+    const GEOM: &str = r#"<a:custGeom><a:pathLst><a:path w="100" h="50" fill="none" stroke="0"><a:moveTo><a:pt x="0" y="0"/></a:moveTo><a:cubicBezTo><a:pt x="10" y="0"/><a:pt x="20" y="50"/><a:pt x="30" y="50"/></a:cubicBezTo><a:quadBezTo><a:pt x="40" y="0"/><a:pt x="50" y="25"/></a:quadBezTo><a:arcTo wR="10" hR="5" stAng="0" swAng="5400000"/><a:close/></a:path><a:path w="10" h="10"><a:moveTo><a:pt x="1" y="2"/></a:moveTo></a:path></a:pathLst></a:custGeom>"#;
+
+    #[test]
+    fn every_path_command_survives_a_write_and_read() {
+        let el = crate::xml::parse(GEOM.as_bytes()).unwrap();
+        let paths = read_custom_paths(&el).unwrap();
+        assert_eq!(paths.len(), 2);
+        assert!(!paths[0].fill && !paths[0].stroke && paths[1].fill && paths[1].stroke);
+        assert_eq!(paths[0].commands[1], PathCommand::CubicBezTo([(10, 0), (20, 50), (30, 50)]));
+        assert_eq!(paths[0].commands[3], PathCommand::ArcTo { w_r: 10, h_r: 5, st_ang: 0, sw_ang: 5_400_000 });
+        let mut xml = String::new();
+        write_custom_geometry(&mut xml, &paths);
+        let again = read_custom_paths(&crate::xml::parse(xml.as_bytes()).unwrap()).unwrap();
+        assert_eq!(again, paths);
+    }
+
+    #[test]
+    fn guide_named_coordinates_keep_the_rectangle_fallback() {
+        let guided = GEOM.replace(r#"<a:pt x="10" y="0"/>"#, r#"<a:pt x="x1" y="0"/>"#);
+        assert!(read_custom_paths(&crate::xml::parse(guided.as_bytes()).unwrap()).is_none());
+        assert!(read_custom_paths(&crate::xml::parse(b"<a:custGeom><a:pathLst/></a:custGeom>").unwrap()).is_none());
     }
 }

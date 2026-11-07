@@ -845,6 +845,9 @@ pub enum ShapeKind {
     /// An equation: `Shape::text` holds its LaTeX source, `Shape::line` its ink colour
     /// (`Color::Auto` for the sheet's text colour) and `Shape::math` its cached layout.
     Equation,
+    /// A freeform: DrawingML custom geometry (`a:custGeom`, ECMA-376 Part 1 §20.1.9.8) whose
+    /// outline is `Shape::geometry`'s `paths`, or an Excel 5.0/95 polygon read as one.
+    Freeform,
 }
 
 /// A DrawingML preset geometry (`a:prstGeom`, ECMA-376 Part 1 §20.1.9.18).
@@ -855,6 +858,35 @@ pub struct ShapeGeometry {
     /// The adjust-value guides (`a:avLst/a:gd`): each `name` and `fmla`, in document order.
     #[serde(default)]
     pub adjust: Vec<(String, String)>,
+    /// A freeform's custom geometry paths (`a:custGeom/a:pathLst`), in document order; empty for a
+    /// preset, whose `preset` is then the geometry.
+    #[serde(default)]
+    pub paths: Vec<GeometryPath>,
+}
+
+/// One path of a custom geometry (`a:path`, ECMA-376 Part 1 §20.1.9.15): its own coordinate
+/// space `w` × `h` (stretched to the shape's box) and its commands, coordinates as written.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeometryPath {
+    pub w: i64,
+    pub h: i64,
+    /// `fill` is not `none`.
+    pub fill: bool,
+    /// `stroke` is not false.
+    pub stroke: bool,
+    pub commands: Vec<PathCommand>,
+}
+
+/// A custom geometry path command (`a:moveTo`, `a:lnTo`, `a:cubicBezTo`, `a:quadBezTo`, `a:arcTo`,
+/// `a:close`). Angles are in 60000ths of a degree.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PathCommand {
+    MoveTo(i64, i64),
+    LineTo(i64, i64),
+    CubicBezTo([(i64, i64); 3]),
+    QuadBezTo([(i64, i64); 2]),
+    ArcTo { w_r: i64, h_r: i64, st_ang: i64, sw_ang: i64 },
+    Close,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
