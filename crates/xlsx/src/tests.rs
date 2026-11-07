@@ -97,6 +97,7 @@ mod xls_group_shapes_tests;
 mod xls_invalid_names_tests;
 mod xls_label_tail_tests;
 mod xls_macro_sheet_tests;
+mod xls_office_art_presets_tests;
 mod xls_picture_tests;
 mod xls_pivot_tests;
 mod xls_print_tests;

@@ -847,6 +847,16 @@ pub enum ShapeKind {
     Equation,
 }
 
+/// A DrawingML preset geometry (`a:prstGeom`, ECMA-376 Part 1 §20.1.9.18).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShapeGeometry {
+    /// The preset's name (`prst`, an ST_ShapeType value such as `star5` or `wedgeRectCallout`).
+    pub preset: String,
+    /// The adjust-value guides (`a:avLst/a:gd`): each `name` and `fmla`, in document order.
+    #[serde(default)]
+    pub adjust: Vec<(String, String)>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Shape {
     /// Hidden drawing objects stay in the workbook but are not displayed or printed.
@@ -859,6 +869,11 @@ pub struct Shape {
     pub name: Option<String>,
     pub id: u32,
     pub kind: ShapeKind,
+    /// The DrawingML preset geometry the shape was read with, when `kind` alone doesn't say it (a
+    /// star, a callout, a flowchart box) or the preset carries adjust values. `kind` stays the
+    /// closest kind GridCraft draws, so a shape whose preset isn't drawn yet draws as `kind`.
+    #[serde(default)]
+    pub geometry: Option<ShapeGeometry>,
     pub anchor: Anchor,
     pub fill: Color,
     pub line: Color,

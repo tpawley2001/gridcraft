@@ -17,7 +17,7 @@ fn art(ver: u16, inst: u16, ty: u16, b: &[u8]) -> Vec<u8> {
 
 /// An MsoDrawing shape of OfficeArt shape type `spt`, anchored from `(col_l, row_t)` to
 /// `(col_r, row_b)`, with simple FOPT properties `(id, value)`.
-fn shape(spt: u16, props: &[(u16, u32)], col_l: u16, row_t: u16, col_r: u16, row_b: u16) -> Vec<u8> {
+pub(super) fn shape(spt: u16, props: &[(u16, u32)], col_l: u16, row_t: u16, col_r: u16, row_b: u16) -> Vec<u8> {
     let sp = art(2, spt, 0xF00A, &cat(&[&1025u32.to_le_bytes(), &0x0A00u32.to_le_bytes()]));
     let mut body = vec![];
     for (id, value) in props {
@@ -31,7 +31,7 @@ fn shape(spt: u16, props: &[(u16, u32)], col_l: u16, row_t: u16, col_r: u16, row
 }
 
 /// A TxO holding `text` (8-bit characters) with one terminating run.
-fn txo(text: &str) -> Vec<u8> {
+pub(super) fn txo(text: &str) -> Vec<u8> {
     let cch = text.len() as u16;
     let mut t = vec![0u8; 18];
     t[10..12].copy_from_slice(&cch.to_le_bytes());
@@ -43,7 +43,7 @@ fn txo(text: &str) -> Vec<u8> {
     cat(&[&rec(0x01B6, &t), &rec(0x003C, &chars), &rec(0x003C, &runs)])
 }
 
-fn xls(records: &[u8]) -> Vec<u8> {
+pub(super) fn xls(records: &[u8]) -> Vec<u8> {
     let sheet = cat(&[&bof(0x0010), &cells(), records, &eof()]);
     let globals = |pos: u32| cat(&[&bof(0x0005), &rec(0x0085, &cat(&[&pos.to_le_bytes(), &[0, 0, 6, 0], b"Sheet1"])), &eof()]);
     compound("Workbook", &cat(&[&globals(globals(0).len() as u32), &sheet]))
@@ -62,7 +62,7 @@ const OT_RECTANGLE: u16 = 0x0002;
 const OT_OVAL: u16 = 0x0003;
 const OT_BUTTON: u16 = 0x0007;
 const OT_DROP_DOWN: u16 = 0x0014;
-const OT_OFFICE_ART: u16 = 0x001E;
+pub(super) const OT_OFFICE_ART: u16 = 0x001E;
 
 /// Values measured on real files: an outline-only oval (fUsefFilled set, fFilled clear) with
 /// its line drawn (fUsefLine and fLine set).

@@ -21,7 +21,7 @@ use gridcraft_core::CellRef;
 use gridcraft_core::color::INDEXED;
 use gridcraft_model::{
     Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, ControlKind, FormControl, Image, LegendPos, Orientation,
-    PreservedPart, PreservedRel, PreservedSheet, PrintSettings, Series, Shape, ShapeFormat, ShapeKind, Sheet, Visibility, Workbook,
+    PreservedPart, PreservedRel, PreservedSheet, PrintSettings, Series, Shape, ShapeFormat, ShapeGeometry, ShapeKind, Sheet, Visibility, Workbook,
 };
 
 use super::drawing::{self, BStore, Blip, ShapeProps};
@@ -338,6 +338,155 @@ struct PendingButton {
     locked: bool,
 }
 
+/// The DrawingML preset (ECMA-376 Part 1 §20.1.10.56 ST_ShapeType) of each Office Art shape type
+/// ([MS-ODRAW] 2.4.24 MSOSPT) that has one, beyond the types `shape_kind` maps to a kind of its
+/// own. The [MS-ODRAW] name is in the comment; a type missing here (freeforms, text effects, the
+/// `90` callouts) has no preset and isn't imported.
+const MSOSPT_PRESETS: &[(u16, &str)] = &[
+    (4, "diamond"),                      // msosptDiamond
+    (6, "rtTriangle"),                   // msosptRightTriangle
+    (7, "parallelogram"),                // msosptParallelogram
+    (8, "trapezoid"),                    // msosptTrapezoid
+    (9, "hexagon"),                      // msosptHexagon
+    (10, "octagon"),                     // msosptOctagon
+    (11, "plus"),                        // msosptPlus
+    (12, "star5"),                       // msosptStar
+    (13, "rightArrow"),                  // msosptArrow
+    (15, "homePlate"),                   // msosptHomePlate
+    (16, "cube"),                        // msosptCube
+    (19, "arc"),                         // msosptArc
+    (21, "plaque"),                      // msosptPlaque
+    (22, "can"),                         // msosptCan
+    (23, "donut"),                       // msosptDonut
+    (33, "bentConnector2"),              // msosptBentConnector2
+    (34, "bentConnector3"),              // msosptBentConnector3
+    (35, "bentConnector4"),              // msosptBentConnector4
+    (36, "bentConnector5"),              // msosptBentConnector5
+    (37, "curvedConnector2"),            // msosptCurvedConnector2
+    (38, "curvedConnector3"),            // msosptCurvedConnector3
+    (39, "curvedConnector4"),            // msosptCurvedConnector4
+    (40, "curvedConnector5"),            // msosptCurvedConnector5
+    (41, "callout1"),                    // msosptCallout1
+    (42, "callout2"),                    // msosptCallout2
+    (43, "callout3"),                    // msosptCallout3
+    (44, "accentCallout1"),              // msosptAccentCallout1
+    (45, "accentCallout2"),              // msosptAccentCallout2
+    (46, "accentCallout3"),              // msosptAccentCallout3
+    (47, "borderCallout1"),              // msosptBorderCallout1
+    (48, "borderCallout2"),              // msosptBorderCallout2
+    (49, "borderCallout3"),              // msosptBorderCallout3
+    (50, "accentBorderCallout1"),        // msosptAccentBorderCallout1
+    (51, "accentBorderCallout2"),        // msosptAccentBorderCallout2
+    (52, "accentBorderCallout3"),        // msosptAccentBorderCallout3
+    (53, "ribbon"),                      // msosptRibbon
+    (54, "ribbon2"),                     // msosptRibbon2
+    (55, "chevron"),                     // msosptChevron
+    (56, "pentagon"),                    // msosptPentagon
+    (57, "noSmoking"),                   // msosptNoSmoking
+    (58, "star8"),                       // msosptSeal8
+    (59, "star16"),                      // msosptSeal16
+    (60, "star32"),                      // msosptSeal32
+    (61, "wedgeRectCallout"),            // msosptWedgeRectCallout
+    (62, "wedgeRoundRectCallout"),       // msosptWedgeRRectCallout
+    (63, "wedgeEllipseCallout"),         // msosptWedgeEllipseCallout
+    (64, "wave"),                        // msosptWave
+    (65, "foldedCorner"),                // msosptFoldedCorner
+    (66, "leftArrow"),                   // msosptLeftArrow
+    (67, "downArrow"),                   // msosptDownArrow
+    (68, "upArrow"),                     // msosptUpArrow
+    (69, "leftRightArrow"),              // msosptLeftRightArrow
+    (70, "upDownArrow"),                 // msosptUpDownArrow
+    (71, "irregularSeal1"),              // msosptIrregularSeal1
+    (72, "irregularSeal2"),              // msosptIrregularSeal2
+    (73, "lightningBolt"),               // msosptLightningBolt
+    (74, "heart"),                       // msosptHeart
+    (76, "quadArrow"),                   // msosptQuadArrow
+    (77, "leftArrowCallout"),            // msosptLeftArrowCallout
+    (78, "rightArrowCallout"),           // msosptRightArrowCallout
+    (79, "upArrowCallout"),              // msosptUpArrowCallout
+    (80, "downArrowCallout"),            // msosptDownArrowCallout
+    (81, "leftRightArrowCallout"),       // msosptLeftRightArrowCallout
+    (82, "upDownArrowCallout"),          // msosptUpDownArrowCallout
+    (83, "quadArrowCallout"),            // msosptQuadArrowCallout
+    (84, "bevel"),                       // msosptBevel
+    (85, "leftBracket"),                 // msosptLeftBracket
+    (86, "rightBracket"),                // msosptRightBracket
+    (87, "leftBrace"),                   // msosptLeftBrace
+    (88, "rightBrace"),                  // msosptRightBrace
+    (89, "leftUpArrow"),                 // msosptLeftUpArrow
+    (90, "bentUpArrow"),                 // msosptBentUpArrow
+    (91, "bentArrow"),                   // msosptBentArrow
+    (92, "star24"),                      // msosptSeal24
+    (93, "stripedRightArrow"),           // msosptStripedRightArrow
+    (94, "notchedRightArrow"),           // msosptNotchedRightArrow
+    (95, "blockArc"),                    // msosptBlockArc
+    (96, "smileyFace"),                  // msosptSmileyFace
+    (97, "verticalScroll"),              // msosptVerticalScroll
+    (98, "horizontalScroll"),            // msosptHorizontalScroll
+    (99, "circularArrow"),               // msosptCircularArrow
+    (101, "uturnArrow"),                 // msosptUturnArrow
+    (102, "curvedRightArrow"),           // msosptCurvedRightArrow
+    (103, "curvedLeftArrow"),            // msosptCurvedLeftArrow
+    (104, "curvedUpArrow"),              // msosptCurvedUpArrow
+    (105, "curvedDownArrow"),            // msosptCurvedDownArrow
+    (106, "cloudCallout"),               // msosptCloudCallout
+    (107, "ellipseRibbon"),              // msosptEllipseRibbon
+    (108, "ellipseRibbon2"),             // msosptEllipseRibbon2
+    (109, "flowChartProcess"),           // msosptFlowChartProcess
+    (110, "flowChartDecision"),          // msosptFlowChartDecision
+    (111, "flowChartInputOutput"),       // msosptFlowChartInputOutput
+    (112, "flowChartPredefinedProcess"), // msosptFlowChartPredefinedProcess
+    (113, "flowChartInternalStorage"),   // msosptFlowChartInternalStorage
+    (114, "flowChartDocument"),          // msosptFlowChartDocument
+    (115, "flowChartMultidocument"),     // msosptFlowChartMultidocument
+    (116, "flowChartTerminator"),        // msosptFlowChartTerminator
+    (117, "flowChartPreparation"),       // msosptFlowChartPreparation
+    (118, "flowChartManualInput"),       // msosptFlowChartManualInput
+    (119, "flowChartManualOperation"),   // msosptFlowChartManualOperation
+    (120, "flowChartConnector"),         // msosptFlowChartConnector
+    (121, "flowChartPunchedCard"),       // msosptFlowChartPunchedCard
+    (122, "flowChartPunchedTape"),       // msosptFlowChartPunchedTape
+    (123, "flowChartSummingJunction"),   // msosptFlowChartSummingJunction
+    (124, "flowChartOr"),                // msosptFlowChartOr
+    (125, "flowChartCollate"),           // msosptFlowChartCollate
+    (126, "flowChartSort"),              // msosptFlowChartSort
+    (127, "flowChartExtract"),           // msosptFlowChartExtract
+    (128, "flowChartMerge"),             // msosptFlowChartMerge
+    (129, "flowChartOfflineStorage"),    // msosptFlowChartOfflineStorage
+    (130, "flowChartOnlineStorage"),     // msosptFlowChartOnlineStorage
+    (131, "flowChartMagneticTape"),      // msosptFlowChartMagneticTape
+    (132, "flowChartMagneticDisk"),      // msosptFlowChartMagneticDisk
+    (133, "flowChartMagneticDrum"),      // msosptFlowChartMagneticDrum
+    (134, "flowChartDisplay"),           // msosptFlowChartDisplay
+    (135, "flowChartDelay"),             // msosptFlowChartDelay
+    (176, "flowChartAlternateProcess"),  // msosptFlowChartAlternateProcess
+    (177, "flowChartOffpageConnector"),  // msosptFlowChartOffpageConnector
+    (182, "leftRightUpArrow"),           // msosptLeftRightUpArrow
+    (183, "sun"),                        // msosptSun
+    (184, "moon"),                       // msosptMoon
+    (185, "bracketPair"),                // msosptBracketPair
+    (186, "bracePair"),                  // msosptBracePair
+    (187, "star4"),                      // msosptSeal4
+    (188, "doubleWave"),                 // msosptDoubleWave
+    (189, "actionButtonBlank"),          // msosptActionButtonBlank
+    (190, "actionButtonHome"),           // msosptActionButtonHome
+    (191, "actionButtonHelp"),           // msosptActionButtonHelp
+    (192, "actionButtonInformation"),    // msosptActionButtonInformation
+    (193, "actionButtonForwardNext"),    // msosptActionButtonForwardNext
+    (194, "actionButtonBackPrevious"),   // msosptActionButtonBackPrevious
+    (195, "actionButtonEnd"),            // msosptActionButtonEnd
+    (196, "actionButtonBeginning"),      // msosptActionButtonBeginning
+    (197, "actionButtonReturn"),         // msosptActionButtonReturn
+    (198, "actionButtonDocument"),       // msosptActionButtonDocument
+    (199, "actionButtonSound"),          // msosptActionButtonSound
+    (200, "actionButtonMovie"),          // msosptActionButtonMovie
+];
+
+/// The DrawingML preset of an Office Art shape type, when it has one ([`MSOSPT_PRESETS`]).
+fn msospt_preset(shape_type: u16) -> Option<&'static str> {
+    MSOSPT_PRESETS.iter().find(|(t, _)| *t == shape_type).map(|(_, p)| *p)
+}
+
 /// The model kind of a drawn shape: the Obj `ot` for the BIFF8 kinds, the OfficeArtFSP instance
 /// (the shape type) for an Office Art object. `None` is a kind that isn't imported.
 fn shape_kind(ot: u16, props: &ShapeProps) -> Option<ShapeKind> {
@@ -357,7 +506,8 @@ fn shape_kind(ot: u16, props: &ShapeProps) -> Option<ShapeKind> {
             5 => Some(ShapeKind::Triangle),
             20 => Some(line),
             32 => Some(line),
-            _ => None,
+            // Any other type with a DrawingML preset is kept as that preset (see `msospt_preset`).
+            t => msospt_preset(t).map(|_| ShapeKind::Rectangle),
         },
         _ => None,
     }
@@ -595,6 +745,7 @@ impl Embedded {
                 name: props.name,
                 id: 0,
                 kind: ShapeKind::TextBox,
+                geometry: None,
                 anchor: place_at(sheet, &a),
                 fill: Color::Auto,
                 line: Color::Auto,
@@ -622,6 +773,12 @@ impl Embedded {
                 name: props.name,
                 id: 0,
                 kind,
+                // An Office Art shape type with a DrawingML preset of its own is kept as that preset.
+                geometry: if kind == ShapeKind::Rectangle {
+                    msospt_preset(props.shape_type).map(|p| ShapeGeometry { preset: p.to_string(), adjust: Vec::new() })
+                } else {
+                    None
+                },
                 anchor: place_at(sheet, &a),
                 fill,
                 line,
