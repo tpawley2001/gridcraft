@@ -312,9 +312,8 @@ impl ArtWalk {
     }
 }
 
-/// The last client anchor in one MsoDrawing record's OfficeArt records, with its shape's
-/// properties.
-/// The model has one font per shape, so use the TxO run beginning at character zero.
+/// Shape text takes the font of the TxO run beginning at character zero: the model has one
+/// font per shape.
 fn apply_text_font(format: &mut ShapeFormat, text: &Text, fonts: &[(gridcraft_model::Font, u16)], table: &[u32; 64]) {
     let Some(ifnt) = text.font else { return };
     // FontIndex skips 4; invalid references must not substitute another font.
@@ -334,6 +333,8 @@ fn apply_text_font(format: &mut ShapeFormat, text: &Text, fonts: &[(gridcraft_mo
     };
 }
 
+/// The last client anchor in one MsoDrawing record's OfficeArt records, with its shape's
+/// properties.
 #[cfg(test)]
 fn client_anchor(data: &[u8]) -> Option<(ClientAnchor, ShapeProps)> {
     match ArtWalk::default().record(data) {
