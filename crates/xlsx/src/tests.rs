@@ -86,6 +86,7 @@ mod xls_biff5_chart_tests;
 mod xls_biff5_header_footer_tests;
 mod xls_biff5_objects_tests;
 mod xls_biff5_page_breaks_tests;
+mod xls_biff5_picture_tests;
 mod xls_biff5_style_tests;
 mod xls_biff5_tests;
 mod xls_cell_address_names_tests;

@@ -26,6 +26,7 @@ use gridcraft_model::{
 
 use super::drawing::{self, BStore, Blip, ShapeProps};
 use super::formula::{Biff5, Extern, ExternKind, Links, Mode, decode_version};
+use super::png;
 use super::records::{Cursor, Record, Records};
 use super::textbox::{self, Text};
 use super::{BOF, Budget, EOF};
@@ -558,6 +559,12 @@ pub(super) struct Embedded {
     text_boxes: Vec<(Place, ShapeProps, Text)>,
     shapes: Vec<(Place, ShapeProps, ShapeKind, Option<Text>)>,
     buttons: Vec<(Place, bool, Option<Text>)>,
+    /// The anchor and name of the BIFF5 picture Obj whose IMDATA record comes next.
+    pending_biff5_picture: Option<(ClientAnchor, Option<String>)>,
+    /// BIFF5 pictures: anchor, name and PNG bytes.
+    biff5_pictures: Vec<(ClientAnchor, Option<String>, Vec<u8>)>,
+    /// Whether a BIFF5 picture's image was in a format that isn't imported.
+    biff5_skipped: bool,
     /// The workbook's colour table, for the shapes' palette colours.
     palette: Palette,
     fonts: Vec<(gridcraft_model::Font, u16)>,
@@ -663,9 +670,12 @@ impl Embedded {
     }
 
     /// A BIFF5 Obj record: its fixed 34-byte header carries the object type and the anchor, and a
-    /// text box's text follows its own fields. Text boxes and rectangles are imported; every other
-    /// kind keeps the report the BIFF8 path gives an object without a drawing shape.
+    /// text box's text follows its own fields. Text boxes, rectangles and pictures (whose image is
+    /// in the IMDATA record that follows) are imported; every other kind keeps the report the
+    /// BIFF8 path gives an object without a drawing shape.
     fn obj_biff5(&mut self, data: &[u8], b5: &Biff5, report: &mut ReadReport) {
+        // Only the IMDATA record right after a picture Obj holds its image.
+        self.pending_biff5_picture = None;
         let Some(ot) = u16_at(data, 4) else {
             report.warn("Shapes in .xls files are not imported yet.");
             return;
@@ -688,10 +698,40 @@ impl Embedded {
             }
             // The chart substream that follows is placed where the Obj says.
             OT_CHART => self.pending = biff5_anchor(data).map(Place::Cells),
-            // A picture, note or group imports nothing.
-            OT_PICTURE | OT_NOTE | OT_GROUP => {}
+            // The picture's image is in the IMDATA record that follows its Obj.
+            OT_PICTURE => {
+                if let Some(anchor) = biff5_anchor(data) {
+                    self.pending_biff5_picture = Some((anchor, biff5_picture_name(data, b5)));
+                }
+            }
+            // A note or group imports nothing.
+            OT_NOTE | OT_GROUP => {}
             ot if OT_FORM_CONTROLS.contains(&ot) => report.warn("Form controls in .xls files are not imported yet."),
             _ => report.warn("Shapes in .xls files are not imported yet."),
+        }
+    }
+
+    /// A BIFF5 IMDATA record ([MS-XLS] 2.4.140): `cf`, `env`, `lcb`, then `lcb` bytes of image
+    /// data, the image of the picture Obj before it. A 24-bit Windows bitmap is imported as a PNG;
+    /// any other format is skipped with a warning when the sheet is finished. An IMDATA without a
+    /// picture Obj before it, or in a BIFF8 workbook (`biff5` false), is ignored.
+    pub(super) fn imdata(&mut self, rec: &Record<'_>, biff5: bool) {
+        if !biff5 {
+            return;
+        }
+        let Some((anchor, name)) = self.pending_biff5_picture.take() else { return };
+        let data = rec.parts.concat();
+        let png = (|| {
+            // cf 0x0009: a bitmap; env 1: Windows.
+            if u16_at(&data, 0)? != 0x0009 || u16_at(&data, 2)? != 1 {
+                return None;
+            }
+            let lcb = usize::try_from(u32_at(&data, 4)?).ok()?;
+            png::bitmap_to_png(data.get(8..8usize.checked_add(lcb)?)?)
+        })();
+        match png {
+            Some(png) => self.biff5_pictures.push((anchor, name, png)),
+            None => self.biff5_skipped = true,
         }
     }
 
@@ -763,7 +803,21 @@ impl Embedded {
             });
         }
         // A damaged store was reported when it was read.
-        if skipped && !store.damaged {
+        for (a, name, data) in self.biff5_pictures {
+            sheet.images.push(Image {
+                hidden: false,
+                hyperlink: None,
+                name,
+                id: 0,
+                anchor: place(sheet, &a),
+                data: Arc::new(data),
+                mime: "image/png".to_string(),
+                alt: String::new(),
+                blip_ext: vec![],
+                link: None,
+            });
+        }
+        if (skipped && !store.damaged) || self.biff5_skipped {
             report.warn("Some pictures in .xls files use a format that isn't imported (only PNG and JPEG are).");
         }
         let table = self.palette.0;
@@ -850,6 +904,14 @@ impl Embedded {
 fn biff5_anchor(data: &[u8]) -> Option<ClientAnchor> {
     let f = |i: usize| u16_at(data, 10 + 2 * i);
     Some(ClientAnchor { col_l: f(0)?, dx_l: f(1)?, row_t: f(2)?, dy_t: f(3)?, col_r: f(4)?, dx_r: f(5)?, row_b: f(6)?, dy_b: f(7)? })
+}
+
+/// A BIFF5 picture Obj's name: `cch` 8-bit characters in the workbook's code page at offset 61,
+/// after the picture fields. `None` when the record is too short or the name is empty.
+fn biff5_picture_name(data: &[u8], b5: &Biff5) -> Option<String> {
+    let cch = usize::from(*data.get(60)?);
+    let name = b5.text(data.get(61..61usize.checked_add(cch)?)?);
+    (!name.is_empty()).then_some(name)
 }
 
 /// A BIFF5 text box Obj's text: `cchText` 8-bit characters in the workbook's code page at
