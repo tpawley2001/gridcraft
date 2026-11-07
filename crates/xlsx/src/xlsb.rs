@@ -130,7 +130,7 @@ impl Budget {
 /// Imports worksheet scalar values, cell formulas (with their saved results) and cell formatting.
 /// Dates retain the workbook's original date system. Inspect warnings for unsupported features.
 pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
-    let mut package = Package::open(bytes)?;
+    let mut package = Package::open_repairing(bytes)?;
     let types = content_types(&mut package)?;
     let root_rels = relationships(&mut package, "")?;
     let roots: Vec<_> = root_rels.iter().filter(|r| r.kind == "officeDocument").collect();
@@ -147,6 +147,9 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     crate::read::read_doc_props(&mut package, &root_rels, &mut wb.props);
     wb.sheets.clear();
     let mut report = ReadReport::default();
+    if let Some(n) = package.recovered_parts() {
+        report.warn(crate::package::damaged_warning(n));
+    }
     report.warn("XLSB import: some workbook features are not imported. Save a new .xlsx file; XLSB saving is not supported.");
     keep_custom_properties(&mut package, &types, &root_rels, &mut wb, &mut report);
     let mut itab_cur: Option<u32> = None;
@@ -399,7 +402,7 @@ fn keep_custom_properties(package: &mut Package<'_>, types: &[Entry], root_rels:
 
 pub(crate) fn is_xlsb(bytes: &[u8]) -> bool {
     let inspect = || -> Result<bool, IoError> {
-        let mut package = Package::open(bytes)?;
+        let mut package = Package::open_repairing(bytes)?;
         let types = content_types(&mut package)?;
         let roots = relationships(&mut package, "")?;
         let mut books = roots.iter().filter(|r| r.kind == "officeDocument");

@@ -314,8 +314,12 @@ fn selected_workbook_view(workbook: &El) -> Option<&El> {
 }
 
 pub fn read_xlsx<'a>(bytes: &'a [u8], known_function: Option<&'a dyn Fn(&str) -> bool>) -> Result<(Workbook, ReadReport), IoError> {
-    let pkg = Package::open(bytes)?;
+    let pkg = Package::open_repairing(bytes)?;
+    let recovered = pkg.recovered_parts();
     let mut cx = Ctx { known_function, ..Ctx::new(pkg) };
+    if let Some(n) = recovered {
+        cx.warn(crate::package::damaged_warning(n));
+    }
     let root_rels = cx.pkg.rels("")?;
     let wb_part = find_rel(&root_rels, "officeDocument").map(|r| r.target.clone()).unwrap_or_else(|| "xl/workbook.xml".into());
     let wb_xml = workbook_xml(&mut cx.pkg, &wb_part)?;

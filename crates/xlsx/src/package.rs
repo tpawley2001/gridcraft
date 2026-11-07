@@ -15,10 +15,16 @@ pub const MAX_TOTAL: u64 = 1024 * 1024 * 1024;
 pub const MAX_ENTRIES: usize = 200_000;
 
 pub struct Package<'a> {
-    zip: zip::ZipArchive<Cursor<&'a [u8]>>,
-    /// Lower-case normalized part name → zip index.
+    source: Source<'a>,
+    /// Lower-case normalized part name → zip index (or index into the recovered parts).
     names: HashMap<String, usize>,
     total: u64,
+}
+
+enum Source<'a> {
+    Zip(zip::ZipArchive<Cursor<&'a [u8]>>),
+    /// Parts read from the local file headers of a package that lost its central directory.
+    Recovered(Vec<Vec<u8>>),
 }
 
 /// A relationship.
@@ -49,7 +55,53 @@ impl<'a> Package<'a> {
                 names.entry(normalize(n)).or_insert(i);
             }
         }
-        Ok(Package { zip, names, total: 0 })
+        Ok(Package { source: Source::Zip(zip), names, total: 0 })
+    }
+
+    /// [`Package::open`], and when the zip has no readable central directory (a truncated
+    /// download), the parts that can be read in order from their local file headers (APPNOTE
+    /// 4.3.7), as Excel's repair does. Recovery stops at the first incomplete or damaged entry
+    /// and keeps the complete ones before it. It is used only when the content types and the
+    /// workbook part survived; otherwise the original error is returned.
+    pub fn open_repairing(bytes: &'a [u8]) -> Result<Package<'a>, IoError> {
+        match Package::open(bytes) {
+            Err(IoError::Zip(e)) => Package::recover(bytes).ok_or(IoError::Zip(e)),
+            other => other,
+        }
+    }
+
+    /// How many parts were recovered from local headers, when the package was repaired.
+    pub fn recovered_parts(&self) -> Option<usize> {
+        match &self.source {
+            Source::Zip(_) => None,
+            Source::Recovered(parts) => Some(parts.len()),
+        }
+    }
+
+    fn recover(bytes: &'a [u8]) -> Option<Package<'a>> {
+        if !bytes.starts_with(b"PK\x03\x04") {
+            return None;
+        }
+        let mut cursor = Cursor::new(bytes);
+        let mut parts = Vec::new();
+        let mut names = HashMap::new();
+        let mut total = 0u64;
+        while parts.len() < MAX_ENTRIES {
+            let Some(entry) = recover_entry(&mut cursor, MAX_TOTAL.saturating_sub(total)) else { break };
+            if let Some((name, data)) = entry {
+                total = total.saturating_add(data.len() as u64);
+                names.entry(normalize(&name)).or_insert(parts.len());
+                parts.push(data);
+            }
+        }
+        let mut pkg = Package { source: Source::Recovered(parts), names, total: 0 };
+        // The essential parts: the content types and the workbook part the package names.
+        let workbook = pkg.rels("").ok()?.into_iter().find(|r| r.kind == "officeDocument" && !r.external).map(|r| r.target);
+        let workbook = workbook.unwrap_or_else(|| "xl/workbook.xml".into());
+        (pkg.has("[Content_Types].xml") && pkg.has(&workbook)).then(|| {
+            pkg.total = 0;
+            pkg
+        })
     }
 
     /// Every part's (normalized) name, sorted.
@@ -88,7 +140,23 @@ impl<'a> Package<'a> {
         let Some(&idx) = self.names.get(&normalize(part)) else {
             return Ok(None);
         };
-        let mut f = self.zip.by_index(idx).map_err(|e| IoError::Zip(format!("{part}: {e}")))?;
+        let zip = match &mut self.source {
+            Source::Zip(zip) => zip,
+            Source::Recovered(parts) => {
+                let data = parts.get(idx).ok_or_else(|| IoError::Zip(format!("{part}: missing")))?;
+                let size = data.len() as u64;
+                if size > maximum {
+                    return Err(IoError::TooLarge(format!("{part} expands to {size} bytes")));
+                }
+                if size > MAX_TOTAL.saturating_sub(self.total) {
+                    self.total = MAX_TOTAL;
+                    return Err(IoError::TooLarge("package expands to more than 1 GB".into()));
+                }
+                self.total += size;
+                return Ok(Some(data.clone()));
+            }
+        };
+        let mut f = zip.by_index(idx).map_err(|e| IoError::Zip(format!("{part}: {e}")))?;
         if f.size() > maximum {
             return Err(IoError::TooLarge(format!("{part} expands to {} bytes", f.size())));
         }
@@ -150,6 +218,30 @@ impl<'a> Package<'a> {
             })
             .collect())
     }
+}
+
+/// The load warning for a package opened by [`Package::open_repairing`] from `n` recovered parts.
+pub fn damaged_warning(n: usize) -> String {
+    format!("The file was damaged (incomplete ZIP archive); {n} parts were recovered.")
+}
+
+/// The next entry at the cursor: `Some(Some((name, data)))` for a complete file,
+/// `Some(None)` for a directory, `None` at the central directory or at the first entry that is
+/// truncated, damaged, over the size limits, or written with a data descriptor (its size isn't
+/// known before its data).
+fn recover_entry(cursor: &mut Cursor<&[u8]>, remaining: u64) -> Option<Option<(String, Vec<u8>)>> {
+    let mut f = zip::read::read_zipfile_from_stream(cursor).ok()??;
+    let size = f.size();
+    if size > MAX_PART || size > remaining {
+        return None;
+    }
+    let name = f.name().to_string();
+    if f.is_dir() {
+        return Some(None);
+    }
+    let mut out = Vec::with_capacity(size.min(16 * 1024 * 1024) as usize);
+    (&mut f).take(size.saturating_add(1)).read_to_end(&mut out).ok()?;
+    (out.len() as u64 == size).then_some(Some((name, out)))
 }
 
 /// The first part whose declared unpacked size is over [`MAX_PART`], with that size.
@@ -271,5 +363,24 @@ mod tests {
         // An ordinary read of it still ends the package's budget.
         assert!(pkg.read("a.xml").is_err());
         assert_eq!(pkg.total, MAX_TOTAL);
+    }
+
+    /// Recovery from local headers stops at an entry written with a data descriptor (its size
+    /// comes after its data); the complete entries before it are kept.
+    #[test]
+    fn recovery_stops_at_a_data_descriptor_entry() {
+        let z = crate::tests::make_zip(&[("a.xml", b"0123456789"), ("b.xml", b"hello")]);
+        let cd = z.windows(4).position(|w| w == b"PK\x01\x02").unwrap();
+        let mut cursor = Cursor::new(&z[..cd]);
+        assert_eq!(recover_entry(&mut cursor, MAX_TOTAL), Some(Some(("a.xml".into(), b"0123456789".to_vec()))));
+        assert_eq!(recover_entry(&mut cursor, MAX_TOTAL), Some(Some(("b.xml".into(), b"hello".to_vec()))));
+        assert_eq!(recover_entry(&mut cursor, MAX_TOTAL), None);
+
+        // General purpose bit 3 on the first entry: its sizes would follow its data.
+        let mut streamed = z[..cd].to_vec();
+        streamed[6] |= 1 << 3;
+        assert_eq!(recover_entry(&mut Cursor::new(&streamed[..]), MAX_TOTAL), None);
+        // Over the remaining package allowance: not read.
+        assert_eq!(recover_entry(&mut Cursor::new(&z[..cd]), 3), None);
     }
 }
