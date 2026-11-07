@@ -458,6 +458,28 @@ impl KeptReader {
         (!p.is_empty()).then(|| Arc::new(p))
     }
 
+    /// The unmodelled anchors (SmartArt graphics and the like) of the drawing of a sheet part
+    /// whose own content is not XML (an XLSB sheet): the drawing and the parts it refers to are
+    /// the same as in `.xlsx`.
+    pub fn sheet_drawing(&mut self, cx: &mut Ctx<'_>, part: &str, name: &str) -> Option<Arc<Preserved>> {
+        if !self.on {
+            return None;
+        }
+        let rels = match raw_rels(cx, part) {
+            Ok(r) => r,
+            Err(e) => {
+                cx.warn(format!("sheet \"{name}\": relationships could not be read ({e}); unmodelled content was dropped"));
+                return None;
+            }
+        };
+        let mut p = Preserved::default();
+        let mut seen = HashSet::new();
+        if let Some(r) = rels.iter().find(|r| !r.external && is_kind(r, &["drawing"])) {
+            self.drawing_anchors(cx, name, r, &mut p, &mut seen);
+        }
+        (!p.is_empty()).then(|| Arc::new(p))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn sheet_elements(
         &mut self,

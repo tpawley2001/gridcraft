@@ -222,6 +222,8 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut macro_unread = false;
     // Damaged chart sheet page records warn once for the workbook.
     let mut chart_page = PageState::default();
+    // Unmodelled worksheet drawing content, read as for .xlsx (created on the first drawing).
+    let mut kept_drawing: Option<crate::passthrough::KeptReader> = None;
     for (bound, info) in sheets.into_iter().enumerate() {
         model_index.push(None);
         let Some(id) = info.rel else {
@@ -313,6 +315,11 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             // Drawing parts are DrawingML XML, as in .xlsx: read them with the .xlsx reader's state.
             let mut cx = crate::read::Ctx::new(package);
             sheet_drawing(&mut cx, &sheet_rels, &id, &mut sheet, &mut report);
+            // Anchors the drawing reader does not model (SmartArt graphics) are kept for saving.
+            let kept =
+                kept_drawing.get_or_insert_with(|| crate::passthrough::KeptReader::new(&mut cx)).sheet_drawing(&mut cx, &rel.target, &sheet.name);
+            std::mem::take(&mut cx.report.warnings).into_iter().for_each(|w| report.warn(w));
+            crate::passthrough::merge_preserved(&mut sheet.preserved, kept);
             package = cx.pkg;
         }
         sheet_comments(&mut package, &types, &sheet_rels, &mut sheet, &mut budget, &mut report);
