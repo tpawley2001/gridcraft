@@ -580,9 +580,14 @@ fn step_part(app: &mut SheetApp, c: &FormControl, part: Part) {
     };
 }
 
+/// The items of list box or drop-down `c` on sheet `si` (none for the other kinds).
+pub fn items(wb: &gridcraft_engine::model::Workbook, si: usize, c: &FormControl) -> Vec<String> {
+    if c.kind.is_list() { gridcraft_engine::cmd::controls::list_items(wb, si, c) } else { Vec::new() }
+}
+
 /// The items of list box or drop-down `c` on the active sheet.
 fn items_of(app: &SheetApp, c: &FormControl) -> Vec<String> {
-    app.session.active().map(|d| gridcraft_engine::cmd::controls::list_items(&d.wb, d.wb.active_sheet(), c)).unwrap_or_default()
+    app.session.active().map(|d| items(&d.wb, d.wb.active_sheet(), c)).unwrap_or_default()
 }
 
 /// Whether the focused control is a button, check box or option button. Space presses one, so
