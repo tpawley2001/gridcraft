@@ -82,6 +82,7 @@ fn colored_borders() -> Borders {
         right: line(0x985213),
         diag_down: line(0x7c2ba2),
         diag_up: line(0x248088),
+        ..Default::default()
     }
 }
 

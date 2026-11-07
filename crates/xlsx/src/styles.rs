@@ -637,8 +637,9 @@ fn border_xml(b: &Borders) -> String {
     s.push_str(&line_xml("top", &b.top));
     s.push_str(&line_xml("bottom", &b.bottom));
     s.push_str(&line_xml("diagonal", &diag_of(b)));
-    s.push_str(&line_xml("horizontal", &b.horizontal));
+    // Schema order (ECMA-376 §18.8.4): vertical before horizontal.
     s.push_str(&line_xml("vertical", &b.vertical));
+    s.push_str(&line_xml("horizontal", &b.horizontal));
     s.push_str("</border>");
     s
 }
