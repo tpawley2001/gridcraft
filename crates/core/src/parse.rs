@@ -316,7 +316,7 @@ fn parse_date(t: &str, sys: DateSystem) -> Option<(f64, &'static str)> {
             // A one- or two-digit number that is a day of that month is a day in the current
             // year ("Feb-01" is 1 February this year); otherwise it is a year ("Mar-45").
             let year = current_year();
-            let max = crate::date::days_in_month(year as i32, m as u32) as i64;
+            let max = crate::date::days_in_month(year as i32, m) as i64;
             if b.len() <= 2 && (1..=max).contains(&y) {
                 return valid_ymd(sys, year, m as i64, y).map(|s| (s, "d-mmm"));
             }
