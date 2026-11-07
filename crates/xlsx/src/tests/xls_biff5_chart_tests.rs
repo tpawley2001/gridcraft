@@ -217,7 +217,9 @@ fn biff5_import_summary_no_longer_says_charts_are_not_imported() {
     let file = book(&cat(&[&chart_obj(1, [4, 0, 1, 0, 10, 0, 15, 0]), &two_series_chart()]));
     let (_, report) = read_xls(&file).unwrap();
     let summary = report.warnings.iter().find(|w| w.contains("Excel 5.0/95")).expect("BIFF5 import summary");
-    assert!(!summary.contains("Charts") && !summary.contains("charts,"), "{summary}");
+    // Charts are listed among what was read, not among what is not imported.
+    let (read, not_read) = summary.split_once("were read").expect("summary lists what was read");
+    assert!(read.contains("charts") && !not_read.contains("harts"), "{summary}");
 }
 
 #[test]

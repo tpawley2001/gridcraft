@@ -295,3 +295,13 @@ fn sheet_names_longer_than_31_characters_are_shortened_not_refused() {
     assert_eq!(v(&wb, 1, "A1"), Value::from("second"));
     assert!(report.warnings.iter().any(|w| w.contains("sheet name")), "{:?}", report.warnings);
 }
+
+#[test]
+fn biff5_overview_lists_charts_pictures_and_shapes() {
+    let bytes = book(1252, &[], &[(b"Data", label(0, 0, b"ok"))]);
+    let (_, report) = read_xls(&bytes).unwrap();
+    assert_eq!(
+        report.warnings[0],
+        "Imported from an Excel 5.0/95 (.xls) workbook: values, formulas, cell formatting, column widths, row heights, defined names, charts, pictures, text boxes and drawn shapes were read. Comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
+    );
+}

@@ -430,7 +430,7 @@ fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>) -> Result<(W
     report.warnings.insert(
         0,
         if g.biff5.is_some() {
-            "Imported from an Excel 5.0/95 (.xls) workbook: values, formulas, cell formatting, column widths, row heights and defined names were read. Pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
+            "Imported from an Excel 5.0/95 (.xls) workbook: values, formulas, cell formatting, column widths, row heights, defined names, charts, pictures, text boxes and drawn shapes were read. Comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         } else {
             "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights, defined names, charts and pictures were read. Comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         }
