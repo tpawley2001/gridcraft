@@ -27,6 +27,7 @@ pub mod fonts;
 pub mod form_controls;
 pub mod formula_bar;
 mod formula_locale;
+pub mod freeform;
 pub mod function_library;
 pub mod grid;
 pub mod i18n;
