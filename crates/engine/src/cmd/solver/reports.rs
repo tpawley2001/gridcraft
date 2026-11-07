@@ -14,6 +14,7 @@ pub(super) enum ReportKind {
     Answer,
     Sensitivity,
     Limits,
+    Population,
 }
 
 impl ReportKind {
@@ -22,6 +23,7 @@ impl ReportKind {
             ReportKind::Answer => "Answer",
             ReportKind::Sensitivity => "Sensitivity",
             ReportKind::Limits => "Limits",
+            ReportKind::Population => "Population",
         }
     }
 }
@@ -29,14 +31,15 @@ impl ReportKind {
 /// The `reports` list (`None` when absent).
 pub(super) fn report_kinds(cmd: &'static str, p: &Json) -> Result<Option<Vec<ReportKind>>> {
     let Some(list) = p.get("reports") else { return Ok(None) };
-    let list = list.as_array().ok_or_else(|| bad(cmd, "`reports` must be an array of answer, sensitivity and limits"))?;
+    let list = list.as_array().ok_or_else(|| bad(cmd, "`reports` must be an array of answer, sensitivity, limits and population"))?;
     let mut kinds = Vec::new();
     for k in list {
         let kind = match k.as_str().map(|t| t.trim().to_ascii_lowercase()).as_deref() {
             Some("answer") => ReportKind::Answer,
             Some("sensitivity") => ReportKind::Sensitivity,
             Some("limits") => ReportKind::Limits,
-            _ => return Err(bad(cmd, format!("unknown report {k} (answer, sensitivity or limits)"))),
+            Some("population") => ReportKind::Population,
+            _ => return Err(bad(cmd, format!("unknown report {k} (answer, sensitivity, limits or population)"))),
         };
         if !kinds.contains(&kind) {
             kinds.push(kind);
@@ -94,6 +97,7 @@ pub(super) struct ReportInput<'a> {
     pub(super) solution: Vec<f64>,
     pub(super) message: String,
     pub(super) budget: u64,
+    pub(super) population: &'a [Vec<f64>],
 }
 
 pub(super) fn title(out: &mut Lines, kind: ReportKind, sheet: &str) -> u32 {
@@ -199,6 +203,84 @@ fn answer_report(d: &DocState, sh: &Sheet, inp: &ReportInput) -> Lines {
     }
     table(&mut out, r + 1, &["Cell", "Name", "Cell Value", "Formula", "Status", "Slack"], rows);
     out
+}
+
+pub(super) const POPULATION_ONLY: &str = "The Population report is available only for the Evolutionary method.";
+
+/// Summarise the final generation, independently of the search's evaluation budget.
+pub(super) fn population_report(d: &DocState, sh: &Sheet, inp: &ReportInput) -> Lines {
+    let m = inp.model;
+    let mut cells = m.vars.clone();
+    for c in &m.cons {
+        for cell in &c.lhs {
+            if !cells.contains(cell) {
+                cells.push(*cell);
+            }
+        }
+    }
+    let mut trial = Trial::new(d);
+    let reads: Vec<_> = cells.iter().map(|c| (m.sheet, *c)).collect();
+    let mut read = |x: &[f64]| {
+        let sets: Vec<_> = m.vars.iter().zip(x).map(|(c, v)| (m.sheet, *c, Value::number(*v))).collect();
+        trial.run(&sets, &reads)
+    };
+    let best = read(&inp.solution);
+    // Welford's recurrence avoids subtracting nearly equal sums of squares.
+    let mut stats = vec![(0usize, 0.0f64, 0.0f64, f64::NEG_INFINITY, f64::INFINITY); cells.len()];
+    for member in inp.population {
+        for ((n, mean, m2, max, min), value) in stats.iter_mut().zip(read(member)) {
+            let v = as_num(&value);
+            *n += 1;
+            let delta = v - *mean;
+            *mean += delta / *n as f64;
+            *m2 += delta * (v - *mean);
+            *max = max.max(v);
+            *min = min.min(v);
+        }
+    }
+    let num = |v: f64| if v.is_finite() { Value::number(v) } else { Value::Error(gridcraft_core::CellError::Value) };
+    let mut vars = Vec::new();
+    let mut constraints = Vec::new();
+    for (j, ((cell, best), (n, mean, m2, max, min))) in cells.iter().zip(best).zip(stats).enumerate() {
+        let sd = if n >= 2 { (m2.max(0.0) / (n - 1) as f64).sqrt() } else { f64::NAN };
+        let row = vec![Value::text(abs_ref(*cell)), Value::text(cell_name(sh, *cell)), best, num(mean), num(sd), num(max), num(min)];
+        if j < m.vars.len() {
+            vars.push(row);
+        } else {
+            constraints.push(row);
+        }
+    }
+    let headers = ["Cell", "Name", "Best Value", "Mean Value", "Standard Deviation", "Maximum Value", "Minimum Value"];
+    let mut out = Lines::new();
+    let r = title(&mut out, ReportKind::Population, &sh.name);
+    out.push((r, 0, Value::text("Variable Cells"), true));
+    let r = table(&mut out, r + 1, &headers, vars);
+    out.push((r, 0, Value::text("Constraints"), true));
+    table(&mut out, r + 1, &headers, constraints);
+    out
+}
+
+/// The Results dialog can write retained statistics without running another search or accepting
+/// a caller-supplied population. Bind them to the originating document and model sheet.
+pub(super) fn retained_population_report(s: &mut Session, _: &Json) -> Result<Json> {
+    let d = s.doc()?;
+    let pending = s
+        .solver_population
+        .as_ref()
+        .filter(|p| p.uid == d.uid)
+        .ok_or_else(|| EngineError::Other("No Evolutionary population is available in this workbook.".into()))?;
+    let at = d.wb.sheet_index(&pending.sheet).ok_or(EngineError::NoDocument)?;
+    if d.wb.protected_structure {
+        return Err(protected());
+    }
+    let name = (1..=10_000u32)
+        .map(|i| format!("Population Report {i}"))
+        .find(|n| d.wb.sheet_index(n).is_none())
+        .ok_or_else(|| EngineError::Other("Too many report sheets.".into()))?;
+    let built = vec![(name, pending.lines.clone())];
+    let names = edit(s, |cx| Ok(write_reports(cx, at, built)))?;
+    insert_report_selections(s, at, names.len());
+    Ok(json!({"sheets": names}))
 }
 
 fn limits_report(d: &DocState, sh: &Sheet, inp: &ReportInput) -> Result<Lines> {
@@ -330,6 +412,7 @@ pub(super) fn prepare_reports(
                 NotOptimal::Refuse => sensitivity_report(d, sh, inp)?,
             },
             ReportKind::Limits => limits_report(d, sh, inp)?,
+            ReportKind::Population => population_report(d, sh, inp),
         };
         let name = (1..=10_000u32)
             .map(|i| format!("{} Report {i}", k.title()))
@@ -392,9 +475,12 @@ pub(super) fn insert_report_selections(s: &mut Session, at: usize, count: usize)
 
 /// `data.solverReport`: reports for a solution of the sheet's saved model.
 pub(super) fn report(s: &mut Session, p: &Json) -> Result<Json> {
-    let kinds = report_kinds(REPORT_CMD, p)?.ok_or_else(|| bad(REPORT_CMD, "missing `reports` (answer, sensitivity, limits)"))?;
+    let kinds = report_kinds(REPORT_CMD, p)?.ok_or_else(|| bad(REPORT_CMD, "missing `reports` (answer, sensitivity, limits, population)"))?;
+    if kinds.contains(&ReportKind::Population) {
+        return Err(EngineError::Other("The Population report is available only for the Evolutionary method, right after it solves.".into()));
+    }
     if kinds.is_empty() {
-        return Err(bad(REPORT_CMD, "`reports` is empty (answer, sensitivity, limits)"));
+        return Err(bad(REPORT_CMD, "`reports` is empty (answer, sensitivity, limits, population)"));
     }
     let d = s.doc()?;
     // The given model as is, else the saved model with any params given here over it.
@@ -435,7 +521,7 @@ pub(super) fn report(s: &mut Session, p: &Json) -> Result<Json> {
     let original = if p.get("original").is_some() { point("original")? } else { solution.clone() };
     let budget = model.max_evals;
     let message = str_param(p, "message").unwrap_or("").chars().take(500).collect();
-    let inp = ReportInput { model: &model, prob: &prob, original, solution, message, budget };
+    let inp = ReportInput { model: &model, prob: &prob, original, solution, message, budget, population: &[] };
     let not_optimal = if bool_param(p, "skipNotOptimal").unwrap_or(false) { NotOptimal::Skip { optimum: true } } else { NotOptimal::Refuse };
     let (built, skipped) = prepare_reports(s.doc()?, &kinds, &inp, not_optimal)?;
     // Nothing left to write (every report skipped): no edit, so no Undo step.
@@ -446,4 +532,85 @@ pub(super) fn report(s: &mut Session, p: &Json) -> Result<Json> {
         out["skippedReports"] = json!(skipped);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod population_tests {
+    use super::*;
+
+    #[test]
+    fn final_members_use_sample_sd_and_recalculate_distinct_constraint_cells() {
+        let mut s = Session::new();
+        s.new_workbook();
+        for (cell, input) in [("A1", "2"), ("B1", "=A1*A1"), ("C1", "=A1+1")] {
+            s.execute("cell.set", json!({"cell": cell, "input": input})).unwrap();
+        }
+        let model = parse_model(
+            &s,
+            &json!({"objective": "B1", "variables": "A1", "method": "evolutionary",
+            "constraints": ["A1 >= 0", "A1 <= 10", "C1 <= 10", "C1 >= 0"]}),
+        )
+        .unwrap();
+        let prob = build_problem(&model);
+        let population = vec![vec![1.0], vec![3.0], vec![5.0]];
+        let inp = ReportInput {
+            model: &model,
+            prob: &prob,
+            original: vec![2.0],
+            solution: vec![2.0],
+            message: String::new(),
+            budget: 100,
+            population: &population,
+        };
+        let d = s.doc().unwrap();
+        let lines = population_report(d, d.wb.active().unwrap(), &inp);
+        let rows: Vec<_> = lines.iter().filter(|(_, c, v, _)| *c == 1 && matches!(v, Value::Text(t) if t.starts_with('$'))).collect();
+        assert_eq!(rows.len(), 2);
+        for (row, _, cell, _) in rows {
+            let offset = if *cell == Value::text("$A$1") { 0.0 } else { 1.0 };
+            for (col, expected) in [(3, 2.0 + offset), (4, 3.0 + offset), (5, 2.0), (6, 5.0 + offset), (7, 1.0 + offset)] {
+                let actual = lines.iter().find(|(r, c, _, _)| r == row && *c == col).unwrap().2.as_f64().unwrap();
+                assert_eq!(actual, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn standalone_population_refusal_does_not_need_a_saved_model() {
+        let mut s = Session::new();
+        s.new_workbook();
+        let before = s.doc().unwrap().wb.clone();
+        let error = s.execute("data.solverReport", json!({"reports": ["population"]})).unwrap_err();
+        assert!(error.to_string().contains("The Population report is available only for the Evolutionary method, right after it solves."));
+        assert!(std::sync::Arc::ptr_eq(&before, &s.doc().unwrap().wb));
+    }
+
+    #[test]
+    fn retained_population_matches_the_solve_and_stays_in_its_document() {
+        let mut s = Session::new();
+        s.new_workbook();
+        for (cell, input) in [("A1", "2"), ("B1", "=A1*A1")] {
+            s.execute("cell.set", json!({"cell": cell, "input": input})).unwrap();
+        }
+        let result = s
+            .execute(
+                "data.solver",
+                json!({"objective": "B1", "goal": "min", "variables": "A1", "method": "evolutionary",
+            "constraints": ["A1 >= 0", "A1 <= 10"], "reports": ["population"]}),
+            )
+            .unwrap();
+        s.execute("data.solverPopulationReport", json!({})).unwrap();
+        let d = s.doc().unwrap();
+        let first = d.wb.sheet(d.wb.sheet_index("Population Report 1").unwrap()).unwrap();
+        let second = d.wb.sheet(d.wb.sheet_index("Population Report 2").unwrap()).unwrap();
+        for row in 0..10 {
+            for col in 0..8 {
+                assert_eq!(first.value(CellRef::new(row, col)), second.value(CellRef::new(row, col)));
+            }
+        }
+        assert!(result["evaluations"].as_u64().unwrap() > 0);
+        s.new_workbook();
+        assert!(s.execute("data.solverPopulationReport", json!({})).is_err());
+        assert_eq!(s.doc().unwrap().wb.sheets.len(), 1);
+    }
 }

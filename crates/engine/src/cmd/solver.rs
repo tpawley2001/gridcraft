@@ -79,9 +79,18 @@ pub fn specs() -> Vec<CommandSpec> {
             "Solver…",
             ["Data", "Analysis"],
             None,
-            "{objective: \"B10\" (formula cell), goal?: max|min|value (default max), value?: number (for goal value), variables: \"B2:B4,D1\" (≤200 constant cells, same sheet), constraints?: [\"B5 <= 10\", \"B2:B4 >= C2:C4\", \"B2 int\", \"B3 bin\", {lhs: \"B6\", op: \"=\", rhs: 3 | \"C6\"}], nonNegative?: bool (default true: variables without a lower bound get 0), method?: grg|simplex|evolutionary (default grg), populationSize?: 100, mutationRate?: 0.075, randomSeed?: 0 (a fixed seed, so runs repeat), convergence?: 0.0001, generationsWithoutImprovement?: 50, requireBounds?: bool (default true: every variable needs both bounds; false searches within ±100 of the start) (Evolutionary options), keep?: bool (default true; false restores the original values), saveModel?: bool (default true: hidden names, solver_* as Excel names them, with the options; the evaluation limit and generations without improvement, which Excel lacks, as gridcraft_solver_evals and gridcraft_solver_stall), maxEvaluations?: 20000 (at most 200000), integerOptimality?: percent (default 0), saved?: bool (solve the sheet's saved model; other params override), reports?: [answer|sensitivity|limits] (written on new sheets when a solution is found)} → {status: optimal|converged|cannotImprove|iterationLimit|infeasible|unbounded|notLinear, message, objective, values: {cell: value}, original: {cell: value}, model: the model as params, evaluations, changed, reports?: [sheet names], skippedReports?: [{report: \"sensitivity\", reason}] (a Sensitivity report left out because the run did not reach an optimum or the values are not one; the solve and the other reports still apply)}. No `objective` → {model: the saved model} (the menu opens the dialog).",
+            "{objective: \"B10\" (formula cell), goal?: max|min|value (default max), value?: number (for goal value), variables: \"B2:B4,D1\" (≤200 constant cells, same sheet), constraints?: [\"B5 <= 10\", \"B2:B4 >= C2:C4\", \"B2 int\", \"B3 bin\", {lhs: \"B6\", op: \"=\", rhs: 3 | \"C6\"}], nonNegative?: bool (default true: variables without a lower bound get 0), method?: grg|simplex|evolutionary (default grg), populationSize?: 100, mutationRate?: 0.075, randomSeed?: 0 (a fixed seed, so runs repeat), convergence?: 0.0001, generationsWithoutImprovement?: 50, requireBounds?: bool (default true: every variable needs both bounds; false searches within ±100 of the start) (Evolutionary options), keep?: bool (default true; false restores the original values), saveModel?: bool (default true: hidden names, solver_* as Excel names them, with the options; the evaluation limit and generations without improvement, which Excel lacks, as gridcraft_solver_evals and gridcraft_solver_stall), maxEvaluations?: 20000 (at most 200000), integerOptimality?: percent (default 0), saved?: bool (solve the sheet's saved model; other params override), reports?: [answer|sensitivity|limits|population] (written on new sheets when a solution is found)} → {status: optimal|converged|cannotImprove|iterationLimit|infeasible|unbounded|notLinear, message, objective, values: {cell: value}, original: {cell: value}, model: the model as params, evaluations, changed, reports?: [sheet names], skippedReports?: [{report: \"sensitivity\", reason}] (a Sensitivity report left out because the run did not reach an optimum or the values are not one; the solve and the other reports still apply)}. No `objective` → {model: the saved model} (the menu opens the dialog).",
             has_doc,
             run
+        ),
+        cmd!(
+            "data.solverPopulationReport",
+            "Population Report",
+            [],
+            None,
+            "{} → {sheets: [names]}. Writes the Population report retained from the last Evolutionary solve in this session, before the model sheet. No search is run.",
+            has_doc,
+            reports::retained_population_report
         ),
         cmd!(
             "data.solverReport",
@@ -122,11 +131,19 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
+/// Prepared statistics retained for the Solver Results dialog.
+pub(crate) struct PopulationReport {
+    uid: u64,
+    sheet: String,
+    lines: reports::Lines,
+}
+
 /// What a solve ended with, and why Simplex LP or Evolutionary stopped.
 struct Solve {
     outcome: Outcome,
     not_linear: bool,
     evo_end: Option<EvoEnd>,
+    population: Vec<Vec<f64>>,
 }
 
 /// Variable bounds and integrality flags.
@@ -144,6 +161,7 @@ fn optimise(ev: &mut Evaluator, m: &Model, goal: Goal, x0: &[f64], bounds: Bound
     let any_int = integer.iter().any(|b| *b);
     let mut not_linear = false;
     let mut evo_end = None;
+    let mut population = Vec::new();
     let outcome = if lo.iter().zip(hi).any(|(l, h)| l > h) {
         Outcome::Infeasible
     } else {
@@ -172,13 +190,14 @@ fn optimise(ev: &mut Evaluator, m: &Model, goal: Goal, x0: &[f64], bounds: Bound
                 }
             }
             Method::Evolutionary => {
-                let (out, end) = evolutionary(ev, x0, bounds, &different, goal, &m.evo);
+                let (out, end, members) = evolutionary(ev, x0, bounds, &different, goal, &m.evo);
                 evo_end = Some(end);
+                population = members;
                 out
             }
         }
     };
-    Solve { outcome, not_linear, evo_end }
+    Solve { outcome, not_linear, evo_end, population }
 }
 
 // ---------------------------------------------------------------- command
@@ -208,6 +227,9 @@ fn run(s: &mut Session, p: &Json) -> Result<Json> {
     let keep = bool_param(&params, "keep").unwrap_or(true);
     let save = bool_param(&params, "saveModel").unwrap_or(true);
     let reports = report_kinds(CMD, &params)?;
+    if reports.as_ref().is_some_and(|k| k.contains(&reports::ReportKind::Population)) && model.method != Method::Evolutionary {
+        return Err(EngineError::Other(reports::POPULATION_ONLY.into()));
+    }
     let prob = build_problem(&model);
     // A Sensitivity report the model has none of (integer, Evolutionary, Value Of) fails the
     // call, so it is refused before the solve runs rather than after it.
@@ -236,7 +258,7 @@ fn run(s: &mut Session, p: &Json) -> Result<Json> {
                 .into(),
         ));
     }
-    let Solve { outcome, not_linear, evo_end } =
+    let Solve { outcome, not_linear, evo_end, population } =
         optimise(&mut ev, &model, model.goal, &x0, Bounds { lo: &prob.lo, hi: &prob.hi, integer: &prob.integer }, gap);
     let (status, message, solution) = match outcome {
         _ if not_linear => ("notLinear", "The model isn't linear in the variable cells, so Simplex LP can't solve it. Try GRG Nonlinear.", None),
@@ -280,10 +302,39 @@ fn run(s: &mut Session, p: &Json) -> Result<Json> {
     // solve and the other reports still apply.
     let (built, skipped) = match (&reports, &solution) {
         (Some(kinds), Some(x)) => {
-            let inp = ReportInput { model: &model, prob: &prob, original: x0, solution: x.clone(), message: message.to_string(), budget };
+            let inp = ReportInput {
+                model: &model,
+                prob: &prob,
+                original: x0,
+                solution: x.clone(),
+                message: message.to_string(),
+                budget,
+                population: &population,
+            };
             prepare_reports(s.doc()?, kinds, &inp, NotOptimal::Skip { optimum: sensitivity_status(status) })?
         }
         _ => (Vec::new(), Vec::new()),
+    };
+    let pending_population = if model.method == Method::Evolutionary
+        && let Some(x) = &solution
+    {
+        let inp = ReportInput {
+            model: &model,
+            prob: &prob,
+            original: Vec::new(),
+            solution: x.clone(),
+            message: String::new(),
+            budget,
+            population: &population,
+        };
+        let d = s.doc()?;
+        Some(PopulationReport {
+            uid: d.uid,
+            sheet: d.wb.sheet(model.sheet).ok_or(EngineError::NoDocument)?.name.clone(),
+            lines: reports::population_report(d, d.wb.sheet(model.sheet).ok_or(EngineError::NoDocument)?, &inp),
+        })
+    } else {
+        None
     };
     let count = built.len();
     let before = s.doc()?.wb.clone();
@@ -329,6 +380,7 @@ fn run(s: &mut Session, p: &Json) -> Result<Json> {
     if !skipped.is_empty() {
         out["skippedReports"] = json!(skipped);
     }
+    s.solver_population = pending_population;
     Ok(out)
 }
 

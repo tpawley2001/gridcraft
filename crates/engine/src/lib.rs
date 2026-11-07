@@ -462,6 +462,8 @@ pub type TextWidth = Arc<dyn Fn(&str, &model::Font, bool) -> f32 + Send + Sync>;
 
 #[derive(Default)]
 pub struct Session {
+    /// Population statistics from the last successful Evolutionary solve.
+    pub(crate) solver_population: Option<cmd::solver::PopulationReport>,
     docs: Vec<DocState>,
     /// Index in `docs` of the active window's workbook.
     active: usize,

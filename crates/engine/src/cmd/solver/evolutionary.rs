@@ -179,7 +179,7 @@ pub(super) fn evolutionary(
     different: &[Vec<usize>],
     goal: Goal,
     o: &EvoOptions,
-) -> (Outcome, EvoEnd) {
+) -> (Outcome, EvoEnd, Vec<Vec<f64>>) {
     let Bounds { lo, hi, integer } = bounds;
     let rows = ev.rows.clone();
     let senses: Vec<Sense> = rows.iter().map(|r| r.sense).collect();
@@ -191,7 +191,7 @@ pub(super) fn evolutionary(
     let bhi: Vec<f64> = hi.iter().zip(&start).map(|(h, s)| if h.is_finite() { *h } else { s + 100.0 }).collect();
     let no_integer = blo.iter().zip(&bhi).zip(integer).any(|((l, h), int)| *int && l.ceil() > h.floor());
     if blo.iter().zip(&bhi).any(|(l, h)| l > h) || no_integer {
-        return (Outcome::Infeasible, EvoEnd::Converged);
+        return (Outcome::Infeasible, EvoEnd::Converged, Vec::new());
     }
     let span: Vec<f64> = blo.iter().zip(&bhi).map(|(l, h)| (h - l).max(1e-9)).collect();
     let mut se = EvoSearch { ev, rows, senses, goal, lo: blo, hi: bhi, integer, different, tol: PRECISION * scale };
@@ -202,7 +202,7 @@ pub(super) fn evolutionary(
     // The first generation: the start and random points in the box.
     let mut pop: Vec<Member> = Vec::with_capacity(size);
     if !random_permutations(&mut start, different, &mut rng) {
-        return (Outcome::Limit, EvoEnd::Budget);
+        return (Outcome::Limit, EvoEnd::Budget, Vec::new());
     }
     se.repair(&mut start);
     let permutation_start = start.clone();
@@ -327,9 +327,11 @@ pub(super) fn evolutionary(
         }
         best = Some(b);
     }
-    match best {
-        Some(b) if b.viol <= tol => (Outcome::Solved(b.x, b.phi, end != EvoEnd::Budget), end),
-        _ if end == EvoEnd::Budget => (Outcome::Limit, end),
-        _ => (Outcome::Infeasible, end),
-    }
+    let population = pop.into_iter().map(|m| m.x).collect();
+    let outcome = match best {
+        Some(b) if b.viol <= tol => Outcome::Solved(b.x, b.phi, end != EvoEnd::Budget),
+        _ if end == EvoEnd::Budget => Outcome::Limit,
+        _ => Outcome::Infeasible,
+    };
+    (outcome, end, population)
 }
