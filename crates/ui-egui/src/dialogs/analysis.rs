@@ -768,6 +768,7 @@ pub(super) fn solver_results(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dial
     } else {
         "Needs Simplex LP or GRG Nonlinear, a Max or Min objective and no integer constraints."
     };
+    let evolutionary = d.values.get("model").and_then(|m| m.get("method")).and_then(Json::as_str) == Some("evolutionary");
     let offered = |key: &str| key != "sensitivityReport" || sensitivity;
     if solved {
         ui.add_space(4.0);
@@ -778,6 +779,12 @@ pub(super) fn solver_results(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dial
             if check.changed() {
                 d.values.insert(key.into(), json!(on));
             }
+        }
+    }
+    if solved && evolutionary {
+        let mut on = d.values.get("populationReport").and_then(Json::as_bool).unwrap_or(false);
+        if ui.checkbox(&mut on, "Population").changed() {
+            d.values.insert("populationReport".into(), json!(on));
         }
     }
     let mut confirm = false;
@@ -813,6 +820,10 @@ pub(super) fn solver_results(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dial
                 }
                 Err(e) => app.message = Some(("Solver Results".into(), crate::clean_error(&e))),
             }
+        }
+        if solved && evolutionary && d.values.get("populationReport").and_then(Json::as_bool) == Some(true) {
+            let doc = app.session.active().map(|d| d.uid);
+            app.run_or_alert("data.solverPopulationReport", json!({"doc": doc}));
         }
         *open = false;
     }
