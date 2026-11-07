@@ -410,7 +410,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     report.warnings.insert(
         0,
         if g.biff5.is_some() {
-            "Imported from an Excel 5.0/95 (.xls) workbook: values, formulas, cell formatting, column widths, row heights and defined names were read. Charts, pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
+            "Imported from an Excel 5.0/95 (.xls) workbook: values, formulas, cell formatting, column widths, row heights and defined names were read. Pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         } else {
             "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights, defined names, charts and pictures were read. Comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         }
@@ -709,12 +709,7 @@ fn biff5_global(
             }
             let cch = usize::from(c.u8()?);
             let raw = c.bytes(cch.min(c.remaining()))?;
-            let kind = match raw.split_first() {
-                Some((0x03, name)) => ExternKind::Sheet(b5.text(name)),
-                Some((0x02 | 0x04, _)) => ExternKind::OwnBook,
-                Some((b':', [])) => ExternKind::AddIn,
-                _ => ExternKind::Other,
-            };
+            let kind = b5.extern_kind(&raw);
             b5.externs.push(Extern { kind, names: vec![] });
         }
         // ExternName: flags, 4 reserved bytes, then a 1-byte count and 8-bit characters.
@@ -1134,7 +1129,7 @@ fn worksheet(
         match rec.id {
             BOF if depth == 1 && chart::is_chart_bof(&rec) => {
                 // An embedded chart's substream, read to its EOF.
-                if !st.charts.chart(&mut recs, budget, &g.links, report)? {
+                if !st.charts.chart(&mut recs, budget, &g.links, g.biff5.as_ref(), report)? {
                     break;
                 }
                 continue;
