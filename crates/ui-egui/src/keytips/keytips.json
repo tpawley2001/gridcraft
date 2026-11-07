@@ -2200,8 +2200,8 @@
   },
   {
    "seq": "AWT",
-   "kind": "command",
-   "target": "data.dataTable",
+   "kind": "dialog",
+   "target": "dataTable",
    "excel": "Data Table",
    "note": ""
   },
@@ -2843,8 +2843,8 @@
   },
   {
    "seq": "DT",
-   "kind": "command",
-   "target": "data.dataTable",
+   "kind": "dialog",
+   "target": "dataTable",
    "excel": "Data > Table (what-if data table)",
    "note": "Legacy Excel 2003 menu path (#941)."
   },

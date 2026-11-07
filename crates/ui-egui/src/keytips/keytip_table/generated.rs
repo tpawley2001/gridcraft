@@ -318,7 +318,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("AW", Entry::Continue),                                                // group: group: What-If (goalSeek/scenarioManager/dataTable)
     ("AWG", Entry::Finish(Action::Dialog("goalSeek"))),                     // Excel: Goal Seek
     ("AWS", Entry::Finish(Action::Command("data.scenarioManager"))),        // Excel: Scenario Manager
-    ("AWT", Entry::Finish(Action::Command("data.dataTable"))),              // Excel: Data Table
+    ("AWT", Entry::Finish(Action::Dialog("dataTable"))),                    // Excel: Data Table
     ("AX", Entry::Finish(Action::Pending("data.existingConnections"))), // pending; Excel: Existing Connections; gap #12; reserved until the command lands
     ("AY", Entry::Finish(Action::Command("data.reapply"))),             // Excel: Reapply Filter; containment(Reapply)
     ("RA1", Entry::Finish(Action::Dialog("accessibility"))),            // Excel: Check Accessibility
@@ -409,7 +409,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("DGS", Entry::Finish(Action::Command("data.showDetail"))), // Excel: Data > Group and Outline > Show Detail; Legacy Excel 2003 menu path (#941).
     ("DGH", Entry::Finish(Action::Command("data.hideDetail"))), // Excel: Data > Group and Outline > Hide Detail; Legacy Excel 2003 menu path (#941).
     ("DL", Entry::Finish(Action::Command("data.validation"))), // Excel: Data > Validation; Legacy Excel 2003 menu path (#941).
-    ("DT", Entry::Finish(Action::Command("data.dataTable"))), // Excel: Data > Table (what-if data table); Legacy Excel 2003 menu path (#941).
+    ("DT", Entry::Finish(Action::Dialog("dataTable"))),    // Excel: Data > Table (what-if data table); Legacy Excel 2003 menu path (#941).
     ("VN", Entry::Finish(Action::Command("view.normal"))), // Excel: View > Normal; Legacy Excel 2003 menu path (#941).
     ("VP", Entry::Finish(Action::Command("view.pageBreakPreview"))), // Excel: View > Page Break Preview; Legacy Excel 2003 menu path (#941).
     ("VZ", Entry::Finish(Action::Dialog("zoom"))),         // Excel: View > Zoom; Legacy Excel 2003 menu path (#941).

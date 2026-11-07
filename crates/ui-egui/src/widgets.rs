@@ -72,6 +72,15 @@ pub fn icon_button_on(ui: &mut Ui, t: &Tokens, icon: Icon, color: Color32, tip: 
     resp.on_hover_text(tip_text(ui, tip))
 }
 
+/// [`icon_button`] drawn greyed and inert: it shows its tooltip but takes no clicks or focus, so
+/// it isn't in the accessibility tree under its name (the formula bar's Cancel and Enter while no
+/// cell is being edited, which would otherwise answer to a dialog's Cancel).
+pub fn inert_icon(ui: &mut Ui, icon: Icon, color: Color32, tip: &str, size: egui::Vec2) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
+    icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(16.0, 16.0)), icon, color);
+    resp.on_hover_text(tip_text(ui, tip))
+}
+
 /// A button for a character the interface inserts (the Symbol gallery). When the current font set
 /// has no glyph for it, the code-drawn icon with the same meaning is painted instead of a tofu
 /// box. Only the button's appearance changes: clicking still inserts the exact requested character.
