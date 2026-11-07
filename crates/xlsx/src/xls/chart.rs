@@ -99,8 +99,18 @@ const OT_BUTTON: u16 = 0x0007;
 const F_UI_OBJ: u16 = 0x0100;
 /// FtCmo `fLocked` ([MS-XLS] 2.5.143).
 const F_LOCKED: u16 = 0x0001;
+/// A group Obj's `ot`.
+const OT_GROUP: u16 = 0x0000;
+/// The Office Art shape type of a text box (msosptTextBox, [MS-ODRAW] 2.4.24).
+const SPT_TEXT_BOX: u16 = 202;
 /// OfficeArtClientAnchorSheet record type ([MS-XLS] 2.5.193).
 const CLIENT_ANCHOR: u16 = 0xF010;
+/// OfficeArt record types ([MS-ODRAW] 2.2): a group's container, a shape's container, a group's
+/// frame and a grouped shape's anchor.
+const SPGR_CONTAINER: u16 = 0xF003;
+const SP_CONTAINER: u16 = 0xF004;
+const FSPGR: u16 = 0xF009;
+const CHILD_ANCHOR: u16 = 0xF00F;
 
 /// Whether a BOF record opens a chart substream.
 pub(super) fn is_chart_bof(rec: &Record<'_>) -> bool {
@@ -130,59 +140,201 @@ fn u32_at(b: &[u8], at: usize) -> Option<u32> {
     Some(u32::from(u16_at(b, at)?) | (u32::from(u16_at(b, at.checked_add(2)?)?) << 16))
 }
 
-/// The last client anchor in one MsoDrawing record's OfficeArt records, with the properties of
-/// its shape (the FOPTs since the shape's FSP): containers (`recVer` 0xF) are entered, atoms
-/// skipped by their length.
-fn client_anchor(data: &[u8]) -> Option<(ClientAnchor, ShapeProps)> {
-    let mut pos = 0usize;
-    let mut found = None;
-    let mut props = ShapeProps::default();
-    for _ in 0..MAX_ART_RECORDS {
-        let (Some(ver), Some(ty), Some(len)) = (u16_at(data, pos), u16_at(data, pos.saturating_add(2)), u32_at(data, pos.saturating_add(4))) else {
-            break;
-        };
-        let body = pos.saturating_add(8);
-        if ver & 0x000F == 0x000F {
-            pos = body;
-            continue;
-        }
-        if ty == drawing::FSP {
-            // The instance is the shape type ([MS-ODRAW] 2.2.40); the properties that follow it
-            // are its shape's.
-            props = ShapeProps { shape_type: ver >> 4, ..ShapeProps::default() };
-        } else if ty == drawing::FOPT || ty == drawing::TERTIARY_FOPT {
-            let end = body.saturating_add(usize::try_from(len).unwrap_or(usize::MAX)).min(data.len());
-            drawing::fopt(ver >> 4, data.get(body..end).unwrap_or_default(), &mut props);
-        } else if ty == CLIENT_ANCHOR {
-            // flags, then colL, dxL, rwT, dyT, colR, dxR, rwB, dyB.
-            let f = |i: usize| u16_at(data, body.saturating_add(2 + 2 * i));
-            if let (Some(col_l), Some(dx_l), Some(row_t), Some(dy_t), Some(col_r), Some(dx_r), Some(row_b), Some(dy_b)) =
-                (f(0), f(1), f(2), f(3), f(4), f(5), f(6), f(7))
-            {
-                found = Some((ClientAnchor { col_l, dx_l, row_t, dy_t, col_r, dx_r, row_b, dy_b }, props.clone()));
-            }
-        }
-        pos = body.saturating_add(usize::try_from(len).unwrap_or(usize::MAX));
+/// Where a drawn object goes: a client anchor (cells under its corners), or a part of a group's
+/// rectangle (the outermost group's client anchor, and the fractions of its width and height the
+/// shape's left, top, width and height are: its child anchors mapped through each group frame).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Place {
+    Cells(ClientAnchor),
+    Group(ClientAnchor, [f64; 4]),
+}
+
+/// What one MsoDrawing record's last anchor belongs to.
+#[derive(Debug, PartialEq)]
+enum Found {
+    /// A shape, with its place (none: a child anchor outside a placed group) and properties.
+    Shape(Option<Place>, ShapeProps),
+    /// A group's own shape: its Obj (a group) imports nothing.
+    Group,
+}
+
+/// An OfficeArtSpgrContainer being walked ([MS-ODRAW] 2.2.16): its first SpContainer is the
+/// group's own shape (frame and anchor), the others its children.
+struct ArtGroup {
+    /// Drawing-stream offset where the container ends.
+    end: u64,
+    /// Where the group's own shape's SpContainer ends, once it has started.
+    shape_end: Option<u64>,
+    /// The group's coordinate frame (OfficeArtFSPGR, [MS-ODRAW] 2.2.38): left, top, right, bottom.
+    frame: Option<[i32; 4]>,
+    /// The group's rectangle, once its anchor has been read (none for the drawing's root group).
+    place: Option<(ClientAnchor, [f64; 4])>,
+}
+
+/// A grouped shape's position and size in points at most.
+const MAX_POINTS: f64 = 1.0e7;
+/// Group nesting followed at most; deeper groups' shapes aren't placed.
+const MAX_GROUP_DEPTH: usize = 16;
+
+/// The walk through a sheet's drawing data: the concatenation of its MsoDrawing records
+/// ([MS-XLS] 2.4.168), with Obj and TxO records in between. Groups span several MsoDrawing
+/// records, so their ends are tracked by byte counts.
+#[derive(Default)]
+struct ArtWalk {
+    /// Drawing-stream offset of the next MsoDrawing record's first byte.
+    offset: u64,
+    groups: Vec<ArtGroup>,
+    /// The end of a group nested too deeply: until then, child anchors place nothing.
+    too_deep: Option<u64>,
+}
+
+/// `rect` (left, top, right, bottom in `frame`) as fractions of `outer` (fractions of a root
+/// rectangle): a degenerate or missing frame gives the whole of `outer`.
+fn map_child(outer: [f64; 4], frame: Option<[i32; 4]>, rect: [i32; 4]) -> [f64; 4] {
+    let Some([fl, ft, fr, fb]) = frame else { return outer };
+    if fr <= fl || fb <= ft {
+        return outer;
     }
-    found
+    let (fw, fh) = (f64::from(fr) - f64::from(fl), f64::from(fb) - f64::from(ft));
+    let [l, t, r, b] = rect.map(f64::from);
+    let [ox, oy, ow, oh] = outer;
+    [ox + (l - f64::from(fl)) / fw * ow, oy + (t - f64::from(ft)) / fh * oh, (r - l) / fw * ow, (b - t) / fh * oh]
+}
+
+fn i32_at(b: &[u8], at: usize) -> Option<i32> {
+    u32_at(b, at).map(|v| i32::from_le_bytes(v.to_le_bytes()))
+}
+
+fn rect_at(b: &[u8], at: usize) -> Option<[i32; 4]> {
+    Some([i32_at(b, at)?, i32_at(b, at.checked_add(4)?)?, i32_at(b, at.checked_add(8)?)?, i32_at(b, at.checked_add(12)?)?])
+}
+
+impl ArtWalk {
+    /// One MsoDrawing record's OfficeArt records: the last anchor in it, with the properties of
+    /// its shape (the FOPTs since the shape's FSP). Containers (`recVer` 0xF) are entered, atoms
+    /// skipped by their length.
+    fn record(&mut self, data: &[u8]) -> Option<Found> {
+        let base = self.offset;
+        self.offset = base.saturating_add(data.len() as u64);
+        let mut pos = 0usize;
+        let mut found = None;
+        let mut props = ShapeProps::default();
+        for _ in 0..MAX_ART_RECORDS {
+            let (Some(ver), Some(ty), Some(len)) = (u16_at(data, pos), u16_at(data, pos.saturating_add(2)), u32_at(data, pos.saturating_add(4)))
+            else {
+                break;
+            };
+            let at = base.saturating_add(pos as u64);
+            while self.groups.last().is_some_and(|g| g.end <= at) {
+                self.groups.pop();
+            }
+            if self.too_deep.is_some_and(|end| end <= at) {
+                self.too_deep = None;
+            }
+            let body = pos.saturating_add(8);
+            let end = at.saturating_add(8).saturating_add(u64::from(len));
+            if ver & 0x000F == 0x000F {
+                if ty == SPGR_CONTAINER && self.too_deep.is_none() {
+                    if self.groups.len() < MAX_GROUP_DEPTH {
+                        self.groups.push(ArtGroup { end, shape_end: None, frame: None, place: None });
+                    } else {
+                        self.too_deep = Some(end);
+                    }
+                } else if ty == SP_CONTAINER
+                    && self.too_deep.is_none()
+                    && let Some(g) = self.groups.last_mut()
+                    && g.shape_end.is_none()
+                {
+                    g.shape_end = Some(end);
+                }
+                pos = body;
+                continue;
+            }
+            let atom = data.get(body..body.saturating_add(usize::try_from(len).unwrap_or(usize::MAX)).min(data.len())).unwrap_or_default();
+            // Whether this atom is the innermost group's own shape's.
+            let group_shape = self.too_deep.is_none() && self.groups.last().and_then(|g| g.shape_end).is_some_and(|e| at < e);
+            if ty == drawing::FSP {
+                // The instance is the shape type ([MS-ODRAW] 2.2.40); the properties that follow it
+                // are its shape's.
+                props = ShapeProps { shape_type: ver >> 4, ..ShapeProps::default() };
+            } else if ty == drawing::FOPT || ty == drawing::TERTIARY_FOPT {
+                drawing::fopt(ver >> 4, atom, &mut props);
+            } else if ty == FSPGR {
+                if group_shape && let (Some(g), Some(r)) = (self.groups.last_mut(), rect_at(atom, 0)) {
+                    g.frame = Some(r);
+                }
+            } else if ty == CLIENT_ANCHOR {
+                // flags, then colL, dxL, rwT, dyT, colR, dxR, rwB, dyB.
+                let f = |i: usize| u16_at(atom, 2 + 2 * i);
+                if let (Some(col_l), Some(dx_l), Some(row_t), Some(dy_t), Some(col_r), Some(dx_r), Some(row_b), Some(dy_b)) =
+                    (f(0), f(1), f(2), f(3), f(4), f(5), f(6), f(7))
+                {
+                    let a = ClientAnchor { col_l, dx_l, row_t, dy_t, col_r, dx_r, row_b, dy_b };
+                    found = Some(if group_shape {
+                        if let Some(g) = self.groups.last_mut() {
+                            g.place = Some((a, [0.0, 0.0, 1.0, 1.0]));
+                        }
+                        Found::Group
+                    } else {
+                        Found::Shape(Some(Place::Cells(a)), props.clone())
+                    });
+                }
+            } else if ty == CHILD_ANCHOR
+                && let Some(r) = rect_at(atom, 0)
+            {
+                found = Some(self.child_anchor(group_shape, r, &props));
+            }
+            pos = body.saturating_add(usize::try_from(len).unwrap_or(usize::MAX));
+        }
+        found
+    }
+
+    /// An OfficeArtChildAnchor ([MS-ODRAW] 2.2.39): a rectangle in the enclosing group's frame.
+    fn child_anchor(&mut self, group_shape: bool, r: [i32; 4], props: &ShapeProps) -> Found {
+        if self.too_deep.is_some() {
+            return if group_shape { Found::Group } else { Found::Shape(None, props.clone()) };
+        }
+        // A group's own shape is placed in its parent group's frame, any other shape in its group's.
+        let n = self.groups.len();
+        let parent = if group_shape { n.checked_sub(2) } else { n.checked_sub(1) };
+        let placed = parent.and_then(|i| self.groups.get(i)).and_then(|g| g.place.map(|(root, outer)| (root, map_child(outer, g.frame, r))));
+        if group_shape {
+            if let Some(g) = self.groups.last_mut() {
+                g.place = placed;
+            }
+            Found::Group
+        } else {
+            Found::Shape(placed.map(|(root, rel)| Place::Group(root, rel)), props.clone())
+        }
+    }
+}
+
+/// The last client anchor in one MsoDrawing record's OfficeArt records, with its shape's
+/// properties.
+#[cfg(test)]
+fn client_anchor(data: &[u8]) -> Option<(ClientAnchor, ShapeProps)> {
+    match ArtWalk::default().record(data) {
+        Some(Found::Shape(Some(Place::Cells(a)), props)) => Some((a, props)),
+        _ => None,
+    }
 }
 
 /// A text box's shape, before its TxO record has been read.
 struct PendingTextBox {
-    anchor: ClientAnchor,
+    anchor: Place,
     props: ShapeProps,
 }
 
 /// A drawn shape, before its TxO record (if any) has been read.
 struct PendingShape {
-    anchor: ClientAnchor,
+    anchor: Place,
     props: ShapeProps,
     kind: ShapeKind,
 }
 
 /// A button, before its TxO record (if any) has been read.
 struct PendingButton {
-    anchor: ClientAnchor,
+    anchor: Place,
     locked: bool,
 }
 
@@ -216,20 +368,22 @@ fn shape_kind(ot: u16, props: &ShapeProps) -> Option<ShapeKind> {
 #[derive(Default)]
 pub(super) struct Embedded {
     /// The last drawing shape's anchor and properties, until an Obj record claims them.
-    anchor: Option<(ClientAnchor, ShapeProps)>,
+    anchor: Option<(Place, ShapeProps)>,
+    /// The walk through the sheet's drawing data.
+    art: ArtWalk,
     /// The anchor of the chart Obj whose substream comes next.
-    pending: Option<ClientAnchor>,
+    pending: Option<Place>,
     /// The shape of the text box Obj whose TxO record comes next.
     pending_text: Option<PendingTextBox>,
     /// The drawn shape whose TxO record (if any) comes next.
     pending_shape: Option<PendingShape>,
     /// The button whose TxO record (if any) comes next.
     pending_button: Option<PendingButton>,
-    charts: Vec<(Option<ClientAnchor>, Chart)>,
-    pictures: Vec<(ClientAnchor, ShapeProps)>,
-    text_boxes: Vec<(ClientAnchor, ShapeProps, Text)>,
-    shapes: Vec<(ClientAnchor, ShapeProps, ShapeKind, Option<Text>)>,
-    buttons: Vec<(ClientAnchor, bool, Option<Text>)>,
+    charts: Vec<(Option<Place>, Chart)>,
+    pictures: Vec<(Place, ShapeProps)>,
+    text_boxes: Vec<(Place, ShapeProps, Text)>,
+    shapes: Vec<(Place, ShapeProps, ShapeKind, Option<Text>)>,
+    buttons: Vec<(Place, bool, Option<Text>)>,
     /// The workbook's colour table, for the shapes' palette colours.
     palette: Palette,
 }
@@ -253,11 +407,15 @@ impl Embedded {
     }
     /// An MsoDrawing record: remembers its shape's anchor and properties. Only a record that
     /// starts a new shape (it carries an anchor) ends the pending drawn shape: the one holding a
-    /// shape's text-box client data comes between its Obj and its TxO.
+    /// shape's text-box client data comes between its Obj and its TxO. A group's own shape, or a
+    /// grouped shape that can't be placed, leaves no anchor for its Obj.
     pub(super) fn drawing(&mut self, rec: &Record<'_>) {
-        if let Some(a) = client_anchor(&rec.parts.concat()) {
+        if let Some(found) = self.art.record(&rec.parts.concat()) {
             self.flush_shape();
-            self.anchor = Some(a);
+            self.anchor = match found {
+                Found::Shape(Some(place), props) => Some((place, props)),
+                Found::Shape(None, _) | Found::Group => None,
+            };
         }
     }
 
@@ -295,7 +453,10 @@ impl Embedded {
                 // A text box without its drawing shape has no anchor to place it with.
                 self.pending_text = anchor.map(|(anchor, props)| PendingTextBox { anchor, props });
             }
-            Some(OT_NOTE) => {}
+            // An Office Art text box (shape type 202) is a text box.
+            Some(OT_OFFICE_ART) if anchor.as_ref().is_some_and(|(_, p)| p.shape_type == SPT_TEXT_BOX) => {
+                self.pending_text = anchor.map(|(anchor, props)| PendingTextBox { anchor, props });
+            }
             Some(OT_BUTTON) => {
                 // A button without its drawing shape has no anchor to place it with.
                 if let Some((anchor, _)) = anchor {
@@ -304,6 +465,8 @@ impl Embedded {
                     report.warn("Form controls in .xls files are not imported yet.");
                 }
             }
+            // A group's shapes are read from their own Obj records.
+            Some(OT_NOTE | OT_GROUP) => {}
             Some(ot) if OT_FORM_CONTROLS.contains(&ot) => report.warn("Form controls in .xls files are not imported yet."),
             Some(ot) => {
                 // A shape without its drawing shape has no anchor to place it with.
@@ -354,7 +517,7 @@ impl Embedded {
         self.flush_shape();
         for (anchor, mut ch) in self.charts {
             if let Some(a) = anchor {
-                ch.anchor = place(sheet, &a);
+                ch.anchor = place_at(sheet, &a);
             }
             sheet.charts.push(ch);
         }
@@ -364,7 +527,7 @@ impl Embedded {
                 skipped = true;
                 continue;
             };
-            let anchor = place(sheet, &a);
+            let anchor = place_at(sheet, &a);
             sheet.images.push(Image {
                 hidden: props.hidden,
                 hyperlink: None,
@@ -396,7 +559,7 @@ impl Embedded {
                 name: props.name,
                 id: 0,
                 kind: ShapeKind::TextBox,
-                anchor: place(sheet, &a),
+                anchor: place_at(sheet, &a),
                 fill: Color::Auto,
                 line: Color::Auto,
                 text: text.text,
@@ -423,7 +586,7 @@ impl Embedded {
                 name: props.name,
                 id: 0,
                 kind,
-                anchor: place(sheet, &a),
+                anchor: place_at(sheet, &a),
                 fill,
                 line,
                 text: text.map_or(String::new(), |t| t.text),
@@ -440,12 +603,36 @@ impl Embedded {
             sheet.controls.push(FormControl {
                 id: first.saturating_add(u32::try_from(i).unwrap_or(u32::MAX)).saturating_add(1),
                 kind: ControlKind::Button,
-                anchor: place(sheet, &a),
+                anchor: place_at(sheet, &a),
                 text: text.map_or(String::new(), |t| t.text),
                 locked,
                 ..FormControl::default()
             });
         }
+    }
+}
+
+/// A drawn object's anchor in sheet units: a grouped shape is anchored to the cell under its
+/// top-left corner, at its place in its group's rectangle.
+fn place_at(sheet: &Sheet, p: &Place) -> Anchor {
+    let (root, [fx, fy, fw, fh]) = match p {
+        Place::Cells(a) => return place(sheet, a),
+        Place::Group(root, rel) => (root, rel),
+    };
+    let g = place(sheet, root);
+    let (gx, gy) = (sheet.col_left(g.cell.col) + f64::from(g.dx), sheet.row_top(g.cell.row) + f64::from(g.dy));
+    let (gw, gh) = (f64::from(g.width), f64::from(g.height));
+    // Hostile frames can map far off the sheet: keep the numbers finite.
+    let clamp = |v: f64| v.clamp(0.0, MAX_POINTS);
+    let (x, y) = (clamp(gx + fx * gw), clamp(gy + fy * gh));
+    let cell = CellRef::new(sheet.row_at(y), sheet.col_at(x));
+    Anchor {
+        cell,
+        dx: (x - sheet.col_left(cell.col)).max(0.0) as f32,
+        dy: (y - sheet.row_top(cell.row)).max(0.0) as f32,
+        width: clamp(fw * gw) as f32,
+        height: clamp(fh * gh) as f32,
+        mode: AnchorMode::MoveAndSize,
     }
 }
 
@@ -1274,5 +1461,48 @@ mod tests {
         huge.extend_from_slice(&u32::MAX.to_le_bytes());
         huge.extend_from_slice(&data);
         assert_eq!(client_anchor(&huge), None);
+    }
+
+    fn art(ver: u16, ty: u16, body: &[u8]) -> Vec<u8> {
+        let mut v = [ver.to_le_bytes(), ty.to_le_bytes()].concat();
+        v.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        v.extend_from_slice(body);
+        v
+    }
+
+    #[test]
+    fn deeply_nested_groups_are_bounded_and_extreme_frames_stay_finite() {
+        let rect = |r: [i32; 4]| r.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+        let mut anchor = vec![0u8; 18];
+        anchor[2] = 1;
+        anchor[10] = 5;
+        anchor[14] = 9;
+        // A top-level group placed by cells, then 40 nested groups with extreme frames, each
+        // in its own record; the innermost child is past the depth limit, so it has no place.
+        let mut inner = art(0xF, SP_CONTAINER, &art(0, CHILD_ANCHOR, &rect([i32::MIN, i32::MIN, i32::MAX, i32::MAX])));
+        for _ in 0..40 {
+            let shape =
+                art(0xF, SP_CONTAINER, &[art(1, FSPGR, &rect([0, 0, 1, 1])), art(0, CHILD_ANCHOR, &rect([i32::MIN, 0, i32::MAX, 1]))].concat());
+            inner = art(0xF, SPGR_CONTAINER, &[shape, inner].concat());
+        }
+        let shape = art(0xF, SP_CONTAINER, &[art(1, FSPGR, &rect([0, 0, 1, 1])), art(0, CLIENT_ANCHOR, &anchor)].concat());
+        let data = art(0xF, SPGR_CONTAINER, &[shape, inner].concat());
+        let mut walk = ArtWalk::default();
+        assert!(matches!(walk.record(&data), Some(Found::Shape(None, _))));
+        assert!(walk.groups.len() <= MAX_GROUP_DEPTH);
+        // Two levels deep, the extreme frames map to finite placements on the sheet.
+        let mut walk = ArtWalk::default();
+        let two = art(
+            0xF,
+            SPGR_CONTAINER,
+            &[
+                art(0xF, SP_CONTAINER, &[art(1, FSPGR, &rect([0, 0, 1, 1])), art(0, CLIENT_ANCHOR, &anchor)].concat()),
+                art(0xF, SP_CONTAINER, &art(0, CHILD_ANCHOR, &rect([i32::MIN, i32::MIN, i32::MAX, i32::MAX]))),
+            ]
+            .concat(),
+        );
+        let Some(Found::Shape(Some(place), _)) = walk.record(&two) else { panic!("child not placed") };
+        let a = place_at(&Sheet::new("S"), &place);
+        assert!(a.dx.is_finite() && a.dy.is_finite() && a.width.is_finite() && a.height.is_finite());
     }
 }
