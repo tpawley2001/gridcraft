@@ -40,6 +40,66 @@ pub(super) fn goal_seek(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, c
     }
 }
 
+/// Data › What-If Analysis › Data Table. The table is the selection when the dialog opened
+/// (`range`); OK runs `data.dataTable` with the input cells given and closes only when it
+/// succeeds, so a refused input cell can be corrected in place.
+pub(super) fn data_table(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) {
+    egui::Grid::new("dt").show(ui, |ui| {
+        let l = ui.label("Row input cell:");
+        ref_edit(app, ui, d, "rowInput", RefLabel::By(l.id), 200.0);
+        ui.end_row();
+        let l = ui.label("Column input cell:");
+        ref_edit(app, ui, d, "columnInput", RefLabel::By(l.id), 200.0);
+        ui.end_row();
+    });
+    let get = |k: &str| d.values.get(k).and_then(Json::as_str).unwrap_or("").trim().to_string();
+    let (range, row, column) = (get("range"), get("rowInput"), get("columnInput"));
+    // OK and Cancel are named without the padding the shared buttons carry, as Excel names them;
+    // a minimum width gives them the same look.
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let lang = crate::i18n::current(ui.ctx());
+            let t = crate::theme::Tokens::get(ui.ctx());
+            let w = vec2(64.0, 0.0);
+            let ok = egui::Button::new(egui::RichText::new(lang.tr("OK")).color(t.on_accent)).fill(t.accent).min_size(w);
+            if ui.add(ok).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                *confirm = true;
+            }
+            if ui.add(egui::Button::new(lang.tr("Cancel")).min_size(w)).clicked() {
+                *open = false;
+            }
+        })
+    });
+    if *confirm && row.is_empty() && column.is_empty() {
+        app.message = Some((d.title.clone(), "Input cell reference is not valid.".into()));
+        *confirm = false;
+    }
+    if *confirm && home_sheet_deleted(app, d) {
+        app.message = Some((d.title.clone(), SHEET_DELETED.into()));
+        *confirm = false;
+    }
+    if *confirm && let Err(e) = end_pick(app, d) {
+        // As in Goal Seek: the input cells would be read against the wrong sheet.
+        app.message = Some((d.title.clone(), crate::clean_error(&e)));
+        *confirm = false;
+    }
+    if *confirm {
+        let mut params = Map::new();
+        params.insert("range".into(), json!(range));
+        if !row.is_empty() {
+            params.insert("rowInput".into(), json!(row));
+        }
+        if !column.is_empty() {
+            params.insert("columnInput".into(), json!(column));
+        }
+        if let Err(e) = app.run("data.dataTable", Json::Object(params)) {
+            app.message = Some((d.title.clone(), crate::clean_error(&e)));
+            *confirm = false;
+        }
+    }
+}
+
 /// The fields of one Analysis ToolPak tool's form (input and options; output is drawn apart).
 fn toolpak_fields(tool: &str, values: &Map<String, Json>) -> Vec<Field> {
     use Field::*;

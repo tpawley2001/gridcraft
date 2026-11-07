@@ -689,6 +689,7 @@ impl Dialog {
             }
             "equation" => return crate::equation::open_editor(app, &params),
             "goalSeek" => Dialog::custom("goalSeek", "Goal Seek", json!({"set": active, "to": "0", "changing": ""})),
+            "dataTable" => Dialog::custom("dataTable", "Data Table", json!({"range": sel, "rowInput": "", "columnInput": ""})),
             "forecastSheet" => Dialog::form(
                 "forecastSheet",
                 "Create Forecast Worksheet",
