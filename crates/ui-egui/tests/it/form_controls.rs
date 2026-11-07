@@ -724,3 +724,27 @@ fn assign_action_and_format_control_dialogs() {
     h.run_steps(2);
     assert_eq!(h.state().dialog.as_ref().map(|d| d.title.as_str()), Some("Edit Text"));
 }
+
+#[test]
+fn clicking_a_check_box_ticks_it_and_writes_true() {
+    let (mut h, _) = fixture();
+    let id = |v: serde_json::Value| v["control"].as_u64().unwrap() as u32;
+    let check = id(h.state_mut().session.execute("insert.formCheckBox", json!({"at": "H3", "width": 120, "height": 20, "link": "J1"})).unwrap());
+    let a = id(h.state_mut().session.execute("insert.optionButton", json!({"at": "H6", "width": 120, "height": 20, "link": "J2"})).unwrap());
+    let b = id(h.state_mut().session.execute("insert.optionButton", json!({"at": "H8", "width": 120, "height": 20})).unwrap());
+    h.run_steps(4);
+    let r = rect(&h, check);
+    // A click anywhere on the control, the caption too, ticks it.
+    click(&mut h, r.right_center() - vec2(10.0, 0.0));
+    assert_eq!(control(&h, check).value, 1, "{:?}", h.state().message);
+    assert_eq!(cell(&h, "J1"), Value::Bool(true));
+    // Space on the focused box clears it again.
+    space(&mut h);
+    assert_eq!(control(&h, check).value, 0);
+    assert_eq!(cell(&h, "J1"), Value::Bool(false));
+    // Clicking an option button selects it and writes its position.
+    let rb = rect(&h, b);
+    click(&mut h, rb.center());
+    assert_eq!((control(&h, a).value, control(&h, b).value), (0, 1));
+    assert_eq!(cell(&h, "J2"), Value::Number(2.0));
+}

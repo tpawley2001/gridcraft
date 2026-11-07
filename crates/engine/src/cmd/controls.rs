@@ -1,5 +1,11 @@
-//! Form controls (Insert › Controls): buttons that run a macro or a command, and sliders and spin
-//! buttons that hold a whole number from 0 to 30000 and write it to a linked cell.
+//! Form controls (Insert › Controls): buttons that run a macro or a command, sliders and spin
+//! buttons that hold a whole number from 0 to 30000 and write it to a linked cell, and check boxes
+//! and option buttons that a click turns on or off.
+//!
+//! A check box's linked cell holds TRUE when it is checked, FALSE when it isn't and #N/A when it is
+//! mixed. The option buttons of a sheet are one group (there are no group boxes yet): at most one
+//! is selected, they share one linked cell, and that cell holds the 1-based position of the
+//! selected button among the sheet's option buttons (0 when none is).
 //!
 //! A slider or spin button's value lives on the control and in its linked cell. Setting it goes
 //! through `cell.set`, so the cell's dependents recalculate and Undo takes both back as one step;
@@ -7,7 +13,7 @@
 //! its action through the macro policy with the document's trust, so a button from a file someone
 //! else made asks before it runs anything.
 
-use gridcraft_core::CellRef;
+use gridcraft_core::{CellError, CellRef, Value};
 use gridcraft_model::{
     Anchor, AnchorMode, CONTROL_MAX, ControlAction, ControlKind, FormControl, MAX_MACRO_NAME, MacroInput, ObjKind, Sheet, Workbook,
 };
@@ -49,6 +55,24 @@ pub fn specs() -> Vec<CommandSpec> {
             |s, p| insert_number_control(s, p, ControlKind::Spin)
         ),
         cmd!(
+            "insert.formCheckBox",
+            "Check Box",
+            ["Insert", "Controls"],
+            None,
+            "{at?: \"B2\" (or cell), dx?, dy?, width?, height?, text?, link?: \"$B$1\", value?: 0 | 1 | 2 (unchecked, checked, mixed)} places a form check box; its linked cell holds TRUE, FALSE or #N/A → {control: id}",
+            has_doc,
+            insert_check_box
+        ),
+        cmd!(
+            "insert.optionButton",
+            "Option Button",
+            ["Insert", "Controls"],
+            None,
+            "{at?: \"B2\" (or cell), dx?, dy?, width?, height?, text?, link?: \"$B$1\"} places an option button; the sheet's option buttons are one group sharing one linked cell, which holds the selected button's 1-based position → {control: id}",
+            has_doc,
+            insert_option_button
+        ),
+        cmd!(
             "control.format",
             "Format Control",
             [],
@@ -71,7 +95,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Change Control Value",
             [],
             None,
-            "{id, value} clamps the value to min..max, snaps it to the step, and writes it to the linked cell → {value}",
+            "{id, value} clamps a slider or spin button's value to min..max, snaps it to the step, and writes it to the linked cell; a check box takes 0, 1 or 2 (unchecked, checked, mixed), an option button 1 (select it) or 0 (deselect it) → {value}",
             has_doc,
             set_value
         ),
@@ -80,7 +104,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Press Button",
             [],
             None,
-            "{id, approve?: bool, onConflict?, overwrite?} runs a button's macro or command (through the macro policy, with the workbook's trust; a workbook from a file asks first) → what the macro or command returned",
+            "{id, approve?: bool, onConflict?, overwrite?} runs a button's macro or command (through the macro policy, with the workbook's trust; a workbook from a file asks first) → what the macro or command returned; clicks a check box (checked ↔ unchecked) or selects an option button → {value}",
             has_doc,
             press
         ),
@@ -230,6 +254,57 @@ fn insert_button(s: &mut Session, p: &Json) -> Result<Json> {
     })
 }
 
+fn insert_check_box(s: &mut Session, p: &Json) -> Result<Json> {
+    const CMD: &str = "insert.formCheckBox";
+    let anchor = new_anchor(s, p, (96.0, 20.0))?;
+    let given = state_param(CMD, p, ControlKind::CheckBox)?;
+    let d = s.doc()?;
+    let sheet = d.wb.active_sheet();
+    let id = d.wb.next_object_id();
+    let text = text_param(CMD, p, "text")?.unwrap_or_else(|| format!("Check Box {id}"));
+    let mut c = FormControl { id, kind: ControlKind::CheckBox, anchor, text, value: given.unwrap_or(0), ..FormControl::default() };
+    if let Some(link) = link_param(CMD, &d.wb, sheet, p)? {
+        c.link = link;
+    }
+    let link = c.link.clone();
+    s.grouped("Insert Check Box", |s| {
+        edit(s, |cx| {
+            cx.sheet_mut(sheet)?.controls.push(c);
+            Ok(())
+        })?;
+        if let Some(v) = given {
+            write_link_value(s, sheet, link.as_deref(), check_value(v))?;
+        }
+        Ok(json!({"control": id}))
+    })
+}
+
+fn insert_option_button(s: &mut Session, p: &Json) -> Result<Json> {
+    const CMD: &str = "insert.optionButton";
+    let anchor = new_anchor(s, p, (112.0, 20.0))?;
+    let d = s.doc()?;
+    let sheet = d.wb.active_sheet();
+    let id = d.wb.next_object_id();
+    let text = text_param(CMD, p, "text")?.unwrap_or_else(|| format!("Option Button {id}"));
+    // Without a link of its own, it joins the link the sheet's option buttons share; a given link
+    // becomes the whole group's.
+    let link = match link_param(CMD, &d.wb, sheet, p)? {
+        Some(l) => l,
+        None => d.wb.sheet(sheet).and_then(group_link),
+    };
+    let c = FormControl { id, kind: ControlKind::OptionButton, anchor, text, link: link.clone(), ..FormControl::default() };
+    // A new option button starts unselected; the group's linked cell selects it after the edit
+    // when it already holds its position.
+    edit(s, |cx| {
+        let sh = cx.sheet_mut(sheet)?;
+        sh.controls.push(c);
+        for o in sh.controls.iter_mut().filter(|o| o.kind == ControlKind::OptionButton) {
+            o.link = link.clone();
+        }
+        Ok(json!({"control": id}))
+    })
+}
+
 fn insert_number_control(s: &mut Session, p: &Json, kind: ControlKind) -> Result<Json> {
     let cmd = if kind == ControlKind::Slider { "insert.slider" } else { "insert.spinButton" };
     let horizontal = bool_param(p, "horizontal").unwrap_or(true);
@@ -300,6 +375,141 @@ fn write_link(s: &mut Session, host: usize, link: Option<&str>, value: u32) -> R
     Ok(())
 }
 
+/// A check box's or option button's state from `value`, if given: 0, 1 or 2 for a check box, 0 or
+/// 1 for an option button.
+fn state_param(cmd: &str, p: &Json, kind: ControlKind) -> Result<Option<u32>> {
+    let top = kind.max_state().unwrap_or(0);
+    let v = match p.get("value") {
+        None | Some(Json::Null) => return Ok(None),
+        Some(Json::Number(n)) => n.as_f64(),
+        Some(Json::String(t)) => t.trim().parse::<f64>().ok(),
+        Some(Json::Bool(b)) => Some(f64::from(u8::from(*b))),
+        Some(_) => None,
+    };
+    match v {
+        Some(x) if x.fract() == 0.0 && (0.0..=f64::from(top)).contains(&x) => Ok(Some(x as u32)),
+        _ if top >= 2 => Err(bad(cmd, "`value` must be 0, 1 or 2")),
+        _ => Err(bad(cmd, "`value` must be 0 or 1")),
+    }
+}
+
+/// What a check box's linked cell holds for state `v`: TRUE checked, FALSE unchecked, #N/A mixed.
+fn check_value(v: u32) -> Value {
+    match v {
+        0 => Value::Bool(false),
+        1 => Value::Bool(true),
+        _ => Value::Error(CellError::NA),
+    }
+}
+
+/// The state a check box takes from its linked cell's value; `None` (leave it) for values other
+/// than TRUE, FALSE and #N/A.
+fn check_state(v: &Value) -> Option<u32> {
+    match v {
+        Value::Bool(false) => Some(0),
+        Value::Bool(true) => Some(1),
+        Value::Error(CellError::NA) => Some(2),
+        _ => None,
+    }
+}
+
+/// The value the cell `link` names holds (empty for an empty cell); `None` without a valid link.
+fn linked_value(wb: &Workbook, host: usize, link: Option<&str>) -> Option<Value> {
+    let (si, cell) = link_target(wb, host, link?)?;
+    Some(wb.sheet(si)?.value(cell))
+}
+
+/// The indexes in `controls` of the sheet's option buttons, in order: one group.
+fn option_indexes(sh: &Sheet) -> Vec<usize> {
+    sh.controls.iter().enumerate().filter(|(_, c)| c.kind == ControlKind::OptionButton).map(|(i, _)| i).collect()
+}
+
+/// The linked cell the sheet's option buttons share: the first one's that has a link.
+fn group_link(sh: &Sheet) -> Option<String> {
+    sh.controls.iter().filter(|c| c.kind == ControlKind::OptionButton).find_map(|c| c.link.clone())
+}
+
+/// Writes `want` to the linked cell through `cell.set`, unless the cell already shows it (see
+/// [`write_link`]).
+fn write_link_value(s: &mut Session, host: usize, link: Option<&str>, want: Value) -> Result<()> {
+    let Some(link) = link else { return Ok(()) };
+    let Some((si, cell)) = link_target(&s.doc()?.wb, host, link) else { return Ok(()) };
+    if s.doc()?.wb.sheet(si).is_some_and(|sh| sh.value(cell) == want) {
+        return Ok(());
+    }
+    let input = match &want {
+        Value::Bool(true) => "TRUE".to_string(),
+        Value::Bool(false) => "FALSE".to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::Error(e) => e.to_string(),
+        _ => String::new(),
+    };
+    s.execute("cell.set", json!({"sheet": si, "cell": cell.a1(), "input": input}))?;
+    Ok(())
+}
+
+/// Sets check box `i` of `sheet` to `value` and writes its linked cell, as one undo step.
+fn set_check(s: &mut Session, sheet: usize, i: usize, c: &FormControl, value: u32) -> Result<Json> {
+    let label = format!("Change {}", c.kind.label());
+    s.grouped(&label, |s| {
+        // The cell first: editing it moves the box (see `sync_linked_values`).
+        write_link_value(s, sheet, c.link.as_deref(), check_value(value))?;
+        let now = s.doc()?.wb.sheet(sheet).and_then(|sh| sh.controls.get(i)).map(|k| k.value);
+        if now != Some(value) {
+            edit(s, |cx| {
+                if let Some(slot) = cx.sheet_mut(sheet)?.controls.get_mut(i) {
+                    slot.value = value;
+                }
+                Ok(())
+            })?;
+        }
+        Ok(json!({"value": value}))
+    })
+}
+
+/// Selects option button `i` of `sheet` (deselecting the others) or, with `on` false, deselects
+/// it; writes the group's linked cell, as one undo step.
+fn set_option(s: &mut Session, sheet: usize, i: usize, c: &FormControl, on: bool) -> Result<Json> {
+    let sh = s.doc()?.wb.sheet(sheet).ok_or(EngineError::NoDocument)?;
+    let group = option_indexes(sh);
+    let states: Vec<(usize, u32)> = group
+        .iter()
+        .map(|&k| {
+            let now = sh.controls.get(k).map_or(0, |o| o.value.min(1));
+            (
+                k,
+                if k == i {
+                    u32::from(on)
+                } else if on {
+                    0
+                } else {
+                    now
+                },
+            )
+        })
+        .collect();
+    let pos = states.iter().position(|(_, v)| *v == 1).map_or(0, |n| n + 1);
+    let link = group_link(sh);
+    let label = format!("Change {}", c.kind.label());
+    s.grouped(&label, |s| {
+        // The cell first: editing it moves the group (see `sync_linked_values`).
+        write_link_value(s, sheet, link.as_deref(), Value::Number(pos as f64))?;
+        let stale = s.doc()?.wb.sheet(sheet).is_some_and(|sh| states.iter().any(|(k, v)| sh.controls.get(*k).is_some_and(|o| o.value != *v)));
+        if stale {
+            edit(s, |cx| {
+                let sh = cx.sheet_mut(sheet)?;
+                for (k, v) in &states {
+                    if let Some(o) = sh.controls.get_mut(*k) {
+                        o.value = *v;
+                    }
+                }
+                Ok(())
+            })?;
+        }
+        Ok(json!({"value": u32::from(on)}))
+    })
+}
+
 /// The control `id` names on the active sheet: (sheet, its index in `controls`, a copy).
 fn find(s: &Session, cmd: &str, p: &Json) -> Result<(usize, usize, FormControl)> {
     let id = u32_param(p, "id").ok_or_else(|| bad(cmd, "missing `id` (a control id from control.list)"))?;
@@ -361,15 +571,25 @@ fn format(s: &mut Session, p: &Json) -> Result<Json> {
     if let Some(link) = link_param(CMD, &s.doc()?.wb, sheet, p)? {
         c.link = link;
     }
-    // New bounds pull the value in; a given value is snapped to them.
-    c.value = c.snap(given.map_or(c.value as f64, f64::from));
     let number = c.kind.is_number();
+    // New bounds pull the value in; a given value is snapped to them.
+    if number {
+        c.value = c.snap(given.map_or(c.value as f64, f64::from));
+    }
+    // The option buttons of a sheet share one linked cell.
+    let group_link = (c.kind == ControlKind::OptionButton && p.get("link").is_some()).then(|| c.link.clone());
     let write = number && (given.is_some() || p.get("min").is_some() || p.get("max").is_some() || p.get("step").is_some());
     let (value, link) = (c.value, c.link.clone());
     s.grouped("Format Control", |s| {
         edit(s, |cx| {
-            if let Some(slot) = cx.sheet_mut(sheet)?.controls.get_mut(i) {
+            let sh = cx.sheet_mut(sheet)?;
+            if let Some(slot) = sh.controls.get_mut(i) {
                 *slot = c;
+            }
+            if let Some(link) = &group_link {
+                for o in sh.controls.iter_mut().filter(|o| o.kind == ControlKind::OptionButton) {
+                    o.link = link.clone();
+                }
             }
             Ok(())
         })?;
@@ -493,8 +713,13 @@ fn assign(s: &mut Session, p: &Json) -> Result<Json> {
 fn set_value(s: &mut Session, p: &Json) -> Result<Json> {
     const CMD: &str = "control.setValue";
     let (sheet, i, c) = find(s, CMD, p)?;
-    if !c.kind.is_number() {
-        return Err(bad(CMD, "only a slider or spin button takes a value; use control.press for a button"));
+    match c.kind {
+        ControlKind::CheckBox | ControlKind::OptionButton => {
+            let v = state_param(CMD, p, c.kind)?.ok_or_else(|| bad(CMD, "missing `value`"))?;
+            return if c.kind == ControlKind::CheckBox { set_check(s, sheet, i, &c, v) } else { set_option(s, sheet, i, &c, v == 1) };
+        }
+        ControlKind::Button => return Err(bad(CMD, "only a slider or spin button takes a value; use control.press for a button")),
+        ControlKind::Slider | ControlKind::Spin => {}
     }
     let v = match p.get("value") {
         Some(Json::Number(n)) => n.as_f64(),
@@ -521,9 +746,15 @@ fn set_value(s: &mut Session, p: &Json) -> Result<Json> {
 
 fn press(s: &mut Session, p: &Json) -> Result<Json> {
     const CMD: &str = "control.press";
-    let (_, _, c) = find(s, CMD, p)?;
-    if c.kind != ControlKind::Button {
-        return Err(bad(CMD, "only buttons can be pressed; use control.setValue for a slider or spin button"));
+    let (sheet, i, c) = find(s, CMD, p)?;
+    match c.kind {
+        // A click checks an unchecked or mixed box and clears a checked one.
+        ControlKind::CheckBox => return set_check(s, sheet, i, &c, if c.value == 1 { 0 } else { 1 }),
+        ControlKind::OptionButton => return set_option(s, sheet, i, &c, true),
+        ControlKind::Slider | ControlKind::Spin => {
+            return Err(bad(CMD, "only buttons can be pressed; use control.setValue for a slider or spin button"));
+        }
+        ControlKind::Button => {}
     }
     let name = c.display_name();
     match c.action {
@@ -610,18 +841,40 @@ fn approval_key(id: &str, params: &Json) -> String {
 }
 
 /// After an edit: each slider and spin button whose linked cell holds a number takes that number
-/// (clamped and snapped), so editing the cell moves the control. Sheets without such a control
-/// are left untouched.
+/// (clamped and snapped), so editing the cell moves the control. A check box whose linked cell
+/// holds TRUE, FALSE or #N/A takes that state. The option buttons of a sheet select the one whose
+/// 1-based position the group's linked cell holds (none for anything else). Sheets without a
+/// linked control are left untouched.
 pub(crate) fn sync_linked_values(wb: &mut Workbook) {
     for si in 0..wb.sheets.len() {
         let updates: Vec<(usize, u32)> = match wb.sheet(si) {
-            Some(sh) if sh.controls.iter().any(|c| c.link.is_some()) => sh
-                .controls
-                .iter()
-                .enumerate()
-                .filter(|(_, c)| c.kind.is_number())
-                .filter_map(|(i, c)| linked_number(wb, si, c).map(|n| (i, c.snap(n))).filter(|(_, v)| *v != c.value))
-                .collect(),
+            Some(sh) if sh.controls.iter().any(|c| c.link.is_some()) => {
+                let mut out: Vec<(usize, u32)> = sh
+                    .controls
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, c)| match c.kind {
+                        ControlKind::Slider | ControlKind::Spin => linked_number(wb, si, c).map(|n| (i, c.snap(n))),
+                        ControlKind::CheckBox => linked_value(wb, si, c.link.as_deref()).as_ref().and_then(check_state).map(|v| (i, v)),
+                        ControlKind::Button | ControlKind::OptionButton => None,
+                    })
+                    .filter(|(i, v)| sh.controls.get(*i).is_some_and(|c| c.value != *v))
+                    .collect();
+                if let Some(cell) = linked_value(wb, si, group_link(sh).as_deref()) {
+                    let group = option_indexes(sh);
+                    let selected = cell
+                        .as_f64()
+                        .filter(|n| n.fract() == 0.0 && *n >= 1.0 && *n <= group.len() as f64)
+                        .and_then(|n| group.get((n as usize).saturating_sub(1)).copied());
+                    for k in group {
+                        let want = u32::from(Some(k) == selected);
+                        if sh.controls.get(k).is_some_and(|c| c.value != want) {
+                            out.push((k, want));
+                        }
+                    }
+                }
+                out
+            }
             _ => continue,
         };
         if updates.is_empty() {

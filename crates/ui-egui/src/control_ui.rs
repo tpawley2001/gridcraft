@@ -31,7 +31,8 @@ fn insert_id(kind: ControlKind) -> Option<&'static str> {
         ControlKind::Button => Some("insert.button"),
         ControlKind::Slider => Some("insert.slider"),
         ControlKind::Spin => Some("insert.spinButton"),
-        ControlKind::CheckBox | ControlKind::OptionButton => None,
+        ControlKind::CheckBox => Some("insert.formCheckBox"),
+        ControlKind::OptionButton => Some("insert.optionButton"),
     }
 }
 
