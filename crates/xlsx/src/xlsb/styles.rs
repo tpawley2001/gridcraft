@@ -274,6 +274,10 @@ fn font(b: &mut Bytes<'_>, budget: &mut Budget) -> Result<Font, IoError> {
         family: Some(family).filter(|f| *f != 0 && *f != DEFAULT_FONT_FAMILY && *f <= MAX_FONT_FAMILY),
         minor: scheme == 2,
         major: scheme == 1,
+        outline: None,
+        shadow: None,
+        condense: None,
+        extend: None,
     })
 }
 

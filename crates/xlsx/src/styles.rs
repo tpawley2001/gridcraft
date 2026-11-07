@@ -60,6 +60,18 @@ fn bool_prop(e: &El, name: &str) -> bool {
     e.child(name).is_some_and(|c| c.flag("val", true))
 }
 
+/// A stated font effect (`<outline>`, `<shadow>`, `<condense>`, `<extend>`): no `val` is on,
+/// `1`/`true` on, `0`/`false` off; an absent element or an unknown value states nothing.
+fn stated_prop(e: &El, name: &str) -> Option<bool> {
+    let c = e.child(name)?;
+    match c.attr("val") {
+        None => Some(true),
+        Some("1" | "true") => Some(true),
+        Some("0" | "false") => Some(false),
+        Some(_) => None,
+    }
+}
+
 const DEFAULT_FONT_FAMILY: u8 = 2;
 const MAX_FONT_FAMILY: u8 = 14;
 
@@ -78,6 +90,10 @@ pub fn read_font(e: &El, palette: &[u32]) -> Font {
     f.bold = bool_prop(e, "b");
     f.italic = bool_prop(e, "i");
     f.strike = bool_prop(e, "strike");
+    f.condense = stated_prop(e, "condense");
+    f.extend = stated_prop(e, "extend");
+    f.outline = stated_prop(e, "outline");
+    f.shadow = stated_prop(e, "shadow");
     if let Some(u) = e.child("u") {
         f.underline = match u.attr("val").unwrap_or("single") {
             "double" => Underline::Double,
@@ -493,6 +509,18 @@ fn font_xml(f: &Font, dxf: Option<&DxfStated>, scheme: Option<&str>) -> String {
             let _ = write!(s, "<{tag} val=\"0\"/>");
         }
     }
+    // Schema order: condense, extend, outline, shadow come between strike and u.
+    for (v, tag) in [(f.condense, "condense"), (f.extend, "extend"), (f.outline, "outline"), (f.shadow, "shadow")] {
+        match v {
+            Some(true) => {
+                let _ = write!(s, "<{tag}/>");
+            }
+            Some(false) => {
+                let _ = write!(s, "<{tag} val=\"0\"/>");
+            }
+            None => {}
+        }
+    }
     match f.underline {
         Underline::None if stated.underline => s.push_str("<u val=\"none\"/>"),
         Underline::None => {}
@@ -797,6 +825,10 @@ pub fn write_styles(wb: &Workbook, dxfs: &[Style], extra_fmts: &[String]) -> (St
             || d.font.name != def.font.name
             || d.font.family.is_some()
             || d.font.charset.is_some()
+            || d.font.condense.is_some()
+            || d.font.extend.is_some()
+            || d.font.outline.is_some()
+            || d.font.shadow.is_some()
             || st.bold
             || st.italic
             || st.strike

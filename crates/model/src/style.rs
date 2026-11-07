@@ -230,6 +230,19 @@ pub struct Font {
     /// or a size keep it. Takes precedence over `minor`.
     #[serde(default)]
     pub major: bool,
+    /// Outline effect (`<outline>`); `None` when the font does not state it, `Some(false)` when
+    /// it is stated off (a differential format then clears the effect).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline: Option<bool>,
+    /// Shadow effect (`<shadow>`), stated or not like `outline`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<bool>,
+    /// Condensed spacing (`<condense>`), stated or not like `outline`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condense: Option<bool>,
+    /// Extended spacing (`<extend>`), stated or not like `outline`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extend: Option<bool>,
 }
 
 fn default_minor() -> bool {
@@ -242,6 +255,7 @@ impl Hash for Font {
         self.name.hash(h);
         self.size.to_bits().hash(h);
         (self.bold, self.italic, self.underline, self.strike, self.color, self.vert, self.charset, self.family, self.minor, self.major).hash(h);
+        (self.outline, self.shadow, self.condense, self.extend).hash(h);
     }
 }
 
@@ -260,6 +274,10 @@ impl Default for Font {
             family: None,
             minor: true,
             major: false,
+            outline: None,
+            shadow: None,
+            condense: None,
+            extend: None,
         }
     }
 }
@@ -545,6 +563,17 @@ mod tests {
         let f: Font = serde_json::from_value(json)?;
         assert!(!f.major && f.minor);
         assert_eq!(f, Font::default());
+        Ok(())
+    }
+
+    #[test]
+    fn font_effects_keep_stated_off_through_json_and_old_json_states_none() -> Result<(), serde_json::Error> {
+        let f = Font { outline: Some(true), shadow: Some(false), condense: Some(false), ..Font::default() };
+        let back: Font = serde_json::from_value(serde_json::to_value(&f)?)?;
+        assert_eq!((back.outline, back.shadow, back.condense, back.extend), (Some(true), Some(false), Some(false), None));
+        let old = serde_json::to_value(Font::default())?;
+        assert!(old.get("outline").is_none());
+        assert_eq!(serde_json::from_value::<Font>(old)?, Font::default());
         Ok(())
     }
 
