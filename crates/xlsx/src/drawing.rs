@@ -8,6 +8,7 @@
 
 use std::collections::HashSet;
 use std::fmt::Write as _;
+use std::sync::Arc;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
 use gridcraft_model::{
@@ -24,12 +25,12 @@ pub use blip_ext::write as write_blip_ext;
 mod ink;
 
 /// The chart's own theme is optional and stays opaque (ECMA-376 Part 1 §14.2.8).
-fn read_theme_override(cx: &mut Ctx<'_>, chart_part: &str) -> Result<Option<Vec<u8>>, IoError> {
+fn read_theme_override(cx: &mut Ctx<'_>, chart_part: &str) -> Result<Option<Arc<Vec<u8>>>, IoError> {
     let Some(rel) = cx.pkg.rels(chart_part)?.into_iter().find(|r| r.kind == "themeOverride" && !r.external) else {
         return Ok(None);
     };
     match cx.pkg.read_optional_limited(&rel.target, 4 * 1024 * 1024) {
-        Ok(Some(bytes)) if valid_theme_override(&bytes) => Ok(Some(bytes)),
+        Ok(Some(bytes)) if valid_theme_override(&bytes) => Ok(Some(Arc::new(bytes))),
         Ok(None) => Ok(None),
         Ok(Some(_)) => {
             cx.warn(format!("chart theme override {} was dropped: invalid XML or root element", rel.target));

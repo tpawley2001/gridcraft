@@ -861,6 +861,18 @@ mod tests {
 
     use crate::features::{ChartKind, EquationCache, LegendPos, ShapeFormat, ShapeKind};
 
+    #[test]
+    fn sheet_clones_share_chart_theme_override_bytes() {
+        let mut sheet = Sheet::new("Charts");
+        push_object(&mut sheet, ObjKind::Chart, 1, Anchor::default());
+        let bytes = Arc::new(b"<themeOverride/>".to_vec());
+        sheet.charts[0].theme_override = Some(bytes.clone());
+
+        let copy = sheet.clone();
+        let copied_bytes = copy.charts[0].theme_override.as_ref().expect("theme override");
+        assert!(Arc::ptr_eq(&bytes, copied_bytes));
+    }
+
     /// Adds a floating object of `kind` with id `id` at `anchor`. The match is exhaustive on
     /// purpose: a new kind of floating object does not compile here until this test covers it,
     /// and the counts in `object_anchor_accessors_visit_the_same_objects_in_the_same_order`

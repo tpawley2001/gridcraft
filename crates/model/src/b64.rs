@@ -65,7 +65,8 @@ pub mod shared {
     }
 }
 
-/// Base64 for optional shared byte blobs (VBA projects): `null`/missing stays `None`.
+/// Base64 for optional shared byte blobs: `null`/missing stays `None`.
+/// Also reads legacy number arrays, used by chart theme overrides in older documents.
 pub mod opt {
     use std::sync::Arc;
 
@@ -79,10 +80,17 @@ pub mod opt {
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Arc<Vec<u8>>>, D::Error> {
-        let s = Option::<String>::deserialize(d)?;
-        match s {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Bytes {
+            Base64(String),
+            Legacy(Vec<u8>),
+        }
+
+        match Option::<Bytes>::deserialize(d)? {
             None => Ok(None),
-            Some(s) => super::decode(&s).map(|v| Some(Arc::new(v))).ok_or_else(|| serde::de::Error::custom("invalid base64")),
+            Some(Bytes::Base64(s)) => super::decode(&s).map(|v| Some(Arc::new(v))).ok_or_else(|| serde::de::Error::custom("invalid base64")),
+            Some(Bytes::Legacy(bytes)) => Ok(Some(Arc::new(bytes))),
         }
     }
 }
