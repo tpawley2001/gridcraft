@@ -142,6 +142,7 @@ mod xlsb_external_link_cache_tests;
 mod xlsb_external_link_nonfinite_tests;
 mod xlsb_external_link_tests;
 mod xlsb_filter_tests;
+mod xlsb_gradient_fill_tests;
 mod xlsb_layout_tests;
 mod xlsb_links_tests;
 mod xlsb_list_tests;

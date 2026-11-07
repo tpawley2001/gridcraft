@@ -7,13 +7,13 @@ use super::make_zip;
 use super::xlsb_tests::{RELS, ROOT, TYPES, book, font, record, row, sst, wide, worksheet};
 use crate::{ReadReport, read_xlsb, read_xlsx, write_xlsx};
 
-const PLAIN: [u8; 8] = [3 << 1, 1, 0, 0, 0, 0, 0, 0];
-fn rgb(rgb: u32) -> [u8; 8] {
+pub(super) const PLAIN: [u8; 8] = [3 << 1, 1, 0, 0, 0, 0, 0, 0];
+pub(super) fn rgb(rgb: u32) -> [u8; 8] {
     let [_, r, g, b] = rgb.to_be_bytes();
     [1 | 2 << 1, 0, 0, 0, r, g, b, 255]
 }
 /// A BrtXF with the given number format, font and fill; bottom-aligned and locked as Excel writes it.
-fn xf(fmt: u16, font: u16, fill: u16) -> Vec<u8> {
+pub(super) fn xf(fmt: u16, font: u16, fill: u16) -> Vec<u8> {
     let mut d = 0u16.to_le_bytes().to_vec();
     for v in [fmt, font, fill, 0] {
         d.extend(v.to_le_bytes());
@@ -75,7 +75,7 @@ fn styles_part(style_xfs: &[Vec<u8>], styles: &[Vec<u8>]) -> Vec<u8> {
     out
 }
 /// A1 uses cell XF 1.
-fn package(styles: &[u8]) -> Vec<u8> {
+pub(super) fn package(styles: &[u8]) -> Vec<u8> {
     let rels = RELS.replace(
         "</Relationships>",
         r#"<Relationship Id="styles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="../text/styles.bin"/></Relationships>"#,
