@@ -252,7 +252,7 @@ mod workbook_protection_locks {
 }
 mod codex_day_alignment_extras;
 mod codex_day_font_effects;
+mod codex_day_note_appearance;
 mod codex_day_print_options;
 mod codex_day_table_metadata;
 mod codex_day_text_body;
-mod codex_day_note_appearance;
