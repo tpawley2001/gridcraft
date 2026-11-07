@@ -1809,11 +1809,35 @@ pub(crate) fn add_chart_sheets(wb: &mut Workbook, sheets: Vec<ChartSheet>) {
             data: Arc::from(drawing.into_bytes()),
             rels: vec![rel("chart", &chart_part)],
         });
+        let mut chart_rels = Vec::new();
+        for (id, name, content_type, data, rel_type) in [
+            ("rId1", format!("xl/charts/chartsheet_style{n}.xml"), crate::chartex::CT_STYLE, crate::chartex::style_xml(), crate::chartex::REL_STYLE),
+            (
+                "rId2",
+                format!("xl/charts/chartsheet_colors{n}.xml"),
+                crate::chartex::CT_COLORS,
+                crate::chartex::colors_xml(),
+                crate::chartex::REL_COLORS,
+            ),
+        ] {
+            chart_rels.push(PreservedRel { id: id.into(), rel_type: rel_type.into(), target: name.clone(), external: false });
+            kept.parts.push(PreservedPart { name, content_type: content_type.into(), data: Arc::from(data.into_bytes()), rels: vec![] });
+        }
+        if let Some(bytes) = &cs.chart.theme_override {
+            let name = format!("xl/theme/chartsheet_themeOverride{n}.xml");
+            chart_rels.push(PreservedRel { id: "rId3".into(), rel_type: format!("{REL}/themeOverride"), target: name.clone(), external: false });
+            kept.parts.push(PreservedPart {
+                name,
+                content_type: "application/vnd.openxmlformats-officedocument.themeOverride+xml".into(),
+                data: Arc::from(bytes.as_slice()),
+                rels: vec![],
+            });
+        }
         kept.parts.push(PreservedPart {
             name: chart_part,
             content_type: "application/vnd.openxmlformats-officedocument.drawingml.chart+xml".into(),
             data: Arc::from(chart_xml.into_bytes()),
-            rels: vec![],
+            rels: chart_rels,
         });
         let rel_id = format!("rIdXlsChartSheet{n}");
         kept.rels.push(PreservedRel { id: rel_id.clone(), rel_type: format!("{REL}/chartsheet"), target: sheet_part, external: false });
