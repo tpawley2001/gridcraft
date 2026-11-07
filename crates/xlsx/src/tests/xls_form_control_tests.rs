@@ -100,7 +100,8 @@ fn a_mixed_check_box_without_a_link_keeps_state_two_and_no_link() {
 #[test]
 fn option_buttons_open_with_their_captions_and_the_selected_one() {
     let opt = |id: u16, checked: u16, first: bool, next: u16, caption: &str, row: u16| {
-        let o = obj(&[&cmo(OT_OPTION_BUTTON, id, CONTROL_FLAGS), &cbls(), &rbo(), &link(0x14, 0, 3), &cbls_data(checked, false), &rbo_data(next, first)]);
+        let o =
+            obj(&[&cmo(OT_OPTION_BUTTON, id, CONTROL_FLAGS), &cbls(), &rbo(), &link(0x14, 0, 3), &cbls_data(checked, false), &rbo_data(next, first)]);
         cat(&[&shape(201, &[], 0, row, 2, row + 1), &o, &txo(caption)])
     };
     let records = cat(&[&opt(1, 0, true, 2, "Small", 0), &opt(2, 1, false, 1, "Large", 1)]);
