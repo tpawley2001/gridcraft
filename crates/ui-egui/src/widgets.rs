@@ -278,7 +278,7 @@ pub fn small_toggle_icon(ui: &mut Ui, icon: Icon, label: &str, tip: &str, on: bo
     icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(16.0, 16.0)), icon, color);
     let enabled = ui.is_enabled();
     let text = format!("{label}: {}", tip_text(ui, tip));
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, enabled, on, label.clone()));
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, enabled, on, label));
     resp.on_hover_text(text)
 }
 
