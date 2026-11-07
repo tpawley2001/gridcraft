@@ -12,7 +12,8 @@
 //!
 //! As in the .xlsx reader, links are kept all together or not at all (`[n]` is a position): when
 //! a part can't be read, the formulas that use any link keep their saved results. Defined names of
-//! the linked workbook (BrtSupNameStart…) and DDE or OLE links are not read.
+//! the linked workbook (BrtSupNameStart…) and DDE or OLE links are not read. A cached number that
+//! is NaN or infinite is kept as the error `#NUM!`, as SpreadsheetML has no such number.
 use std::fmt::Write as _;
 use std::sync::Arc;
 
@@ -230,7 +231,14 @@ fn part(data: &[u8], report: &mut ReadReport) -> Result<Link, IoError> {
                 tables.push('"');
                 match id {
                     368 => {
-                        let _ = write!(tables, "><v>{}</v></cell>", b.f64()?);
+                        // Read raw: `Bytes::f64` refuses non-finite numbers, which would drop the link.
+                        let v = f64::from_le_bytes(b.take(8)?.try_into().map_err(|_| invalid("truncated number"))?);
+                        if v.is_finite() {
+                            let _ = write!(tables, "><v>{v}</v></cell>");
+                        } else {
+                            // NaN and infinity have no SpreadsheetML number form.
+                            let _ = write!(tables, " t=\"e\"><v>{}</v></cell>", CellError::Num.as_str());
+                        }
                     }
                     369 => {
                         let _ = write!(tables, " t=\"b\"><v>{}</v></cell>", u8::from(b.u8()? != 0));

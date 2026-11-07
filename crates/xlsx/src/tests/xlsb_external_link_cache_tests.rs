@@ -47,7 +47,7 @@ fn book(links: u32) -> Vec<u8> {
 }
 
 /// A link part for one sheet named `sheet`, its cached row 2 holding `cells`.
-fn link_part(sheet: &str, cells: &[u8]) -> Vec<u8> {
+pub(super) fn link_part(sheet: &str, cells: &[u8]) -> Vec<u8> {
     let mut begin = 0u16.to_le_bytes().to_vec();
     begin.extend(wide("rId1"));
     begin.extend(u32::MAX.to_le_bytes());
@@ -129,7 +129,7 @@ fn sheet(links: u16) -> Vec<u8> {
 }
 
 /// A package with one link part per entry of `parts`.
-fn file(parts: &[Vec<u8>]) -> Vec<u8> {
+pub(super) fn file(parts: &[Vec<u8>]) -> Vec<u8> {
     let n = parts.len();
     let mut rels = String::from(
         r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="one" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.bin"/><Relationship Id="strings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.bin"/>"#,
@@ -173,7 +173,7 @@ fn formula(wb: &gridcraft_model::Workbook, a1: &str) -> Option<String> {
     wb.sheets[0].cell(at(a1)).and_then(|c| c.formula.as_ref()).map(|f| f.text.clone())
 }
 
-fn saved_part(bytes: &[u8], name: &str) -> String {
+pub(super) fn saved_part(bytes: &[u8], name: &str) -> String {
     let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
     let mut s = String::new();
     std::io::Read::read_to_string(&mut z.by_name(name).unwrap(), &mut s).unwrap();
