@@ -36,9 +36,9 @@ fn xor_key(pw: &[u8]) -> u16 {
     let mut key = INITIAL_CODE[pw.len() - 1];
     for (i, &ch) in pw.iter().enumerate() {
         let row = 15 - pw.len() + i;
-        for bit in 0..7 {
+        for (bit, m) in MATRIX[row].iter().enumerate() {
             if ch & (1 << bit) != 0 {
-                key ^= MATRIX[row][bit];
+                key ^= m;
             }
         }
     }

@@ -417,11 +417,9 @@ pub(crate) fn md5(data: &[u8]) -> [u8; 16] {
         msg.push(0);
     }
     msg.extend_from_slice(&bit_len.to_le_bytes());
-    for chunk in msg.chunks_exact(64) {
-        let x: [u32; 16] = std::array::from_fn(|k| {
-            let w = chunk.get(k * 4..k * 4 + 4).unwrap_or(&[0; 4]);
-            u32::from_le_bytes([w[0], w[1], w[2], w[3]])
-        });
+    for chunk in msg.as_chunks::<64>().0 {
+        let words = chunk.as_chunks::<4>().0;
+        let x: [u32; 16] = std::array::from_fn(|k| words.get(k).map_or(0, |w| u32::from_le_bytes(*w)));
         let [mut a, mut b, mut c, mut d] = state;
         for i in 0..64 {
             let (f, g) = match i / 16 {
@@ -439,8 +437,8 @@ pub(crate) fn md5(data: &[u8]) -> [u8; 16] {
         state = [state[0].wrapping_add(a), state[1].wrapping_add(b), state[2].wrapping_add(c), state[3].wrapping_add(d)];
     }
     let mut out = [0u8; 16];
-    for (o, w) in out.chunks_exact_mut(4).zip(state) {
-        o.copy_from_slice(&w.to_le_bytes());
+    for (o, w) in out.as_chunks_mut::<4>().0.iter_mut().zip(state) {
+        *o = w.to_le_bytes();
     }
     out
 }
