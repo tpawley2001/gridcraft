@@ -178,6 +178,16 @@ impl Biff5 {
         crate::csv::decode_codepage(bytes, self.codepage)
     }
 
+    /// What an EXTERNSHEET entry's encoded target (after its 1-byte count) points at.
+    pub fn extern_kind(&self, raw: &[u8]) -> ExternKind {
+        match raw.split_first() {
+            Some((0x03, name)) => ExternKind::Sheet(self.text(name)),
+            Some((0x02 | 0x04, _)) => ExternKind::OwnBook,
+            Some((b':', [])) => ExternKind::AddIn,
+            _ => ExternKind::Other,
+        }
+    }
+
     fn entry(&self, ixals: i16) -> Option<&Extern> {
         usize::from(ixals.unsigned_abs()).checked_sub(1).and_then(|i| self.externs.get(i))
     }
