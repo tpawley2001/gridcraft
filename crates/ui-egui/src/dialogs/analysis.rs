@@ -494,7 +494,7 @@ pub(super) fn solver(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, conf
             .selected_text(op.clone())
             .width(60.0)
             .show_ui(ui, |ui| {
-                for o in ["<=", "=", ">=", "int", "bin"] {
+                for o in ["<=", "=", ">=", "int", "bin", "dif"] {
                     if ui.selectable_label(op == o, o).clicked() {
                         d.values.insert("newOp".into(), json!(o));
                     }
@@ -502,13 +502,13 @@ pub(super) fn solver(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, conf
             })
             .response
             .accessible_name(lang.tr("Constraint Operator"));
-        if !matches!(op.as_str(), "int" | "bin") {
+        if !matches!(op.as_str(), "int" | "bin" | "dif") {
             ref_edit(app, ui, d, "newRhs", RefLabel::Named("Constraint Value"), 130.0);
         }
         if ui.button("Add").clicked() {
             let lhs = text(d, "newLhs");
             if !lhs.trim().is_empty() {
-                let rhs = if matches!(op.as_str(), "int" | "bin") { String::new() } else { format!(" {}", text(d, "newRhs").trim()) };
+                let rhs = if matches!(op.as_str(), "int" | "bin" | "dif") { String::new() } else { format!(" {}", text(d, "newRhs").trim()) };
                 let mut list = list.clone();
                 list.push(format!("{} {op}{rhs}", lhs.trim()));
                 d.values.insert("constraints".into(), json!(list));

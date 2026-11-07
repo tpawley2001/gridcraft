@@ -247,6 +247,7 @@ pub(super) fn branch_and_bound(
     lo: &[f64],
     hi: &[f64],
     integer: &[bool],
+    different: &[Vec<usize>],
     max_nodes: usize,
     gap: f64,
     relax: &mut dyn FnMut(&[f64], &[f64]) -> Outcome,
@@ -293,7 +294,37 @@ pub(super) fn branch_and_bound(
         match frac {
             None => {
                 let snapped: Vec<f64> = x.iter().zip(integer).map(|(v, int)| if *int { v.round() } else { *v }).collect();
-                best = Some((snapped, obj));
+                let duplicate = different.iter().find_map(|group| {
+                    group.iter().enumerate().find_map(|(k, i)| {
+                        let v = snapped.get(*i)?;
+                        group.iter().skip(k + 1).find(|j| snapped.get(**j) == Some(v)).map(|j| (*i, *j, *v))
+                    })
+                });
+                if let Some((i, j, v)) = duplicate {
+                    // Exclude only (xi = v AND xj = v). Excluding v from just one cell
+                    // would discard feasible permutations and could claim a false optimum.
+                    for (cell, lower) in [(i, false), (i, true), (j, false), (j, true)] {
+                        let (mut child_l, mut child_h) = (l.clone(), h.clone());
+                        if cell == j
+                            && let (Some(a), Some(b)) = (child_l.get_mut(i), child_h.get_mut(i))
+                        {
+                            *a = a.max(v);
+                            *b = b.min(v);
+                        }
+                        if lower {
+                            if let Some(a) = child_l.get_mut(cell) {
+                                *a = a.max(v + 1.0);
+                            }
+                        } else if let Some(b) = child_h.get_mut(cell) {
+                            *b = b.min(v - 1.0);
+                        }
+                        if child_l.iter().zip(&child_h).all(|(a, b)| a <= b) {
+                            stack.push((child_l, child_h));
+                        }
+                    }
+                } else {
+                    best = Some((snapped, obj));
+                }
             }
             Some((j, _)) => {
                 let v = x.get(j).copied().unwrap_or(0.0);

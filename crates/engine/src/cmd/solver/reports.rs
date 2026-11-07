@@ -105,6 +105,15 @@ pub(super) fn title(out: &mut Lines, kind: ReportKind, sheet: &str) -> u32 {
 fn format_constraint_row(sh: &Sheet, c: &Constraint, cell: CellRef, v: f64, rhs: &[f64], k: usize) -> Vec<Value> {
     let (formula, status, slack) = match (c.rel, &c.rhs) {
         (Rel::Int, _) => (format!("{}=Integer", abs_ref(cell)), "Binding", 0.0),
+        (Rel::Dif, _) => {
+            let range = c
+                .lhs
+                .first()
+                .zip(c.lhs.last())
+                .map(|(a, b)| if a == b { abs_ref(*a) } else { format!("{}:{}", abs_ref(*a), abs_ref(*b)) })
+                .unwrap_or_default();
+            (format!("{range}=AllDifferent"), "Binding", 0.0)
+        }
         (Rel::Bin, _) => (format!("{}=Binary", abs_ref(cell)), "Binding", 0.0),
         (rel, rhs_cells) => {
             let b = rhs.get(k).or_else(|| rhs.first()).copied().unwrap_or(f64::NAN);
