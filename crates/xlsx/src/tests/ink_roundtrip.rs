@@ -60,6 +60,7 @@ fn exported_ink_has_a_visible_unfilled_path_and_correct_stroke() {
             name: None,
             id,
             kind: ShapeKind::Ink,
+            geometry: None,
             anchor: Anchor { width: 100.0, height: 50.0, mode: AnchorMode::Absolute, ..Default::default() },
             fill: Color::Rgb(width << 16),
             line: Color::Rgb(0xA12BCD),

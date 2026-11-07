@@ -920,6 +920,7 @@ mod tests {
                 name: None,
                 id,
                 kind: if kind == ObjKind::Equation { ShapeKind::Equation } else { ShapeKind::default() },
+                geometry: None,
                 anchor,
                 fill: Color::default(),
                 line: Color::default(),

@@ -185,6 +185,7 @@ pub(super) fn read(obj: &El, anchor: Anchor) -> Option<Shape> {
         name: None,
         id: 0,
         kind: ShapeKind::Ink,
+        geometry: None,
         anchor,
         fill: Color::Rgb((width as u32) << 16),
         line,

@@ -43,6 +43,7 @@ fn text_box(text: &str, format: ShapeFormat) -> Workbook {
         name: None,
         id: 1,
         kind: ShapeKind::TextBox,
+        geometry: None,
         anchor: Anchor { width: 120.0, height: 40.0, ..Default::default() },
         fill: Color::Auto,
         line: Color::Auto,

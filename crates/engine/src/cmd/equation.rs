@@ -92,6 +92,7 @@ fn insert_equation(s: &mut Session, p: &Json) -> Result<Json> {
         name: None,
         id,
         kind: ShapeKind::Equation,
+        geometry: None,
         anchor: Anchor { cell: at, dx: 0.0, dy: 0.0, width, height, mode: AnchorMode::MoveOnly },
         fill: Color::Auto,
         line: color,

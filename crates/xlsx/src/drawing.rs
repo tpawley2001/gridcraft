@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
 use gridcraft_model::{
-    Anchor, AnchorMode, Color, DrawingHyperlink, Image, Shape, ShapeFormat, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextVert, ShapeTextWrap,
-    Sheet, Theme,
+    Anchor, AnchorMode, Color, DrawingHyperlink, Image, Shape, ShapeFormat, ShapeGeometry, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextVert,
+    ShapeTextWrap, Sheet, Theme,
 };
 
 use crate::IoError;
@@ -353,6 +353,26 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
     Ok(())
 }
 
+/// A shape's `a:prstGeom`: the preset it was read with and its adjust guides when it kept them,
+/// else the kind's own preset without guides.
+fn write_preset_geometry(s: &mut String, prst: &str, geometry: Option<&ShapeGeometry>) {
+    let Some(g) = geometry.filter(|g| !g.preset.is_empty()) else {
+        let _ = write!(s, "<a:prstGeom prst=\"{prst}\"><a:avLst/></a:prstGeom>");
+        return;
+    };
+    let _ = write!(s, "<a:prstGeom prst=\"{}\">", esc_attr(&g.preset));
+    if g.adjust.is_empty() {
+        s.push_str("<a:avLst/>");
+    } else {
+        s.push_str("<a:avLst>");
+        for (name, fmla) in &g.adjust {
+            let _ = write!(s, "<a:gd name=\"{}\" fmla=\"{}\"/>", esc_attr(name), esc_attr(fmla));
+        }
+        s.push_str("</a:avLst>");
+    }
+    s.push_str("</a:prstGeom>");
+}
+
 fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
     let sp = obj.child("spPr")?;
     if let Some(shape) = ink::read(obj, anchor) {
@@ -372,6 +392,22 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
         "rightArrow" => ShapeKind::Arrow,
         _ => ShapeKind::Rectangle,
     };
+    // A preset the kind doesn't name (a star, a callout, a flowchart box), or one with adjust
+    // values, is kept as read so Save writes it back unchanged.
+    let geometry = sp.child("prstGeom").and_then(|g| {
+        let adjust: Vec<(String, String)> = g
+            .child("avLst")
+            .map(|av| {
+                av.children
+                    .iter()
+                    .filter(|gd| gd.name == "gd")
+                    .map(|gd| (gd.attr("name").unwrap_or("").to_string(), gd.attr("fmla").unwrap_or("").to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let known = matches!(prst, "rect" | "roundRect" | "ellipse" | "triangle" | "line" | "straightConnector1" | "rightArrow");
+        (!known || !adjust.is_empty()).then(|| ShapeGeometry { preset: prst.to_string(), adjust })
+    });
     // An equation: GridCraft's own source while the marker in the description still matches the
     // body (another application that edits the Office Math, or the text of a box without Office
     // Math, leaves the description alone, as Excel does), else the Office Math converted back to
@@ -396,6 +432,7 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
             name: None,
             id: 0,
             kind: ShapeKind::Equation,
+            geometry: None,
             anchor,
             fill: Color::Auto,
             line: ink,
@@ -410,7 +447,7 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
     let mut format = read_text_format(obj.child("txBody"));
     format.no_line = ln.is_some_and(|l| l.child("noFill").is_some());
     format.no_fill = sp.child("noFill").is_some();
-    Some(Shape { hidden: false, hyperlink: None, name: None, id: 0, kind, anchor, fill, line, text, format, math: Default::default() })
+    Some(Shape { hidden: false, hyperlink: None, name: None, id: 0, kind, geometry, anchor, fill, line, text, format, math: Default::default() })
 }
 
 /// A shape's text formatting: vertical anchor (`a:bodyPr anchor`), the first paragraph's
@@ -770,10 +807,11 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                 };
                 let _ = write!(
                     s,
-                    "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"{name}\"{hidden}>{link}</xdr:cNvPr><xdr:cNvSpPr{}/></xdr:nvSpPr><xdr:spPr>{}<a:prstGeom prst=\"{prst}\"><a:avLst/></a:prstGeom>",
+                    "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"{name}\"{hidden}>{link}</xdr:cNvPr><xdr:cNvSpPr{}/></xdr:nvSpPr><xdr:spPr>{}",
                     if tx { " txBox=\"1\"" } else { "" },
                     xfrm(&sh.anchor, "a:xfrm")
                 );
+                write_preset_geometry(&mut s, prst, sh.geometry.as_ref());
                 if sh.format.no_fill {
                     s.push_str("<a:noFill/>");
                 } else if let Some(c) = srgb(&sh.fill, theme) {

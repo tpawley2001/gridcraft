@@ -1220,6 +1220,7 @@ fn insert_shape(s: &mut Session, p: &Json) -> Result<Json> {
         math: Default::default(),
         id,
         kind,
+        geometry: None,
         anchor: Anchor {
             cell: at,
             dx: 0.0,
@@ -1867,6 +1868,7 @@ fn insert_icon(s: &mut Session, p: &Json) -> Result<Json> {
         math: Default::default(),
         id,
         kind: ShapeKind::Icon,
+        geometry: None,
         anchor: Anchor { cell: at, dx: 4.0, dy: 4.0, width: size, height: size, mode: anchor_mode_param(p).unwrap_or_default() },
         fill: color,
         line: Color::Auto,
