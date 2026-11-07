@@ -1,8 +1,8 @@
 //! [MS-XLSB] styles part (2.1.7.50): number formats, fonts, fills, borders and the cell XFs that
 //! combine them with alignment and protection, plus the named cell styles (BrtStyle) and the cell
 //! style XFs (BrtBeginCellStyleXFs) they point at. Cell style XFs are a separate list and never
-//! contribute to cell style indices; ixfeParent inheritance, dxfs and gradient fills are not
-//! imported.
+//! contribute to cell style indices; ixfeParent inheritance and dxfs are not imported. Gradient
+//! fills open as a solid fill in their first stop's colour, as in the XLSX reader.
 
 use std::collections::HashMap;
 
@@ -281,13 +281,16 @@ fn font(b: &mut Bytes<'_>, budget: &mut Budget) -> Result<Font, IoError> {
     })
 }
 
-/// BrtFill (2.4.681); the gradient fields after the two colours are not imported.
+/// BrtFill (2.4.681). A gradient fill opens as a solid fill in its first stop's colour (the stop
+/// with the lowest position), as the XLSX reader does; a gradient with no stops or a truncated
+/// stop list opens as no fill rather than failing the workbook.
 fn fill(b: &mut Bytes<'_>) -> Result<Fill, IoError> {
     let fls = b.u32()?;
     let fg = color(b)?;
     let bg = color(b)?;
     let pattern = match fls {
         1 => return Ok(Fill::solid(fg)),
+        0x28 => return Ok(gradient_first_stop(b).map_or_else(Fill::default, Fill::solid)),
         2 => PatternType::Gray50,
         3 => PatternType::Gray75,
         4 => PatternType::Gray25,
@@ -308,6 +311,28 @@ fn fill(b: &mut Bytes<'_>) -> Result<Fill, IoError> {
         _ => return Ok(Fill::default()),
     };
     Ok(Fill { pattern, fg, bg })
+}
+
+/// The colour of the lowest-positioned GradientStop (2.5.68) of a gradient BrtFill, read after its
+/// two colours; the first stop wins ties and NaN positions sort last. `None` when there are no
+/// stops or the record ends before all `cNumStop` of them.
+fn gradient_first_stop(b: &mut Bytes<'_>) -> Option<Color> {
+    // iGradientType, then xnumDegree and the four xnumFillTo* doubles.
+    b.take(4 + 5 * 8).ok()?;
+    let count = b.u32().ok()?;
+    let mut best: Option<(f64, Color)> = None;
+    for _ in 0..count {
+        let stop = color(b).ok()?;
+        let position = f64::from_le_bytes(b.take(8).ok()?.try_into().ok()?);
+        let lower = match best {
+            None => true,
+            Some((p, _)) => p.is_nan() && !position.is_nan() || position < p,
+        };
+        if lower {
+            best = Some((position, stop));
+        }
+    }
+    best.map(|(_, c)| c)
 }
 
 /// Blxf (2.5.5).
@@ -360,5 +385,21 @@ mod tests {
         gradient.extend([0; 16]);
         assert_eq!(fill(&mut Bytes::new(&gradient)).unwrap(), Fill::default());
         assert!(border(&mut Bytes::new(&[3; 50])).is_err());
+    }
+
+    #[test]
+    fn gradient_stops_with_nan_positions_sort_last() {
+        let stop = |rgb: [u8; 3], position: f64| {
+            let mut out = vec![2 << 1, 0, 0, 0, rgb[0], rgb[1], rgb[2], 0xFF];
+            out.extend(position.to_le_bytes());
+            out
+        };
+        let mut record = 0x28u32.to_le_bytes().to_vec();
+        record.extend([0; 16 + 4 + 40]);
+        record.extend(3u32.to_le_bytes());
+        record.extend(stop([0x11, 0x11, 0x11], f64::NAN));
+        record.extend(stop([0x22, 0x22, 0x22], 0.5));
+        record.extend(stop([0x33, 0x33, 0x33], 0.5));
+        assert_eq!(fill(&mut Bytes::new(&record)).unwrap(), Fill::solid(Color::Rgb(0x222222)));
     }
 }

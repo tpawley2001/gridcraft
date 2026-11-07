@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-07 · **Change:** minor (§7: password-protected `.xls` files ask for their password and open; `.xls` text boxes keep their fill, outline and font; doc cleanup: merged duplicated rows and sentences)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-07 · **Change:** minor (§19: `.xlsb` gradient fills open as their first stop's colour, as in `.xlsx`)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -216,8 +216,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   PivotTables; print setup; pictures, shapes, text boxes and charts from each sheet's drawing part; sheet and workbook structure protection, Allow Edit Ranges (legacy and
   iterated passwords), and calculation settings; data connections and sheet query tables are kept on save as .xlsx,
   including cell-bound query parameters (no OLAP or data-model connections). Windows range permissions warn once per workbook. Left:
-  links to other workbooks (kept as saved results), gradient fills, cell style (ixfeParent)
-  inheritance, date/colour/icon filters; no XLSB write.
+  links to other workbooks (kept as saved results), cell style (ixfeParent) inheritance (gradient
+  fills open as their first stop's colour, as in .xlsx), date/colour/icon filters; no XLSB write.
 - ODS values only, no write; valued rows repeated past the worksheet height read once with one warning per file; SYLK reads and writes active-sheet values, R1C1 formulas, number formats and column widths (other formatting and objects omitted); DIF reads typed values and saves active-sheet values; no `.prn`, XML Spreadsheet 2003; CSV writes raw
   instead of displayed values; templates saved with the workbook content type.
   **Estimate:** 14–22 h.
@@ -251,6 +251,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-07 | minor | §19: `.xlsb` gradient fills open as their first stop's colour, as in `.xlsx`, instead of no fill |
 | 2026-11-07 | minor | XLSX `rightArrow` block arrows survive Save as preset geometry instead of line arrows; block-arrow rendering remains unsupported. |
 | 2026-11-07 | minor | §7: password-protected `.xls` (BIFF8 and BIFF5; XOR, RC4, RC4 CryptoAPI) asks for its password and opens, as in Excel. |
 | 2026-11-07 | minor | BIFF8 `.xls` text boxes keep their fill, outline and font; text boxes and drawn shapes use the first TxO run’s FONT record, including palette text colour. |
