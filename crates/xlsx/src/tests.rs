@@ -86,6 +86,7 @@ mod xls_connections_tests;
 mod xls_custom_views_tests;
 mod xls_date_filter_tests;
 mod xls_edit_ranges_tests;
+mod xls_group_shapes_tests;
 mod xls_invalid_names_tests;
 mod xls_label_tail_tests;
 mod xls_macro_sheet_tests;
