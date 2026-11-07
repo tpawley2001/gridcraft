@@ -381,6 +381,9 @@ impl KeptReader {
                 Err(why) => cx.warn(format!("links to external workbooks were dropped: {why}")),
             }
         }
+        // Parts other applications link with their own relationship types (Google Sheets' workbook
+        // metadata): kept byte for byte, as Excel keeps them. Unknown OOXML and Microsoft types are not.
+        self.third_party(cx, &mut p, &wb_rels, &mut seen);
         // Excel trusts the saved cell values only when both are present; without them it
         // recalculates everything on open, and links into closed workbooks come back as errors.
         // Custom Views (View > Custom Views); each sheet keeps its part of them.
@@ -413,6 +416,19 @@ impl KeptReader {
             p.elements.push(PreservedXml { slot: "ext".into(), xml: x });
         }
         (!p.is_empty()).then(|| Arc::new(p))
+    }
+
+    /// The workbook relationships of third-party types (see [`is_third_party`]) not kept yet, with
+    /// their parts.
+    fn third_party(&mut self, cx: &mut Ctx<'_>, p: &mut Preserved, wb_rels: &[PreservedRel], seen: &mut HashSet<String>) {
+        for r in wb_rels.iter().filter(|r| is_third_party(&r.rel_type)) {
+            if p.rels.iter().any(|x| x.id == r.id) {
+                continue;
+            }
+            if let Err(why) = self.keep(cx, p, std::slice::from_ref(r), seen) {
+                cx.warn(format!("{} part {} was dropped: {why}", kind(&r.rel_type), r.target));
+            }
+        }
     }
 
     /// Notes whether the workbook part `wb_xml` lists Custom Views, before its sheets are read.

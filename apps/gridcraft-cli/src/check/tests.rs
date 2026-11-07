@@ -292,7 +292,7 @@ fn package_validation_finds_what_excel_would_repair() {
 
 const WB_RELS: &str = "xl/_rels/workbook.xml.rels";
 const SHEET_RELS: &str = "xl/worksheets/_rels/sheet1.xml.rels";
-const MADE_UP: &str = r#"<Relationship Id="rId90" Type="http://example.com/relationships/madeUp" Target="madeUp.xml"/>"#;
+const MADE_UP: &str = r#"<Relationship Id="rId90" Type="http://schemas.microsoft.com/office/2099/relationships/madeUp" Target="madeUp.xml"/>"#;
 /// Not empty: an empty part isn't a loss.
 const MADE_UP_PART: (&str, &str) = ("xl/madeUp.xml", "<madeUp><item/></madeUp>");
 
