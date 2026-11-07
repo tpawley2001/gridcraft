@@ -294,7 +294,15 @@ fn read_workbook_properties(cx: &mut Ctx<'_>, wb: &mut Workbook, xml: &El) {
     }
     if let Some(p) = xml.child("workbookProtection") {
         wb.protected_structure = p.flag("lockStructure", false);
-        wb.structure_password = if wb.protected_structure { crate::sheet_read::read_password(p, "workbook") } else { None };
+        let workbook_password = crate::sheet_read::read_password(p, "workbook");
+        wb.locks = gridcraft_model::WorkbookLocks {
+            lock_structure: p.attr_bool("lockStructure").filter(|on| !on),
+            lock_windows: p.attr_bool("lockWindows"),
+            lock_revision: p.attr_bool("lockRevision"),
+            workbook_password: if wb.protected_structure { None } else { workbook_password.clone() },
+            revisions_password: crate::sheet_read::read_password(p, "revisions"),
+        };
+        wb.structure_password = if wb.protected_structure { workbook_password } else { None };
     }
 }
 

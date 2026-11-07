@@ -455,10 +455,7 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
     let file_version = crate::passthrough::workbook_elements(wb, "fileVersion");
     w.push_str(if file_version.is_empty() { "<fileVersion appName=\"gridcraft\"/>" } else { &file_version });
     w.push_str(&workbook_pr(wb));
-    if wb.protected_structure {
-        let pw = wb.structure_password.as_ref().map(|h| crate::sheet_write::password_attrs(h, "workbook")).unwrap_or_default();
-        let _ = write!(w, "<workbookProtection{pw} lockStructure=\"1\"/>");
-    }
+    w.push_str(&workbook_protection(wb));
     let _ = write!(w, "<bookViews><workbookView activeTab=\"{}\"", kept.file_index(active));
     w.push_str(&workbook_view_attrs(wb));
     let _ = write!(w, "/></bookViews><sheets>{sheets_xml}</sheets>");
@@ -752,6 +749,32 @@ fn write_defined_names(wb: &Workbook, kept: &crate::passthrough::WorkbookKept, c
 
 /// Cell metadata declaring dynamic-array formulas (MS-XLSX `XLDAPR`).
 const METADATA: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<metadata xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:xda=\"http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray\"><metadataTypes count=\"1\"><metadataType name=\"XLDAPR\" minSupportedVersion=\"120000\" copy=\"1\" pasteAll=\"1\" pasteValues=\"1\" merge=\"1\" splitFirst=\"1\" rowColShift=\"1\" clearFormats=\"1\" clearComments=\"1\" assign=\"1\" coerce=\"1\" cellMeta=\"1\"/></metadataTypes><futureMetadata name=\"XLDAPR\" count=\"1\"><bk><extLst><ext uri=\"{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}\"><xda:dynamicArrayProperties fDynamic=\"1\" fCollapsed=\"0\"/></ext></extLst></bk></futureMetadata><cellMetadata count=\"1\"><bk><rc t=\"1\" v=\"0\"/></bk></cellMetadata></metadata>";
+
+/// `<workbookProtection>` (ECMA-376 Part 1 §18.2.29): the structure lock from
+/// [`Workbook::protected_structure`], plus the window and revision locks and passwords kept from
+/// the file. Empty when there is nothing to write.
+fn workbook_protection(wb: &Workbook) -> String {
+    let locks = &wb.locks;
+    if !wb.protected_structure && locks.is_default() {
+        return String::new();
+    }
+    let workbook_password = if wb.protected_structure { wb.structure_password.as_ref() } else { locks.workbook_password.as_ref() };
+    let mut w = String::from("<workbookProtection");
+    if let Some(h) = workbook_password {
+        w.push_str(&crate::sheet_write::password_attrs(h, "workbook"));
+    }
+    if let Some(h) = &locks.revisions_password {
+        w.push_str(&crate::sheet_write::password_attrs(h, "revisions"));
+    }
+    let lock_structure = if wb.protected_structure { Some(true) } else { locks.lock_structure.filter(|on| !on) };
+    for (name, on) in [("lockStructure", lock_structure), ("lockWindows", locks.lock_windows), ("lockRevision", locks.lock_revision)] {
+        if let Some(on) = on {
+            let _ = write!(w, " {name}=\"{}\"", u8::from(on));
+        }
+    }
+    w.push_str("/>");
+    w
+}
 
 #[cfg(test)]
 mod table_id_tests {
