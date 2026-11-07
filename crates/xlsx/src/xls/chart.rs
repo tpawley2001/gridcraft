@@ -431,9 +431,14 @@ impl Embedded {
 
     /// An Obj record: a chart, picture, text box, button or drawn shape takes the shape's anchor;
     /// other form controls and objects are reported. An object the application created itself
-    /// (fUIObj: an AutoFilter or validation drop-down arrow) is skipped silently.
-    pub(super) fn obj(&mut self, rec: &Record<'_>, report: &mut ReadReport) {
+    /// (fUIObj: an AutoFilter or validation drop-down arrow) is skipped silently. A BIFF5
+    /// workbook's Obj records carry their own anchor and text (`biff5` is its code page).
+    pub(super) fn obj(&mut self, rec: &Record<'_>, biff5: Option<&Biff5>, report: &mut ReadReport) {
         self.flush_shape();
+        if let Some(b5) = biff5 {
+            self.obj_biff5(&rec.parts.concat(), b5, report);
+            return;
+        }
         let head = rec.parts.first().copied().unwrap_or_default();
         let ot = u16_at(head, 4);
         // FtCmo: ft, cb, ot, id, then the flags.
@@ -479,6 +484,37 @@ impl Embedded {
                 }
             }
             None => report.warn("Shapes in .xls files are not imported yet."),
+        }
+    }
+
+    /// A BIFF5 Obj record: its fixed 34-byte header carries the object type and the anchor, and a
+    /// text box's text follows its own fields. Text boxes and rectangles are imported; every other
+    /// kind keeps the report the BIFF8 path gives an object without a drawing shape.
+    fn obj_biff5(&mut self, data: &[u8], b5: &Biff5, report: &mut ReadReport) {
+        let Some(ot) = u16_at(data, 4) else {
+            report.warn("Shapes in .xls files are not imported yet.");
+            return;
+        };
+        match ot {
+            OT_TEXT_BOX => {
+                let Some(anchor) = biff5_anchor(data) else {
+                    report.warn("Shapes in .xls files are not imported yet.");
+                    return;
+                };
+                let Some(text) = biff5_text(data, b5, report) else { return };
+                self.text_boxes.push((Place::Cells(anchor), ShapeProps::default(), Text { text, ..Text::default() }));
+            }
+            OT_RECTANGLE => {
+                let Some(anchor) = biff5_anchor(data) else {
+                    report.warn("Shapes in .xls files are not imported yet.");
+                    return;
+                };
+                self.shapes.push((Place::Cells(anchor), ShapeProps::default(), ShapeKind::Rectangle, None));
+            }
+            // A chart's substream follows its Obj; a picture, note or group imports nothing.
+            OT_CHART | OT_PICTURE | OT_NOTE | OT_GROUP => {}
+            ot if OT_FORM_CONTROLS.contains(&ot) => report.warn("Form controls in .xls files are not imported yet."),
+            _ => report.warn("Shapes in .xls files are not imported yet."),
         }
     }
 
@@ -610,6 +646,30 @@ impl Embedded {
             });
         }
     }
+}
+
+/// A BIFF5 Obj's anchor: the same fields, in the same units, as an OfficeArtClientAnchorSheet
+/// ([MS-XLS] 2.5.193), at offsets 10..26 of the record. `None` when the record is shorter than
+/// its fixed header.
+fn biff5_anchor(data: &[u8]) -> Option<ClientAnchor> {
+    let f = |i: usize| u16_at(data, 10 + 2 * i);
+    Some(ClientAnchor { col_l: f(0)?, dx_l: f(1)?, row_t: f(2)?, dy_t: f(3)?, col_r: f(4)?, dx_r: f(5)?, row_b: f(6)?, dy_b: f(7)? })
+}
+
+/// A BIFF5 text box Obj's text: `cchText` 8-bit characters in the workbook's code page at
+/// `70 + cbMacro`, cut at the record end. `None` when the record is too short to hold the text
+/// fields (the object is skipped).
+fn biff5_text(data: &[u8], b5: &Biff5, report: &mut ReadReport) -> Option<String> {
+    let cch = usize::from(u16_at(data, 44)?);
+    let cb_macro = usize::from(u16_at(data, 26)?);
+    let start = 70usize.checked_add(cb_macro)?;
+    let end = start.checked_add(cch)?;
+    let bytes = data.get(start..end);
+    if bytes.is_none() {
+        report.warn("A text box cut off by the end of its record kept the text that was read.");
+    }
+    let bytes = data.get(start..end.min(data.len())).unwrap_or_default();
+    Some(b5.text(bytes))
 }
 
 /// A drawn object's anchor in sheet units: a grouped shape is anchored to the cell under its
