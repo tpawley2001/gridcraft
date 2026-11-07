@@ -86,6 +86,7 @@ mod xls_cell_address_names_tests;
 mod xls_cf12_tests;
 mod xls_chart_pie_angle_tests;
 mod xls_chart_tests;
+mod xls_codepages_tests;
 mod xls_connections_tests;
 mod xls_custom_views_tests;
 mod xls_date_filter_tests;
