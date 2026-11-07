@@ -1393,11 +1393,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x000C => st.calc.set_max_iterations(u32::from(c.u16()?)),
         0x0011 => st.calc.iterative = c.u16()? == 1,
         0x0010 => st.calc.set_max_change(c.f64()?),
-        0x0236 if st.g.biff5.is_some() => report.warn("What-if data tables are not supported; their values were kept."),
-        0x0236 => {
-            st.data_table_record = true;
-            data_table(&rec.parts, st, report);
-        }
+        0x0236 => data_table(&rec.parts, st, report),
         0x00E5 => {
             let n = usize::from(c.u16()?);
             for _ in 0..n.min(c.remaining() / 8) {
@@ -1604,10 +1600,15 @@ fn formula_cell(c: &mut Cursor<'_, '_>, st: &mut SheetState<'_>, budget: &mut Bu
 /// The most What-If data tables kept on one sheet.
 const MAX_DATA_TABLES: usize = 65_536;
 
-/// A BIFF8 TABLE record ([MS-XLS] 2.4.319): one What-If data table, mapped to the model as the
+/// A BIFF8 TABLE record ([MS-XLS] 2.4.319; BIFF5 tables keep only their values): one What-If data table, mapped to the model as the
 /// `.xlsx` `<f t="dataTable">` attributes are. A malformed record is skipped with a warning; a
 /// second table with the same result range is skipped.
 fn data_table(parts: &[&[u8]], st: &mut SheetState<'_>, report: &mut ReadReport) {
+    if st.g.biff5.is_some() {
+        report.warn("What-if data tables are not supported; their values were kept.");
+        return;
+    }
+    st.data_table_record = true;
     match parse_data_table(parts) {
         Some(t) => {
             if st.data_table_ranges.len() < MAX_DATA_TABLES && st.data_table_ranges.insert(t.range) {
