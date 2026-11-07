@@ -48,6 +48,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   Office add-ins (web extensions: the content add-in's drawing anchor, its `webextension` part and
   its fallback picture, and the workbook's task panes part); never checked in Excel (repair
   prompts unknown).
+- XLSX right block arrows keep their preset, adjust guides, fill, outline and text through Save; they render as rectangles.
 - Workbook image, link-update, display and compatibility options now survive XLSX saves, including explicit false/default values and the saved theme version (G0108). Links are not refreshed.
 - **Evidence:** `crates/xlsx/src/passthrough.rs` (what is kept, and why the rest isn't).
 - **Impact:** open-edit-save still simplifies workbooks with slicers, timelines or Power Pivot.
@@ -249,6 +250,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-07 | minor | XLSX `rightArrow` block arrows survive Save as preset geometry instead of line arrows; block-arrow rendering remains unsupported. |
 | 2026-11-07 | minor | §7: Excel 5.0/95 (BIFF5) `.xls` Font and XF records are read: fonts, fills, borders and alignment. |
 | 2026-11-06 | minor | XLSX What-If data table text results save as inline formula strings (`t="str"`), including cells after the formula anchor. |
 | 2026-11-06 | minor | Evolutionary Solver Population report: best value and final-generation mean, sample standard deviation, maximum and minimum for variable and constraint cells; offered in Solver Results. |

@@ -389,7 +389,6 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
         "triangle" => ShapeKind::Triangle,
         "line" | "straightConnector1" if arrow => ShapeKind::Arrow,
         "line" | "straightConnector1" => ShapeKind::Line,
-        "rightArrow" => ShapeKind::Arrow,
         _ => ShapeKind::Rectangle,
     };
     // A preset the kind doesn't name (a star, a callout, a flowchart box), or one with adjust
@@ -405,7 +404,7 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
                     .collect()
             })
             .unwrap_or_default();
-        let known = matches!(prst, "rect" | "roundRect" | "ellipse" | "triangle" | "line" | "straightConnector1" | "rightArrow");
+        let known = matches!(prst, "rect" | "roundRect" | "ellipse" | "triangle" | "line" | "straightConnector1");
         (!known || !adjust.is_empty()).then(|| ShapeGeometry { preset: prst.to_string(), adjust })
     });
     // An equation: GridCraft's own source while the marker in the description still matches the
