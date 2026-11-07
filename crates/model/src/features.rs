@@ -403,12 +403,14 @@ pub struct NoteShape {
     /// `stroked`: `Some(false)` when the box has no outline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stroked: Option<bool>,
-    /// `<x:MoveWithCells>`: the box moves with the cells under it.
-    #[serde(default)]
-    pub move_with_cells: bool,
-    /// `<x:SizeWithCells>`: the box resizes with the cells under it.
-    #[serde(default)]
-    pub size_with_cells: bool,
+    /// `<x:MoveWithCells>` is present and on. Despite its name, the element means the box does
+    /// *not* move with the cells under it (as for form controls); `false` writes no element.
+    #[serde(default, alias = "move_with_cells")]
+    pub fixed_position: bool,
+    /// `<x:SizeWithCells>` is present and on: the box does *not* resize with the cells under it;
+    /// `false` writes no element.
+    #[serde(default, alias = "size_with_cells")]
+    pub fixed_size: bool,
 }
 
 impl NoteShape {
@@ -419,8 +421,8 @@ impl NoteShape {
         stroke_weight_pt: None,
         filled: None,
         stroked: None,
-        move_with_cells: true,
-        size_with_cells: true,
+        fixed_position: true,
+        fixed_size: true,
     };
 }
 
@@ -1422,7 +1424,9 @@ mod tests {
         let c: Comment = serde_json::from_str(json).unwrap();
         assert_eq!(c.note_shape, None);
         let s: NoteShape = serde_json::from_str("{}").unwrap();
-        assert!(!s.move_with_cells && !s.size_with_cells && s.fill_color.is_none());
+        assert!(!s.fixed_position && !s.fixed_size && s.fill_color.is_none());
+        let old: NoteShape = serde_json::from_str(r#"{"move_with_cells":true,"size_with_cells":false}"#).unwrap();
+        assert!(old.fixed_position && !old.fixed_size);
     }
 
     #[test]

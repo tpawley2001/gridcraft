@@ -342,7 +342,8 @@ pub(crate) fn read_note_shapes(x: &El, sheet: &mut Sheet, depth: usize, picture:
 
 /// A note shape's colours, outline and placement flags. Colours other than `#rgb`/`#rrggbb`
 /// (optionally followed by a `[n]` palette index) and stroke weights other than `0..=1584pt` are
-/// dropped; a missing `<x:MoveWithCells>`/`<x:SizeWithCells>` means off.
+/// dropped. A present `<x:MoveWithCells>`/`<x:SizeWithCells>` means the box does *not* move/size
+/// with its cells; a missing one means it does, and stays missing on save.
 fn note_shape(e: &El, cd: &El) -> NoteShape {
     let flag = |k: &str| {
         cd.child(k).is_some_and(|f| {
@@ -366,8 +367,8 @@ fn note_shape(e: &El, cd: &El) -> NoteShape {
         stroke_weight_pt: weight,
         filled: on_off("filled"),
         stroked: on_off("stroked"),
-        move_with_cells: flag("MoveWithCells"),
-        size_with_cells: flag("SizeWithCells"),
+        fixed_position: flag("MoveWithCells"),
+        fixed_size: flag("SizeWithCells"),
     }
 }
 

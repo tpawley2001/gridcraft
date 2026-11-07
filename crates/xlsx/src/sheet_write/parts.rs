@@ -467,9 +467,10 @@ fn note_shape_attrs(n: &gridcraft_model::NoteShape) -> String {
     s
 }
 
-/// A note's `<x:MoveWithCells/>` and `<x:SizeWithCells/>` flags, each written only when on.
+/// A note's `<x:MoveWithCells/>` and `<x:SizeWithCells/>` flags, each written only when on. Each
+/// present element means the box does *not* move (or size) with its cells, Excel's default note.
 fn note_placement(n: &gridcraft_model::NoteShape) -> &'static str {
-    match (n.move_with_cells, n.size_with_cells) {
+    match (n.fixed_position, n.fixed_size) {
         (true, true) => "<x:MoveWithCells/><x:SizeWithCells/>",
         (true, false) => "<x:MoveWithCells/>",
         (false, true) => "<x:SizeWithCells/>",
