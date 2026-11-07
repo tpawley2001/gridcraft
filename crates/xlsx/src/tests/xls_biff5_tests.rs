@@ -138,10 +138,10 @@ fn decodes_labels_in_code_page_1251() {
     assert_eq!(v(&wb, 0, "A1"), Value::from("Привет"));
     assert!(!report.warnings.iter().any(|w| w.contains("code page")), "{:?}", report.warnings);
     // An unsupported code page reads as Windows-1252, with one warning.
-    let bytes = book(10000, &[], &[(b"Data", cat(&[&label(0, 0, &[0xE9]), &label(1, 0, &[0xE9])]))]);
+    let bytes = book(1255, &[], &[(b"Data", cat(&[&label(0, 0, &[0xE9]), &label(1, 0, &[0xE9])]))]);
     let (wb, report) = read_xls(&bytes).unwrap();
     assert_eq!(v(&wb, 0, "A1"), Value::from("é"));
-    assert_eq!(report.warnings.iter().filter(|w| w.contains("code page 10000")).count(), 1, "{:?}", report.warnings);
+    assert_eq!(report.warnings.iter().filter(|w| w.contains("code page 1255")).count(), 1, "{:?}", report.warnings);
 }
 
 #[test]
