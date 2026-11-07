@@ -313,6 +313,13 @@ fn parse_date(t: &str, sys: DateSystem) -> Option<(f64, &'static str)> {
             return valid_ymd(sys, current_year(), m as i64, d).map(|s| (s, "d-mmm"));
         }
         if let (Some(m), Some(y)) = (month_from_name(a), num(b)) {
+            // A one- or two-digit number that is a day of that month is a day in the current
+            // year ("Feb-01" is 1 February this year); otherwise it is a year ("Mar-45").
+            let year = current_year();
+            let max = crate::date::days_in_month(year as i32, m) as i64;
+            if b.len() <= 2 && (1..=max).contains(&y) {
+                return valid_ymd(sys, year, m as i64, y).map(|s| (s, "d-mmm"));
+            }
             let y = if b.len() <= 2 { if y < 30 { 2000 + y } else { 1900 + y } } else { y };
             return valid_ymd(sys, y, m as i64, 1).map(|s| (s, "mmm-yy"));
         }
