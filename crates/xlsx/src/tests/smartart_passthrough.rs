@@ -9,21 +9,21 @@ use std::sync::Arc;
 use super::make_zip;
 use crate::{read_xlsx, write_xlsx};
 
-const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+pub(super) const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-const MS_DIAGRAM_DRAWING: &str = "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing";
-const PNG: &[u8] = b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90\x77\x53\xde\x00\x00\x00\x0c\x49\x44\x41\x54\x78\x9c\x63\xf8\xcf\xc0\x00\x00\x03\x01\x01\x00\xc9\xfe\x92\xef\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82";
+pub(super) const MS_DIAGRAM_DRAWING: &str = "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing";
+pub(super) const PNG: &[u8] = b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90\x77\x53\xde\x00\x00\x00\x0c\x49\x44\x41\x54\x78\x9c\x63\xf8\xcf\xc0\x00\x00\x03\x01\x01\x00\xc9\xfe\x92\xef\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82";
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/><Override PartName="/xl/diagrams/data1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.diagramData+xml"/><Override PartName="/xl/diagrams/layout1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.diagramLayout+xml"/><Override PartName="/xl/diagrams/quickStyle1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.diagramStyle+xml"/><Override PartName="/xl/diagrams/colors1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.diagramColors+xml"/><Override PartName="/xl/diagrams/drawing1.xml" ContentType="application/vnd.ms-office.drawingml.diagramDrawing+xml"/></Types>"#;
 const ROOT_RELS: &str = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#;
 
-const DATA: &str = r#"<?xml version="1.0"?><dgm:dataModel xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><dgm:ptLst><dgm:pt modelId="{11111111-0000-0000-0000-000000000001}" type="doc"><dgm:prSet/><dgm:spPr/><dgm:t><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></dgm:t></dgm:pt><dgm:pt modelId="{11111111-0000-0000-0000-000000000002}"><dgm:prSet phldrT="[Text]"/><dgm:spPr/><dgm:t><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US"/><a:t>DATA-MARKER step one</a:t></a:r></a:p></dgm:t></dgm:pt></dgm:ptLst><dgm:cxnLst><dgm:cxn modelId="{11111111-0000-0000-0000-000000000003}" srcId="{11111111-0000-0000-0000-000000000001}" destId="{11111111-0000-0000-0000-000000000002}" srcOrd="0" destOrd="0"/></dgm:cxnLst><dgm:bg/><dgm:whole/><dgm:extLst><a:ext uri="http://schemas.microsoft.com/office/drawing/2008/diagram"><dsp:dataModelExt xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram" relId="rId5" minVer="http://schemas.openxmlformats.org/drawingml/2006/diagram"/></a:ext></dgm:extLst></dgm:dataModel>"#;
-const LAYOUT: &str = r#"<?xml version="1.0"?><dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" uniqueId="urn:example/layout/LAYOUT-MARKER"><dgm:title val=""/><dgm:desc val=""/><dgm:layoutNode name="root"/></dgm:layoutDef>"#;
-const QUICK_STYLE: &str = r#"<?xml version="1.0"?><dgm:styleDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" uniqueId="urn:example/quickstyle/STYLE-MARKER"><dgm:title val=""/><dgm:desc val=""/></dgm:styleDef>"#;
-const COLORS: &str = r#"<?xml version="1.0"?><dgm:colorsDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" uniqueId="urn:example/colors/COLORS-MARKER"><dgm:title val=""/><dgm:desc val=""/></dgm:colorsDef>"#;
-const DIAGRAM_DRAWING: &str = r#"<?xml version="1.0"?><dsp:drawing xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><dsp:spTree><dsp:nvGrpSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvGrpSpPr/></dsp:nvGrpSpPr><dsp:grpSpPr/><dsp:sp modelId="{22222222-0000-0000-0000-000000000001}"><dsp:nvSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvSpPr/></dsp:nvSpPr><dsp:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="457200"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></dsp:spPr><dsp:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US"/><a:t>DRAWING-MARKER step one</a:t></a:r></a:p></dsp:txBody></dsp:sp></dsp:spTree></dsp:drawing>"#;
+pub(super) const DATA: &str = r#"<?xml version="1.0"?><dgm:dataModel xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><dgm:ptLst><dgm:pt modelId="{11111111-0000-0000-0000-000000000001}" type="doc"><dgm:prSet/><dgm:spPr/><dgm:t><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></dgm:t></dgm:pt><dgm:pt modelId="{11111111-0000-0000-0000-000000000002}"><dgm:prSet phldrT="[Text]"/><dgm:spPr/><dgm:t><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US"/><a:t>DATA-MARKER step one</a:t></a:r></a:p></dgm:t></dgm:pt></dgm:ptLst><dgm:cxnLst><dgm:cxn modelId="{11111111-0000-0000-0000-000000000003}" srcId="{11111111-0000-0000-0000-000000000001}" destId="{11111111-0000-0000-0000-000000000002}" srcOrd="0" destOrd="0"/></dgm:cxnLst><dgm:bg/><dgm:whole/><dgm:extLst><a:ext uri="http://schemas.microsoft.com/office/drawing/2008/diagram"><dsp:dataModelExt xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram" relId="rId5" minVer="http://schemas.openxmlformats.org/drawingml/2006/diagram"/></a:ext></dgm:extLst></dgm:dataModel>"#;
+pub(super) const LAYOUT: &str = r#"<?xml version="1.0"?><dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" uniqueId="urn:example/layout/LAYOUT-MARKER"><dgm:title val=""/><dgm:desc val=""/><dgm:layoutNode name="root"/></dgm:layoutDef>"#;
+pub(super) const QUICK_STYLE: &str = r#"<?xml version="1.0"?><dgm:styleDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" uniqueId="urn:example/quickstyle/STYLE-MARKER"><dgm:title val=""/><dgm:desc val=""/></dgm:styleDef>"#;
+pub(super) const COLORS: &str = r#"<?xml version="1.0"?><dgm:colorsDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" uniqueId="urn:example/colors/COLORS-MARKER"><dgm:title val=""/><dgm:desc val=""/></dgm:colorsDef>"#;
+pub(super) const DIAGRAM_DRAWING: &str = r#"<?xml version="1.0"?><dsp:drawing xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><dsp:spTree><dsp:nvGrpSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvGrpSpPr/></dsp:nvGrpSpPr><dsp:grpSpPr/><dsp:sp modelId="{22222222-0000-0000-0000-000000000001}"><dsp:nvSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvSpPr/></dsp:nvSpPr><dsp:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="457200"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></dsp:spPr><dsp:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US"/><a:t>DRAWING-MARKER step one</a:t></a:r></a:p></dsp:txBody></dsp:sp></dsp:spTree></dsp:drawing>"#;
 
-fn anchor(col: u32, row: u32, body: &str) -> String {
+pub(super) fn anchor(col: u32, row: u32, body: &str) -> String {
     format!(
         r#"<xdr:twoCellAnchor editAs="oneCell"><xdr:from><xdr:col>{col}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>{row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>{}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>{}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>{body}<xdr:clientData/></xdr:twoCellAnchor>"#,
         col + 5,
@@ -31,8 +31,8 @@ fn anchor(col: u32, row: u32, body: &str) -> String {
     )
 }
 
-const SMARTART: &str = r#"<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="3" name="Diagram 2"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram"><dgm:relIds xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" r:dm="rId1" r:lo="rId2" r:qs="rId3" r:cs="rId4"/></a:graphicData></a:graphic></xdr:graphicFrame>"#;
-const PICTURE: &str = r#"<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="2" name="Picture 1"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId6"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>"#;
+pub(super) const SMARTART: &str = r#"<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="3" name="Diagram 2"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram"><dgm:relIds xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" r:dm="rId1" r:lo="rId2" r:qs="rId3" r:cs="rId4"/></a:graphicData></a:graphic></xdr:graphicFrame>"#;
+pub(super) const PICTURE: &str = r#"<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="2" name="Picture 1"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId6"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>"#;
 
 /// Sheet "Data" with a SmartArt graphic (and with `picture`, a picture in the same drawing);
 /// sheet "Other" is plain.
@@ -82,7 +82,7 @@ fn package(picture: bool) -> Vec<u8> {
     ])
 }
 
-fn unpack(bytes: &[u8]) -> HashMap<String, String> {
+pub(super) fn unpack(bytes: &[u8]) -> HashMap<String, String> {
     let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
     let mut parts = HashMap::new();
     for i in 0..z.len() {
@@ -129,7 +129,7 @@ fn rel(p: &HashMap<String, String>, part: &str, id: &str) -> Option<(String, Str
 }
 
 /// The drawing part of sheet "Data" in a saved package.
-fn data_drawing(p: &HashMap<String, String>) -> String {
+pub(super) fn data_drawing(p: &HashMap<String, String>) -> String {
     let wb = &p["xl/workbook.xml"];
     let i = wb.find("name=\"Data\"").expect("no sheet Data");
     let rid = between(&wb[i..], "r:id=\"", "\"").unwrap();
@@ -142,7 +142,7 @@ fn data_drawing(p: &HashMap<String, String>) -> String {
 
 /// The SmartArt graphic in `out` is complete: frame, the four `dgm:relIds` parts and the
 /// diagram drawing named by the data part, each with its content type and original content.
-fn assert_smartart_kept(out: &[u8]) {
+pub(super) fn assert_smartart_kept(out: &[u8]) {
     let p = unpack(out);
     let drawing = data_drawing(&p);
     let dx = p.get(&drawing).unwrap_or_else(|| panic!("no part {drawing}"));
@@ -169,7 +169,7 @@ fn assert_smartart_kept(out: &[u8]) {
     assert!(ct.contains("drawingml.diagramDrawing+xml"), "diagram drawing content type");
 }
 
-fn cnvpr_ids(x: &str) -> Vec<String> {
+pub(super) fn cnvpr_ids(x: &str) -> Vec<String> {
     let mut ids: Vec<String> = x.match_indices("<xdr:cNvPr id=\"").filter_map(|(i, m)| between(&x[i..], m, "\"")).collect();
     ids.sort();
     ids
