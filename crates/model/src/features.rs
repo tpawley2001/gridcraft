@@ -1171,6 +1171,66 @@ pub struct ShapeFormat {
     pub anchor: Option<ShapeTextAnchor>,
     /// Paragraphs run right to left (`a:pPr rtl`).
     pub rtl: bool,
+    /// Text insets in EMU (`a:bodyPr lIns`, `tIns`, `rIns`, `bIns`), each `None` when the file
+    /// leaves it to the default.
+    pub inset_left: Option<i32>,
+    pub inset_top: Option<i32>,
+    pub inset_right: Option<i32>,
+    pub inset_bottom: Option<i32>,
+    /// Text wrapping (`a:bodyPr wrap`); `None` writes the usual square wrapping.
+    pub wrap: Option<ShapeTextWrap>,
+    /// Text direction (`a:bodyPr vert`); `None` is the default (horizontal).
+    pub vert: Option<ShapeTextVert>,
+    /// Rotation of the text in its box (`a:bodyPr rot`), in 60000ths of a degree.
+    pub text_rotation: Option<i32>,
+}
+
+/// How a shape's text wraps (`a:bodyPr wrap`, ST_TextWrappingType).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShapeTextWrap {
+    None,
+    Square,
+}
+
+/// A shape's text direction (`a:bodyPr vert`, ST_TextVerticalType).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShapeTextVert {
+    Horizontal,
+    Vertical,
+    Vertical270,
+    WordArtVertical,
+    EastAsianVertical,
+    MongolianVertical,
+    WordArtVerticalRtl,
+}
+
+impl ShapeTextVert {
+    /// The `vert` attribute value.
+    pub fn xml(self) -> &'static str {
+        match self {
+            Self::Horizontal => "horz",
+            Self::Vertical => "vert",
+            Self::Vertical270 => "vert270",
+            Self::WordArtVertical => "wordArtVert",
+            Self::EastAsianVertical => "eaVert",
+            Self::MongolianVertical => "mongolianVert",
+            Self::WordArtVerticalRtl => "wordArtVertRtl",
+        }
+    }
+
+    /// The value for a `vert` attribute; `None` for anything outside the schema's list.
+    pub fn from_xml(s: &str) -> Option<Self> {
+        Some(match s {
+            "horz" => Self::Horizontal,
+            "vert" => Self::Vertical,
+            "vert270" => Self::Vertical270,
+            "wordArtVert" => Self::WordArtVertical,
+            "eaVert" => Self::EastAsianVertical,
+            "mongolianVert" => Self::MongolianVertical,
+            "wordArtVertRtl" => Self::WordArtVerticalRtl,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1342,6 +1402,32 @@ mod tests {
         let legacy: Chart = serde_json::from_value(json).expect("deserialize legacy chart");
         assert_eq!(legacy.hole_size, 50, "documents saved before hole_size existed keep the old 50% hole");
         assert_eq!(chart.hole_size, 75, "new charts keep Excel's 75% default");
+    }
+
+    #[test]
+    fn shape_text_body_properties_survive_json_and_old_json_reads() {
+        let f = ShapeFormat {
+            inset_left: Some(0),
+            inset_bottom: Some(-45720),
+            wrap: Some(ShapeTextWrap::None),
+            vert: Some(ShapeTextVert::EastAsianVertical),
+            text_rotation: Some(i32::MIN),
+            ..ShapeFormat::default()
+        };
+        let json = serde_json::to_string(&f).expect("serialize format");
+        assert_eq!(serde_json::from_str::<ShapeFormat>(&json).expect("deserialize format"), f);
+        let old: ShapeFormat = serde_json::from_str(r#"{"bold":true,"rtl":true}"#).expect("old JSON");
+        assert!(old.bold && old.rtl);
+        assert_eq!((old.inset_left, old.wrap, old.vert, old.text_rotation), (None, None, None, None));
+    }
+
+    #[test]
+    fn shape_text_vert_names_round_trip_and_reject_unknown_values() {
+        for v in ["horz", "vert", "vert270", "wordArtVert", "eaVert", "mongolianVert", "wordArtVertRtl"] {
+            assert_eq!(ShapeTextVert::from_xml(v).map(ShapeTextVert::xml), Some(v));
+        }
+        assert_eq!(ShapeTextVert::from_xml("Vert"), None);
+        assert_eq!(ShapeTextVert::from_xml(""), None);
     }
 }
 
