@@ -7,6 +7,10 @@
 //! is selected, they share one linked cell, and that cell holds the 1-based position of the
 //! selected button among the sheet's option buttons (0 when none is).
 //!
+//! A list box or drop-down shows the displayed values of its input range; its value is the 1-based
+//! item selected (0 = none), and choosing an item writes that number to its linked cell. Group
+//! boxes and labels only show their caption.
+//!
 //! A slider or spin button's value lives on the control and in its linked cell. Setting it goes
 //! through `cell.set`, so the cell's dependents recalculate and Undo takes both back as one step;
 //! editing the linked cell moves the control (see [`sync_linked_values`]). Pressing a button runs
@@ -95,7 +99,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Change Control Value",
             [],
             None,
-            "{id, value} clamps a slider or spin button's value to min..max, snaps it to the step, and writes it to the linked cell; a check box takes 0, 1 or 2 (unchecked, checked, mixed), an option button 1 (select it) or 0 (deselect it) → {value}",
+            "{id, value} clamps a slider or spin button's value to min..max, snaps it to the step, and writes it to the linked cell; a check box takes 0, 1 or 2 (unchecked, checked, mixed), an option button 1 (select it) or 0 (deselect it), a list box or drop-down the 1-based item to select (0 for none) → {value}",
             has_doc,
             set_value
         ),
@@ -124,6 +128,10 @@ fn control_json(c: &FormControl) -> Json {
             ControlKind::Spin => "spinButton",
             ControlKind::CheckBox => "checkBox",
             ControlKind::OptionButton => "optionButton",
+            ControlKind::ListBox => "listBox",
+            ControlKind::DropDown => "dropDown",
+            ControlKind::GroupBox => "groupBox",
+            ControlKind::Label => "label",
         },
         "name": c.display_name(),
         "at": c.anchor.cell.a1(),
@@ -132,7 +140,17 @@ fn control_json(c: &FormControl) -> Json {
         "print": c.print,
         "locked": c.locked,
     });
-    if !c.kind.is_number() {
+    if c.kind.is_list() {
+        o["value"] = json!(c.value);
+        if let Some(r) = &c.input_range {
+            o["inputRange"] = json!(r);
+        }
+        if c.kind == ControlKind::DropDown {
+            o["dropLines"] = json!(c.drop_lines);
+        } else {
+            o["selection"] = serde_json::to_value(c.selection).unwrap_or(Json::Null);
+        }
+    } else if !c.kind.is_number() {
         o["text"] = json!(c.text);
         if c.kind.max_state().is_some() {
             o["value"] = json!(c.value);
@@ -718,7 +736,18 @@ fn set_value(s: &mut Session, p: &Json) -> Result<Json> {
             let v = state_param(CMD, p, c.kind)?.ok_or_else(|| bad(CMD, "missing `value`"))?;
             return if c.kind == ControlKind::CheckBox { set_check(s, sheet, i, &c, v) } else { set_option(s, sheet, i, &c, v == 1) };
         }
+        ControlKind::ListBox | ControlKind::DropDown => {
+            let v = match p.get("value") {
+                Some(Json::Number(n)) => n.as_f64(),
+                Some(Json::String(t)) => t.trim().parse::<f64>().ok(),
+                _ => None,
+            }
+            .filter(|v| v.fract() == 0.0 && (0.0..=f64::from(MAX_ITEMS)).contains(v))
+            .ok_or_else(|| bad(CMD, "`value` must be the 1-based item to select (0 for none)"))?;
+            return choose_item(s, sheet, i, &c, v as u32);
+        }
         ControlKind::Button => return Err(bad(CMD, "only a slider or spin button takes a value; use control.press for a button")),
+        ControlKind::GroupBox | ControlKind::Label => return Err(bad(CMD, "a group box or label has no value")),
         ControlKind::Slider | ControlKind::Spin => {}
     }
     let v = match p.get("value") {
@@ -744,6 +773,58 @@ fn set_value(s: &mut Session, p: &Json) -> Result<Json> {
     })
 }
 
+/// The most items a list box or drop-down shows.
+pub const MAX_ITEMS: u32 = 32_767;
+
+/// The sheet and range a list box's or drop-down's `input_range` names (`$E$1:$E$4` on the host
+/// sheet `host`, or `Lists!$A$1:$A$3`); `None` when it names nothing in the workbook.
+fn items_range(wb: &Workbook, host: usize, text: &str) -> Option<(usize, gridcraft_core::RangeRef)> {
+    let text = text.trim().trim_start_matches('=');
+    let (sheet, body) = split_sheet(text);
+    let si = match sheet {
+        Some(n) => wb.sheet_index(&n)?,
+        None => host,
+    };
+    wb.sheet(si)?;
+    Some((si, gridcraft_core::RangeRef::parse(body.trim())?))
+}
+
+/// The items a list box or drop-down on sheet `host` shows: the displayed values of its input
+/// range, row by row, at most [`MAX_ITEMS`]. Empty without a valid range.
+pub fn list_items(wb: &Workbook, host: usize, c: &FormControl) -> Vec<String> {
+    let Some((si, range)) = c.input_range.as_deref().and_then(|t| items_range(wb, host, t)) else { return Vec::new() };
+    let Some(sh) = wb.sheet(si) else { return Vec::new() };
+    range.iter().take(MAX_ITEMS as usize).map(|cell| crate::display::value_text(wb, sh, cell)).collect()
+}
+
+/// Selects item `value` (1-based, 0 = none) of list box or drop-down `i` of `sheet` and writes it
+/// to the linked cell, as one undo step.
+fn choose_item(s: &mut Session, sheet: usize, i: usize, c: &FormControl, value: u32) -> Result<Json> {
+    const CMD: &str = "control.setValue";
+    let count = {
+        let wb = &s.doc()?.wb;
+        if c.input_range.as_deref().and_then(|t| items_range(wb, sheet, t)).is_some() { list_items(wb, sheet, c).len() as u32 } else { MAX_ITEMS }
+    };
+    if value > count {
+        return Err(bad(CMD, format!("`value` must be from 0 to {count}, the number of items")));
+    }
+    let label = format!("Change {}", c.kind.label());
+    s.grouped(&label, |s| {
+        // The cell first: editing it moves the selection (see `sync_linked_values`).
+        write_link(s, sheet, c.link.as_deref(), value)?;
+        let now = s.doc()?.wb.sheet(sheet).and_then(|sh| sh.controls.get(i)).map(|k| k.value);
+        if now != Some(value) {
+            edit(s, |cx| {
+                if let Some(slot) = cx.sheet_mut(sheet)?.controls.get_mut(i) {
+                    slot.value = value;
+                }
+                Ok(())
+            })?;
+        }
+        Ok(json!({"value": value}))
+    })
+}
+
 fn press(s: &mut Session, p: &Json) -> Result<Json> {
     const CMD: &str = "control.press";
     let (sheet, i, c) = find(s, CMD, p)?;
@@ -751,9 +832,10 @@ fn press(s: &mut Session, p: &Json) -> Result<Json> {
         // A click checks an unchecked or mixed box and clears a checked one.
         ControlKind::CheckBox => return set_check(s, sheet, i, &c, if c.value == 1 { 0 } else { 1 }),
         ControlKind::OptionButton => return set_option(s, sheet, i, &c, true),
-        ControlKind::Slider | ControlKind::Spin => {
-            return Err(bad(CMD, "only buttons can be pressed; use control.setValue for a slider or spin button"));
+        ControlKind::Slider | ControlKind::Spin | ControlKind::ListBox | ControlKind::DropDown => {
+            return Err(bad(CMD, "only buttons can be pressed; use control.setValue for a slider, spin button, list box or drop-down"));
         }
+        ControlKind::GroupBox | ControlKind::Label => return Err(bad(CMD, "a group box or label can't be pressed")),
         ControlKind::Button => {}
     }
     let name = c.display_name();
@@ -856,7 +938,10 @@ pub(crate) fn sync_linked_values(wb: &mut Workbook) {
                     .filter_map(|(i, c)| match c.kind {
                         ControlKind::Slider | ControlKind::Spin => linked_number(wb, si, c).map(|n| (i, c.snap(n))),
                         ControlKind::CheckBox => linked_value(wb, si, c.link.as_deref()).as_ref().and_then(check_state).map(|v| (i, v)),
-                        ControlKind::Button | ControlKind::OptionButton => None,
+                        ControlKind::ListBox | ControlKind::DropDown => {
+                            linked_number(wb, si, c).filter(|n| n.fract() == 0.0 && (0.0..=f64::from(MAX_ITEMS)).contains(n)).map(|n| (i, n as u32))
+                        }
+                        ControlKind::Button | ControlKind::OptionButton | ControlKind::GroupBox | ControlKind::Label => None,
                     })
                     .filter(|(i, v)| sh.controls.get(*i).is_some_and(|c| c.value != *v))
                     .collect();

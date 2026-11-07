@@ -421,8 +421,15 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
             continue;
         }
         let start = p.add(egui::Shape::Noop);
-        crate::form_controls::paint(p, r, c, geo.z, crate::form_controls::look(app, geo, c, r, hover));
+        let items = if c.kind.is_list() { gridcraft_engine::cmd::controls::list_items(wb, si, c) } else { Vec::new() };
+        crate::form_controls::paint(p, r, c, geo.z, crate::form_controls::look(app, geo, c, r, hover), &items);
         done(start, r);
+    }
+    // An open drop-down's list goes over every other control.
+    if let Some(c) = app.grid.drop_open.and_then(|id| crate::form_controls::find(sh, id)) {
+        let r = anchor_rect(geo, sh, &c.anchor);
+        let items = gridcraft_engine::cmd::controls::list_items(wb, si, c);
+        crate::form_controls::paint_drop_list(p, r, c, geo.z, &items);
     }
     // The selected object's frame and handles go over every object, and move with it on a
     // right-to-left sheet.

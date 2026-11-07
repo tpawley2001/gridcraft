@@ -1,6 +1,7 @@
-//! Form controls on the sheet: drawing buttons, sliders, spin buttons, check boxes and option
-//! buttons, and working them with
-//! the pointer and the keyboard. A click operates a control; Ctrl or Cmd+click, or a right-click,
+//! Form controls on the sheet: drawing buttons, sliders, spin buttons, check boxes, option
+//! buttons, list boxes, drop-downs, group boxes and labels, and working them with
+//! the pointer and the keyboard. Clicking a list box's item, or an item of a drop-down's open
+//! list, selects it (`control.setValue`). A click operates a control; Ctrl or Cmd+click, or a right-click,
 //! selects it instead (to move, resize or format it). Values change through `control.setValue`,
 //! and a whole drag or a held arrow is one undo step.
 //!
@@ -33,6 +34,85 @@ pub enum Part {
     TrackBefore,
     /// The track on the maximum's side of the thumb (a page up).
     TrackAfter,
+    /// A list box's items.
+    List,
+    /// A drop-down's box, which opens its list.
+    Drop,
+}
+
+/// The height of one item row of a list box or drop-down, unzoomed.
+const ROW: f32 = 16.0;
+
+/// The 0-based first item shown in `rows` rows: the top, scrolled down so the selected item shows.
+fn first_shown(value: u32, rows: usize) -> usize {
+    (value as usize).saturating_sub(rows.max(1))
+}
+
+/// How many item rows fit in a list box drawn in `r`.
+fn list_rows(r: Rect, z: f32) -> usize {
+    (((r.height() - 2.0) / (ROW * z)).floor().max(1.0)) as usize
+}
+
+/// The rectangle of a drop-down's open list, below the drop-down drawn in `r`, of `drop_lines`
+/// rows (fewer when there are fewer items).
+pub fn drop_list_rect(r: Rect, c: &FormControl, z: f32, items: usize) -> Rect {
+    let rows = items.clamp(1, c.drop_lines.clamp(1, 64) as usize);
+    Rect::from_min_size(pos2(r.left(), r.bottom()), vec2(r.width(), rows as f32 * ROW * z + 2.0))
+}
+
+/// The 1-based item at `p` among `items` items drawn from the top of `area` in `rows` rows, with
+/// `value` selected.
+fn item_in(area: Rect, value: u32, rows: usize, items: usize, z: f32, p: Pos2) -> Option<u32> {
+    if !area.contains(p) {
+        return None;
+    }
+    let row = ((p.y - area.top() - 1.0) / (ROW * z)).floor();
+    if !(0.0..rows as f32).contains(&row) {
+        return None;
+    }
+    let i = first_shown(value, rows).saturating_add(row as usize);
+    (i < items).then(|| u32::try_from(i + 1).ok()).flatten()
+}
+
+/// The 1-based item of a list box drawn in `r` at `p`.
+pub fn list_item_at(r: Rect, c: &FormControl, z: f32, items: usize, p: Pos2) -> Option<u32> {
+    item_in(r, c.value, list_rows(r, z), items, z, p)
+}
+
+/// The 1-based item of a drop-down's open list (the drop-down drawn in `r`) at `p`.
+pub fn drop_item_at(r: Rect, c: &FormControl, z: f32, items: usize, p: Pos2) -> Option<u32> {
+    let area = drop_list_rect(r, c, z, items);
+    let rows = items.clamp(1, c.drop_lines.clamp(1, 64) as usize);
+    item_in(area, c.value, rows, items, z, p)
+}
+
+/// Paints `rows` item rows of `items` from the top of `area`, the selected one (`value`, 1-based)
+/// highlighted.
+fn paint_items(p: &Painter, area: Rect, value: u32, rows: usize, items: &[String], z: f32) {
+    let t = Tokens::get(p.ctx());
+    let clip = p.with_clip_rect(area.shrink(1.0).intersect(p.clip_rect()));
+    let first = first_shown(value, rows);
+    for (k, text) in items.iter().enumerate().skip(first).take(rows) {
+        let top = area.top() + 1.0 + (k - first) as f32 * ROW * z;
+        let row = Rect::from_min_size(pos2(area.left() + 1.0, top), vec2(area.width() - 2.0, ROW * z));
+        let selected = k + 1 == value as usize;
+        if selected {
+            clip.rect_filled(row, 0.0, t.sheet_fill);
+        }
+        let ink = if selected { t.sheet_control_bg } else { t.sheet_control_text };
+        let g = clip.layout_no_wrap(text.clone(), theme::ui_font(12.0 * z), ink);
+        clip.galley(pos2(row.left() + 3.0 * z, row.center().y - g.size().y / 2.0), g, ink);
+    }
+}
+
+/// Paints a drop-down's open list below it (the drop-down drawn in `r`).
+pub fn paint_drop_list(p: &Painter, r: Rect, c: &FormControl, z: f32, items: &[String]) {
+    let t = Tokens::get(p.ctx());
+    let area = drop_list_rect(r, c, z, items.len());
+    p.rect_filled(area, 0.0, t.sheet_control_bg);
+    p.rect_stroke(area, 0.0, Stroke::new(1.0, t.sheet_control_border), StrokeKind::Inside);
+    let rows = items.len().clamp(1, c.drop_lines.clamp(1, 64) as usize);
+    paint_items(p, area, c.value, rows, items, z);
 }
 
 /// A control being worked with the pointer.
@@ -105,6 +185,10 @@ pub fn part_at(r: Rect, c: &FormControl, z: f32, p: Pos2) -> Option<Part> {
     }
     Some(match c.kind {
         ControlKind::Button | ControlKind::CheckBox | ControlKind::OptionButton => Part::Button,
+        ControlKind::ListBox => Part::List,
+        ControlKind::DropDown => Part::Drop,
+        // Group boxes and labels only show their caption; a click on one reaches the grid.
+        ControlKind::GroupBox | ControlKind::Label => return None,
         ControlKind::Spin => {
             let (up, _) = spin_parts(r);
             if up.contains(p) { Part::Up } else { Part::Down }
@@ -129,8 +213,9 @@ pub fn value_at(r: Rect, c: &FormControl, z: f32, p: Pos2, grab: f32) -> f64 {
     c.min as f64 + f.clamp(0.0, 1.0) as f64 * c.max.saturating_sub(c.min) as f64
 }
 
-/// Paints control `c` in `r`, in the sheet's control colours.
-pub fn paint(p: &Painter, r: Rect, c: &FormControl, z: f32, look: Look) {
+/// Paints control `c` in `r`, in the sheet's control colours. `items` are a list box's or
+/// drop-down's items (empty for the other kinds).
+pub fn paint(p: &Painter, r: Rect, c: &FormControl, z: f32, look: Look, items: &[String]) {
     let t = Tokens::get(p.ctx());
     let border = Stroke::new(1.0, t.sheet_control_border);
     let bg = |part: Part| {
@@ -222,6 +307,45 @@ pub fn paint(p: &Painter, r: Rect, c: &FormControl, z: f32, look: Look) {
                 p.galley(at, g, t.sheet_control_text);
             }
         }
+        ControlKind::ListBox => {
+            clip.rect_filled(r, 0.0, t.sheet_control_bg);
+            clip.rect_stroke(r, 0.0, border, StrokeKind::Inside);
+            paint_items(&clip, r, c.value, list_rows(r, z), items, z);
+        }
+        ControlKind::DropDown => {
+            clip.rect_filled(r, 0.0, t.sheet_control_bg);
+            clip.rect_stroke(r, 0.0, border, StrokeKind::Inside);
+            // The arrow button on the right, a square as tall as the box.
+            let side = r.height().min(r.width() / 2.0).max(1.0);
+            let arrow = Rect::from_min_max(pos2(r.right() - side, r.top()), r.max);
+            clip.rect_filled(arrow.shrink(1.0), 0.0, bg(Part::Drop));
+            clip.rect_stroke(arrow, 0.0, border, StrokeKind::Inside);
+            let (m, s) = (arrow.center(), (side * 0.2).max(1.5));
+            let tri = vec![pos2(m.x - s, m.y - s * 0.5), pos2(m.x + s, m.y - s * 0.5), pos2(m.x, m.y + s * 0.6)];
+            clip.add(PathShape::convex_polygon(tri, t.sheet_control_text, Stroke::NONE));
+            let chosen = (c.value as usize).checked_sub(1).and_then(|i| items.get(i));
+            if let Some(text) = chosen {
+                let g = clip.layout_no_wrap(text.clone(), theme::ui_font(12.0 * z), t.sheet_control_text);
+                let at = pos2(r.left() + 3.0 * z, r.center().y - g.size().y / 2.0);
+                let text_area = Rect::from_min_max(r.min, pos2(arrow.left(), r.bottom())).shrink(1.0);
+                clip.with_clip_rect(text_area.intersect(clip.clip_rect())).galley(at, g, t.sheet_control_text);
+            }
+        }
+        ControlKind::GroupBox => {
+            // A frame whose top edge breaks for the caption.
+            let g = clip.layout_no_wrap(c.text.clone(), theme::ui_font(12.0 * z), t.sheet_control_text);
+            let frame = Rect::from_min_max(pos2(r.left(), r.top() + g.size().y / 2.0), r.max);
+            clip.rect_stroke(frame, 0.0, border, StrokeKind::Inside);
+            if !c.text.is_empty() {
+                let at = pos2(r.left() + 8.0 * z, r.top());
+                clip.rect_filled(Rect::from_min_size(at - vec2(2.0 * z, 0.0), g.size() + vec2(4.0 * z, 0.0)), 0.0, t.grid_bg);
+                clip.with_clip_rect(r.intersect(clip.clip_rect())).galley(at, g, t.sheet_control_text);
+            }
+        }
+        ControlKind::Label => {
+            let g = clip.layout(c.text.clone(), theme::ui_font(12.0 * z), t.sheet_control_text, r.width().max(1.0));
+            clip.with_clip_rect(r.intersect(clip.clip_rect())).galley(r.min, g, t.sheet_control_text);
+        }
         ControlKind::Spin => {
             let (up, down) = spin_parts(r);
             let tall = r.height() >= r.width();
@@ -292,6 +416,17 @@ impl SheetApp {
         self.control_set(id, c.value as f64 + steps as f64 * by)
     }
 
+    /// Selects item `item` (1-based) of a list box or drop-down and writes it to the linked cell.
+    pub fn control_choose(&mut self, id: u32, item: u32) -> bool {
+        match self.session.run("control.setValue", json!({"id": id, "value": item})) {
+            Ok(_) => true,
+            Err(e) => {
+                self.message = Some(("Form Control".into(), crate::clean_error(&e)));
+                false
+            }
+        }
+    }
+
     /// Runs a button's action. Questions (approve it, make room for a macro's output) become a
     /// prompt.
     pub fn press_button(&mut self, id: u32) {
@@ -310,6 +445,31 @@ pub fn interact(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, 
     {
         app.grid.focused_control = None;
     }
+    // An open drop-down list takes the next press: on an item it chooses it; anywhere it closes.
+    if let Some(id) = app.grid.drop_open {
+        let Some(c) = find(sh, id).cloned() else {
+            app.grid.drop_open = None;
+            return false;
+        };
+        if pointer.primary_pressed() || pointer.secondary_pressed() {
+            app.grid.drop_open = None;
+            let r = crate::chartview::anchor_rect(geo, sh, &c.anchor);
+            let at = pointer.press_origin().map(|p| geo.mirror_pos(p)).or(pos);
+            if let Some(p) = at.filter(|_| pointer.primary_pressed()) {
+                let items = items_of(app, &c);
+                let list = drop_list_rect(r, &c, geo.z, items.len());
+                if list.contains(p) {
+                    if let Some(n) = drop_item_at(r, &c, geo.z, items.len(), p) {
+                        app.control_choose(c.id, n);
+                    }
+                    return true;
+                }
+                if r.contains(p) {
+                    return true;
+                }
+            }
+        }
+    }
     if let Some(g) = app.grid.control.clone() {
         let Some(c) = find(sh, g.id).cloned() else {
             app.grid.control = None;
@@ -326,7 +486,7 @@ pub fn interact(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, 
                         }
                     }
                 }
-                Part::Button => {}
+                Part::Button | Part::List | Part::Drop => {}
                 part => {
                     // Held arrows and track repeat while the pointer stays on them.
                     let over = pos.and_then(|p| part_at(r, &c, geo.z, inner(geo, r, p))) == Some(part);
@@ -375,6 +535,25 @@ pub fn interact(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, 
     let Some(part) = part_at(r, &c, geo.z, p) else { return false };
     app.selected_object = None;
     app.grid.focused_control = Some(c.id);
+    match part {
+        Part::Drop => {
+            app.grid.drop_open = Some(c.id);
+            resp.request_focus();
+            return true;
+        }
+        Part::List => {
+            // Only a single-selection list box changes on a click (multi-selection isn't edited).
+            if c.selection == gridcraft_engine::model::ListSelection::Single {
+                let items = items_of(app, &c).len();
+                if let Some(n) = list_item_at(r, &c, geo.z, items, p).filter(|n| *n != c.value) {
+                    app.control_choose(c.id, n);
+                }
+            }
+            resp.request_focus();
+            return true;
+        }
+        _ => {}
+    }
     let undo_start = app.session.active().map_or(0, |d| d.undo.len());
     let grab = if part == Part::Thumb {
         let (_, thumb) = slider_parts(r, &c, geo.z);
@@ -397,8 +576,13 @@ fn step_part(app: &mut SheetApp, c: &FormControl, part: Part) {
         Part::Down => app.control_nudge(c.id, -1, false),
         Part::TrackBefore => app.control_nudge(c.id, -1, true),
         Part::TrackAfter => app.control_nudge(c.id, 1, true),
-        Part::Button | Part::Thumb => false,
+        Part::Button | Part::Thumb | Part::List | Part::Drop => false,
     };
+}
+
+/// The items of list box or drop-down `c` on the active sheet.
+fn items_of(app: &SheetApp, c: &FormControl) -> Vec<String> {
+    app.session.active().map(|d| gridcraft_engine::cmd::controls::list_items(&d.wb, d.wb.active_sheet(), c)).unwrap_or_default()
 }
 
 /// Whether the focused control is a button, check box or option button. Space presses one, so
@@ -432,6 +616,7 @@ pub fn key(app: &mut SheetApp, sh: &Sheet, key: egui::Key, repeat: bool) -> bool
     match (c.kind, key) {
         (_, Key::Escape) => {
             app.grid.focused_control = None;
+            app.grid.drop_open = None;
             true
         }
         (ControlKind::Button, Key::Space | Key::Enter) => {
@@ -447,6 +632,7 @@ pub fn key(app: &mut SheetApp, sh: &Sheet, key: egui::Key, repeat: bool) -> bool
             true
         }
         (ControlKind::Button | ControlKind::CheckBox | ControlKind::OptionButton, _) => false,
+        (ControlKind::ListBox | ControlKind::DropDown | ControlKind::GroupBox | ControlKind::Label, _) => false,
         // A spin button's up arrow adds; a slider's minimum is at its left or top.
         (ControlKind::Spin, Key::ArrowUp | Key::ArrowRight) | (ControlKind::Slider, Key::ArrowDown | Key::ArrowRight) => {
             app.control_nudge(c.id, 1, false)
@@ -492,6 +678,26 @@ mod tests {
         let (_, thumb) = slider_parts(r, &c, 1.0);
         assert!(thumb.center().y < 20.0);
         assert_eq!(part_at(r, &slider(50, false), 1.0, pos2(10.0, 190.0)), Some(Part::TrackAfter));
+    }
+
+    #[test]
+    fn list_items_are_hit_by_row_and_scroll_to_the_selection() {
+        let r = Rect::from_min_size(pos2(0.0, 0.0), vec2(100.0, 50.0));
+        let mut c = FormControl { kind: ControlKind::ListBox, ..Default::default() };
+        // Three rows of 16 fit; the first row is item 1.
+        assert_eq!(list_item_at(r, &c, 1.0, 5, pos2(10.0, 5.0)), Some(1));
+        assert_eq!(list_item_at(r, &c, 1.0, 5, pos2(10.0, 40.0)), Some(3));
+        assert_eq!(list_item_at(r, &c, 1.0, 2, pos2(10.0, 40.0)), None, "past the last item");
+        c.value = 5;
+        assert_eq!(list_item_at(r, &c, 1.0, 5, pos2(10.0, 40.0)), Some(5), "scrolled to the selection");
+        let d = FormControl { kind: ControlKind::DropDown, drop_lines: 2, ..Default::default() };
+        let r = Rect::from_min_size(pos2(0.0, 0.0), vec2(100.0, 20.0));
+        assert_eq!(drop_list_rect(r, &d, 1.0, 9).height(), 34.0);
+        assert_eq!(drop_item_at(r, &d, 1.0, 9, pos2(10.0, 40.0)), Some(2));
+        assert_eq!(drop_item_at(r, &d, 1.0, 9, pos2(10.0, 10.0)), None, "the box itself");
+        assert_eq!(part_at(r, &d, 1.0, pos2(10.0, 10.0)), Some(Part::Drop));
+        let g = FormControl { kind: ControlKind::GroupBox, ..Default::default() };
+        assert_eq!(part_at(r, &g, 1.0, pos2(10.0, 10.0)), None);
     }
 
     #[test]
