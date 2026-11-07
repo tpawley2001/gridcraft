@@ -337,7 +337,7 @@ fn border(b: &mut Bytes<'_>) -> Result<Borders, IoError> {
     let flags = b.u8()?;
     let (top, bottom, left, right, diag) = (line(b)?, line(b)?, line(b)?, line(b)?, line(b)?);
     let pick = |bit: u8| if flags & bit != 0 { diag } else { BorderLine::default() };
-    Ok(Borders { left, right, top, bottom, diag_down: pick(1), diag_up: pick(2) })
+    Ok(Borders { left, right, top, bottom, diag_down: pick(1), diag_up: pick(2), ..Borders::default() })
 }
 
 #[cfg(test)]

@@ -261,6 +261,13 @@ pub fn read_border(e: &El, palette: &[u32]) -> Borders {
         bottom: read_line(e.child("bottom"), palette),
         diag_down: if e.flag("diagonalDown", false) { diag } else { BorderLine::default() },
         diag_up: if e.flag("diagonalUp", false) { diag } else { BorderLine::default() },
+        // Inside lines are read whatever the outer edges say: a differential format can state
+        // them alone (ECMA-376 §18.8.4).
+        horizontal: read_line(e.child("horizontal"), palette),
+        vertical: read_line(e.child("vertical"), palette),
+        // The schema default is true, so only an explicit value is kept; an absent attribute
+        // stays absent on save.
+        outline: e.attr_bool("outline"),
     }
 }
 
@@ -621,15 +628,25 @@ fn border_xml(b: &Borders) -> String {
     if !b.diag_down.is_none() {
         s.push_str(" diagonalDown=\"1\"");
     }
+    if let Some(o) = b.outline {
+        let _ = write!(s, " outline=\"{}\"", o as u8);
+    }
     s.push('>');
     s.push_str(&line_xml("left", &b.left));
     s.push_str(&line_xml("right", &b.right));
     s.push_str(&line_xml("top", &b.top));
     s.push_str(&line_xml("bottom", &b.bottom));
-    let diag = if !b.diag_down.is_none() { b.diag_down } else { b.diag_up };
-    s.push_str(&line_xml("diagonal", &diag));
+    s.push_str(&line_xml("diagonal", &diag_of(b)));
+    // Schema order (ECMA-376 §18.8.4): vertical before horizontal.
+    s.push_str(&line_xml("vertical", &b.vertical));
+    s.push_str(&line_xml("horizontal", &b.horizontal));
     s.push_str("</border>");
     s
+}
+
+/// The `<diagonal>` line: both diagonal directions share one line element.
+fn diag_of(b: &Borders) -> BorderLine {
+    if !b.diag_down.is_none() { b.diag_down } else { b.diag_up }
 }
 
 fn alignment_xml(a: &Alignment) -> Option<String> {
