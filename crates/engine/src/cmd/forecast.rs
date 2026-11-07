@@ -416,6 +416,10 @@ fn forecast_sheet(s: &mut Session, p: &Json) -> Result<Json> {
             table_border_dxf: None,
             totals_row_border_dxf: None,
             sort: None,
+            comment: None,
+            insert_row: None,
+            insert_row_shift: None,
+            published: None,
         });
         let q = gridcraft_formula::quote_sheet(&sheet_name);
         let col_ref = |c: u32| format!("{q}!${0}$2:${0}${end_row}", col_letters(c));

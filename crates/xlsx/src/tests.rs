@@ -251,3 +251,4 @@ mod workbook_protection_locks {
     }
 }
 mod codex_day_print_options;
+mod codex_day_table_metadata;

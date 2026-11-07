@@ -178,6 +178,10 @@ fn filter_menu_uses_the_table_whose_header_was_clicked() {
         table_border_dxf: None,
         totals_row_border_dxf: None,
         sort: None,
+        comment: None,
+        insert_row: None,
+        insert_row_shift: None,
+        published: None,
     };
     let mut sh = Sheet::new("S");
     sh.tables.push(table(1, 0, 2));

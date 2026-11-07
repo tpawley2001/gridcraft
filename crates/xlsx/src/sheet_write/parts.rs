@@ -180,6 +180,14 @@ pub(super) fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, out: &m
     if let Some(c) = t.connection_id {
         let _ = write!(s, " connectionId=\"{c}\"");
     }
+    if let Some(c) = t.comment.as_deref().filter(|c| c.chars().count() <= crate::sheet_read::TABLE_COMMENT_MAX) {
+        let _ = write!(s, " comment=\"{}\"", esc_attr(&encode_xstring(c)));
+    }
+    for (attr, on) in [("insertRow", t.insert_row), ("insertRowShift", t.insert_row_shift), ("published", t.published)] {
+        if let Some(on) = on {
+            let _ = write!(s, " {attr}=\"{}\"", u8::from(on));
+        }
+    }
     s.push('>');
     let mut sort = crate::table_sort::current_sort(t).map(|st| (st.in_autofilter, crate::table_sort::sort_state_xml(st, out)));
     if t.header_row && t.filter_button {
@@ -513,6 +521,10 @@ mod tests {
             table_border_dxf: None,
             totals_row_border_dxf: None,
             sort: None,
+            comment: None,
+            insert_row: None,
+            insert_row_shift: None,
+            published: None,
         };
         let names = table_columns(&t);
         assert_eq!(names.len(), 10_000);
