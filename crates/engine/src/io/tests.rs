@@ -843,3 +843,39 @@ fn sylk_survives_huge_relative_offsets_and_width_floods() {
     let (wb, _) = open_bytes("widths.slk", &flood).unwrap();
     assert_eq!(wb.sheet(0).unwrap().value(CellRef::parse("A1").unwrap()), gridcraft_core::Value::Number(1.0));
 }
+
+/// A BIFF8 ROW record ([MS-XLS] 2.4.221) with fUnsynced clear stores an automatic height; Excel
+/// shows and prints it as stored, so opening and recalculating keep it, even with wrapped cells
+/// in the row and one of them in a hidden column.
+#[test]
+fn xls_automatic_row_height_survives_open_and_recalc() {
+    let rec = |id: u16, payload: &[u8]| [&id.to_le_bytes()[..], &(payload.len() as u16).to_le_bytes(), payload].concat();
+    let u16s = |v: &[u16]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+    let bof = |dt: u16| rec(0x0809, &[u16s(&[0x0600, dt, 0x0DBB, 0x07CC]), vec![0; 8]].concat());
+    let eof = rec(0x000A, &[]);
+    // XF 0 plain, XF 1 with fWrap set in its alignment byte.
+    let xf = |align: u8| rec(0x00E0, &[u16s(&[0, 0, 0]), vec![align], vec![0; 13]].concat());
+    let number = |r: u16, c: u16, x: f64| rec(0x0203, &[u16s(&[r, c, 1]), x.to_le_bytes().to_vec()].concat());
+    let globals =
+        |pos: u32| [bof(0x0005), xf(0), xf(0x08), rec(0x0085, &[&pos.to_le_bytes()[..], &[0, 0, 6, 0], b"Sheet1"].concat()), eof.clone()].concat();
+    let sheet = [
+        bof(0x0010),
+        // ColInfo: column B 36 characters wide, column G hidden.
+        rec(0x007D, &u16s(&[1, 1, 36 * 256, 0, 0, 0])),
+        rec(0x007D, &u16s(&[6, 6, 12 * 256, 0, 0x0001, 0])),
+        // Row 2: miyRw = 675 twips (33.75 pt), flags 0 (automatic height).
+        rec(0x0208, &[u16s(&[1, 0, 7, 675, 0, 0]), 0u32.to_le_bytes().to_vec()].concat()),
+        number(1, 1, 1.0),
+        number(1, 6, 1234567890.0),
+        eof.clone(),
+    ]
+    .concat();
+    let stream = [globals(globals(0).len() as u32), sheet].concat();
+    let file = gridcraft_xlsx::testing::compound_file(&[("Workbook", &stream)]);
+    let mut s = crate::Session::new();
+    s.execute("file.open", serde_json::json!({"name": "rows.xls", "base64": base64_encode(&file)})).unwrap();
+    let pt = |s: &crate::Session| s.doc().unwrap().wb.active().unwrap().row_height(1) * 72.0 / 96.0;
+    assert!((pt(&s) - 33.75).abs() < 0.5, "after open: {} pt", pt(&s));
+    s.execute("formulas.calculateNow", serde_json::json!({})).unwrap();
+    assert!((pt(&s) - 33.75).abs() < 0.5, "after recalc: {} pt", pt(&s));
+}

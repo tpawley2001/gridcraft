@@ -803,6 +803,11 @@ pub fn auto_row_height(wb: &mut Workbook, si: usize, row: u32) {
         if row_merges.iter().any(|m| m.contains(CellRef::new(row, c))) {
             continue;
         }
+        // A cell in a hidden (or zero-width) column shows nothing, so it needs no height: laid
+        // out at no width, its wrapped text would ask for a line per character.
+        if sh.cols.get(&c).is_some_and(|i| i.hidden || i.size.is_some_and(|w| w <= 0.0)) {
+            continue;
+        }
         let st = wb.styles.get(cell.style);
         let size = st.font.size;
         // Scaled from an 11pt row's height, not the sheet's default: a sheet whose default
