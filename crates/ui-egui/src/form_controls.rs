@@ -1,4 +1,5 @@
-//! Form controls on the sheet: drawing buttons, sliders and spin buttons, and working them with
+//! Form controls on the sheet: drawing buttons, sliders, spin buttons, check boxes and option
+//! buttons, and working them with
 //! the pointer and the keyboard. A click operates a control; Ctrl or Cmd+click, or a right-click,
 //! selects it instead (to move, resize or format it). Values change through `control.setValue`,
 //! and a whole drag or a held arrow is one undo step.
@@ -143,7 +144,50 @@ pub fn paint(p: &Painter, r: Rect, c: &FormControl, z: f32, look: Look) {
     };
     let clip = p.with_clip_rect(r.expand(2.0 * z.max(1.0) + 3.0).intersect(p.clip_rect()));
     match c.kind {
-        ControlKind::Button | ControlKind::CheckBox | ControlKind::OptionButton => {
+        ControlKind::CheckBox | ControlKind::OptionButton => {
+            // A small box or circle on the left, the caption to its right; 3-D adds a shade.
+            let side = (13.0 * z).min(r.height() - 2.0).max(4.0);
+            let mark = Rect::from_min_size(pos2(r.left() + 3.0 * z, r.center().y - side / 2.0), vec2(side, side));
+            let fill = if look.pressed == Some(Part::Button) { t.sheet_control_pressed } else { t.sheet_control_bg };
+            let ink = t.sheet_control_text;
+            if c.kind == ControlKind::CheckBox {
+                clip.rect_filled(mark, 1.0, fill);
+                clip.rect_stroke(mark, 1.0, border, StrokeKind::Inside);
+                if c.three_d {
+                    clip.rect_stroke(mark.shrink(1.0), 0.0, Stroke::new(1.0, t.sheet_control_hover), StrokeKind::Inside);
+                }
+                match c.value {
+                    1 => {
+                        let (l, w) = (mark.left(), mark.width());
+                        let tick = vec![
+                            pos2(l + w * 0.2, mark.top() + w * 0.52),
+                            pos2(l + w * 0.42, mark.top() + w * 0.74),
+                            pos2(l + w * 0.8, mark.top() + w * 0.28),
+                        ];
+                        clip.add(PathShape::line(tick, Stroke::new((1.8 * z).max(1.0), ink)));
+                    }
+                    2 => {
+                        clip.rect_filled(mark.shrink(side * 0.25), 0.0, ink);
+                    }
+                    _ => {}
+                }
+            } else {
+                let radius = side / 2.0;
+                clip.circle_filled(mark.center(), radius, fill);
+                clip.circle_stroke(mark.center(), radius - 0.5, border);
+                if c.three_d {
+                    clip.circle_stroke(mark.center(), (radius - 1.5).max(0.5), Stroke::new(1.0, t.sheet_control_hover));
+                }
+                if c.value == 1 {
+                    clip.circle_filled(mark.center(), radius * 0.45, ink);
+                }
+            }
+            let left = mark.right() + 4.0 * z;
+            let g = clip.layout_no_wrap(c.text.clone(), theme::ui_font(12.0 * z), ink);
+            let at = pos2(left, r.center().y - g.size().y / 2.0);
+            clip.with_clip_rect(r.intersect(clip.clip_rect())).galley(at, g, ink);
+        }
+        ControlKind::Button => {
             let fill = bg(Part::Button);
             clip.rect_filled(r, 3.0 * z, fill);
             clip.rect_stroke(r, 3.0 * z, border, StrokeKind::Inside);
@@ -357,11 +401,14 @@ fn step_part(app: &mut SheetApp, c: &FormControl, part: Part) {
     };
 }
 
-/// Whether the focused control is a button. Space presses one, so the space it types must not
-/// start a cell edit; a slider or spin button doesn't take Space, and its space reaches the grid
-/// like any other character.
+/// Whether the focused control is a button, check box or option button. Space presses one, so
+/// the space it types must not start a cell edit; a slider or spin button doesn't take Space, and
+/// its space reaches the grid like any other character.
 pub fn focused_button(app: &SheetApp, sh: &Sheet) -> bool {
-    app.grid.focused_control.and_then(|id| find(sh, id)).is_some_and(|c| c.kind == ControlKind::Button)
+    app.grid
+        .focused_control
+        .and_then(|id| find(sh, id))
+        .is_some_and(|c| matches!(c.kind, ControlKind::Button | ControlKind::CheckBox | ControlKind::OptionButton))
 }
 
 /// The grid takes a key while a control is focused: a button gives the keyboard back, so a later
@@ -374,7 +421,7 @@ pub fn key_to_grid(app: &mut SheetApp, sh: &Sheet) {
 }
 
 /// Keys for the focused control: arrows move by a step, Page Up and Page Down by a page, Home and
-/// End to the ends; Space or Enter presses a button. True when the key was used. `repeat` is a key
+/// End to the ends; Space or Enter presses a button; Space clicks a check box or option button. True when the key was used. `repeat` is a key
 /// held down: it steps a slider or spin button again, but a button runs once per press.
 pub fn key(app: &mut SheetApp, sh: &Sheet, key: egui::Key, repeat: bool) -> bool {
     use egui::Key;
@@ -393,7 +440,13 @@ pub fn key(app: &mut SheetApp, sh: &Sheet, key: egui::Key, repeat: bool) -> bool
             }
             true
         }
-        (ControlKind::Button, _) => false,
+        (ControlKind::CheckBox | ControlKind::OptionButton, Key::Space) => {
+            if !repeat {
+                app.press_button(c.id);
+            }
+            true
+        }
+        (ControlKind::Button | ControlKind::CheckBox | ControlKind::OptionButton, _) => false,
         // A spin button's up arrow adds; a slider's minimum is at its left or top.
         (ControlKind::Spin, Key::ArrowUp | Key::ArrowRight) | (ControlKind::Slider, Key::ArrowDown | Key::ArrowRight) => {
             app.control_nudge(c.id, 1, false)

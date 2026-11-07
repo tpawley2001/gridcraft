@@ -279,6 +279,8 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
     ("insert.button", "Developer", "Controls", "Button (Form Control)"),
     ("insert.spinButton", "Developer", "Controls", "Spin Button (Form Control)"),
     ("insert.slider", "Developer", "Controls", "Scroll Bar (Form Control)"),
+    ("insert.formCheckBox", "Developer", "Controls", "Check Box (Form Control)"),
+    ("insert.optionButton", "Developer", "Controls", "Option Button (Form Control)"),
     ("control.format", "Developer", "Controls", "Properties"),
     // Table Design
     ("table.rename", "Table Design", "Properties", "Table Name"),

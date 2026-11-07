@@ -5858,6 +5858,7 @@ fn a_script_cannot_switch_windows() {
 mod controls;
 mod equation;
 mod filter_date_tests;
+mod form_check_option;
 mod macros;
 mod objects;
 mod python_cells;

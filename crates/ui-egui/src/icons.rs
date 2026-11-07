@@ -114,6 +114,8 @@ pub enum Icon {
     Slider,
     /// A form spin button.
     Spin,
+    /// A form option button: a ring with a dot.
+    OptionButton,
     Function,
     Name,
     Trace,
@@ -556,6 +558,10 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, c: Color32, pal: &Palette) {
             g.stroke(&[(4.0, 8.0), (12.0, 8.0)], c);
             g.poly(&[(8.0, 3.2), (10.5, 6.3), (5.5, 6.3)], c);
             g.poly(&[(5.5, 9.7), (10.5, 9.7), (8.0, 12.8)], c);
+        }
+        Icon::OptionButton => {
+            g.circle(8.0, 8.0, 5.5, Some(paper), Some(c));
+            g.circle(8.0, 8.0, 2.4, Some(blue), None);
         }
         Icon::Fx => g.text(8.0, 8.0, "fx", 10.5, c, (false, true)),
         Icon::Plus => {
