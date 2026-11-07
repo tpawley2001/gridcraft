@@ -670,9 +670,9 @@ impl Embedded {
     }
 
     /// A BIFF5 Obj record: its fixed 34-byte header carries the object type and the anchor, and a
-    /// text box's text follows its own fields. Text boxes, rectangles and pictures (whose image is
-    /// in the IMDATA record that follows) are imported; every other kind keeps the report the
-    /// BIFF8 path gives an object without a drawing shape.
+    /// text box's text follows its own fields. Text boxes, rectangles, lines and pictures (whose
+    /// image is in the IMDATA record that follows) are imported; every other kind keeps the report
+    /// the BIFF8 path gives an object without a drawing shape.
     fn obj_biff5(&mut self, data: &[u8], b5: &Biff5, report: &mut ReadReport) {
         // Only the IMDATA record right after a picture Obj holds its image.
         self.pending_biff5_picture = None;
@@ -681,6 +681,27 @@ impl Embedded {
             return;
         };
         match ot {
+            OT_LINE => {
+                let Some(anchor) = biff5_anchor(data) else {
+                    report.warn("Shapes in .xls files are not imported yet.");
+                    return;
+                };
+                // icv, lns, lnw, fAuto, the arrow word and iqu follow the header.
+                let Some([icv, lns, _lnw, f_auto, arrow_lo, arrow_hi, _iqu, _]) = data.get(34..42).and_then(|f| <[u8; 8]>::try_from(f).ok()) else {
+                    report.warn("Shapes in .xls files are not imported yet.");
+                    return;
+                };
+                let mut props = ShapeProps::default();
+                // A palette colour (icv 8..=63) unless the line format is automatic.
+                if f_auto & 1 == 0 && (8..=63).contains(&icv) {
+                    props.line_color = Some(0x0800_0000 | u32::from(icv));
+                }
+                props.no_line = lns == 5;
+                let arrow_word = u16::from_le_bytes([arrow_lo, arrow_hi]);
+                let kind = if arrow_word & 0x000F != 0 { ShapeKind::Arrow } else { ShapeKind::Line };
+                // iqu (the direction quadrant) maps to the shape's flips once the model has them.
+                self.shapes.push((Place::Cells(anchor), props, kind, None));
+            }
             OT_TEXT_BOX => {
                 let Some(anchor) = biff5_anchor(data) else {
                     report.warn("Shapes in .xls files are not imported yet.");
