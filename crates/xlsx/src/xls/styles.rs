@@ -1,6 +1,8 @@
 //! Cell formatting in a BIFF8 Workbook stream, from [MS-XLS]: Font (2.4.122), XF (2.4.353) with
 //! CellXF (2.5.91), Palette (2.4.188), Style (2.4.269), XFExt (2.4.355) with FullColorExt
-//! (2.5.155) and Theme (2.4.326). Every XF is
+//! (2.5.155) and Theme (2.4.326). A BIFF5 (Excel 5.0/95) Font differs only in its 8-bit name,
+//! and its 16-byte XF packs the same fields differently; it is translated into the BIFF8
+//! CellXF layout so both versions share one decoder. Every XF is
 //! decoded on its own: a cell XF stores its complete formatting (the fAtr* bits only say whether
 //! later changes to the parent style propagate), so nothing is inherited from `ixfParent`.
 
@@ -122,10 +124,23 @@ pub(super) struct StyleRecords {
 impl StyleRecords {
     /// A Font record. The colour is resolved later, once the palette is known.
     pub(super) fn font(&mut self, c: &mut Cursor<'_, '_>) {
+        self.push_font(c, |c| c.short_string().ok());
+    }
+
+    /// A BIFF5 Font record: the BIFF8 fields, then a 1-byte count and 8-bit characters that
+    /// `decode` turns into text.
+    pub(super) fn font_biff5(&mut self, c: &mut Cursor<'_, '_>, decode: impl Fn(&[u8]) -> String) {
+        self.push_font(c, |c| {
+            let cch = usize::from(c.u8().ok()?);
+            Some(decode(&c.bytes(cch).ok()?))
+        });
+    }
+
+    fn push_font(&mut self, c: &mut Cursor<'_, '_>, name: impl FnOnce(&mut Cursor<'_, '_>) -> Option<String>) {
         if self.fonts.len() >= MAX_FONTS {
             return;
         }
-        match read_font(c) {
+        match read_font(c, name) {
             Some((font, icv)) => {
                 self.fonts.push(font);
                 self.font_colors.push(icv);
@@ -173,20 +188,26 @@ impl StyleRecords {
         self.xfs.push(xf);
     }
 
-    /// A BIFF5 XF record: only the number format and the protection/style flags are read (the
-    /// font, alignment, borders and fill use BIFF5 layouts that aren't imported).
+    /// A BIFF5 XF record (16 bytes), translated into the BIFF8 CellXF layout. A short record
+    /// keeps the font, format and flags it has.
     pub(super) fn xf_biff5(&mut self, c: &mut Cursor<'_, '_>, max: usize) {
         if self.xfs.len() >= max {
             return;
         }
         let mut xf = Xf { flags: 1, ..Xf::default() };
-        let head = (|| {
-            let _ifnt = c.u16().ok()?;
-            Some((c.u16().ok()?, c.u16().ok()?))
-        })();
-        if let Some((ifmt, flags)) = head {
+        let head = (|| Some((c.u16().ok()?, c.u16().ok()?, c.u16().ok()?)))();
+        if let Some((ifnt, ifmt, flags)) = head {
+            xf.ifnt = ifnt;
             xf.ifmt = ifmt;
             xf.flags = flags;
+            let body = (|| Some((c.u16().ok()?, c.u32().ok()?, c.u32().ok()?)))();
+            if let Some((align, fill_bottom, sides)) = body {
+                xf.data = biff5_xf_data(align, fill_bottom, sides);
+                xf.complete = true;
+            }
+        }
+        if !xf.complete {
+            self.short = true;
         }
         self.xfs.push(xf);
     }
@@ -389,7 +410,7 @@ fn full_color(kind: u16, tint: i16, value: u32) -> Option<ExtColor> {
 }
 
 /// Font record fields up to the name; `None` if the record is too short for them.
-fn read_font(c: &mut Cursor<'_, '_>) -> Option<(Font, u16)> {
+fn read_font(c: &mut Cursor<'_, '_>, name: impl FnOnce(&mut Cursor<'_, '_>) -> Option<String>) -> Option<(Font, u16)> {
     let height = c.u16().ok()?;
     let flags = c.u16().ok()?;
     let icv = c.u16().ok()?;
@@ -399,7 +420,7 @@ fn read_font(c: &mut Cursor<'_, '_>) -> Option<(Font, u16)> {
     let family = c.u8().ok()?;
     let charset = c.u8().ok()?;
     c.skip(1).ok()?; // reserved
-    let name = c.short_string().ok()?;
+    let name = name(c)?;
     let mut f = Font::default();
     let name: String = name.chars().filter(|ch| *ch != '\0').take(255).collect();
     if !name.trim().is_empty() {
@@ -427,6 +448,39 @@ fn read_font(c: &mut Cursor<'_, '_>) -> Option<(Font, u16)> {
     f.family = Some(family);
     f.charset = Some(charset);
     Some((f, icv))
+}
+
+/// The BIFF8 CellXF bytes (offsets 6-19 of a BIFF8 XF) holding a BIFF5 XF's alignment, fill and
+/// borders. `align` is offset 6 (alignment, wrap, orientation), `fill_bottom` offset 8 (fill
+/// colours and pattern, bottom border) and `sides` offset 12 (top, left and right borders).
+fn biff5_xf_data(align: u16, fill_bottom: u32, sides: u32) -> [u8; 14] {
+    let mut d = [0u8; 14];
+    // Horizontal alignment, wrap, vertical alignment and fJustLast share the BIFF8 bit layout.
+    d[0] = (align & 0x00FF) as u8;
+    d[1] = match (align >> 8) & 0x03 {
+        1 => 255,
+        2 => 90,
+        3 => 180,
+        _ => 0,
+    };
+    let fore = fill_bottom & 0x7F;
+    let back = (fill_bottom >> 7) & 0x7F;
+    let fls = (fill_bottom >> 16) & 0x3F;
+    let dg_bottom = (fill_bottom >> 22) & 0x07;
+    let icv_bottom = (fill_bottom >> 25) & 0x7F;
+    let dg_top = sides & 0x07;
+    let dg_left = (sides >> 3) & 0x07;
+    let dg_right = (sides >> 6) & 0x07;
+    let icv_top = (sides >> 9) & 0x7F;
+    let icv_left = (sides >> 16) & 0x7F;
+    let icv_right = (sides >> 23) & 0x7F;
+    let b1 = dg_left | dg_right << 4 | dg_top << 8 | dg_bottom << 12 | icv_left << 16 | icv_right << 23;
+    let b2 = icv_top | icv_bottom << 7 | fls << 26;
+    let fill = (fore | back << 7) as u16;
+    d[4..8].copy_from_slice(&b1.to_le_bytes());
+    d[8..12].copy_from_slice(&b2.to_le_bytes());
+    d[12..14].copy_from_slice(&fill.to_le_bytes());
+    d
 }
 
 /// A colour index in an XF (IcvXF) or Font (IcvFont): 0-63 from the colour table, the system
