@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use gridcraft_core::CellRef;
 use gridcraft_core::color::INDEXED;
+use gridcraft_formula::{Expr, RefKind, Reference, SheetSel};
 use gridcraft_model::{
     Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, ControlKind, FormControl, GeometryPath, Image, LegendPos,
     Orientation, PathCommand, PreservedPart, PreservedRel, PreservedSheet, PrintSettings, Series, Shape, ShapeFormat, ShapeGeometry, ShapeKind,
@@ -105,8 +106,15 @@ const POLY_UNIT: i64 = 0x4000;
 /// Form controls: button, check box, option button, edit box, label, spinner, scroll bar, list,
 /// group box and drop-down (an AutoFilter arrow is a drop-down too).
 const OT_FORM_CONTROLS: [u16; 10] = [0x0007, 0x000B, 0x000C, 0x000D, 0x000E, 0x0010, 0x0011, 0x0012, 0x0013, 0x0014];
-/// A button ([MS-XLS] 2.5.152 FtCmo `ot`), the one form control imported.
+/// The form controls imported ([MS-XLS] 2.5.143 FtCmo `ot`): button, check box, option button,
+/// spin button and scroll bar.
 const OT_BUTTON: u16 = 0x0007;
+const OT_CHECK_BOX: u16 = 0x000B;
+const OT_OPTION_BUTTON: u16 = 0x000C;
+const OT_SPIN: u16 = 0x0010;
+const OT_SCROLL_BAR: u16 = 0x0011;
+/// FtCmo `fPrint` ([MS-XLS] 2.5.143).
+const F_PRINT: u16 = 0x0010;
 /// FtCmo `fUIObj` ([MS-XLS] 2.5.143): an object the application created itself, such as the
 /// drop-down arrow of an AutoFilter or of a list validation. It is not a user form control.
 const F_UI_OBJ: u16 = 0x0100;
@@ -375,10 +383,12 @@ struct PendingPolygon {
     cpt: u16,
 }
 
-/// A button, before its TxO record (if any) has been read.
+/// A form control, before its TxO record (if any) has been read. Its linked cell is resolved
+/// against the sheet's name when the sheet is finished.
 struct PendingButton {
     anchor: Place,
-    locked: bool,
+    control: FormControl,
+    link: Option<Reference>,
 }
 
 /// The DrawingML preset (ECMA-376 Part 1 §20.1.10.56 ST_ShapeType) of each Office Art shape type
@@ -580,7 +590,7 @@ pub(super) struct Embedded {
     pictures: Vec<(Place, ShapeProps)>,
     text_boxes: Vec<(Place, ShapeProps, Text)>,
     shapes: Vec<(Place, ShapeProps, ShapeKind, Option<Text>)>,
-    buttons: Vec<(Place, bool, Option<Text>)>,
+    buttons: Vec<PendingButton>,
     /// The anchor and name of the BIFF5 picture Obj whose IMDATA record comes next.
     pending_biff5_picture: Option<(ClientAnchor, Option<String>)>,
     /// BIFF5 pictures: anchor, name and PNG bytes.
@@ -656,8 +666,8 @@ impl Embedded {
         if let Some(PendingShape { anchor, props, kind }) = self.pending_shape.take() {
             self.shapes.push((anchor, props, kind, None));
         }
-        if let Some(PendingButton { anchor, locked }) = self.pending_button.take() {
-            self.buttons.push((anchor, locked, None));
+        if let Some(button) = self.pending_button.take() {
+            self.buttons.push(button);
         }
     }
 
@@ -665,7 +675,7 @@ impl Embedded {
     /// other form controls and objects are reported. An object the application created itself
     /// (fUIObj: an AutoFilter or validation drop-down arrow) is skipped silently. A BIFF5
     /// workbook's Obj records carry their own anchor and text (`biff5` is its code page).
-    pub(super) fn obj(&mut self, rec: &Record<'_>, biff5: Option<&Biff5>, report: &mut ReadReport) {
+    pub(super) fn obj(&mut self, rec: &Record<'_>, biff5: Option<&Biff5>, links: &Links, report: &mut ReadReport) {
         self.flush_shape();
         if let Some(b5) = biff5 {
             self.obj_biff5(&rec.parts.concat(), b5, report);
@@ -697,7 +707,18 @@ impl Embedded {
             Some(OT_BUTTON) => {
                 // A button without its drawing shape has no anchor to place it with.
                 if let Some((anchor, _)) = anchor {
-                    self.pending_button = Some(PendingButton { anchor, locked: flags & F_LOCKED != 0 });
+                    let control = FormControl { kind: ControlKind::Button, locked: flags & F_LOCKED != 0, ..FormControl::default() };
+                    self.pending_button = Some(PendingButton { anchor, control, link: None });
+                } else {
+                    report.warn("Form controls in .xls files are not imported yet.");
+                }
+            }
+            Some(ot @ (OT_CHECK_BOX | OT_OPTION_BUTTON | OT_SPIN | OT_SCROLL_BAR)) => {
+                // A control without its drawing shape has no anchor to place it with.
+                if let Some((anchor, _)) = anchor {
+                    let data = rec.parts.concat();
+                    let (control, link) = form_control(ot, flags, &data, links);
+                    self.pending_button = Some(PendingButton { anchor, control, link });
                 } else {
                     report.warn("Form controls in .xls files are not imported yet.");
                 }
@@ -821,8 +842,12 @@ impl Embedded {
         } else if let Some(PendingShape { anchor, props, kind }) = self.pending_shape.take() {
             // A line has no text of its own; its TxO, if any, is ignored.
             self.shapes.push((anchor, props, kind, if kind == ShapeKind::Line || kind == ShapeKind::Arrow { None } else { text }));
-        } else if let Some(PendingButton { anchor, locked }) = self.pending_button.take() {
-            self.buttons.push((anchor, locked, text));
+        } else if let Some(mut button) = self.pending_button.take() {
+            // Spin buttons and scroll bars have no caption.
+            if matches!(button.control.kind, ControlKind::Button | ControlKind::CheckBox | ControlKind::OptionButton) {
+                button.control.text = text.map_or(String::new(), |t| t.text);
+            }
+            self.buttons.push(button);
         }
     }
 
@@ -964,16 +989,110 @@ impl Embedded {
         }
         // Ids follow the controls the sheet already has (a kept `.xlsx` control's id is reused).
         let first = sheet.controls.iter().map(|c| c.id).max().unwrap_or(0);
-        for (i, (a, locked, text)) in self.buttons.into_iter().enumerate() {
+        for (i, PendingButton { anchor, control, link }) in self.buttons.into_iter().enumerate() {
+            let link = link.map(|mut r| {
+                // A reference to the control's own sheet is written without the sheet.
+                if r.sheet_name() == Some(sheet.name.as_str()) {
+                    r.sheet = SheetSel::Current;
+                }
+                gridcraft_formula::print(&Expr::Ref(r))
+            });
             sheet.controls.push(FormControl {
                 id: first.saturating_add(u32::try_from(i).unwrap_or(u32::MAX)).saturating_add(1),
-                kind: ControlKind::Button,
-                anchor: place_at(sheet, &a),
-                text: text.map_or(String::new(), |t| t.text),
-                locked,
-                ..FormControl::default()
+                anchor: place_at(sheet, &anchor),
+                link,
+                ..control
             });
         }
+    }
+}
+
+/// Obj subrecord types ([MS-XLS] 2.4.181): FtEnd, FtSbs, the scroll bar's ObjLinkFmla, FtRboData,
+/// FtCblsData, FtLbsData and the check box's ObjLinkFmla.
+const FT_END: u16 = 0x0000;
+const FT_SBS: u16 = 0x000C;
+const FT_SBS_FMLA: u16 = 0x000E;
+const FT_CBLS_DATA: u16 = 0x0012;
+const FT_LBS_DATA: u16 = 0x0013;
+const FT_CBLS_FMLA: u16 = 0x0014;
+/// FtSbs `fNo3d` ([MS-XLS] 2.5.163).
+const SBS_NO_3D: u16 = 0x0008;
+
+/// A BIFF8 check box, option button, spin button or scroll bar Obj (`data`, starting with its
+/// FtCmo) as a form control (without its anchor and caption) and its linked cell. A field the
+/// record doesn't hold keeps the default.
+fn form_control(ot: u16, flags: u16, data: &[u8], links: &Links) -> (FormControl, Option<Reference>) {
+    let kind = match ot {
+        OT_CHECK_BOX => ControlKind::CheckBox,
+        OT_OPTION_BUTTON => ControlKind::OptionButton,
+        OT_SPIN => ControlKind::Spin,
+        _ => ControlKind::Slider,
+    };
+    let mut c = FormControl { kind, locked: flags & F_LOCKED != 0, print: flags & F_PRINT != 0, ..FormControl::default() };
+    let mut link = None;
+    // Subrecords follow FtCmo (4 + 18 bytes): ft, cb, then cb bytes.
+    let mut at = 22usize;
+    while let (Some(ft), Some(cb)) = (u16_at(data, at), u16_at(data, at.saturating_add(2))) {
+        // FtLbsData's cb isn't reliable; nothing after it is read.
+        if ft == FT_END || ft == FT_LBS_DATA {
+            break;
+        }
+        let start = at.saturating_add(4);
+        let end = start.saturating_add(usize::from(cb));
+        let body = data.get(start..end.min(data.len())).unwrap_or_default();
+        let field = |i: usize| u16_at(body, i);
+        let positive = |i: usize| field(i).map(|v| u32::try_from(v as i16).unwrap_or(0));
+        match ft {
+            FT_SBS => {
+                // unused (4), iVal, iMin, iMax, dInc, dPage, fHoriz, dxScroll, flags.
+                let set = |slot: &mut u32, v: Option<u32>| {
+                    if let Some(v) = v {
+                        *slot = v;
+                    }
+                };
+                set(&mut c.value, positive(4));
+                set(&mut c.min, positive(6));
+                set(&mut c.max, positive(8));
+                set(&mut c.step, positive(10));
+                set(&mut c.page, positive(12));
+                if let Some(h) = field(14) {
+                    c.horizontal = h == 1;
+                }
+                if let Some(f) = field(18) {
+                    c.three_d = f & SBS_NO_3D == 0;
+                }
+            }
+            FT_SBS_FMLA | FT_CBLS_FMLA => link = linked_cell(body, links),
+            FT_CBLS_DATA => {
+                if let Some(checked) = field(0) {
+                    c.value = match kind {
+                        ControlKind::OptionButton => u32::from(checked == 1),
+                        _ => u32::from(checked),
+                    };
+                }
+                if let Some(f) = field(6) {
+                    c.three_d = f & 0x0001 == 0;
+                }
+            }
+            _ => {}
+        }
+        at = end;
+    }
+    (c, link)
+}
+
+/// The cell an ObjLinkFmla ([MS-XLS] 2.5.200) links to. `body` is its ObjFmla after cbFmla (the
+/// subrecord's size): an ObjectParsedFormula (cce in the low 15 bits, four unused bytes, rgce)
+/// holding one PtgRef or PtgRef3d. Anything else links nowhere.
+fn linked_cell(body: &[u8], links: &Links) -> Option<Reference> {
+    let cce = usize::from(u16_at(body, 0)? & 0x7FFF);
+    let rgce = body.get(6..6usize.checked_add(cce)?)?;
+    if !matches!(rgce.first(), Some(0x24 | 0x44 | 0x64 | 0x3A | 0x5A | 0x7A)) {
+        return None;
+    }
+    match decode_version(rgce, &[], CellRef::new(0, 0), Mode::Cell, links, None).ok()? {
+        Expr::Ref(r) if matches!(r.kind, RefKind::Cell(_)) && !matches!(r.sheet, SheetSel::Span(..)) => Some(r),
+        _ => None,
     }
 }
 

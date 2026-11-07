@@ -1525,7 +1525,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         }
         0x001C => report.warn("Cell comments in .xls files are not imported yet."),
         0x00EC => st.charts.drawing(rec),
-        0x005D => st.charts.obj(rec, st.g.biff5.as_ref(), report),
+        0x005D => st.charts.obj(rec, st.g.biff5.as_ref(), &st.g.links, report),
         0x01B6 => st.charts.txo(rec, report),
         // IMDATA: a BIFF5 picture's image (BIFF8 pictures are in the drawing's blip store).
         0x007F => st.charts.imdata(rec, st.g.biff5.is_some()),
