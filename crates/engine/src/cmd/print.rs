@@ -447,4 +447,6 @@ fn page_setup(s: &mut Session, p: &Json) -> Result<Json> {
 }
 
 #[cfg(test)]
+mod shape_outline_tests;
+#[cfg(test)]
 mod tests;
