@@ -26,11 +26,12 @@ pub fn is_button(app: &SheetApp, id: u32) -> bool {
     app.session.active().and_then(|d| d.wb.active()).is_some_and(|sh| sh.controls.iter().any(|c| c.id == id && c.kind == ControlKind::Button))
 }
 
-fn insert_id(kind: ControlKind) -> &'static str {
+fn insert_id(kind: ControlKind) -> Option<&'static str> {
     match kind {
-        ControlKind::Button => "insert.button",
-        ControlKind::Slider => "insert.slider",
-        ControlKind::Spin => "insert.spinButton",
+        ControlKind::Button => Some("insert.button"),
+        ControlKind::Slider => Some("insert.slider"),
+        ControlKind::Spin => Some("insert.spinButton"),
+        ControlKind::CheckBox | ControlKind::OptionButton => None,
     }
 }
 
@@ -86,7 +87,8 @@ pub fn place(app: &mut SheetApp, ui: &Ui, resp: &egui::Response, geo: &Geo, sh: 
             params["horizontal"] = json!(rect.width() >= rect.height());
         }
     }
-    match app.run(insert_id(kind), params) {
+    let Some(cmd) = insert_id(kind) else { return true };
+    match app.run(cmd, params) {
         Ok(v) => {
             if let Some(id) = v["control"].as_u64().and_then(|id| u32::try_from(id).ok()) {
                 app.selected_object = Some(ObjRef::new(ObjKind::Control, id));
@@ -439,7 +441,7 @@ fn assign(app: &mut SheetApp, d: &Dialog) -> bool {
 pub fn open_format(app: &SheetApp, params: &Json) -> Option<Dialog> {
     let id = params.get("id").and_then(Json::as_u64).and_then(|i| u32::try_from(i).ok())?;
     let c = control(app, id)?;
-    let text_only = params.get("textOnly").and_then(Json::as_bool) == Some(true) && c.kind == ControlKind::Button;
+    let text_only = params.get("textOnly").and_then(Json::as_bool) == Some(true) && !c.kind.is_number();
     let v = json!({
         "id": id,
         "textOnly": text_only,
@@ -473,7 +475,7 @@ pub fn format_params(app: &SheetApp, d: &Dialog) -> Result<Json, String> {
         return Ok(json!({"id": id, "text": val(d, "text")}));
     }
     let mut out = json!({"id": id, "name": val(d, "name"), "print": flag("print"), "locked": flag("locked")});
-    if c.kind == ControlKind::Button {
+    if !c.kind.is_number() {
         out["text"] = json!(val(d, "text"));
         return Ok(out);
     }
@@ -510,7 +512,7 @@ pub fn format_dialog(app: &mut SheetApp, ui: &mut Ui, d: &mut Dialog, open: &mut
         return;
     };
     let text_only = d.values.get("textOnly").and_then(Json::as_bool) == Some(true);
-    if c.kind == ControlKind::Button {
+    if !c.kind.is_number() {
         let mut text = val(d, "text");
         ui.label("Text:");
         ui.add(egui::TextEdit::multiline(&mut text).desired_rows(2).desired_width(f32::INFINITY).id_salt("control_text"));

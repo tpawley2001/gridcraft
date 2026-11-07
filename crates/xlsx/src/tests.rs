@@ -28,6 +28,7 @@ mod dxf_font_charset;
 mod encrypted_tests;
 mod equation_tests;
 mod fixtures;
+mod form_check_option_controls_tests;
 mod google_sheets_dummy;
 mod group_passthrough;
 mod hidden_drawings;

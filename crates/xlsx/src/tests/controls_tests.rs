@@ -269,8 +269,8 @@ fn an_unsupported_control_beside_a_modelled_one_in_one_alternate_content_is_kept
     let vml_out = text(&mut pkg, "xl/drawings/vmlDrawing1.vml");
     assert!(vml_out.contains("_x0000_s1026") && vml_out.contains("ObjectType=\"List\""), "the list box's shape is kept: {vml_out}");
     assert_eq!(vml_out.matches("ObjectType=\"Scroll\"").count(), 1, "{vml_out}");
-    // Part names come back lower-cased.
-    let props: Vec<String> = pkg.names().into_iter().filter(|n| n.starts_with("xl/ctrlprops/")).collect();
+    // Part names keep their case; compare without it.
+    let props: Vec<String> = pkg.names().into_iter().filter(|n| n.to_ascii_lowercase().starts_with("xl/ctrlprops/")).collect();
     assert_eq!(props.len(), 2, "ours and the kept one: {props:?}");
     assert!(props.iter().any(|n| text(&mut pkg, n).contains("objectType=\"List\"")), "the list box's properties part survives: {props:?}");
     // Read back: the one modelled control and the kept one.
@@ -577,8 +577,8 @@ fn controls_naming_one_properties_part_read_it_once() {
     assert_eq!(sh.comments.len(), 1, "a part read after the controls still reads: {:?}", report.warnings);
 }
 
-/// A legacy VML drawing with a button (`1025`, modelled), a check box (`1026`) and an option
-/// button (`1027`, with a picture through the drawing's own relationship) that only the drawing
+/// A legacy VML drawing with a button (`1025`, modelled), a drop-down (`1026`) and a list
+/// box (`1027`, with a picture through the drawing's own relationship) that only the drawing
 /// lists, plus `note` (a note shape for A1 whose client data carries that `ObjectType` attribute,
 /// with its comments part) when given. `listed`: the sheet's
 /// `<controls>` lists the button.
@@ -604,8 +604,8 @@ fn vml_only_others(listed: bool, button: bool, note: Option<&str>) -> Vec<u8> {
     if button {
         shapes.push_str(r##"<v:shape id="_x0000_s1025" type="#_x0000_t201"><v:textbox><div>Go</div></v:textbox><x:ClientData ObjectType="Button"><x:Anchor>2, 0, 3, 0, 4, 0, 5, 0</x:Anchor><x:FmlaMacro>[0]!Go</x:FmlaMacro></x:ClientData></v:shape>"##);
     }
-    shapes.push_str(r##"<v:shape id="_x0000_s1026" type="#_x0000_t201"><v:textbox><div>Paid</div></v:textbox><x:ClientData ObjectType="Checkbox"><x:Anchor>2, 0, 7, 0, 4, 0, 8, 0</x:Anchor><x:FmlaLink>$B$7</x:FmlaLink><x:Checked>1</x:Checked></x:ClientData></v:shape>"##);
-    shapes.push_str(r##"<v:shape id="_x0000_s1027" type="#_x0000_t201"><v:imagedata o:relid="rId1" o:title=""/><x:ClientData ObjectType="Radio"><x:Anchor>2, 0, 9, 0, 4, 0, 10, 0</x:Anchor><x:FmlaLink>$B$9</x:FmlaLink></x:ClientData></v:shape>"##);
+    shapes.push_str(r##"<v:shape id="_x0000_s1026" type="#_x0000_t201"><v:textbox><div>Paid</div></v:textbox><x:ClientData ObjectType="Drop"><x:Anchor>2, 0, 7, 0, 4, 0, 8, 0</x:Anchor><x:FmlaLink>$B$7</x:FmlaLink></x:ClientData></v:shape>"##);
+    shapes.push_str(r##"<v:shape id="_x0000_s1027" type="#_x0000_t201"><v:imagedata o:relid="rId1" o:title=""/><x:ClientData ObjectType="List"><x:Anchor>2, 0, 9, 0, 4, 0, 10, 0</x:Anchor><x:FmlaLink>$B$9</x:FmlaLink></x:ClientData></v:shape>"##);
     let vml = format!(
         r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout>{shapes}</xml>"#
     );
@@ -644,7 +644,7 @@ fn vml_only_others(listed: bool, button: bool, note: Option<&str>) -> Vec<u8> {
     super::make_zip(&files.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect::<Vec<_>>())
 }
 
-/// Checks a saved package keeps the check box and option button shapes once each, in the sheet's
+/// Checks a saved package keeps the drop-down and list box shapes once each, in the sheet's
 /// one VML drawing, with that drawing's one relationship to its one picture; returns the drawing.
 fn kept_vml_only_others(out: &[u8]) -> String {
     let mut pkg = Package::open(out).unwrap();
@@ -657,18 +657,18 @@ fn kept_vml_only_others(out: &[u8]) -> String {
     assert_eq!(vmls.len(), 1, "{names:?}");
     let vml_name = vmls[0].clone();
     let vml = text(&mut pkg, &vml_name);
-    assert_eq!(vml.matches("ObjectType=\"Checkbox\"").count(), 1, "the check box is kept once: {vml}");
-    assert_eq!(vml.matches("ObjectType=\"Radio\"").count(), 1, "the option button is kept once: {vml}");
+    assert_eq!(vml.matches("ObjectType=\"Drop\"").count(), 1, "the drop-down is kept once: {vml}");
+    assert_eq!(vml.matches("ObjectType=\"List\"").count(), 1, "the list box is kept once: {vml}");
     let (dir, file) = vml_name.rsplit_once('/').unwrap();
     let vml_rels = text(&mut pkg, &format!("{dir}/_rels/{file}.rels"));
     assert_eq!(vml_rels.matches("<Relationship ").count(), 1, "{vml_rels}");
     let media: Vec<&String> = names.iter().filter(|n| n.starts_with("xl/media/")).collect();
-    assert_eq!(media.len(), 1, "the option button's picture once: {names:?}");
+    assert_eq!(media.len(), 1, "the list box's picture once: {names:?}");
     vml
 }
 
-/// The sheet's `<controls>` lists only a button, which is modelled; a check box and an option
-/// button in the same VML drawing have no worksheet entry. With the button's entry gone from the
+/// The sheet's `<controls>` lists only a button, which is modelled; a drop-down and a list
+/// box in the same VML drawing have no worksheet entry. With the button's entry gone from the
 /// kept content no `<controls>` element is left, but the drawing still holds the two, so it is
 /// kept: the save writes them beside the regenerated button, and they survive a second round trip.
 #[test]
@@ -693,7 +693,7 @@ fn vml_only_controls_survive_when_the_last_listed_control_is_modelled() {
     assert_eq!(vml.matches("ObjectType=\"Button\"").count(), 1, "{vml}");
 }
 
-/// A sheet whose only controls are a check box and an option button that only the VML drawing
+/// A sheet whose only controls are a drop-down and a list box that only the VML drawing
 /// lists (no `<controls>`, no notes, nothing modelled): the drawing is kept on its own.
 #[test]
 fn a_sheet_whose_only_controls_are_vml_only_and_unmodelled_keeps_them() {
@@ -710,8 +710,8 @@ fn a_sheet_whose_only_controls_are_vml_only_and_unmodelled_keeps_them() {
 }
 
 /// The same with a note in the drawing (one VML drawing for one comments part) and a VML-only
-/// button that is modelled: the note and the button are written from the model, the check box and
-/// option button stay, all in the one drawing.
+/// button that is modelled: the note and the button are written from the model, the drop-down and
+/// list box stay, all in the one drawing.
 #[test]
 fn vml_only_controls_beside_a_note_are_kept() {
     let bytes = vml_only_others(false, true, Some(r#"ObjectType="Note""#));
@@ -772,15 +772,15 @@ fn with_vml(shapes: &str) -> Vec<u8> {
     )
 }
 
-/// Text that reads like a note's `ObjectType` in a check box's caption or in another attribute of
-/// an option button doesn't make either a note: both are kept, and a modelled button with that
+/// Text that reads like a note's `ObjectType` in a drop-down's caption or in another attribute of
+/// a list box doesn't make either a note: both are kept, and a modelled button with that
 /// caption keeps it.
 #[test]
 fn a_control_whose_text_reads_like_a_note_object_type_is_kept() {
     let bytes = with_vml(concat!(
         r##"<v:shape id="_x0000_s1025" type="#_x0000_t201"><v:textbox><div>ObjectType="Note"</div></v:textbox><x:ClientData ObjectType="Button"><x:Anchor>2, 0, 3, 0, 4, 0, 5, 0</x:Anchor></x:ClientData></v:shape>"##,
-        r##"<v:shape id="_x0000_s1026" type="#_x0000_t201"><v:textbox><div>ObjectType="Note"</div></v:textbox><x:ClientData ObjectType="Checkbox"><x:Anchor>2, 0, 7, 0, 4, 0, 8, 0</x:Anchor><x:FmlaLink>$B$7</x:FmlaLink></x:ClientData></v:shape>"##,
-        r##"<v:shape id="_x0000_s1027" type="#_x0000_t201" alt="ObjectType='note'"><x:ClientData ObjectType="Radio"><x:Anchor>2, 0, 9, 0, 4, 0, 10, 0</x:Anchor></x:ClientData></v:shape>"##,
+        r##"<v:shape id="_x0000_s1026" type="#_x0000_t201"><v:textbox><div>ObjectType="Note"</div></v:textbox><x:ClientData ObjectType="Drop"><x:Anchor>2, 0, 7, 0, 4, 0, 8, 0</x:Anchor><x:FmlaLink>$B$7</x:FmlaLink></x:ClientData></v:shape>"##,
+        r##"<v:shape id="_x0000_s1027" type="#_x0000_t201" alt="ObjectType='note'"><x:ClientData ObjectType="List"><x:Anchor>2, 0, 9, 0, 4, 0, 10, 0</x:Anchor></x:ClientData></v:shape>"##,
     ));
     let (wb, report) = read_xlsx(&bytes).unwrap();
     let sh = wb.sheet(0).unwrap();
@@ -789,8 +789,8 @@ fn a_control_whose_text_reads_like_a_note_object_type_is_kept() {
     let mut out = write_xlsx(&wb).unwrap();
     for _ in 0..2 {
         let vml = only_vml(&out);
-        assert_eq!(vml.matches("ObjectType=\"Checkbox\"").count(), 1, "the check box is kept: {vml}");
-        assert_eq!(vml.matches("ObjectType=\"Radio\"").count(), 1, "the option button is kept: {vml}");
+        assert_eq!(vml.matches("ObjectType=\"Drop\"").count(), 1, "the drop-down is kept: {vml}");
+        assert_eq!(vml.matches("ObjectType=\"List\"").count(), 1, "the list box is kept: {vml}");
         assert_eq!(vml.matches("ObjectType=\"Button\"").count(), 1, "the button once: {vml}");
         assert_eq!(note_shapes(&vml), 0, "{vml}");
         let (back, _) = read_xlsx(&out).unwrap();
@@ -803,15 +803,15 @@ fn a_control_whose_text_reads_like_a_note_object_type_is_kept() {
 
 /// Kept VML leaves out the modelled controls by the number the reader gave them: the `id`, else
 /// the `o:spid`, wherever either comes in the shape's tag. A button whose `o:spid` comes before a
-/// different `id`, and one with a plain numeric `id`, are written once, from the model; a check
-/// box whose `o:spid` is a modelled button's number but whose `id` is its own is kept; a button
+/// different `id`, and one with a plain numeric `id`, are written once, from the model; a drop-down
+/// whose `o:spid` is a modelled button's number but whose `id` is its own is kept; a button
 /// with no number isn't modelled and is kept; notes are dropped whatever their numbers.
 #[test]
 fn kept_vml_leaves_out_modelled_controls_by_the_readers_shape_number() {
     let bytes = with_vml(concat!(
         r##"<v:shape o:spid="_x0000_s1030" id="_x0000_s1025" type="#_x0000_t201"><v:textbox><div>A</div></v:textbox><x:ClientData ObjectType="Button"><x:Anchor>2, 0, 1, 0, 4, 0, 2, 0</x:Anchor></x:ClientData></v:shape>"##,
         r##"<v:shape id="1026" o:spid="_x0000_s1031" type="#_x0000_t201"><v:textbox><div>B</div></v:textbox><x:ClientData ObjectType="Button"><x:Anchor>2, 0, 3, 0, 4, 0, 4, 0</x:Anchor></x:ClientData></v:shape>"##,
-        r##"<v:shape o:spid="_x0000_s1025" id="_x0000_s1027" type="#_x0000_t201"><v:textbox><div>Paid</div></v:textbox><x:ClientData ObjectType="Checkbox"><x:Anchor>2, 0, 5, 0, 4, 0, 6, 0</x:Anchor></x:ClientData></v:shape>"##,
+        r##"<v:shape o:spid="_x0000_s1025" id="_x0000_s1027" type="#_x0000_t201"><v:textbox><div>Paid</div></v:textbox><x:ClientData ObjectType="Drop"><x:Anchor>2, 0, 5, 0, 4, 0, 6, 0</x:Anchor></x:ClientData></v:shape>"##,
         r##"<v:shape id="Button 9" type="#_x0000_t201"><v:textbox><div>C</div></v:textbox><x:ClientData ObjectType="Button"><x:Anchor>2, 0, 7, 0, 4, 0, 8, 0</x:Anchor></x:ClientData></v:shape>"##,
         r##"<v:shape id="_x0000_s1028" o:spid="_x0000_s1040" type="#_x0000_t202"><x:ClientData ObjectType="Note"><x:Row>0</x:Row><x:Column>0</x:Column></x:ClientData></v:shape>"##,
         r##"<v:shape type="#_x0000_t202"><x:ClientData ObjectType="Note"><x:Row>1</x:Row><x:Column>0</x:Column></x:ClientData></v:shape>"##,
@@ -825,7 +825,7 @@ fn kept_vml_leaves_out_modelled_controls_by_the_readers_shape_number() {
         for caption in [">A</div>", ">B</div>", ">C</div>", ">Paid</div>"] {
             assert_eq!(vml.matches(caption).count(), 1, "each control once, kept or written: {caption} {vml}");
         }
-        assert_eq!(vml.matches("ObjectType=\"Checkbox\"").count(), 1, "the check box is kept: {vml}");
+        assert_eq!(vml.matches("ObjectType=\"Drop\"").count(), 1, "the drop-down is kept: {vml}");
         assert_eq!(note_shapes(&vml), 0, "{vml}");
         let (back, _) = read_xlsx(&out).unwrap();
         assert_eq!(back.sheet(0).unwrap().controls.len(), 2);

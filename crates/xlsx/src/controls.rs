@@ -1,4 +1,4 @@
-//! Form controls (buttons, scroll bars, spin buttons) in xlsx, from the published ECMA-376 and
+//! Form controls (buttons, scroll bars, spin buttons, check boxes, option buttons) in xlsx, from the published ECMA-376 and
 //! MS-XLSX formats. A control is written three ways, as spreadsheet applications expect:
 //!
 //! - a control properties part (`xl/ctrlProps/ctrlPropN.xml`, `formControlPr`) with its type,
@@ -8,8 +8,9 @@
 //! - a legacy VML shape with `x:ClientData`, in the sheet's VML drawing (shared with notes).
 //!
 //! Reading prefers the properties part and falls back to the VML. Values are clamped to the
-//! 0..30000 whole numbers sliders and spin buttons take. Controls of other kinds (check boxes,
-//! list boxes, drop-downs, ActiveX controls) are left to pass-through (`passthrough.rs`), which
+//! 0..30000 whole numbers sliders and spin buttons take; a check box's state is 0..=2 (2 = mixed)
+//! and an option button's 0..=1, anything else reading as 0. Controls of other kinds (list boxes,
+//! drop-downs, group boxes, ActiveX controls) are left to pass-through (`passthrough.rs`), which
 //! keeps them unchanged; a sheet can hold both, in one `<controls>` element and one VML drawing.
 
 use std::collections::{HashMap, HashSet};
@@ -39,7 +40,14 @@ fn object_type(k: ControlKind) -> &'static str {
         ControlKind::Button => "Button",
         ControlKind::Slider => "Scroll",
         ControlKind::Spin => "Spin",
+        ControlKind::CheckBox => "CheckBox",
+        ControlKind::OptionButton => "Radio",
     }
+}
+
+/// The VML `ObjectType`, which spells a check box `Checkbox`.
+fn vml_object_type(k: ControlKind) -> &'static str {
+    if k == ControlKind::CheckBox { "Checkbox" } else { object_type(k) }
 }
 
 fn kind_of(t: &str) -> Option<ControlKind> {
@@ -47,6 +55,8 @@ fn kind_of(t: &str) -> Option<ControlKind> {
         "button" => Some(ControlKind::Button),
         "scroll" => Some(ControlKind::Slider),
         "spin" => Some(ControlKind::Spin),
+        "checkbox" => Some(ControlKind::CheckBox),
+        "radio" => Some(ControlKind::OptionButton),
         _ => None,
     }
 }
@@ -158,6 +168,20 @@ fn ctrl_prop(c: &FormControl) -> String {
         ControlKind::Button => {
             s.push_str(" lockText=\"1\"");
         }
+        ControlKind::CheckBox | ControlKind::OptionButton => {
+            match c.value {
+                1 => s.push_str(" checked=\"Checked\""),
+                2 if c.kind == ControlKind::CheckBox => s.push_str(" checked=\"Mixed\""),
+                _ => {}
+            }
+            if let Some(l) = &c.link {
+                let _ = write!(s, " fmlaLink=\"{}\"", esc_attr(l));
+            }
+            s.push_str(" lockText=\"1\"");
+            if !c.three_d {
+                s.push_str(" noThreeD=\"1\"");
+            }
+        }
         ControlKind::Slider | ControlKind::Spin => {
             s.push_str(" dx=\"22\"");
             if let Some(l) = &c.link {
@@ -185,7 +209,7 @@ fn vml_shape(sheet: &Sheet, c: &FormControl, id: u64, z: usize) -> String {
     let y = sheet.row_top(from.row) + fdy;
     let mut data = format!(
         "<x:ClientData ObjectType=\"{}\">{}{}<x:Anchor>{}, {}, {}, {}, {}, {}, {}, {}</x:Anchor>",
-        object_type(c.kind),
+        vml_object_type(c.kind),
         // These two elements mean the object does *not* move (size) with its cells.
         if c.anchor.mode == AnchorMode::Absolute { "<x:MoveWithCells/>" } else { "" },
         if c.anchor.mode == AnchorMode::MoveAndSize { "" } else { "<x:SizeWithCells/>" },
@@ -212,6 +236,20 @@ fn vml_shape(sheet: &Sheet, c: &FormControl, id: u64, z: usize) -> String {
             }
             data.push_str("<x:TextHAlign>Center</x:TextHAlign><x:TextVAlign>Center</x:TextVAlign>");
         }
+        ControlKind::CheckBox | ControlKind::OptionButton => {
+            data.push_str("<x:AutoLine>False</x:AutoLine><x:TextVAlign>Center</x:TextVAlign>");
+            if let Some(l) = &c.link {
+                let _ = write!(data, "<x:FmlaLink>{}</x:FmlaLink>", esc(l));
+            }
+            match c.value {
+                1 => data.push_str("<x:Checked>1</x:Checked>"),
+                2 if c.kind == ControlKind::CheckBox => data.push_str("<x:Checked>2</x:Checked>"),
+                _ => {}
+            }
+            if !c.three_d {
+                data.push_str("<x:NoThreeD/>");
+            }
+        }
         ControlKind::Slider | ControlKind::Spin => {
             if let Some(l) = &c.link {
                 let _ = write!(data, "<x:FmlaLink>{}</x:FmlaLink>", esc(l));
@@ -227,10 +265,20 @@ fn vml_shape(sheet: &Sheet, c: &FormControl, id: u64, z: usize) -> String {
         }
     }
     data.push_str("</x:ClientData>");
-    let text = if c.kind == ControlKind::Button {
-        format!("<v:textbox style=\"mso-direction-alt:auto\" o:singleclick=\"f\"><div style=\"text-align:center\">{}</div></v:textbox>", esc(&c.text))
-    } else {
-        String::new()
+    let text = match c.kind {
+        ControlKind::Button => {
+            format!(
+                "<v:textbox style=\"mso-direction-alt:auto\" o:singleclick=\"f\"><div style=\"text-align:center\">{}</div></v:textbox>",
+                esc(&c.text)
+            )
+        }
+        ControlKind::CheckBox | ControlKind::OptionButton => {
+            format!(
+                "<v:textbox style=\"mso-direction-alt:auto\" o:singleclick=\"f\"><div style=\"text-align:left\">{}</div></v:textbox>",
+                esc(&c.text)
+            )
+        }
+        ControlKind::Slider | ControlKind::Spin => String::new(),
     };
     format!(
         "<v:shape id=\"_x0000_s{id}\" type=\"#_x0000_t201\" style=\"position:absolute;margin-left:{:.2}pt;margin-top:{:.2}pt;width:{:.2}pt;height:{:.2}pt;z-index:{}\"{} o:insetmode=\"auto\"><o:lock v:ext=\"edit\" rotation=\"t\"/>{text}{data}</v:shape>",
@@ -263,6 +311,9 @@ struct Props {
     text: String,
     print: Option<bool>,
     locked: Option<bool>,
+    /// A check box's or option button's state (0 unchecked, 1 checked, 2 mixed).
+    checked: Option<i64>,
+    three_d: Option<bool>,
 }
 
 fn props_from_ctrl_prop(e: &El) -> Props {
@@ -280,6 +331,13 @@ fn props_from_ctrl_prop(e: &El) -> Props {
         text: String::new(),
         print: None,
         locked: None,
+        // Absent means unchecked and shaded: the properties part says it either way.
+        checked: Some(match e.attr("checked").map(str::trim) {
+            Some(t) if t.eq_ignore_ascii_case("checked") => 1,
+            Some(t) if t.eq_ignore_ascii_case("mixed") => 2,
+            _ => 0,
+        }),
+        three_d: Some(!e.attr_bool("noThreeD").unwrap_or(false)),
     }
 }
 
@@ -303,6 +361,8 @@ fn props_from_vml(shape: &El) -> Option<Props> {
         text,
         print: truth("PrintObject"),
         locked: truth("Locked"),
+        checked: Some(int("Checked").filter(|v| (1..=2).contains(v)).unwrap_or(0)),
+        three_d: Some(data.child("NoThreeD").is_none()),
     })
 }
 
@@ -349,6 +409,11 @@ fn build(p: Props, kind: ControlKind, anchor: Anchor, name: Option<&str>, id: u3
     }
     c.print = p.print.unwrap_or(true);
     c.locked = p.locked.unwrap_or(true);
+    if let Some(top) = kind.max_state() {
+        // An out-of-range state reads as unchecked.
+        c.value = p.checked.and_then(|v| u32::try_from(v).ok()).filter(|v| *v <= top).unwrap_or(0);
+        c.three_d = p.three_d.unwrap_or(true);
+    }
     if kind == ControlKind::Button
         && let Some(m) = p.macro_.as_deref().and_then(macro_name)
     {
@@ -428,7 +493,7 @@ pub(crate) fn is_note_data(data: &El) -> bool {
     data.attr("ObjectType").is_some_and(|t| t.trim().eq_ignore_ascii_case("note"))
 }
 
-/// Reads a sheet's buttons, scroll bars and spin buttons: each `<control>` with its properties
+/// Reads a sheet's buttons, scroll bars, spin buttons, check boxes and option buttons: each `<control>` with its properties
 /// part, else its VML shape, and VML shapes the sheet doesn't list (files that only have VML).
 /// The shapes come from the VML drawing with relationship id `vml_rid` (`<legacyDrawing r:id>`).
 /// Returns the shape numbers of the controls it read, so pass-through keeps only the others.
@@ -498,7 +563,7 @@ pub fn read(cx: &mut Ctx<'_>, controls: Option<&El>, vml_rid: Option<&str>, rels
             p.print = pr.attr_bool("print").or(p.print);
             p.locked = pr.attr_bool("locked").or(p.locked);
         }
-        // Other kinds (a check box, a list box) stay with pass-through.
+        // Other kinds (a list box, a drop-down) stay with pass-through.
         let Some(kind) = p.kind else { continue };
         let anchor =
             pr.and_then(|pr| pr.child("anchor")).and_then(|a| anchor_from_markers(a, sheet)).or_else(|| shape.and_then(|s| vml_anchor(s, sheet)));
@@ -507,7 +572,7 @@ pub fn read(cx: &mut Ctx<'_>, controls: Option<&El>, vml_rid: Option<&str>, rels
         sheet.controls.push(build(p, kind, anchor, ctl.attr("name"), id));
         read.insert(n);
     }
-    // Controls known only from the VML. The ones not read (a check box, or past the limit) stay
+    // Controls known only from the VML. The ones not read (a drop-down, or past the limit) stay
     // in the kept drawing.
     let mut vml_only_unmodelled = false;
     for s in &shapes {
