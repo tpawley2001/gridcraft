@@ -314,12 +314,14 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         if let Some(id) = drawing {
             // Drawing parts are DrawingML XML, as in .xlsx: read them with the .xlsx reader's state.
             let mut cx = crate::read::Ctx::new(package);
-            sheet_drawing(&mut cx, &sheet_rels, &id, &mut sheet, &mut report);
-            // Anchors the drawing reader does not model (SmartArt graphics) are kept for saving.
-            let kept =
-                kept_drawing.get_or_insert_with(|| crate::passthrough::KeptReader::new(&mut cx)).sheet_drawing(&mut cx, &rel.target, &sheet.name);
-            std::mem::take(&mut cx.report.warnings).into_iter().for_each(|w| report.warn(w));
-            crate::passthrough::merge_preserved(&mut sheet.preserved, kept);
+            // Anchors the drawing reader does not model (SmartArt graphics) are kept for saving,
+            // unless the drawing could not be read (already reported).
+            if sheet_drawing(&mut cx, &sheet_rels, &id, &mut sheet, &mut report) {
+                let kept =
+                    kept_drawing.get_or_insert_with(|| crate::passthrough::KeptReader::new(&mut cx)).sheet_drawing(&mut cx, &rel.target, &sheet.name);
+                std::mem::take(&mut cx.report.warnings).into_iter().for_each(|w| report.warn(w));
+                crate::passthrough::merge_preserved(&mut sheet.preserved, kept);
+            }
             package = cx.pkg;
         }
         sheet_comments(&mut package, &types, &sheet_rels, &mut sheet, &mut budget, &mut report);
@@ -516,22 +518,30 @@ fn relationships(package: &mut Package<'_>, path: &str) -> Result<Vec<Rel>, IoEr
 
 /// Reads the DrawingML part named by a worksheet's BrtDrawing relationship `id` into `sheet`
 /// (pictures, shapes, text boxes and charts), with the .xlsx drawing reader. A drawing that can't
-/// be found or read is skipped with a warning; the sheet's cells are kept either way.
-fn sheet_drawing(cx: &mut crate::read::Ctx<'_>, sheet_rels: &[Rel], id: &str, sheet: &mut Sheet, report: &mut ReadReport) {
+/// be found or read is skipped with a warning; the sheet's cells are kept either way. True when the
+/// drawing part was read.
+fn sheet_drawing(cx: &mut crate::read::Ctx<'_>, sheet_rels: &[Rel], id: &str, sheet: &mut Sheet, report: &mut ReadReport) -> bool {
     let Some(target) = sheet_rels.iter().find(|r| r.id == id && r.kind == "drawing" && !r.external).map(|r| r.target.clone()) else {
         report.warn(format!("The drawing of XLSB sheet '{}' has no drawing relationship and was skipped.", sheet.name));
-        return;
+        return false;
     };
     let kept = (sheet.images.len(), sheet.shapes.len(), sheet.charts.len());
     let result = crate::drawing::read_drawing(cx, &target, sheet);
     let warnings = std::mem::take(&mut cx.report.warnings);
     match result {
-        Ok(()) => warnings.into_iter().for_each(|w| report.warn(w)),
+        Ok(()) => {
+            // The drawing reader skips a part it can't parse with this warning (`Ctx::optional_xml`).
+            let skipped = format!("skipped {target}: ");
+            let read = !warnings.iter().any(|w| w.starts_with(&skipped));
+            warnings.into_iter().for_each(|w| report.warn(w));
+            read
+        }
         Err(e) => {
             sheet.images.truncate(kept.0);
             sheet.shapes.truncate(kept.1);
             sheet.charts.truncate(kept.2);
             report.warn(format!("The drawing {target} of XLSB sheet '{}' could not be read ({e}) and was skipped.", sheet.name));
+            false
         }
     }
 }
