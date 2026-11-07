@@ -210,6 +210,8 @@ pub struct DocState {
     /// user trusts it in this session (`automate.trustScripts`); one with no scripts starts
     /// trusted, since any script it gains later was written here.
     pub scripts_trusted: bool,
+    /// Data tables recomputed by the most recent recalculating edit or Calculate Now.
+    pub last_data_tables_recalculated: usize,
     /// Where the workbook's content came from: whether its active content may run without
     /// asking. Unlike `scripts_trusted`, this is provenance, not consent: it is set when the
     /// workbook is opened from a file, carried by content pasted from such a workbook, and never
@@ -326,6 +328,7 @@ impl DocState {
             unlocked_ranges: vec![],
             content_kind: None,
             scripts_trusted,
+            last_data_tables_recalculated: 0,
             trust,
             touched: None,
             edits: None,
