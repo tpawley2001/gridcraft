@@ -137,6 +137,7 @@ mod xlsb_date_filter_tests;
 mod xlsb_drawing_tests;
 mod xlsb_dynamic_array_tests;
 mod xlsb_edit_ranges_tests;
+mod xlsb_external_link_cache_tests;
 mod xlsb_external_link_tests;
 mod xlsb_filter_tests;
 mod xlsb_layout_tests;
