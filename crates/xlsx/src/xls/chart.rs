@@ -314,6 +314,26 @@ impl ArtWalk {
 
 /// The last client anchor in one MsoDrawing record's OfficeArt records, with its shape's
 /// properties.
+/// The model has one font per shape, so use the TxO run beginning at character zero.
+fn apply_text_font(format: &mut ShapeFormat, text: &Text, fonts: &[(gridcraft_model::Font, u16)], table: &[u32; 64]) {
+    let Some(ifnt) = text.font else { return };
+    // FontIndex skips 4; invalid references must not substitute another font.
+    let index = match ifnt {
+        0..=3 => usize::from(ifnt),
+        4 => return,
+        _ => usize::from(ifnt) - 1,
+    };
+    let Some((font, icv)) = fonts.get(index) else { return };
+    format.font = Some(font.name.clone());
+    format.font_size = Some(font.size);
+    format.bold = font.bold;
+    format.italic = font.italic;
+    format.text_color = match icv {
+        8..=63 => table.get(usize::from(*icv)).copied().map(Color::Rgb),
+        _ => None,
+    };
+}
+
 #[cfg(test)]
 fn client_anchor(data: &[u8]) -> Option<(ClientAnchor, ShapeProps)> {
     match ArtWalk::default().record(data) {
@@ -539,6 +559,7 @@ pub(super) struct Embedded {
     buttons: Vec<(Place, bool, Option<Text>)>,
     /// The workbook's colour table, for the shapes' palette colours.
     palette: Palette,
+    fonts: Vec<(gridcraft_model::Font, u16)>,
 }
 
 /// A workbook's 64-entry colour table: the built-in one unless the file's PALETTE record replaces
@@ -554,9 +575,9 @@ impl Default for Palette {
 
 impl Embedded {
     /// An `Embedded` with the workbook's colour table (the palette the cell-format reader uses
-    /// for icv: the defaults or the PALETTE record).
-    pub(super) fn new(palette: [u32; 64]) -> Self {
-        Embedded { palette: Palette(palette), ..Embedded::default() }
+    /// for icv: the defaults or the PALETTE record) and parsed FONT records.
+    pub(super) fn new(palette: [u32; 64], fonts: Vec<(gridcraft_model::Font, u16)>) -> Self {
+        Embedded { palette: Palette(palette), fonts, ..Embedded::default() }
     }
     /// An MsoDrawing record: remembers its shape's anchor and properties. Only a record that
     /// starts a new shape (it carries an anchor) ends the pending drawn shape: the one holding a
@@ -744,9 +765,12 @@ impl Embedded {
         if skipped && !store.damaged {
             report.warn("Some pictures in .xls files use a format that isn't imported (only PNG and JPEG are).");
         }
+        let table = self.palette.0;
         let mut rotated = false;
         for (a, props, text) in self.text_boxes {
-            let format = ShapeFormat { align: text.align, anchor: text.anchor, ..ShapeFormat::default() };
+            let mut format =
+                ShapeFormat { align: text.align, anchor: text.anchor, no_fill: props.no_fill, no_line: props.no_line, ..ShapeFormat::default() };
+            apply_text_font(&mut format, &text, &self.fonts, &table);
             // `rot` 1 is stacked text and 2 and 3 turn the box; the model has no vertical-text
             // field, so the text stays upright and horizontal (never right-to-left).
             if text.rotation != 0 {
@@ -760,23 +784,24 @@ impl Embedded {
                 kind: ShapeKind::TextBox,
                 geometry: None,
                 anchor: place_at(sheet, &a),
-                fill: Color::Auto,
-                line: Color::Auto,
+                fill: drawing::art_color(props.fill_color, &table),
+                line: drawing::art_color(props.line_color, &table),
                 text: text.text,
                 format,
                 math: Default::default(),
             });
         }
-        // The same palette the cell-format reader resolves icv with.
-        let table = self.palette.0;
         for (a, props, kind, text) in self.shapes {
             let (fill, line) = (drawing::art_color(props.fill_color, &table), drawing::art_color(props.line_color, &table));
             // A line or arrow is never filled, whatever its fill properties say.
             let no_fill = matches!(kind, ShapeKind::Line | ShapeKind::Arrow) || props.no_fill;
-            let format = match &text {
+            let mut format = match &text {
                 Some(t) => ShapeFormat { align: t.align, anchor: t.anchor, no_fill, no_line: props.no_line, ..ShapeFormat::default() },
                 None => ShapeFormat { no_fill, no_line: props.no_line, ..ShapeFormat::default() },
             };
+            if let Some(text) = &text {
+                apply_text_font(&mut format, text, &self.fonts, &table);
+            }
             if text.as_ref().is_some_and(|t| t.rotation != 0) {
                 rotated = true;
             }
