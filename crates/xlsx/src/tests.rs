@@ -84,6 +84,7 @@ mod xls_autofilter_tests;
 mod xls_biff5_chart_extern_tests;
 mod xls_biff5_chart_tests;
 mod xls_biff5_header_footer_tests;
+mod xls_biff5_line_tests;
 mod xls_biff5_objects_tests;
 mod xls_biff5_page_breaks_tests;
 mod xls_biff5_picture_tests;
