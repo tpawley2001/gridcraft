@@ -150,6 +150,9 @@ struct Custom {
 /// without counting as dropped.
 const OFFICE_RESERVED: &[&str] = &["_PID_HLINKS", "_PID_GUID", "_PID_LINKBASE"];
 
+/// Added to a linked property's id for the entry naming its source ([MS-OSHARED]).
+const LINK_FLAG: u32 = 0x0100_0000;
+
 /// Builds the custom properties part from the user-defined set; `Err` when the set is damaged.
 fn user_defined(set: &Section<'_>) -> Result<Custom, ()> {
     // Property 0 is the dictionary ([MS-OLEPS] 2.17), naming each property; 1 is the code page
@@ -164,6 +167,11 @@ fn user_defined(set: &Section<'_>) -> Result<Custom, ()> {
     let mut next_pid = 2u32;
     let mut skipped = false;
     for &(pid, v) in set.entries.iter().filter(|(pid, _)| user(*pid)) {
+        // A linked property ("Link to content") stores its source under `pid | LINK_FLAG`, with no
+        // dictionary entry; it is not a property of its own.
+        if pid & LINK_FLAG != 0 {
+            continue;
+        }
         let Some((_, name)) = names.iter().find(|(id, _)| *id == pid) else {
             skipped = true;
             continue;
@@ -175,9 +183,16 @@ fn user_defined(set: &Section<'_>) -> Result<Custom, ()> {
             skipped = true;
             continue;
         };
+        let link = set
+            .entries
+            .iter()
+            .find(|(id, _)| *id == pid | LINK_FLAG)
+            .and_then(|&(_, l)| string(l, set.codepage))
+            .map(|source| format!(" linkTarget=\"{}\"", xml::esc_attr(&source)))
+            .unwrap_or_default();
         let _ = write!(
             xml,
-            "<property fmtid=\"{FMTID_USER}\" pid=\"{next_pid}\" name=\"{}\"><vt:{tag}>{}</vt:{tag}></property>",
+            "<property fmtid=\"{FMTID_USER}\" pid=\"{next_pid}\" name=\"{}\"{link}><vt:{tag}>{}</vt:{tag}></property>",
             xml::esc_attr(name),
             xml::esc(&value)
         );
@@ -190,7 +205,8 @@ fn user_defined(set: &Section<'_>) -> Result<Custom, ()> {
     Ok(Custom { xml: (next_pid > 2).then_some(xml), skipped })
 }
 
-/// The names of a dictionary property: (property id, name) pairs.
+/// The names of a dictionary property: (property id, name) pairs. A name that can't be decoded is
+/// left out, so only the property it names is dropped.
 fn dictionary(v: &[u8], codepage: u16) -> Option<Vec<(u32, String)>> {
     let count = u32_at(v, 0).filter(|n| *n <= MAX_PROPERTIES)?;
     let wide = codepage == 1200;
@@ -202,7 +218,9 @@ fn dictionary(v: &[u8], codepage: u16) -> Option<Vec<(u32, String)>> {
         at = at.checked_add(8)?;
         let byte_len = if wide { len.checked_mul(2)? } else { len };
         let end = at.checked_add(byte_len)?;
-        out.push((pid, decode(v.get(at..end)?, wide, codepage)?));
+        if let Some(name) = decode(v.get(at..end)?, wide, codepage) {
+            out.push((pid, name));
+        }
         // Unicode names are padded to a multiple of 4 bytes.
         at = if wide { end.checked_next_multiple_of(4)? } else { end };
     }
@@ -265,6 +283,12 @@ fn decode(data: &[u8], wide: bool, codepage: u16) -> Option<String> {
                 })
                 .collect(),
             65001 => String::from_utf8_lossy(data.get(..data.len().min((MAX_CHARS + 1) * 4))?).chars().take(MAX_CHARS + 1).collect(),
+            cp if crate::csv::codepage_supported(cp) => {
+                let bytes = data.get(..data.len().min(MAX_CHARS + 1))?;
+                crate::csv::decode_codepage(bytes, cp)
+            }
+            // A double-byte code page has no table here: only its ASCII range reads.
+            _ if data.iter().all(|b| *b < 0x80) => data.iter().take(MAX_CHARS + 1).map(|&b| char::from(b)).collect(),
             _ => return None,
         }
     };
