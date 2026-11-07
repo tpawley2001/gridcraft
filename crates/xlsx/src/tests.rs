@@ -113,6 +113,7 @@ mod xls_tests;
 mod xls_textbox_tests;
 mod xls_theme_tests;
 mod xls_vba_tests;
+mod xls_xor_password_tests;
 mod xlsb_array_const_tests;
 mod xlsb_block_warning_tests;
 mod xlsb_cell_style_tests;

@@ -21,7 +21,9 @@
 //! sources (cache streams in `_SX_DB_CUR` and the SxView views, in `xls/pivot.rs`), and query tables with
 //! their data connections (kept for .xlsx, in `xls/connections.rs`). Everything else (other shapes, comments, macros) is
 //! skipped with a warning.
-//! Encrypted workbooks and versions before BIFF5 are refused.
+//! Workbooks encrypted with Excel's default password (`VelvetSweatshop`) are decrypted first
+//! (see `xls_crypto`), as Excel opens them without a prompt; other encrypted workbooks and
+//! versions before BIFF5 are refused.
 
 mod autofilter;
 mod cetab;
@@ -52,6 +54,7 @@ use gridcraft_model::{CalcMode, CalcSettings, Cell, DefinedName, Formula, LineIn
 
 use crate::cfb::{self, Compound};
 use crate::tables::{col_width_to_px, pt_to_px};
+use crate::xls_crypto;
 use crate::{IoError, ReadReport};
 use formula::{Biff5, Extern, ExternKind, Links, Mode, SupBook, Unsupported, Xti, cell_error, decode, decode_version};
 use gridcraft_formula::Expr;
@@ -229,7 +232,13 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         },
     };
     let mut report = ReadReport::default();
-    let mut g = match globals(&stream, &mut budget, &mut report) {
+    let (stream, decrypted) = match unlock(stream) {
+        Err(IoError::Format(msg)) if book && msg.contains(ENCRYPTED) => {
+            return Err(invalid(format!("Excel 5.0/95 (BIFF5) workbook: {ENCRYPTED}")));
+        }
+        other => other?,
+    };
+    let mut g = match globals(&stream, decrypted, &mut budget, &mut report) {
         Err(IoError::Format(msg)) if book && msg.contains(ENCRYPTED) => {
             return Err(invalid(format!("Excel 5.0/95 (BIFF5) workbook: {ENCRYPTED}")));
         }
@@ -431,7 +440,31 @@ fn bof(rec: &Record<'_>) -> Result<(u16, u16), IoError> {
     Ok((c.u16()?, c.u16()?))
 }
 
-fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Result<Globals, IoError> {
+/// Excel's built-in password for workbooks that are encrypted but open without a prompt.
+const DEFAULT_PASSWORD: &str = "VelvetSweatshop";
+
+/// Decrypts a stream whose globals begin with a FilePass ([MS-XLS] 2.4.117) encrypted with
+/// Excel's default password, as Excel opens them without asking. Returns the stream and whether
+/// it was decrypted. A FilePass for another password, or one that can't be read, is refused.
+fn unlock(stream: Vec<u8>) -> Result<(Vec<u8>, bool), IoError> {
+    let header = |at: usize| -> Option<(u16, usize)> {
+        let h = stream.get(at..at.checked_add(4)?)?;
+        Some((u16::from_le_bytes([*h.first()?, *h.get(1)?]), usize::from(u16::from_le_bytes([*h.get(2)?, *h.get(3)?]))))
+    };
+    let Some((BOF, bof_len)) = header(0) else { return Ok((stream, false)) };
+    let version = header(4).map(|(v, _)| v);
+    let mut at = 4 + bof_len;
+    // The globals may begin with WriteProtect before the FilePass ([MS-XLS] 2.1.7.20.1).
+    if let Some((0x0086, len)) = header(at) {
+        at += 4 + len;
+    }
+    let Some((0x002F, len)) = header(at) else { return Ok((stream, false)) };
+    let filepass = stream.get(at + 4..at + 4 + len).ok_or_else(|| invalid(ENCRYPTED))?;
+    let plain = xls_crypto::decrypt(filepass, version == Some(BIFF5), DEFAULT_PASSWORD, &stream).map_err(|_| invalid(ENCRYPTED))?;
+    Ok((plain, true))
+}
+
+fn globals(stream: &[u8], decrypted: bool, budget: &mut Budget, report: &mut ReadReport) -> Result<Globals, IoError> {
     let mut recs = Records::new(stream, 0);
     let first = recs.next_record()?.ok_or_else(|| invalid("empty Workbook stream"))?;
     let (vers, dt) = bof(&first)?;
@@ -446,6 +479,7 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
         g.biff5 = Some(Biff5 { codepage: 1252, externs: vec![] });
     }
     let mut window_seen = false;
+    let mut filepass_seen = false;
     let mut offsets = std::collections::HashSet::new();
     let mut drawing_group = vec![];
     // Whether the previous record was the Theme record or one of its ContinueFrt12 records.
@@ -478,6 +512,8 @@ fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
             }
             0x0012 => protection::protect(&mut c, &mut g.protection, report),
             0x0013 => protection::password(&mut c, &mut g.protection, report),
+            // The FilePass `unlock` already used; any other one is refused.
+            0x002F if decrypted && !filepass_seen => filepass_seen = true,
             0x002F => return Err(invalid(ENCRYPTED)),
             0x003D if !window_seen => {
                 window_seen = true;
