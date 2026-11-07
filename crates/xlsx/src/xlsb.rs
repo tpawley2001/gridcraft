@@ -330,6 +330,10 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         sheet.pivots = pivot::read_pivots(&mut package, &types, &sheet_rels, &info.name, &mut caches, &mut report);
         let query_tables = connections::read_query_tables(&mut package, &types, &sheet_rels, &mut kept_connections, &mut report);
         crate::passthrough::merge_preserved(&mut sheet.preserved, query_tables);
+        if let Some(id) = parts.printer_settings {
+            let kept = keep_printer_settings(&mut package, &types, &sheet_rels, &id, &info.name, &mut report);
+            crate::passthrough::merge_preserved(&mut sheet.preserved, kept);
+        }
         sheet.visibility = info.visibility;
         if let Some(slot) = model_index.last_mut() {
             *slot = Some(wb.sheets.len());
@@ -407,6 +411,50 @@ fn keep_custom_properties(package: &mut Package<'_>, types: &[Entry], root_rels:
         }
         None => report.warn("The XLSB custom document properties could not be read and are not kept on save."),
     }
+}
+
+/// The content type of a printer settings part (ECMA-376 Part 1 §22.3).
+const CT_PRINTER_SETTINGS: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.printerSettings";
+
+/// Keeps the printer settings part a worksheet's `BrtPageSetup` names (`szRelID`), the way the
+/// `.xlsx` reader keeps the part behind `<pageSetup r:id>`: the sheet's relationship and the part
+/// byte for byte, with the `pageSetup` slot naming the relationship. `None`, with one warning
+/// naming the sheet, when the relationship is missing, external or points at a missing or damaged
+/// part; the other print settings are kept either way.
+fn keep_printer_settings(
+    package: &mut Package<'_>,
+    types: &[Entry],
+    sheet_rels: &[Rel],
+    id: &str,
+    name: &str,
+    report: &mut ReadReport,
+) -> Option<Arc<gridcraft_model::Preserved>> {
+    use gridcraft_model::{Preserved, PreservedPart, PreservedRel, PreservedXml};
+    let dropped = |report: &mut ReadReport, why: &str| {
+        report.warn(format!("sheet \"{name}\": printer settings were dropped: {why}"));
+        None
+    };
+    let Some(rel) = sheet_rels.iter().find(|r| r.id == id && r.kind == "printerSettings") else {
+        return dropped(report, "the page setup names a relationship the sheet does not have");
+    };
+    if rel.external {
+        return dropped(report, "the relationship is external");
+    }
+    let content_type = match types.iter().find(|e| e.name == "Override" && e.attr("PartName").is_some_and(|p| normalize(p) == normalize(&rel.target)))
+    {
+        Some(e) => e.attr("ContentType").unwrap_or(CT_PRINTER_SETTINGS).to_string(),
+        None => CT_PRINTER_SETTINGS.to_string(),
+    };
+    let data = match package.read_optional_limited(&rel.target, crate::passthrough::MAX_KEPT_PART) {
+        Ok(Some(data)) => data,
+        Ok(None) => return dropped(report, &format!("{} is missing", rel.target)),
+        Err(e) => return dropped(report, &e.to_string()),
+    };
+    let mut p = Preserved::default();
+    p.parts.push(PreservedPart { name: rel.target.clone(), content_type, data: Arc::from(data), rels: vec![] });
+    p.rels.push(PreservedRel { id: rel.id.clone(), rel_type: format!("{REL_TYPE}printerSettings"), target: rel.target.clone(), external: false });
+    p.elements.push(PreservedXml { slot: "pageSetup".into(), xml: rel.id.clone() });
+    Some(Arc::new(p))
 }
 
 pub(crate) fn is_xlsb(bytes: &[u8]) -> bool {
@@ -1356,12 +1404,16 @@ impl PrintOptions {
 }
 
 /// `BrtPageSetup` ([MS-XLSB] 2.4.722), reduced to the fields the model keeps: paper size, scale,
-/// orientation and the fit-to-pages dimensions (joined with the fit-to-page flag at the end).
+/// orientation and the fit-to-pages dimensions (joined with the fit-to-page flag at the end), plus
+/// the relationship id of the sheet's printer settings part.
 struct PageSetup {
     paper: Option<&'static str>,
     scale: Option<u16>,
     orientation: Orientation,
     fit: (u16, u16),
+    /// `szRelID`: the printer settings part, kept as pass-through content. `None` for a null or
+    /// empty id.
+    rel_id: Option<String>,
 }
 fn read_page_setup(payload: &[u8]) -> Result<PageSetup, IoError> {
     let mut b = Bytes::new(payload);
@@ -1374,7 +1426,7 @@ fn read_page_setup(payload: &[u8]) -> Result<PageSetup, IoError> {
     let fit_width = b.u32()?;
     let fit_height = b.u32()?;
     let flags = b.u16()?;
-    b.string(260, true)?; // szRelID: the printer settings part, kept as pass-through content.
+    let rel_id = b.string(MAX_REL_ID, true)?.filter(|id| !id.is_empty());
     b.finish()?;
     Ok(PageSetup {
         paper: crate::tables::paper_name(paper),
@@ -1383,6 +1435,7 @@ fn read_page_setup(payload: &[u8]) -> Result<PageSetup, IoError> {
         // fNoOrient (bit 6) leaves the orientation to the printer; fLandscape is bit 1.
         orientation: if flags & 0x0040 == 0 && flags & 0x0002 != 0 { Orientation::Landscape } else { Orientation::Portrait },
         fit: (fit_width.min(32767) as u16, fit_height.min(32767) as u16),
+        rel_id,
     })
 }
 impl PageSetup {
@@ -1741,7 +1794,11 @@ fn worksheet(
             }
             478 => {
                 if let Some(p) = page.read(report, "BrtPageSetup", || read_page_setup(payload)) {
+                    let rel_id = p.rel_id.clone();
                     page.fit = Some(p.store(&mut sheet.print));
+                    if rel_id.is_some() {
+                        parts.printer_settings = rel_id;
+                    }
                 }
             }
             479 => {
@@ -2069,6 +2126,8 @@ struct SheetParts {
     lists: Vec<String>,
     /// The BrtLegacyDrawing id: the VML drawing holding the notes' shapes.
     legacy_drawing: Option<String>,
+    /// The BrtPageSetup `szRelID`: the sheet's printer settings part.
+    printer_settings: Option<String>,
 }
 
 /// The workbook's persons part (authors of threaded comments), by person id. None without the

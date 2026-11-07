@@ -182,7 +182,8 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
     write_sheet_data(&mut s, SheetCellData { workbook: wb, index: si, sheet, overrides: &overrides, extra: &extra, dynamic: &dynamic }, &sid, out);
 
     let (prio, custom_views_at) = write_sheet_rules(&mut s, sheet, &mut rels, out);
-    let kept = write_sheet_printing(&mut s, sheet, &mut rels, out);
+    let part = format!("xl/worksheets/sheet{}.xml", si + 1);
+    let kept = write_sheet_printing(&mut s, sheet, &part, &mut rels, out);
     // The sheet's part of the Custom Views goes between <autoFilter> and <mergeCells>; it is known
     // once the kept relationships are added.
     let custom_views = kept.custom_sheet_views(&crate::passthrough::custom_view_guids(wb));
@@ -480,7 +481,7 @@ pub(crate) fn write_header_footer(s: &mut String, p: &PrintSettings) {
     }
 }
 
-fn write_sheet_printing<'a>(s: &mut String, sheet: &'a Sheet, rels: &mut Rels, out: &mut Out) -> crate::passthrough::SheetKept<'a> {
+fn write_sheet_printing<'a>(s: &mut String, sheet: &'a Sheet, part: &str, rels: &mut Rels, out: &mut Out) -> crate::passthrough::SheetKept<'a> {
     // Printing.
     let p = &sheet.print;
     if p.gridlines || p.headings || p.center_h || p.center_v {
@@ -493,7 +494,7 @@ fn write_sheet_printing<'a>(s: &mut String, sheet: &'a Sheet, rels: &mut Rels, o
         s.push_str("/>");
     }
     // Unmodelled content kept from the source file (printer settings, controls, OLE objects…).
-    let kept = crate::passthrough::SheetKept::write(sheet, rels, out);
+    let kept = crate::passthrough::SheetKept::write(sheet, part, rels, out);
     write_page_margins(s, p);
     s.push_str("<pageSetup");
     if let Some(id) = paper_id(&p.paper)
