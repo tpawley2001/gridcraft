@@ -97,6 +97,20 @@ pub(crate) struct SupBook {
     pub internal: bool,
     pub addin: bool,
     pub names: Vec<String>,
+    /// XLSB BrtSupBookSrc: the relationship id of the external link part.
+    pub rel: Option<String>,
+    /// XLSB: the external workbook as its link part was read; `None` until then (and for `.xls`),
+    /// so references into it stay unsupported.
+    pub external: Option<ExternalBook>,
+}
+
+/// An external workbook a formula can name as `[number]Sheet!A1`.
+pub(crate) struct ExternalBook {
+    /// 1-based position among the workbook's links to other workbooks (the `.xlsx`
+    /// `<externalReferences>` order).
+    pub number: usize,
+    /// The linked workbook's sheet names (BrtSupTabs).
+    pub sheets: Vec<String>,
 }
 
 /// XTI ([MS-XLS] 2.5.344, [MS-XLSB] 2.5.172): a supporting link and a range of its sheets.
@@ -143,6 +157,8 @@ pub(crate) struct Site<'a> {
     pub sheet: &'a str,
     /// The table (`idList`) whose calculated column or totals row formula this is.
     pub table: Option<u32>,
+    /// Whether references into other workbooks read (see [`ExternalBook`]) decode to `[n]Sheet`.
+    pub external: bool,
 }
 
 /// What a BIFF5 EXTERNSHEET entry points at.
@@ -323,11 +339,19 @@ fn area(r0: u32, r1: u32, c0: u16, c1: u16, base: CellRef, relative: bool, grid:
 }
 
 impl Links {
-    fn sheet_sel(&self, ixti: u16) -> Result<Option<SheetSel>, Unsupported> {
+    /// The sheets XTI `ixti` names; with `external`, a read external workbook's sheets as
+    /// `[n]Sheet` (a span as `[n]First` to `Last`), as the `.xlsx` formula text holds them.
+    fn sheet_sel(&self, ixti: u16, external: bool) -> Result<Option<SheetSel>, Unsupported> {
         let x = self.xti.get(usize::from(ixti)).ok_or(Unsupported("reference to a missing sheet link"))?;
         let book = usize::try_from(x.book).ok().and_then(|b| self.books.get(b)).ok_or(Unsupported("reference to a missing workbook link"))?;
         if !book.internal {
-            return Err(Unsupported("references to other workbooks (external links)"));
+            let ext = book.external.as_ref().filter(|_| external).ok_or(Unsupported("references to other workbooks (external links)"))?;
+            let name = |i: i32| usize::try_from(i).ok().and_then(|i| ext.sheets.get(i)).cloned();
+            return Ok(match (name(x.first), name(x.last)) {
+                (Some(a), Some(_)) if x.first == x.last => Some(SheetSel::Named(format!("[{}]{a}", ext.number))),
+                (Some(a), Some(b)) => Some(SheetSel::Span(format!("[{}]{a}", ext.number), b)),
+                _ => None,
+            });
         }
         let name = |i: i32| usize::try_from(i).ok().and_then(|i| self.sheets.get(i)).cloned();
         Ok(match (name(x.first), name(x.last)) {
@@ -410,6 +434,58 @@ pub(crate) fn decode_xlsb(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, l
 /// are written without the table name (`[@Qty]`), as the .xlsx reader gives them.
 pub(crate) fn decode_xlsb_at(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, site: Site<'_>) -> Result<Expr, Unsupported> {
     decode_in(rgce, rgcb, base, mode, links, Grid::Biff12, site, None)
+}
+
+/// Formula text printed from an expression with external sheets (`[1]Data`, see
+/// [`ExternalBook`]) written the way `.xlsx` files hold them: the printer quotes every such name
+/// (`'[1]Data'!B2`); the quotes are left only when the sheet name needs them
+/// (`'[1]My Data'!B2`). Also returns whether the text refers to another workbook.
+pub(crate) fn external_sheet_text(text: &str) -> (String, bool) {
+    let mut out = String::with_capacity(text.len());
+    let mut external = false;
+    let mut in_string = false;
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if in_string || c != '\'' {
+            if c == '"' {
+                in_string = !in_string;
+            }
+            out.push(c);
+            continue;
+        }
+        // A quoted sheet name: up to the closing quote, `''` standing for one quote.
+        let mut inner = String::new();
+        let mut end = text.len();
+        while let Some((j, d)) = chars.next() {
+            if d == '\'' {
+                if chars.peek().is_some_and(|&(_, e)| e == '\'') {
+                    chars.next();
+                    inner.push('\'');
+                    continue;
+                }
+                end = j + 1;
+                break;
+            }
+            inner.push(d);
+        }
+        let quoted = text.get(i..end).unwrap_or_default();
+        let book = inner.strip_prefix('[').and_then(|r| r.split_once(']')).filter(|(n, _)| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+        match book {
+            Some((n, rest)) if text.get(end..).is_some_and(|t| t.starts_with('!')) => {
+                external = true;
+                if !rest.is_empty() && rest.split(':').all(|s| !gridcraft_core::sheet_needs_quotes(s)) {
+                    out.push('[');
+                    out.push_str(n);
+                    out.push(']');
+                    out.push_str(rest);
+                } else {
+                    out.push_str(quoted);
+                }
+            }
+            _ => out.push_str(quoted),
+        }
+    }
+    (out, external)
 }
 
 /// `PtgList` ([MS-XLSB] 2.5.98, after its first byte): eptg 0x19, ixti, flags (columns: 2 bits,
@@ -725,7 +801,7 @@ fn decode_in(
                 push(
                     &mut stack,
                     kids,
-                    match links.sheet_sel(ixti)? {
+                    match links.sheet_sel(ixti, wide && site.external)? {
                         Some(sheet) => Expr::Ref(Reference { sheet, kind: RefKind::Cell(a) }),
                         None => Expr::Error(CellError::Ref),
                     },
@@ -738,7 +814,7 @@ fn decode_in(
                 push(
                     &mut stack,
                     kids,
-                    match links.sheet_sel(ixti)? {
+                    match links.sheet_sel(ixti, wide && site.external)? {
                         Some(sheet) => Expr::Ref(Reference { sheet, kind }),
                         None => Expr::Error(CellError::Ref),
                     },
@@ -871,8 +947,8 @@ mod tests {
             names: vec!["Rate".into()],
             skipped: vec![false],
             books: vec![
-                SupBook { internal: true, addin: false, names: vec![] },
-                SupBook { internal: false, addin: true, names: vec!["_xlfn.IFERROR".into()] },
+                SupBook { internal: true, ..SupBook::default() },
+                SupBook { addin: true, names: vec!["_xlfn.IFERROR".into()], ..SupBook::default() },
                 SupBook::default(),
             ],
             xti: vec![

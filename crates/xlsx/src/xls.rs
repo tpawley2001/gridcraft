@@ -643,7 +643,7 @@ fn globals(stream: &[u8], decrypted: bool, budget: &mut Budget, report: &mut Rea
             0x01AE => {
                 let _ctab = c.u16()?;
                 let cch = c.u16()?;
-                g.links.books.push(SupBook { internal: cch == 0x0401, addin: cch == 0x3A01, names: vec![] });
+                g.links.books.push(SupBook { internal: cch == 0x0401, addin: cch == 0x3A01, ..SupBook::default() });
             }
             0x0023 => {
                 // ExternName: flags, then an AddinUdf or ExternDocName body; both start with

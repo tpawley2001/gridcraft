@@ -36,7 +36,7 @@ use quick_xml::name::ResolveResult;
 
 use crate::package::{Package, Rel, normalize, resolve, split_dir};
 use crate::tables::{col_width_to_px, pt_to_px};
-use crate::xls::formula::{Links, Mode, Site, SupBook, Xti, decode_xlsb, decode_xlsb_at};
+use crate::xls::formula::{Links, Mode, Site, SupBook, Xti, decode_xlsb, decode_xlsb_at, external_sheet_text};
 use crate::xls::macro_sheet::{MacroSheet, UNREAD_FORMULAS, add_macro_sheets, kept_warning};
 use crate::xls::{
     BUILTIN_NAMES, ChartSheet, FormulaGroups, Lbl, MAX_SHARED_ATTACHES, Parsed, Pending, add_chart_sheets, add_defined_names, blank_array_followers,
@@ -46,6 +46,7 @@ use crate::{IoError, ReadReport};
 use gridcraft_formula::Expr;
 
 mod connections;
+mod external_links;
 mod pivot;
 mod tables;
 
@@ -158,6 +159,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     links.sheets = sheets.iter().map(|s| s.name.clone()).collect();
     let cache_ids = pivot::cache_ids(&book);
     let rels = relationships(&mut package, &root.target)?;
+    package = external_links::read(package, &types, &rels, &mut links, &mut wb, &mut report);
     links.lists = tables::scan_lists(&mut package, &types, &rels, &sheets);
     // Cells using a name the import drops would calculate to #NAME?: they keep their saved result.
     links.skipped =
@@ -967,7 +969,9 @@ fn workbook(
             }
             // BrtSupBookSrc (another workbook), BrtSupSelf / BrtSupSame (this one), BrtSupAddin.
             355 | 357 | 358 | 667 if links.books.len() < MAX_LINKS => {
-                links.books.push(SupBook { internal: matches!(id, 357 | 358), addin: id == 667, names: vec![] });
+                // BrtSupBookSrc ([MS-XLSB] 2.4.811): strRelID names the external link part.
+                let rel = if id == 355 { b.string(MAX_REL_ID, true).ok().flatten() } else { None };
+                links.books.push(SupBook { internal: matches!(id, 357 | 358), addin: id == 667, rel, ..SupBook::default() });
             }
             362 => {
                 // BrtExternSheet: cXti, then XTIs of iSupBook u32, itabFirst i32, itabLast i32.
@@ -1358,12 +1362,15 @@ fn value<'a>(id: u16, b: &mut Bytes<'a>, strings: &[Arc<str>], budget: &mut Budg
 /// The formula of `rgce` at `pos`: `Ok(None)` for a lone constant (`=1`), which calculates
 /// nothing and is kept as its saved value; `Err` when it can't be represented.
 fn formula(rgce: &[u8], rgcb: &[u8], pos: CellRef, links: &Links, sheet: &str) -> Result<Option<Formula>, ()> {
-    let e = decode_xlsb_at(rgce, rgcb, pos, Mode::Cell, links, Site { sheet, table: None }).map_err(|_| ())?;
+    let e = decode_xlsb_at(rgce, rgcb, pos, Mode::Cell, links, Site { sheet, table: None, external: true }).map_err(|_| ())?;
     if matches!(e, Expr::Number(_) | Expr::Bool(_) | Expr::Error(_) | Expr::Text(_)) {
         return Ok(None);
     }
-    let f = Formula::new(&gridcraft_formula::print(&e));
-    if f.expr.is_none() {
+    // References into other workbooks keep the `.xlsx` text (`[1]Data!B2`) and their saved
+    // value, as the .xlsx reader keeps them, even where that text doesn't parse.
+    let (text, external) = external_sheet_text(&gridcraft_formula::print(&e));
+    let f = Formula::new(&text);
+    if f.expr.is_none() && !external {
         return Err(());
     }
     Ok(Some(f))
