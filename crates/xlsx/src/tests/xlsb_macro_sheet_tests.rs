@@ -210,16 +210,35 @@ fn xlsb_truncated_macro_sheet_is_skipped() {
 
 #[test]
 fn xlsb_macro_formula_that_cant_be_read_keeps_its_value() {
-    // PtgFuncVar with fCeFunc set (a command-equivalent function), twice: one warning.
+    // PtgFuncVar with fCeFunc set and a value missing from [MS-XLS] Cetab (0x00A5, 1000), twice: one warning.
     let ce = |tab: u16| vec![0x42, 0, (tab & 0xff) as u8, ((tab >> 8) as u8) | 0x80];
     let mut d = row(0);
-    d.extend(fmla_num(0, 5.0, &ce(1)));
+    d.extend(fmla_num(0, 5.0, &ce(0x00A5)));
     d.extend(row(1));
-    d.extend(fmla_num(0, 6.0, &ce(2)));
+    d.extend(fmla_num(0, 6.0, &ce(1000)));
     let (wb, report) = read_xlsb(&package("xlMacrosheet", 0, &worksheet(&d, &[]))).unwrap();
     assert_eq!(report.warnings.iter().filter(|w| w.as_str() == UNREAD).count(), 1, "{:?}", report.warnings);
     assert!(!report.warnings.iter().any(|w| w.contains("XLSB formula(s)")), "{:?}", report.warnings);
     let p = unpack(&write_xlsx_as(&wb, XlsxKind::MacroWorkbook).unwrap());
     let (_, xml) = macro_part(&p);
     assert!(xml.contains("<c r=\"A1\"><v>5</v></c>") && xml.contains("<c r=\"A2\"><v>6</v></c>"), "{xml}");
+}
+
+#[test]
+fn xlsb_macro_command_equivalents_are_read_by_name() {
+    // PtgFuncVar with fCeFunc set: WINDOW.MAXIMIZE(), BEEP(1) and the dialog form SAVE.AS?().
+    let ce = |cparams: u8, tab: u16| vec![0x42, cparams, (tab & 0xff) as u8, ((tab >> 8) as u8) | 0x80];
+    let mut d = row(0);
+    d.extend(fmla_num(0, 0.0, &ce(0, 0x00A4)));
+    d.extend(row(1));
+    d.extend(fmla_num(0, 0.0, &[ptg_int(1), ce(1, 0)].concat()));
+    d.extend(row(2));
+    d.extend(fmla_num(0, 0.0, &ce(0x80, 5)));
+    let (wb, report) = read_xlsb(&package("xlMacrosheet", 0, &worksheet(&d, &[]))).unwrap();
+    assert!(!report.warnings.iter().any(|w| w == UNREAD), "{:?}", report.warnings);
+    let p = unpack(&write_xlsx_as(&wb, XlsxKind::MacroWorkbook).unwrap());
+    let (_, xml) = macro_part(&p);
+    assert!(xml.contains("<c r=\"A1\"><f>WINDOW.MAXIMIZE()</f>"), "{xml}");
+    assert!(xml.contains("<c r=\"A2\"><f>BEEP(1)</f>"), "{xml}");
+    assert!(xml.contains("<c r=\"A3\"><f>SAVE.AS?()</f>"), "{xml}");
 }

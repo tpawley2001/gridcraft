@@ -141,8 +141,9 @@ fn xls_macro_sheet_is_dropped_from_a_plain_xlsx() {
 
 #[test]
 fn xls_macro_formula_that_cant_be_read_keeps_its_value() {
-    // PtgFuncVar with fCeFunc set (a command-equivalent function), twice: one warning.
-    let records = cat(&[&formula(0, 0, 5.0, &func_var(0x8000 | 1)), &formula(1, 0, 6.0, &func_var(0x8000 | 2)), &formula(2, 0, 0.0, &func_var(55))]);
+    // PtgFuncVar with fCeFunc set and a value missing from [MS-XLS] Cetab (0x00A5, 1000), twice: one warning.
+    let records =
+        cat(&[&formula(0, 0, 5.0, &func_var(0x8000 | 0x00A5)), &formula(1, 0, 6.0, &func_var(0x8000 | 1000)), &formula(2, 0, 0.0, &func_var(55))]);
     let (wb, report) = read_xls(&book(&records, false)).unwrap();
     assert_eq!(report.warnings.iter().filter(|w| w.as_str() == UNREAD).count(), 1, "{:?}", report.warnings);
     assert!(!report.warnings.iter().any(|w| w.starts_with("Some formulas use")), "{:?}", report.warnings);
@@ -160,4 +161,62 @@ fn xls_without_macro_sheets_has_no_macro_warnings() {
     let (wb, report) = read_xls(&compound("Workbook", &cat(&[&globals(globals(0).len() as u32), &data]))).unwrap();
     assert!(!report.warnings.iter().any(|w| w.contains("macro") || w.contains("Macro")), "{:?}", report.warnings);
     assert!(wb.preserved.as_deref().is_none_or(|p| p.sheets.is_empty()));
+}
+
+/// PtgFuncVar (value class) with `cparams` (argument count, bit 7 = fPrompt) and `tab`.
+fn func_var_n(cparams: u8, tab: u16) -> Vec<u8> {
+    cat(&[&[0x42, cparams], &tab.to_le_bytes()])
+}
+
+/// PtgInt `n`.
+fn int(n: u16) -> Vec<u8> {
+    cat(&[&[0x1E], &n.to_le_bytes()])
+}
+
+/// Command-equivalent functions ([MS-XLS] PtgFuncVar fCeFunc + Cetab): A2..A5 of the macro sheet.
+fn command_macro() -> Vec<u8> {
+    cat(&[
+        &number(0, 0, 1.0),
+        &formula(1, 0, 0.0, &func_var_n(0, 0x8000 | 0x00A4)),
+        &formula(2, 0, 0.0, &cat(&[&int(1), &func_var_n(1, 0x8000)])),
+        &formula(3, 0, 0.0, &func_var_n(0x80, 0x8000 | 0x0005)),
+        &formula(4, 0, 0.0, &func_var_n(0, 0x8000 | 0x00A3)),
+        &formula(5, 0, 0.0, &func_var(55)),
+    ])
+}
+
+fn command_macro_xml() -> (String, Vec<String>) {
+    let (wb, report) = read_xls(&book(&command_macro(), false)).unwrap();
+    let p = unpack(&write_xlsx_as(&wb, XlsxKind::MacroWorkbook).unwrap());
+    let parts = macro_parts(&p);
+    assert_eq!(parts.len(), 1, "{:?}", p.keys().collect::<Vec<_>>());
+    (parts[0].1.clone(), report.warnings)
+}
+
+#[test]
+fn xls_macro_command_functions_are_read_without_a_warning() {
+    let (_, warnings) = command_macro_xml();
+    assert!(!warnings.iter().any(|w| w.as_str() == UNREAD), "{warnings:?}");
+    assert!(!warnings.iter().any(|w| w.starts_with("Some formulas use")), "{warnings:?}");
+}
+
+#[test]
+fn xls_macro_command_functions_are_written_by_name() {
+    let (xml, _) = command_macro_xml();
+    assert!(xml.contains("<c r=\"A2\"><f>WINDOW.MAXIMIZE()</f>"), "{xml}");
+    assert!(xml.contains("<c r=\"A5\"><f>WINDOW.RESTORE()</f>"), "{xml}");
+    assert!(xml.contains("<c r=\"A6\"><f>RETURN()</f>"), "{xml}");
+}
+
+#[test]
+fn xls_macro_command_function_arguments_are_kept() {
+    let (xml, _) = command_macro_xml();
+    assert!(xml.contains("<c r=\"A3\"><f>BEEP(1)</f>"), "{xml}");
+}
+
+#[test]
+fn xls_macro_command_dialog_form_gets_a_question_mark() {
+    // fPrompt (cparams bit 7) on a command equivalent = its dialog-box form; 0 arguments.
+    let (xml, _) = command_macro_xml();
+    assert!(xml.contains("<c r=\"A4\"><f>SAVE.AS?()</f>"), "{xml}");
 }
