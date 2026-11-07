@@ -195,6 +195,7 @@ Truncated packages. When an `.xlsx`, `.xlsm` or `.xlsb` file has lost its ZIP ce
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-07 | minor | `.xls` and `.xlsb` chart sheets save to `.xlsx` with chart style and colour parts; an `.xlsb` chart theme override is kept byte for byte (`chart_sheet_style_parts_tests.rs`). |
 | 2026-11-07 | minor | `.xls` Excel 5.0/95 (BIFF5) pictures: a picture OBJ (ot 8) gives the anchor and name, the IMDATA record after it ([MS-XLS] 2.4.140) the image; 24-bit bitmaps are converted to PNG and survive Save As `.xlsx`, other formats are skipped with the format warning (`xls_biff5_picture_tests.rs`) |
 | 2026-11-07 | minor | BIFF8 `.xls` text boxes keep their fill, outline and font; text boxes and drawn shapes use the first TxO run’s FONT record, including palette text colour. |
 | 2026-11-07 | minor | XLSB printer settings parts survive open and Save As `.xlsx`: the `szRelID` of a worksheet's BrtPageSetup ([MS-XLSB] 2.4.722) names `xl/printerSettings/printerSettingsN.bin`, kept byte for byte through the same pass-through store the `.xlsx` reader uses, with its `printerSettings` relationship, `<pageSetup r:id>` and content type; a relationship or part that is missing drops it with one warning naming the sheet and keeps every other print setting. Kept relationship targets are now written relative to their owner part, as Excel writes them (`xlsb_printer_settings_tests.rs`) |
