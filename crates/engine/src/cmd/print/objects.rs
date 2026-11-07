@@ -175,6 +175,8 @@ fn draw_shape(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Bl
                 pg.polygon(&[[x + w, y + h], p(0.4), p(-0.4)], Some(c), None);
             }
         }
+        ShapeKind::RoundedRectangle => pg.polygon(&rounded_rect_points((x, y, w, h)), fill, line),
+        ShapeKind::Freeform if draw_freeform(pg, shp, b, (x, y, w, h), fill, line) => {}
         _ => {
             pg.polygon(&[[x, y], [x + w, y], [x + w, y + h], [x, y + h]], fill, line);
         }
@@ -207,4 +209,153 @@ fn draw_shape(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Bl
         pg.text(lx, yy, size, font, color, l);
         yy += size * 1.2;
     }
+}
+
+/// Most points one shape's outline flattens into, so a hostile path can't exhaust memory.
+const MAX_OUTLINE_POINTS: usize = 200_000;
+
+/// A rounded rectangle (`roundRect`, ECMA-376 Part 1 §20.1.10.56) with the default corner radius,
+/// 16667/100000 of the shorter side, each corner a quarter ellipse of 6 segments.
+fn rounded_rect_points((x, y, w, h): (f32, f32, f32, f32)) -> Vec<[f32; 2]> {
+    const SEGS: usize = 6;
+    let r = 0.16667 * w.abs().min(h.abs());
+    // Corner centres and the angle each quarter arc starts at, clockwise from the top right.
+    let corners = [(x + w - r, y + r, -90.0f32), (x + w - r, y + h - r, 0.0), (x + r, y + h - r, 90.0), (x + r, y + r, 180.0)];
+    let mut pts = Vec::with_capacity(4 * (SEGS + 1));
+    for (cx, cy, start) in corners {
+        for i in 0..=SEGS {
+            let a = (start + 90.0 * i as f32 / SEGS as f32).to_radians();
+            pts.push([cx + r * a.cos(), cy + r * a.sin()]);
+        }
+    }
+    pts
+}
+
+/// Draws a freeform's custom geometry paths (`a:custGeom`, §20.1.9.8) flattened into polygons and
+/// polylines; false when there is nothing to draw, so the caller prints the box instead.
+fn draw_freeform(
+    pg: &mut Page,
+    shp: &gridcraft_model::Shape,
+    b: &Block,
+    rect: (f32, f32, f32, f32),
+    fill: Option<[u8; 3]>,
+    line: Option<([u8; 3], f32)>,
+) -> bool {
+    let Some(geom) = shp.geometry.as_ref() else { return false };
+    let mut budget = MAX_OUTLINE_POINTS;
+    let mut drew = false;
+    for path in &geom.paths {
+        let line = line.filter(|_| path.stroke);
+        for sub in flatten_path(path, rect, b.k, &mut budget) {
+            if sub.points.len() < 2 {
+                continue;
+            }
+            drew = true;
+            if path.fill {
+                pg.polygon(&sub.points, fill, line);
+            } else if let Some((c, lw)) = line {
+                if sub.closed {
+                    pg.polygon(&sub.points, None, Some((c, lw)));
+                } else {
+                    pg.polyline(&sub.points, lw, c, &[]);
+                }
+            }
+        }
+    }
+    drew
+}
+
+struct Subpath {
+    points: Vec<[f32; 2]>,
+    closed: bool,
+}
+
+/// Flattens one geometry path into subpaths on the shape box, path coordinates stretched from the
+/// path's `w` × `h` (the shape's extent in EMU when omitted). Spends at most `budget` points.
+fn flatten_path(path: &gridcraft_model::GeometryPath, (x, y, w, h): (f32, f32, f32, f32), k: f32, budget: &mut usize) -> Vec<Subpath> {
+    use gridcraft_model::PathCommand;
+    let emu = |len: f32| f64::from(len) / f64::from(k) * 12_700.0;
+    let pw = if path.w > 0 { path.w as f64 } else { emu(w) };
+    let ph = if path.h > 0 { path.h as f64 } else { emu(h) };
+    let (sx, sy) = (f64::from(w) / pw, f64::from(h) / ph);
+    let map = |p: (f64, f64)| [(f64::from(x) + p.0 * sx) as f32, (f64::from(y) + p.1 * sy) as f32];
+    let mut out: Vec<Subpath> = Vec::new();
+    let mut cur: Vec<[f32; 2]> = Vec::new();
+    // The current point and the current subpath's start, in path coordinates.
+    let mut pos = (0.0f64, 0.0f64);
+    let mut start = pos;
+    let push = |cur: &mut Vec<[f32; 2]>, budget: &mut usize, p: (f64, f64)| {
+        if *budget > 0 {
+            *budget -= 1;
+            cur.push(map(p));
+        }
+    };
+    for cmd in &path.commands {
+        if *budget == 0 {
+            break;
+        }
+        // A drawing command after a close (or before any move) continues from the current point.
+        if cur.is_empty() && !matches!(cmd, PathCommand::MoveTo(..) | PathCommand::Close) {
+            push(&mut cur, budget, pos);
+            start = pos;
+        }
+        match *cmd {
+            PathCommand::MoveTo(px, py) => {
+                if !cur.is_empty() {
+                    out.push(Subpath { points: std::mem::take(&mut cur), closed: false });
+                }
+                pos = (px as f64, py as f64);
+                start = pos;
+                push(&mut cur, budget, pos);
+            }
+            PathCommand::LineTo(px, py) => {
+                pos = (px as f64, py as f64);
+                push(&mut cur, budget, pos);
+            }
+            PathCommand::CubicBezTo([c1, c2, e]) => {
+                let (p0, p1, p2, p3) = (pos, (c1.0 as f64, c1.1 as f64), (c2.0 as f64, c2.1 as f64), (e.0 as f64, e.1 as f64));
+                for i in 1..=8 {
+                    let t = f64::from(i) / 8.0;
+                    let u = 1.0 - t;
+                    let (a, bb, c, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+                    push(&mut cur, budget, (a * p0.0 + bb * p1.0 + c * p2.0 + d * p3.0, a * p0.1 + bb * p1.1 + c * p2.1 + d * p3.1));
+                }
+                pos = p3;
+            }
+            PathCommand::QuadBezTo([c1, e]) => {
+                let (p0, p1, p2) = (pos, (c1.0 as f64, c1.1 as f64), (e.0 as f64, e.1 as f64));
+                for i in 1..=8 {
+                    let t = f64::from(i) / 8.0;
+                    let u = 1.0 - t;
+                    let (a, bb, c) = (u * u, 2.0 * u * t, t * t);
+                    push(&mut cur, budget, (a * p0.0 + bb * p1.0 + c * p2.0, a * p0.1 + bb * p1.1 + c * p2.1));
+                }
+                pos = p2;
+            }
+            PathCommand::ArcTo { w_r, h_r, st_ang, sw_ang } => {
+                let (wr, hr) = (w_r as f64, h_r as f64);
+                let st = (st_ang as f64 / 60_000.0).to_radians();
+                let sw_deg = sw_ang as f64 / 60_000.0;
+                let sw = sw_deg.to_radians();
+                let (cx, cy) = (pos.0 - wr * st.cos(), pos.1 - hr * st.sin());
+                // One segment per 15° of sweep, at least 4; a hostile sweep is capped by the budget.
+                let segs = (sw_deg.abs() / 15.0).ceil().clamp(4.0, 1440.0) as u32;
+                for i in 1..=segs {
+                    let a = st + sw * f64::from(i) / f64::from(segs);
+                    pos = (cx + wr * a.cos(), cy + hr * a.sin());
+                    push(&mut cur, budget, pos);
+                }
+            }
+            PathCommand::Close => {
+                if !cur.is_empty() {
+                    out.push(Subpath { points: std::mem::take(&mut cur), closed: true });
+                }
+                pos = start;
+            }
+        }
+    }
+    if !cur.is_empty() {
+        out.push(Subpath { points: cur, closed: false });
+    }
+    out
 }
