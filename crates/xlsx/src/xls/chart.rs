@@ -20,8 +20,9 @@ use std::sync::Arc;
 use gridcraft_core::CellRef;
 use gridcraft_core::color::INDEXED;
 use gridcraft_model::{
-    Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, ControlKind, FormControl, Image, LegendPos, Orientation,
-    PreservedPart, PreservedRel, PreservedSheet, PrintSettings, Series, Shape, ShapeFormat, ShapeGeometry, ShapeKind, Sheet, Visibility, Workbook,
+    Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, ControlKind, FormControl, GeometryPath, Image, LegendPos,
+    Orientation, PathCommand, PreservedPart, PreservedRel, PreservedSheet, PrintSettings, Series, Shape, ShapeFormat, ShapeGeometry, ShapeKind,
+    Sheet, Visibility, Workbook,
 };
 
 use super::drawing::{self, BStore, Blip, ShapeProps};
@@ -93,6 +94,14 @@ const OT_LINE: u16 = 0x0001;
 const OT_RECTANGLE: u16 = 0x0002;
 const OT_OVAL: u16 = 0x0003;
 const OT_OFFICE_ART: u16 = 0x001E;
+/// A BIFF5 polygon: its points are the COORDLIST record right after its Obj.
+const OT_POLYGON: u16 = 0x0009;
+/// A BIFF5 polygon's `wPolyFlags` bit for a closed outline.
+const POLY_CLOSED: u16 = 0x0100;
+/// COORDLIST: a BIFF5 polygon's points, in 1/16384 of its box.
+pub(super) const COORDLIST: u16 = 0x00A9;
+/// The coordinate space of a COORDLIST point.
+const POLY_UNIT: i64 = 0x4000;
 /// Form controls: button, check box, option button, edit box, label, spinner, scroll bar, list,
 /// group box and drop-down (an AutoFilter arrow is a drop-down too).
 const OT_FORM_CONTROLS: [u16; 10] = [0x0007, 0x000B, 0x000C, 0x000D, 0x000E, 0x0010, 0x0011, 0x0012, 0x0013, 0x0014];
@@ -357,6 +366,15 @@ struct PendingShape {
     kind: ShapeKind,
 }
 
+/// A BIFF5 polygon, before its COORDLIST record has been read: its shape without the outline,
+/// whether the outline is closed and the number of points.
+struct PendingPolygon {
+    anchor: ClientAnchor,
+    shape: Shape,
+    closed: bool,
+    cpt: u16,
+}
+
 /// A button, before its TxO record (if any) has been read.
 struct PendingButton {
     anchor: Place,
@@ -554,6 +572,10 @@ pub(super) struct Embedded {
     pending_shape: Option<PendingShape>,
     /// The button whose TxO record (if any) comes next.
     pending_button: Option<PendingButton>,
+    /// The BIFF5 polygon whose COORDLIST record comes next.
+    pending_polygon: Option<PendingPolygon>,
+    /// BIFF5 polygons with their outline, the anchor placed when the sheet is finished.
+    freeforms: Vec<(Place, Shape)>,
     charts: Vec<(Option<Place>, Chart)>,
     pictures: Vec<(Place, ShapeProps)>,
     text_boxes: Vec<(Place, ShapeProps, Text)>,
@@ -599,6 +621,34 @@ impl Embedded {
                 Found::Shape(None, _) | Found::Group => None,
             };
         }
+    }
+
+    /// Any record but COORDLIST ends a pending polygon, which then has no points and is skipped.
+    pub(super) fn next_record(&mut self, id: u16, report: &mut ReadReport) {
+        if id != COORDLIST && self.pending_polygon.take().is_some() {
+            report.warn("Shapes in .xls files are not imported yet.");
+        }
+    }
+
+    /// A BIFF5 COORDLIST record: the pending polygon's `cpt` points (x, y in 1/16384 of its box),
+    /// a freeform with one path. A list shorter than `cpt` skips the polygon.
+    pub(super) fn coordlist(&mut self, rec: &Record<'_>, report: &mut ReadReport) {
+        let Some(PendingPolygon { anchor, mut shape, closed, cpt }) = self.pending_polygon.take() else { return };
+        let data = rec.parts.concat();
+        let points: Option<Vec<(i64, i64)>> =
+            (0..usize::from(cpt)).map(|i| Some((i64::from(u16_at(&data, 4 * i)?), i64::from(u16_at(&data, 4 * i + 2)?)))).collect();
+        let Some(points) = points.filter(|p| !p.is_empty()) else {
+            report.warn("Shapes in .xls files are not imported yet.");
+            return;
+        };
+        let mut commands: Vec<PathCommand> =
+            points.iter().enumerate().map(|(i, &(x, y))| if i == 0 { PathCommand::MoveTo(x, y) } else { PathCommand::LineTo(x, y) }).collect();
+        if closed {
+            commands.push(PathCommand::Close);
+        }
+        let path = GeometryPath { w: POLY_UNIT, h: POLY_UNIT, fill: true, stroke: true, commands };
+        shape.geometry = Some(ShapeGeometry { paths: vec![path], ..ShapeGeometry::default() });
+        self.freeforms.push((Place::Cells(anchor), shape));
     }
 
     /// A drawn shape or button whose Obj record had no TxO after it: imported with empty text.
@@ -725,6 +775,10 @@ impl Embedded {
                     self.pending_biff5_picture = Some((anchor, biff5_picture_name(data, b5)));
                 }
             }
+            OT_POLYGON => match biff5_polygon(data, &self.palette.0) {
+                Some(p) => self.pending_polygon = Some(p),
+                None => report.warn("Shapes in .xls files are not imported yet."),
+            },
             // A note or group imports nothing.
             OT_NOTE | OT_GROUP => {}
             ot if OT_FORM_CONTROLS.contains(&ot) => report.warn("Form controls in .xls files are not imported yet."),
@@ -797,6 +851,7 @@ impl Embedded {
     /// skipped with one warning.
     pub(super) fn finish(mut self, sheet: &mut Sheet, store: &BStore, report: &mut ReadReport) {
         self.flush_shape();
+        self.next_record(EOF, report);
         for (anchor, mut ch) in self.charts {
             if let Some(a) = anchor {
                 ch.anchor = place_at(sheet, &a);
@@ -889,7 +944,7 @@ impl Embedded {
                 kind,
                 // An Office Art shape type with a DrawingML preset of its own is kept as that preset.
                 geometry: if kind == ShapeKind::Rectangle {
-                    msospt_preset(props.shape_type).map(|p| ShapeGeometry { preset: p.to_string(), adjust: Vec::new() })
+                    msospt_preset(props.shape_type).map(|p| ShapeGeometry { preset: p.to_string(), ..ShapeGeometry::default() })
                 } else {
                     None
                 },
@@ -900,6 +955,9 @@ impl Embedded {
                 format,
                 math: Default::default(),
             });
+        }
+        for (a, shape) in self.freeforms {
+            sheet.shapes.push(Shape { anchor: place_at(sheet, &a), ..shape });
         }
         if rotated {
             report.warn("The rotation of text boxes in .xls files is not imported; their text was kept upright.");
@@ -933,6 +991,37 @@ fn biff5_picture_name(data: &[u8], b5: &Biff5) -> Option<String> {
     let cch = usize::from(*data.get(60)?);
     let name = b5.text(data.get(61..61usize.checked_add(cch)?)?);
     (!name.is_empty()).then_some(name)
+}
+
+/// A BIFF5 polygon Obj (66 bytes with no macro): the 34-byte header with its anchor, then the
+/// fill and line fields at 34 (icvBack, icvFore, fls, fAutoFill, icv, lns, lnw, fAutoB), frs and
+/// wPolyFlags at 42 and the point count `cpt` at 56. `None` when the record is too short or has no
+/// points.
+fn biff5_polygon(data: &[u8], table: &[u32; 64]) -> Option<PendingPolygon> {
+    let anchor = biff5_anchor(data)?;
+    let f = data.get(34..42)?;
+    let (icv_fore, fls, icv, lns, auto_line) = (f.get(1)?, f.get(2)?, f.get(4)?, f.get(5)?, f.get(7)?);
+    let flags = u16_at(data, 44)?;
+    let cpt = u16_at(data, 56).filter(|&n| n > 0)?;
+    // icv 0..64 is the colour table; 0x40 and up are automatic (system) colours.
+    let color = |icv: u8| table.get(usize::from(icv)).map_or(Color::Auto, |c| Color::Rgb(*c));
+    let fill = if *fls == 0 { Color::Auto } else { color(*icv_fore) };
+    let line = if auto_line & 1 != 0 { Color::Auto } else { color(*icv) };
+    let shape = Shape {
+        hidden: false,
+        hyperlink: None,
+        name: None,
+        id: 0,
+        kind: ShapeKind::Freeform,
+        geometry: None,
+        anchor: Anchor::default(),
+        fill,
+        line,
+        text: String::new(),
+        format: ShapeFormat { no_fill: *fls == 0, no_line: *lns == 5, ..ShapeFormat::default() },
+        math: Default::default(),
+    };
+    Some(PendingPolygon { anchor, shape, closed: flags & POLY_CLOSED != 0, cpt })
 }
 
 /// A BIFF5 text box Obj's text: `cchText` 8-bit characters in the workbook's code page at
