@@ -58,6 +58,7 @@ mod pivot_tests;
 mod richdata_tests;
 mod roundtrip;
 mod sensitivity_label;
+mod shape_preset_geometry;
 mod shape_text_rtl;
 mod shared_media;
 mod sheet_custom_properties;
