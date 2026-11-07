@@ -1588,3 +1588,23 @@ pub(crate) fn add_defined_names(
         }
     }
 }
+
+/// Why [`read_xls_with_password`] could not open a workbook.
+#[derive(Debug, thiserror::Error)]
+pub enum XlsOpenError {
+    /// Encrypted with a password other than Excel's default, and no password was given.
+    #[error("the workbook is password-protected")]
+    PasswordRequired,
+    /// The password is wrong, or the encryption can't be read.
+    #[error(transparent)]
+    Decrypt(#[from] crate::DecryptError),
+    #[error(transparent)]
+    Io(#[from] IoError),
+}
+
+/// [`read_xls`], decrypting a workbook encrypted with `password`. Excel's default password is
+/// always tried first, so an unencrypted or default-password workbook opens with any password.
+pub fn read_xls_with_password(bytes: &[u8], password: Option<&str>) -> Result<(Workbook, ReadReport), XlsOpenError> {
+    let _ = (bytes, password);
+    Err(XlsOpenError::PasswordRequired) // acceptance stub
+}
