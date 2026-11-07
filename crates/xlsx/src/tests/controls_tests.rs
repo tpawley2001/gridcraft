@@ -27,6 +27,7 @@ fn note(author: &str, text: &str) -> Comment {
         dates: vec![],
         note_box: None,
         picture_fill: None,
+        note_shape: None,
     }
 }
 

@@ -3,7 +3,7 @@ use super::{
     MAX_HYPERLINK_TARGET, MAX_ROWS, MAX_TOOLTIP_CHARS, NoteBox, NoteCorner, RangeRef, Rel, Sheet, Table, TableColumn, TotalsFn, XmlColumnPr,
     from_file, truncate_chars, xml,
 };
-use gridcraft_model::{DateGroup, DateGrouping, NotePictureFill};
+use gridcraft_model::{DateGroup, DateGrouping, NotePictureFill, NoteShape};
 
 /// `budget` counts the cells and bytes this sheet's hyperlinks have copied so far, across
 /// `<hyperlinks>` blocks.
@@ -300,6 +300,7 @@ pub(super) fn read_comments(x: &El, sheet: &mut Sheet) {
                 dates: vec![],
                 note_box: None,
                 picture_fill: None,
+                note_shape: None,
             },
         );
     }
@@ -335,6 +336,69 @@ pub(crate) fn read_note_shapes(x: &El, sheet: &mut Sheet, depth: usize, picture:
             let attrs = NOTE_FILL_ATTRS.iter().filter_map(|(k, _)| Some((k.to_string(), fill.attr(k)?.to_string()))).collect();
             c.picture_fill = Some(NotePictureFill { data, mime, attrs });
         }
+        c.note_shape = Some(note_shape(e, cd)).filter(|s| *s != NoteShape::DEFAULT);
+    }
+}
+
+/// A note shape's colours, outline and placement flags. Colours other than `#rgb`/`#rrggbb`
+/// (optionally followed by a `[n]` palette index) and stroke weights other than `0..=1584pt` are
+/// dropped. A present `<x:MoveWithCells>`/`<x:SizeWithCells>` means the box does *not* move/size
+/// with its cells; a missing one means it does, and stays missing on save.
+fn note_shape(e: &El, cd: &El) -> NoteShape {
+    let flag = |k: &str| {
+        cd.child(k).is_some_and(|f| {
+            let t = f.text.trim();
+            t.is_empty() || t.eq_ignore_ascii_case("true") || t == "1"
+        })
+    };
+    let on_off = |k: &str| match e.attr(k)?.trim().to_ascii_lowercase().as_str() {
+        "t" | "true" | "1" => Some(true),
+        "f" | "false" | "0" => Some(false),
+        _ => None,
+    };
+    let weight = e
+        .attr("strokeweight")
+        .and_then(|w| w.trim().strip_suffix("pt")?.trim().parse::<f64>().ok())
+        .filter(|w| w.is_finite() && (0.0..=1584.0).contains(w));
+    NoteShape {
+        // The usual note yellow is what a note without a kept colour writes.
+        fill_color: e.attr("fillcolor").and_then(vml_hex_color).filter(|c| c != "#ffffe1"),
+        stroke_color: e.attr("strokecolor").and_then(vml_hex_color),
+        stroke_weight_pt: weight,
+        filled: on_off("filled"),
+        stroked: on_off("stroked"),
+        fixed_position: flag("MoveWithCells"),
+        fixed_size: flag("SizeWithCells"),
+    }
+}
+
+/// A VML `#rgb` or `#rrggbb` colour, optionally followed by a ` [n]` palette index, as lowercase
+/// `#rrggbb`; `None` for anything else.
+fn vml_hex_color(v: &str) -> Option<String> {
+    let v = v.trim();
+    let v = match v.split_once('[') {
+        Some((c, idx)) => {
+            let n = idx.trim().strip_suffix(']')?.trim();
+            if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            c.trim()
+        }
+        None => v,
+    };
+    let hex = v.strip_prefix('#')?;
+    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let hex = hex.to_ascii_lowercase();
+    match hex.len() {
+        6 => Some(format!("#{hex}")),
+        3 => Some(hex.chars().fold(String::from("#"), |mut s, c| {
+            s.push(c);
+            s.push(c);
+            s
+        })),
+        _ => None,
     }
 }
 
@@ -449,6 +513,7 @@ pub(crate) fn read_threaded(persons: &HashMap<String, String>, x: &El, sheet: &m
                         dates,
                         note_box: None,
                         picture_fill: None,
+                        note_shape: None,
                     },
                 );
             }
@@ -468,6 +533,32 @@ pub(crate) fn read_threaded(persons: &HashMap<String, String>, x: &El, sheet: &m
                 cm.dates.push(date);
             }
             cm.replies.push((author, text));
+        }
+    }
+}
+
+#[cfg(test)]
+mod note_shape_tests {
+    use super::*;
+
+    #[test]
+    fn only_hex_colours_are_kept() {
+        assert_eq!(vml_hex_color("#EEE").as_deref(), Some("#eeeeee"));
+        assert_eq!(vml_hex_color(" #FBF6D6 [80] ").as_deref(), Some("#fbf6d6"));
+        for bad in ["infoBackground [80]", "#12345", "#ggg", "#fff [x]", "#fff [", "red", "", "#", "#fff;x:1"] {
+            assert_eq!(vml_hex_color(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn bad_weights_and_switches_are_dropped() {
+        let cd = El { name: "ClientData".into(), ..El::default() };
+        for w in ["-1pt", "1585pt", "NaNpt", "infpt", "3", "3px", "pt"] {
+            let mut e = El { name: "shape".into(), ..El::default() };
+            e.attrs.push(("strokeweight".into(), w.into()));
+            e.attrs.push(("filled".into(), "maybe".into()));
+            let s = note_shape(&e, &cd);
+            assert_eq!((s.stroke_weight_pt, s.filled), (None, None), "{w}");
         }
     }
 }
