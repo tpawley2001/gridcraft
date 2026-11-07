@@ -25,6 +25,7 @@ mod crypto;
 mod csv;
 mod dif;
 mod drawing;
+mod external_link;
 mod feature_bags;
 mod fmla;
 mod ods;

@@ -17,25 +17,19 @@
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use gridcraft_core::{CellError, CellRef};
-use gridcraft_model::{Preserved, PreservedPart, PreservedRel, PreservedXml, Workbook};
+use gridcraft_core::CellRef;
+use gridcraft_model::{PreservedPart, PreservedRel, Workbook};
 
 use super::{Bytes, MAX_REL_ID, REL_TYPE, Records, check_type, error};
+use crate::external_link::{CT_XML, Cached, Kept, MAX_CACHED_CELLS, keep, link_xml, push_cell};
 use crate::package::{Package, Rel};
-use crate::passthrough::{MAX_KEPT_PART, merge_preserved, raw_rels};
+use crate::passthrough::{MAX_KEPT_PART, raw_rels};
 use crate::read::Ctx;
-use crate::write::{NS_REL, XML_DECL};
-use crate::xls::formula::{ExternalBook, Links};
-use crate::xml::{esc_attr, push_a1, push_esc};
+use crate::xls::formula::Links;
 use crate::{IoError, ReadReport};
 
 /// The content type of a binary external link part.
 const CT_BINARY: &str = "application/vnd.ms-excel.externalLink";
-/// The content type of the SpreadsheetML part it becomes.
-const CT_XML: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml";
-const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-/// Most cached cells read from one link part.
-const MAX_CACHED_CELLS: usize = 1_048_576;
 /// Most sheet names of a linked workbook (BrtSupTabs: fewer than 65535).
 const MAX_SHEET_NAMES: usize = 65_535;
 
@@ -63,39 +57,17 @@ pub(super) fn read<'a>(
         return package;
     }
     let mut cx = Ctx::new(package);
-    let mut p = Preserved::default();
-    let mut read = vec![];
-    let mut failed = None;
+    let mut kept = vec![];
     for (n, (book, id)) in ids.iter().enumerate() {
         match link(&mut cx, types, rels, id, n + 1, report) {
-            Ok((link, part, rel)) => {
-                read.push((*book, n + 1, link.sheets));
-                p.parts.push(part);
-                p.rels.push(rel);
-            }
+            Ok((link, part, rel)) => kept.push(Kept { book: *book, sheets: link.sheets, part, rel }),
             Err(why) => {
-                failed = Some(why);
-                break;
+                report.warn(format!("links to external workbooks were dropped: {why}"));
+                return cx.pkg;
             }
         }
     }
-    if let Some(why) = failed {
-        report.warn(format!("links to external workbooks were dropped: {why}"));
-        return cx.pkg;
-    }
-    let mut x = format!("<externalReferences xmlns:r=\"{NS_REL}\">");
-    for (_, id) in &ids {
-        let _ = write!(x, "<externalReference r:id=\"{}\"/>", esc_attr(id));
-    }
-    x.push_str("</externalReferences>");
-    p.elements.push(PreservedXml { slot: "externalReferences".into(), xml: x });
-    merge_preserved(&mut wb.preserved, Some(Arc::new(p)));
-    for (book, number, sheets) in read {
-        if let Some(b) = links.books.get_mut(book) {
-            b.external = Some(ExternalBook { number, sheets });
-        }
-    }
-    report.warn("links to external workbooks were kept; they are not followed or refreshed");
+    keep(kept, links, wb, report);
     cx.pkg
 }
 
@@ -226,34 +198,15 @@ fn part(data: &[u8], report: &mut ReadReport) -> Result<Link, IoError> {
                 if col >= gridcraft_core::MAX_COLS {
                     return Err(invalid("invalid cached column"));
                 }
-                tables.push_str("<cell r=\"");
-                push_a1(&mut tables, CellRef::new(row, col));
-                tables.push('"');
-                match id {
-                    368 => {
-                        // Read raw: `Bytes::f64` refuses non-finite numbers, which would drop the link.
-                        let v = f64::from_le_bytes(b.take(8)?.try_into().map_err(|_| invalid("truncated number"))?);
-                        if v.is_finite() {
-                            let _ = write!(tables, "><v>{v}</v></cell>");
-                        } else {
-                            // NaN and infinity have no SpreadsheetML number form.
-                            let _ = write!(tables, " t=\"e\"><v>{}</v></cell>", CellError::Num.as_str());
-                        }
-                    }
-                    369 => {
-                        let _ = write!(tables, " t=\"b\"><v>{}</v></cell>", u8::from(b.u8()? != 0));
-                    }
-                    370 => {
-                        let e: CellError = error(b.u8()?)?;
-                        let _ = write!(tables, " t=\"e\"><v>{}</v></cell>", e.as_str());
-                    }
-                    371 => {
-                        tables.push_str(" t=\"str\"><v>");
-                        push_esc(&mut tables, &b.text(32767)?);
-                        tables.push_str("</v></cell>");
-                    }
-                    _ => tables.push_str("/>"),
-                }
+                let value = match id {
+                    // Read raw: `Bytes::f64` refuses non-finite numbers, which would drop the link.
+                    368 => Cached::Number(f64::from_le_bytes(b.take(8)?.try_into().map_err(|_| invalid("truncated number"))?)),
+                    369 => Cached::Bool(b.u8()? != 0),
+                    370 => Cached::Error(error(b.u8()?)?),
+                    371 => Cached::Text(b.text(32767)?),
+                    _ => Cached::Blank,
+                };
+                push_cell(&mut tables, CellRef::new(row, col), &value);
             }
             // BrtEndSupBook (2.4.588).
             588 => {
@@ -271,19 +224,6 @@ fn part(data: &[u8], report: &mut ReadReport) -> Result<Link, IoError> {
     }
     let rel_id = rel_id.ok_or_else(|| invalid("missing BrtBeginSupBook"))?;
     let sheets = sheets.ok_or_else(|| invalid("missing BrtSupTabs"))?;
-    let mut xml = format!("{XML_DECL}<externalLink xmlns=\"{NS_MAIN}\" xmlns:r=\"{NS_REL}\"><externalBook r:id=\"{}\">", esc_attr(&rel_id));
-    if !sheets.is_empty() {
-        xml.push_str("<sheetNames>");
-        for s in &sheets {
-            let _ = write!(xml, "<sheetName val=\"{}\"/>", esc_attr(s));
-        }
-        xml.push_str("</sheetNames>");
-    }
-    if !tables.is_empty() {
-        xml.push_str("<sheetDataSet>");
-        xml.push_str(&tables);
-        xml.push_str("</sheetDataSet>");
-    }
-    xml.push_str("</externalBook></externalLink>");
+    let xml = link_xml(&rel_id, &sheets, &tables);
     Ok(Link { rel_id, sheets, xml })
 }
