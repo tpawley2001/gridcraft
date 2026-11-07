@@ -107,6 +107,8 @@ pub(super) struct NamedStyle {
 pub(super) struct StyleRecords {
     fonts: Vec<Font>,
     font_colors: Vec<u16>,
+    /// Raw height and weight for shape text, before cell-font normalisation.
+    font_metrics: Vec<(u16, u16)>,
     xfs: Vec<Xf>,
     /// Palette entries for colour indexes 8 and up (RRGGBB), when a Palette record is present.
     palette: Option<Vec<u32>>,
@@ -141,17 +143,29 @@ impl StyleRecords {
             return;
         }
         match read_font(c, name) {
-            Some((font, icv)) => {
+            Some((font, icv, height, weight)) => {
+                self.font_metrics.push((height, weight));
                 self.fonts.push(font);
                 self.font_colors.push(icv);
             }
             None => {
                 // Keep the numbering of the fonts after it.
                 self.short = true;
+                self.font_metrics.push((220, 400));
                 self.fonts.push(Font::default());
                 self.font_colors.push(ICV_FONT_AUTO);
             }
         }
+    }
+
+    /// Parsed FONT records for shape text; colours remain indexes until the palette is known.
+    pub(super) fn drawing_fonts(&self) -> Vec<(Font, u16)> {
+        self.fonts
+            .iter()
+            .zip(&self.font_colors)
+            .zip(&self.font_metrics)
+            .map(|((font, icv), (height, weight))| (Font { size: f32::from(*height) / 20.0, bold: *weight >= 700, ..font.clone() }, *icv))
+            .collect()
     }
 
     /// An XF record. A short record keeps the fields it has.
@@ -410,7 +424,7 @@ fn full_color(kind: u16, tint: i16, value: u32) -> Option<ExtColor> {
 }
 
 /// Font record fields up to the name; `None` if the record is too short for them.
-fn read_font(c: &mut Cursor<'_, '_>, name: impl FnOnce(&mut Cursor<'_, '_>) -> Option<String>) -> Option<(Font, u16)> {
+fn read_font(c: &mut Cursor<'_, '_>, name: impl FnOnce(&mut Cursor<'_, '_>) -> Option<String>) -> Option<(Font, u16, u16, u16)> {
     let height = c.u16().ok()?;
     let flags = c.u16().ok()?;
     let icv = c.u16().ok()?;
@@ -447,7 +461,7 @@ fn read_font(c: &mut Cursor<'_, '_>, name: impl FnOnce(&mut Cursor<'_, '_>) -> O
     };
     f.family = Some(family);
     f.charset = Some(charset);
-    Some((f, icv))
+    Some((f, icv, height, weight))
 }
 
 /// The BIFF8 CellXF bytes (offsets 6-19 of a BIFF8 XF) holding a BIFF5 XF's alignment, fill and

@@ -1116,7 +1116,7 @@ fn worksheet(
         page: page_setup::PageState::default(),
         autofilter: autofilter::State::default(),
         tables: tables::SheetTables::default(),
-        charts: chart::Embedded::new(g.styles.color_table()),
+        charts: chart::Embedded::new(g.styles.color_table(), g.styles.drawing_fonts()),
         pivots: pivot::Views::default(),
         queries: connections::Blocks::default(),
         selections: vec![],

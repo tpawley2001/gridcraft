@@ -3,7 +3,7 @@
 //! that follows holds the text's alignment, its rotation and the character count, and the
 //! `Continue` records after it carry the text as `XLUnicodeStringNoCch` parts (each starting
 //! with its own compression flag, [MS-XLS] 2.5.293) and then the TxORuns formatting, which is
-//! not imported: its bytes are never read as text.
+//! read separately from the characters; only the first run's font is imported.
 
 use gridcraft_model::{ShapeTextAlign, ShapeTextAnchor};
 
@@ -23,6 +23,7 @@ fn u16_at(b: &[u8], at: usize) -> Option<u16> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct Text {
     pub text: String,
+    pub font: Option<u16>,
     pub align: Option<ShapeTextAlign>,
     pub anchor: Option<ShapeTextAnchor>,
     /// `rot`: 1 stacked, 2 counter-clockwise, 3 clockwise ([MS-XLS] 2.4.329).
@@ -47,13 +48,23 @@ pub(super) fn read(parts: &[&[u8]], report: &mut ReadReport) -> Option<Text> {
     if (cch == 0 && cb_runs != 0) || (cch != 0 && (usize::from(cb_runs) < MIN_RUNS || cb_runs % 8 != 0)) {
         report.warn("A text box in a .xls file has malformed formatting runs; its text was kept without them.");
     }
-    let (text, complete) = chars(text_parts(parts.get(1..).unwrap_or_default(), usize::from(cb_runs)), cch);
+    let parts = parts.get(1..).unwrap_or_default();
+    let text_parts = text_parts(parts, usize::from(cb_runs));
+    let font = if cch != 0 && usize::from(cb_runs) >= MIN_RUNS && cb_runs % 8 == 0 {
+        // Run bytes can span Continue records, including the first run's header.
+        let mut bytes = parts.get(text_parts.len()..).unwrap_or_default().iter().flat_map(|p| p.iter().copied());
+        let header: Option<[u8; 4]> = (|| Some([bytes.next()?, bytes.next()?, bytes.next()?, bytes.next()?]))();
+        header.and_then(|[lo, hi, fl, fh]| (u16::from_le_bytes([lo, hi]) == 0).then_some(u16::from_le_bytes([fl, fh])))
+    } else {
+        None
+    };
+    let (text, complete) = chars(text_parts, cch);
     if cch > MAX_CHARS {
         report.warn(format!("Only the first {MAX_CHARS} characters of a text box in a .xls file were imported."));
     } else if !complete {
         report.warn("A text box cut off by the end of its Continue records kept the text that was read.");
     }
-    Some(Text { text, align: align(flags), anchor: anchor(flags), rotation: rot })
+    Some(Text { text, font, align: align(flags), anchor: anchor(flags), rotation: rot })
 }
 
 /// The horizontal alignment in the TxO's first flags word.
@@ -137,6 +148,29 @@ mod tests {
 
     fn text(parts: &[&[u8]], cch: usize) -> (String, bool) {
         chars(parts, cch)
+    }
+
+    #[test]
+    fn first_font_run_can_span_continue_records() {
+        let mut head = [0u8; 18];
+        head[10..12].copy_from_slice(&2u16.to_le_bytes());
+        head[12..14].copy_from_slice(&16u16.to_le_bytes());
+        let runs = [0, 0, 5, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0];
+        let parts: [&[u8]; 4] = [&head, &[0, b'h', b'i'], &runs[..3], &runs[3..]];
+        let text = read(&parts, &mut ReadReport::default()).unwrap();
+        assert_eq!(text.text, "hi");
+        assert_eq!(text.font, Some(5));
+    }
+
+    #[test]
+    fn malformed_runs_keep_text_without_a_font() {
+        let mut head = [0u8; 18];
+        head[10..12].copy_from_slice(&2u16.to_le_bytes());
+        head[12..14].copy_from_slice(&16u16.to_le_bytes());
+        let runs = [0u8; 8];
+        let text = read(&[&head, &[0, b'h', b'i'], &runs], &mut ReadReport::default()).unwrap();
+        assert_eq!(text.text, "hi");
+        assert_eq!(text.font, None);
     }
 
     #[test]
