@@ -104,10 +104,12 @@ impl<'a> Package<'a> {
         })
     }
 
-    /// Every part's (normalized) name, sorted.
+    /// Every part's name as the package spells it (the first of names that differ only in case),
+    /// sorted. Lookups ([`Package::read`]) ignore case either way.
     #[cfg(test)]
     pub fn names(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.names.keys().cloned().collect();
+        let mut v: Vec<String> =
+            self.names.values().filter_map(|&i| self.zip.name_for_index(i)).map(|n| n.trim_start_matches('/').to_string()).collect();
         v.sort();
         v
     }

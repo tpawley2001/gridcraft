@@ -94,7 +94,13 @@ const MAX_TEXT: usize = 1_024;
 fn control_json(c: &FormControl) -> Json {
     let mut o = json!({
         "id": c.id,
-        "kind": match c.kind { ControlKind::Button => "button", ControlKind::Slider => "slider", ControlKind::Spin => "spinButton" },
+        "kind": match c.kind {
+            ControlKind::Button => "button",
+            ControlKind::Slider => "slider",
+            ControlKind::Spin => "spinButton",
+            ControlKind::CheckBox => "checkBox",
+            ControlKind::OptionButton => "optionButton",
+        },
         "name": c.display_name(),
         "at": c.anchor.cell.a1(),
         "width": c.anchor.width,
@@ -102,8 +108,11 @@ fn control_json(c: &FormControl) -> Json {
         "print": c.print,
         "locked": c.locked,
     });
-    if c.kind == ControlKind::Button {
+    if !c.kind.is_number() {
         o["text"] = json!(c.text);
+        if c.kind.max_state().is_some() {
+            o["value"] = json!(c.value);
+        }
         if let Some(a) = &c.action {
             o["action"] = serde_json::to_value(a).unwrap_or(Json::Null);
         }
@@ -340,7 +349,7 @@ fn format(s: &mut Session, p: &Json) -> Result<Json> {
         }
     }
     let mut given = None;
-    if c.kind != ControlKind::Button {
+    if c.kind.is_number() {
         for (key, slot) in [("min", &mut c.min), ("max", &mut c.max), ("step", &mut c.step), ("page", &mut c.page)] {
             if let Some(v) = whole(CMD, p, key)? {
                 *slot = v;
@@ -354,7 +363,7 @@ fn format(s: &mut Session, p: &Json) -> Result<Json> {
     }
     // New bounds pull the value in; a given value is snapped to them.
     c.value = c.snap(given.map_or(c.value as f64, f64::from));
-    let number = c.kind != ControlKind::Button;
+    let number = c.kind.is_number();
     let write = number && (given.is_some() || p.get("min").is_some() || p.get("max").is_some() || p.get("step").is_some());
     let (value, link) = (c.value, c.link.clone());
     s.grouped("Format Control", |s| {
@@ -484,8 +493,8 @@ fn assign(s: &mut Session, p: &Json) -> Result<Json> {
 fn set_value(s: &mut Session, p: &Json) -> Result<Json> {
     const CMD: &str = "control.setValue";
     let (sheet, i, c) = find(s, CMD, p)?;
-    if c.kind == ControlKind::Button {
-        return Err(bad(CMD, "a button has no value; use control.press"));
+    if !c.kind.is_number() {
+        return Err(bad(CMD, "only a slider or spin button takes a value; use control.press for a button"));
     }
     let v = match p.get("value") {
         Some(Json::Number(n)) => n.as_f64(),
@@ -610,7 +619,7 @@ pub(crate) fn sync_linked_values(wb: &mut Workbook) {
                 .controls
                 .iter()
                 .enumerate()
-                .filter(|(_, c)| c.kind != ControlKind::Button)
+                .filter(|(_, c)| c.kind.is_number())
                 .filter_map(|(i, c)| linked_number(wb, si, c).map(|n| (i, c.snap(n))).filter(|(_, v)| *v != c.value))
                 .collect(),
             _ => continue,

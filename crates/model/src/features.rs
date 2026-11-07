@@ -967,15 +967,35 @@ pub enum ControlKind {
     Button,
     Slider,
     Spin,
+    CheckBox,
+    OptionButton,
 }
 
 impl ControlKind {
-    /// The kind's name in the window: Button, Slider, Spin Button.
+    /// The kind's name in the window: Button, Slider, Spin Button, Check Box, Option Button.
     pub fn label(self) -> &'static str {
         match self {
             ControlKind::Button => "Button",
             ControlKind::Slider => "Slider",
             ControlKind::Spin => "Spin Button",
+            ControlKind::CheckBox => "Check Box",
+            ControlKind::OptionButton => "Option Button",
+        }
+    }
+
+    /// Whether the kind holds a number in a range (a slider or spin button), with min, max, step
+    /// and page.
+    pub fn is_number(self) -> bool {
+        matches!(self, ControlKind::Slider | ControlKind::Spin)
+    }
+
+    /// The largest state of a check box (2 = mixed) or option button (1 = selected); `None` for
+    /// the other kinds.
+    pub fn max_state(self) -> Option<u32> {
+        match self {
+            ControlKind::CheckBox => Some(2),
+            ControlKind::OptionButton => Some(1),
+            _ => None,
         }
     }
 }
@@ -1015,7 +1035,7 @@ pub enum MacroInput {
     Fixed(String),
 }
 
-/// A form control (button, slider, spin button) floating over the sheet.
+/// A form control (button, slider, spin button, check box, option button) floating over the sheet.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FormControl {
@@ -1024,12 +1044,13 @@ pub struct FormControl {
     pub anchor: Anchor,
     /// The name shown in the Selection Pane (`Button 3`); empty means the kind and id.
     pub name: String,
-    /// The caption of a button.
+    /// The caption of a button, check box or option button.
     pub text: String,
     /// The linked cell as reference text: `$B$2` on the control's own sheet, or `Sheet2!$B$2`.
     /// Structural edits rewrite it like a formula reference.
     pub link: Option<String>,
-    /// The current value of a slider or spin button (the linked cell holds it too).
+    /// The current value of a slider or spin button (the linked cell holds it too); the state of
+    /// a check box (0 unchecked, 1 checked, 2 mixed) or option button (1 selected).
     pub value: u32,
     pub min: u32,
     pub max: u32,
@@ -1045,6 +1066,8 @@ pub struct FormControl {
     pub print: bool,
     /// Locked when the sheet is protected.
     pub locked: bool,
+    /// Drawn with 3-D shading (check boxes and option buttons).
+    pub three_d: bool,
 }
 
 impl Default for FormControl {
@@ -1065,6 +1088,7 @@ impl Default for FormControl {
             action: None,
             print: true,
             locked: true,
+            three_d: true,
         }
     }
 }
@@ -1076,8 +1100,15 @@ impl FormControl {
     }
 
     /// Checks the numbers of a slider or spin button: 0 ≤ min < max ≤ 30000, 1 ≤ step ≤ max − min,
-    /// and (sliders) page ≥ step. Each rule has its own message.
+    /// and (sliders) page ≥ step. Each rule has its own message. A check box's state is 0..=2 and
+    /// an option button's 0..=1; their other numbers are ignored.
     pub fn check_numbers(&self) -> Result<(), String> {
+        if let Some(top) = self.kind.max_state() {
+            if self.value > top {
+                return Err(format!("{} state must be from 0 to {top}.", self.kind.label()));
+            }
+            return Ok(());
+        }
         if self.kind == ControlKind::Button {
             return Ok(());
         }
@@ -1410,6 +1441,22 @@ mod trendline_forecast_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_box_and_option_button_states_are_checked_and_old_json_reads_shaded() {
+        let c = |kind, value| FormControl { kind, value, min: 5, max: 1, ..FormControl::default() };
+        for v in 0..=2 {
+            assert_eq!(c(ControlKind::CheckBox, v).check_numbers(), Ok(()), "{v}");
+        }
+        assert!(c(ControlKind::CheckBox, 3).check_numbers().is_err());
+        assert_eq!(c(ControlKind::OptionButton, 1).check_numbers(), Ok(()));
+        assert!(c(ControlKind::OptionButton, 2).check_numbers().is_err());
+        let old: FormControl = serde_json::from_str(r#"{"id":1,"kind":"button"}"#).unwrap();
+        assert!(old.three_d);
+        let check: FormControl = serde_json::from_str(r#"{"kind":"checkBox","value":2,"three_d":false}"#).unwrap();
+        assert_eq!((check.kind, check.value, check.three_d), (ControlKind::CheckBox, 2, false));
+        assert_eq!((ControlKind::CheckBox.label(), ControlKind::OptionButton.label()), ("Check Box", "Option Button"));
+    }
 
     #[test]
     fn table_json_without_metadata_still_reads() {

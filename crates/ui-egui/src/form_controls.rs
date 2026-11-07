@@ -103,7 +103,7 @@ pub fn part_at(r: Rect, c: &FormControl, z: f32, p: Pos2) -> Option<Part> {
         return None;
     }
     Some(match c.kind {
-        ControlKind::Button => Part::Button,
+        ControlKind::Button | ControlKind::CheckBox | ControlKind::OptionButton => Part::Button,
         ControlKind::Spin => {
             let (up, _) = spin_parts(r);
             if up.contains(p) { Part::Up } else { Part::Down }
@@ -143,7 +143,7 @@ pub fn paint(p: &Painter, r: Rect, c: &FormControl, z: f32, look: Look) {
     };
     let clip = p.with_clip_rect(r.expand(2.0 * z.max(1.0) + 3.0).intersect(p.clip_rect()));
     match c.kind {
-        ControlKind::Button => {
+        ControlKind::Button | ControlKind::CheckBox | ControlKind::OptionButton => {
             let fill = bg(Part::Button);
             clip.rect_filled(r, 3.0 * z, fill);
             clip.rect_stroke(r, 3.0 * z, border, StrokeKind::Inside);
@@ -241,7 +241,7 @@ impl SheetApp {
     /// when `page` is set.
     pub fn control_nudge(&mut self, id: u32, steps: i64, page: bool) -> bool {
         let Some(c) = self.session.active().and_then(|d| d.wb.active()).and_then(|sh| find(sh, id)).cloned() else { return false };
-        if c.kind == ControlKind::Button {
+        if !c.kind.is_number() {
             return false;
         }
         let by = if page && c.kind == ControlKind::Slider { c.page } else { c.step } as f64;
