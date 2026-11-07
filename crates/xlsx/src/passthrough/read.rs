@@ -381,6 +381,16 @@ impl KeptReader {
                 Err(why) => cx.warn(format!("links to external workbooks were dropped: {why}")),
             }
         }
+        // Parts other applications link with their own relationship types (Google Sheets' workbook
+        // metadata): kept byte for byte, as Excel keeps them. Unknown OOXML and Microsoft types are not.
+        for r in wb_rels.iter().filter(|r| is_third_party(&r.rel_type)) {
+            if p.rels.iter().any(|x| x.id == r.id) {
+                continue;
+            }
+            if let Err(why) = self.keep(cx, &mut p, std::slice::from_ref(r), &mut seen) {
+                cx.warn(format!("{} part {} was dropped: {why}", kind(&r.rel_type), r.target));
+            }
+        }
         // Excel trusts the saved cell values only when both are present; without them it
         // recalculates everything on open, and links into closed workbooks come back as errors.
         // Custom Views (View > Custom Views); each sheet keeps its part of them.

@@ -45,8 +45,19 @@ impl KeptOut {
     /// A part name for a kept part: its original name when that can't collide with anything
     /// written, otherwise a fresh one in the same folder.
     pub(super) fn claim(&mut self, original: &str) -> String {
+        self.claim_with(original, false)
+    }
+
+    #[cfg(test)]
+    pub(super) fn claim_third_party(&mut self, original: &str) -> String {
+        self.claim_with(original, true)
+    }
+
+    /// [`Self::claim`]; `third_party`: the part is linked with a third-party relationship type and
+    /// keeps its name anywhere GridCraft doesn't write (see [`free_for_third_party`]).
+    fn claim_with(&mut self, original: &str, third_party: bool) -> String {
         let lower = original.to_ascii_lowercase();
-        let own = OWN_DIRS.iter().any(|d| lower.starts_with(d));
+        let own = OWN_DIRS.iter().any(|d| lower.starts_with(d)) || (third_party && free_for_third_party(original));
         if own && self.used.insert(lower) {
             return original.to_string();
         }
@@ -93,10 +104,12 @@ pub(super) fn part_rels_xml(rels: &[PreservedRel], names: &NameMap) -> String {
 }
 
 pub(super) fn write_parts(out: &mut Out, parts: &[PreservedPart]) -> NameMap {
-    write_parts_with_media(out, parts, false)
+    write_parts_with_media(out, parts, false, &HashSet::new())
 }
 
-fn write_parts_with_media(out: &mut Out, parts: &[PreservedPart], theme_media: bool) -> NameMap {
+/// Writes kept parts; `third_party` (normalized names) are the parts reached through third-party
+/// relationships, which keep their source names where they can.
+fn write_parts_with_media(out: &mut Out, parts: &[PreservedPart], theme_media: bool, third_party: &HashSet<String>) -> NameMap {
     let mut names = NameMap::new();
     for p in parts {
         let key = normalize(&p.name);
@@ -111,7 +124,7 @@ fn write_parts_with_media(out: &mut Out, parts: &[PreservedPart], theme_media: b
                     out.kept.written.insert(normalize(&name));
                     name
                 } else {
-                    out.kept.claim(&p.name)
+                    out.kept.claim_with(&p.name, third_party.contains(&key))
                 };
                 out.kept.names.entry(key.clone()).or_default().push((p.clone(), name.clone()));
                 name
@@ -145,7 +158,7 @@ fn write_parts_with_media(out: &mut Out, parts: &[PreservedPart], theme_media: b
 /// Theme XML retains its source relationship ids; only package target names may change.
 pub fn write_theme_relationships(theme: &gridcraft_model::Theme, out: &mut Out) {
     let Some(p) = &theme.preserved else { return };
-    let names = write_parts_with_media(out, &p.parts, true);
+    let names = write_parts_with_media(out, &p.parts, true, &HashSet::new());
     if !p.rels.is_empty() {
         out.part("xl/theme/_rels/theme1.xml.rels", None, part_rels_xml(&p.rels, &names).into_bytes());
     }
@@ -369,7 +382,8 @@ pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out, macros: 
     }
     let parts: Vec<PreservedPart> = p.parts.iter().filter(|q| !gone.contains(&normalize(&q.name))).cloned().collect();
     let rels: Vec<PreservedRel> = p.rels.iter().filter(|r| !dropped_ids.contains(r.id.as_str())).cloned().collect();
-    let names = write_parts(out, &parts);
+    let third_party: HashSet<String> = rels.iter().filter(|r| !r.external && is_third_party(&r.rel_type)).flat_map(|r| reachable(p, r)).collect();
+    let names = write_parts_with_media(out, &parts, false, &third_party);
     let ids = attach(wb_rels, &rels, &names);
     for r in &p.package_rels {
         if let Some(target) = rel_target(r, &names) {

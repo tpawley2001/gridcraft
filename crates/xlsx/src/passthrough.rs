@@ -6,7 +6,9 @@
 //! dependencies part with the RTD and CUBE topics, the shared workbook revision history and user
 //! names, links to external workbooks with
 //! their `<externalReferences>`, data connections, XML maps, add-in task panes with the web extension
-//! parts they show) and each sheet (query tables, cells
+//! parts they show, and parts other applications link with relationship types outside the OOXML and
+//! Microsoft namespaces, such as Google Sheets' workbook metadata, under their source name when it
+//! is free) and each sheet (query tables, cells
 //! mapped to XML elements, form controls other than the buttons, scroll bars and spin buttons
 //! `controls.rs` models, ActiveX controls, OLE objects, the sheet background,
 //! printer settings and worksheet custom properties (add-in tags such as `ORB_SHEETNAME`), with the
@@ -316,6 +318,56 @@ pub(crate) fn merge_preserved(into: &mut Option<Arc<Preserved>>, add: Option<Arc
     *into = Some(Arc::new(p));
 }
 
+/// Relationship type namespaces OOXML (Transitional and Strict) and Microsoft define.
+const KNOWN_REL_NAMESPACES: &[&str] = &["http://schemas.openxmlformats.org/", "http://purl.oclc.org/ooxml/", "http://schemas.microsoft.com/"];
+
+/// Folders (lower case) where GridCraft's writer puts parts: a third-party part there is renamed.
+const WRITTEN_DIRS: &[&str] = &[
+    "_rels/",
+    "docprops/",
+    "xl/_rels/",
+    "xl/worksheets/",
+    "xl/chartsheets/",
+    "xl/dialogsheets/",
+    "xl/macrosheets/",
+    "xl/charts/",
+    "xl/drawings/",
+    "xl/media/",
+    "xl/tables/",
+    "xl/pivottables/",
+    "xl/pivotcache/",
+    "xl/richdata/",
+    "xl/theme/",
+    "xl/persons/",
+    "xl/threadedcomments/",
+    "xl/ctrlprops/",
+    "xl/slicers/",
+    "xl/slicercaches/",
+    "xl/timelines/",
+    "xl/timelinecaches/",
+    "xl/featurepropertybag/",
+];
+
+/// Whether a relationship type is outside the namespaces OOXML and Microsoft define: a part another
+/// application links (Google Sheets' `http://customschemas.google.com/relationships/workbookmetadata`).
+fn is_third_party(rel_type: &str) -> bool {
+    let t = rel_type.trim().to_ascii_lowercase();
+    !t.is_empty() && !KNOWN_REL_NAMESPACES.iter().any(|ns| t.starts_with(ns))
+}
+
+/// Whether a third-party part can keep its source name on write: not where GridCraft writes its own
+/// parts (its folders, the XML and binary parts directly in `xl/` or at the package root, any rels
+/// part or the content types part).
+fn free_for_third_party(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    let (dir, file) = package::split_dir(&lower);
+    if file.is_empty() || lower.contains("_rels/") || file.ends_with(".rels") || WRITTEN_DIRS.iter().any(|d| lower.starts_with(d)) {
+        return false;
+    }
+    let ours = |f: &str| f.ends_with(".xml") || f.ends_with(".bin") || f.ends_with(".vml");
+    !((dir.is_empty() || dir == "xl") && ours(file))
+}
+
 fn kind(rel_type: &str) -> &str {
     rel_type.rsplit('/').next().unwrap_or("")
 }
@@ -332,4 +384,34 @@ fn rewritten(r: &PreservedRel) -> bool {
 fn rels_part_name(part: &str) -> String {
     let (dir, file) = package::split_dir(part);
     if dir.is_empty() { format!("_rels/{file}.rels") } else { format!("{dir}/_rels/{file}.rels") }
+}
+
+#[cfg(test)]
+mod third_party_tests {
+    use super::*;
+
+    #[test]
+    fn third_party_types_are_those_outside_ooxml_and_microsoft() {
+        assert!(is_third_party("http://customschemas.google.com/relationships/workbookmetadata"));
+        assert!(is_third_party("urn:example:addin/relationships/state"));
+        assert!(!is_third_party("http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"));
+        assert!(!is_third_party("http://purl.oclc.org/ooxml/officeDocument/relationships/worksheet"));
+        assert!(!is_third_party("HTTP://schemas.microsoft.com/office/2099/relationships/notAThing"));
+        assert!(!is_third_party(""));
+    }
+
+    #[test]
+    fn third_party_part_keeps_its_name_only_where_gridcraft_does_not_write() {
+        let mut k = write::KeptOut::default();
+        assert_eq!(k.claim_third_party("xl/metadata"), "xl/metadata");
+        assert_eq!(k.claim_third_party("xl/addin/state.xml"), "xl/addin/state.xml");
+        // Names GridCraft writes itself get a fresh name in the same folder.
+        for taken in ["xl/metadata.xml", "xl/styles.xml", "xl/worksheets/sheet1.xml", "[Content_Types].xml", "xl/_rels/workbook.xml.rels"] {
+            let name = k.claim_third_party(taken);
+            assert_ne!(name, taken);
+            assert_eq!(package::split_dir(&name).0, package::split_dir(taken).0, "{name}");
+        }
+        // A second part of the same name doesn't take the first one's.
+        assert_ne!(k.claim_third_party("xl/metadata"), "xl/metadata");
+    }
 }
