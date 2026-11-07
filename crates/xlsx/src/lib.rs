@@ -10,6 +10,9 @@
 //! Excel's grid are dropped and XML nesting is limited.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
+// Style only, test builds only: the acceptance tests for truncated ZIP packages
+// (`tests/zip_truncated_recovery_tests.rs`) write `.err().expect(..)`.
+#![cfg_attr(test, allow(clippy::err_expect))]
 
 mod array_formula;
 mod binary_custom_views;
