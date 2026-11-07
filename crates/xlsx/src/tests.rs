@@ -193,6 +193,7 @@ mod web_publishing_tests;
 mod workbook_options_controls;
 mod worksheet_settings;
 
+mod border_inside_lines;
 mod codex_day_border_extras;
 mod codex_day_protection;
 

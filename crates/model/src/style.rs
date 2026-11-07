@@ -590,6 +590,18 @@ mod tests {
     }
 
     #[test]
+    fn borders_saved_before_inside_lines_still_read() -> Result<(), serde_json::Error> {
+        let mut json = serde_json::to_value(Borders::default())?;
+        let obj = json.as_object_mut().ok_or(serde_json::Error::io(std::io::Error::other("not an object")))?;
+        assert!(obj.remove("horizontal").is_some() && obj.remove("vertical").is_some() && obj.remove("outline").is_some());
+        assert_eq!(serde_json::from_value::<Borders>(json)?, Borders::default());
+
+        let b = Borders { horizontal: BorderLine::thin(), outline: Some(false), ..Borders::default() };
+        assert_eq!(serde_json::from_str::<Borders>(&serde_json::to_string(&b)?)?, b);
+        Ok(())
+    }
+
+    #[test]
     fn interning() {
         let mut t = StyleTable::default();
         let bold = t.derive(StyleId::DEFAULT, |s| s.font.bold = true);
