@@ -92,6 +92,7 @@ mod xls_codepages_tests;
 mod xls_connections_tests;
 mod xls_custom_views_tests;
 mod xls_date_filter_tests;
+mod xls_default_password_tests;
 mod xls_edit_ranges_tests;
 mod xls_group_shapes_tests;
 mod xls_invalid_names_tests;
