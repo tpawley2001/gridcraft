@@ -99,8 +99,8 @@ pub(crate) struct SupBook {
     pub names: Vec<String>,
     /// XLSB BrtSupBookSrc: the relationship id of the external link part.
     pub rel: Option<String>,
-    /// XLSB: the external workbook as its link part was read; `None` until then (and for `.xls`),
-    /// so references into it stay unsupported.
+    /// The external workbook as its link was read; `None` until then (or when links can't be
+    /// kept), so references into it stay unsupported.
     pub external: Option<ExternalBook>,
 }
 
@@ -246,7 +246,7 @@ pub(super) fn function(iftab: u16) -> Option<(&'static str, i8)> {
     FTAB.binary_search_by_key(&iftab, |(i, _, _)| *i).ok().and_then(|i| FTAB.get(i)).map(|(_, n, a)| (*n, *a))
 }
 
-fn error_code(code: u8) -> Option<CellError> {
+pub(super) fn error_code(code: u8) -> Option<CellError> {
     Some(match code {
         0x00 => CellError::Null,
         0x07 => CellError::Div0,
@@ -420,6 +420,13 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
 pub(super) fn decode_version(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, biff5: Option<&Biff5>) -> Result<Expr, Unsupported> {
     let grid = if biff5.is_some() { Grid::Biff5 } else { Grid::Biff8 };
     decode_in(rgce, rgcb, base, mode, links, grid, Site::default(), biff5)
+}
+
+/// [`decode_version`] for a cell formula: references into the other workbooks read (see
+/// [`ExternalBook`]) decode to `[n]Sheet`.
+pub(super) fn decode_cell(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, biff5: Option<&Biff5>) -> Result<Expr, Unsupported> {
+    let grid = if biff5.is_some() { Grid::Biff5 } else { Grid::Biff8 };
+    decode_in(rgce, rgcb, base, mode, links, grid, Site { external: true, ..Site::default() }, biff5)
 }
 
 /// Decodes an XLSB cell, shared, array or name formula's `rgce` and `rgcb` at `base`. Shared
@@ -801,7 +808,7 @@ fn decode_in(
                 push(
                     &mut stack,
                     kids,
-                    match links.sheet_sel(ixti, wide && site.external)? {
+                    match links.sheet_sel(ixti, site.external)? {
                         Some(sheet) => Expr::Ref(Reference { sheet, kind: RefKind::Cell(a) }),
                         None => Expr::Error(CellError::Ref),
                     },
@@ -814,7 +821,7 @@ fn decode_in(
                 push(
                     &mut stack,
                     kids,
-                    match links.sheet_sel(ixti, wide && site.external)? {
+                    match links.sheet_sel(ixti, site.external)? {
                         Some(sheet) => Expr::Ref(Reference { sheet, kind }),
                         None => Expr::Error(CellError::Ref),
                     },

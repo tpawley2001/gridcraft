@@ -19,7 +19,8 @@
 //! (range and criteria), charts: embedded charts and chart sheets become live charts whose
 //! series refer to the cells (see `chart`), PNG and JPEG pictures (see `drawing`), and PivotTables on worksheet-range or defined-name
 //! sources (cache streams in `_SX_DB_CUR` and the SxView views, in `xls/pivot.rs`), and query tables with
-//! their data connections (kept for .xlsx, in `xls/connections.rs`). Everything else (other shapes, comments, macros) is
+//! their data connections (kept for .xlsx, in `xls/connections.rs`), and links to other workbooks
+//! (kept for .xlsx, in `xls/external_links.rs`). Everything else (other shapes, comments, macros) is
 //! skipped with a warning.
 //! Workbooks encrypted with Excel's default password (`VelvetSweatshop`) are decrypted first
 //! (see `xls_crypto`), as Excel opens them without a prompt; others open with their password
@@ -32,6 +33,7 @@ mod cond_format;
 mod connections;
 mod doc_props;
 mod drawing;
+mod external_links;
 pub(crate) mod formula;
 mod ftab;
 pub(crate) mod macro_sheet;
@@ -58,7 +60,9 @@ use crate::cfb::{self, Compound};
 use crate::tables::{col_width_to_px, pt_to_px};
 use crate::xls_crypto;
 use crate::{IoError, ReadReport};
-use formula::{Biff5, Extern, ExternKind, Links, Mode, SupBook, Unsupported, Xti, cell_error, decode, decode_version};
+use formula::{
+    Biff5, Extern, ExternKind, Links, Mode, SupBook, Unsupported, Xti, cell_error, decode, decode_cell, decode_version, external_sheet_text,
+};
 use gridcraft_formula::Expr;
 use records::{Cursor, Record, Records};
 
@@ -208,6 +212,8 @@ struct Globals {
     styles: styles::StyleRecords,
     sst: Vec<Arc<str>>,
     links: Links,
+    /// Links to other workbooks (BIFF8 SupBook, XCT and CRN records).
+    external: external_links::Reader,
     names: Vec<Lbl>,
     precision_as_displayed: bool,
     protection: protection::Protection,
@@ -283,6 +289,7 @@ fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>) -> Result<(W
         keep_custom_properties(&mut wb, custom);
     }
     wb.sheets.clear();
+    std::mem::take(&mut g.external).finish(&mut g.links, &mut wb, &mut report);
     wb.view = g.view;
     wb.code_name = g.code_name.clone();
     wb.protected_structure = g.protection.locked;
@@ -641,10 +648,18 @@ fn globals(stream: &[u8], decrypted: bool, budget: &mut Budget, report: &mut Rea
             0x087F => in_theme = false,
             0x00FC => g.sst = shared_strings(&mut c, budget)?,
             0x01AE => {
-                let _ctab = c.u16()?;
+                let ctab = c.u16()?;
                 let cch = c.u16()?;
-                g.links.books.push(SupBook { internal: cch == 0x0401, addin: cch == 0x3A01, ..SupBook::default() });
+                let (internal, addin) = (cch == 0x0401, cch == 0x3A01);
+                g.links.books.push(SupBook { internal, addin, ..SupBook::default() });
+                if internal || addin {
+                    g.external.other_supbook();
+                } else {
+                    g.external.supbook(&mut c, g.links.books.len().saturating_sub(1), ctab, cch, report);
+                }
             }
+            0x0059 if g.biff5.is_none() => g.external.xct(&mut c, report),
+            0x005A if g.biff5.is_none() => g.external.crn(&mut c, report),
             0x0023 => {
                 // ExternName: flags, then an AddinUdf or ExternDocName body; both start with
                 // four bytes before the name.
@@ -1055,11 +1070,13 @@ impl SheetState<'_> {
 
     /// Decodes a formula and attaches it to the cell at `pos`, or records why it can't be.
     fn attach(&mut self, pos: CellRef, p: &Parsed, mode: Mode, array: Option<RangeRef>) {
-        match decode_version(&p.rgce, &p.rgcb, pos, mode, &self.g.links, self.g.biff5.as_ref()) {
+        match decode_cell(&p.rgce, &p.rgcb, pos, mode, &self.g.links, self.g.biff5.as_ref()) {
             Ok(e) => {
-                let text = gridcraft_formula::print(&e);
+                // References into other workbooks keep the `.xlsx` text (`[1]Data!B2`) and their
+                // saved value, as the .xlsx reader keeps them, even where that text doesn't parse.
+                let (text, external) = external_sheet_text(&gridcraft_formula::print(&e));
                 let mut f = Formula::new(&text);
-                if f.expr.is_none() {
+                if f.expr.is_none() && !external {
                     self.unsupported("syntax that can't be parsed yet");
                     return;
                 }
