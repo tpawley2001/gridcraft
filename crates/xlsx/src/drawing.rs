@@ -417,6 +417,14 @@ fn read_custom_paths(geom: &El) -> Option<Vec<GeometryPath>> {
     (!paths.is_empty()).then_some(paths)
 }
 
+/// A shape's geometry: a freeform's custom paths, else its preset.
+fn write_geometry(s: &mut String, prst: &str, sh: &Shape) {
+    match sh.geometry.as_ref().filter(|g| sh.kind == ShapeKind::Freeform && !g.paths.is_empty()) {
+        Some(g) => write_custom_geometry(s, &g.paths),
+        None => write_preset_geometry(s, prst, sh.geometry.as_ref()),
+    }
+}
+
 /// A freeform's `a:custGeom`: its paths as read, no guides, the text box the whole shape.
 fn write_custom_geometry(s: &mut String, paths: &[GeometryPath]) {
     s.push_str("<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l=\"l\" t=\"t\" r=\"r\" b=\"b\"/><a:pathLst>");
@@ -908,10 +916,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                     if tx { " txBox=\"1\"" } else { "" },
                     xfrm(&sh.anchor, "a:xfrm")
                 );
-                match sh.geometry.as_ref().filter(|g| sh.kind == ShapeKind::Freeform && !g.paths.is_empty()) {
-                    Some(g) => write_custom_geometry(&mut s, &g.paths),
-                    None => write_preset_geometry(&mut s, prst, sh.geometry.as_ref()),
-                }
+                write_geometry(&mut s, prst, sh);
                 if sh.format.no_fill {
                     s.push_str("<a:noFill/>");
                 } else if let Some(c) = srgb(&sh.fill, theme) {
