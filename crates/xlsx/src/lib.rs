@@ -50,6 +50,7 @@ mod web_publishing;
 mod write;
 mod xlm;
 mod xls;
+mod xls_crypto;
 mod xlsb;
 mod xml;
 
