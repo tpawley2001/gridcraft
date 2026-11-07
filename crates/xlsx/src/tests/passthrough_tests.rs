@@ -40,9 +40,9 @@ const CONTENT_TYPES: &str = r#"<?xml version="1.0"?><Types xmlns="http://schemas
 const EXTERNAL_LINK: &str = r#"<?xml version="1.0"?><externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><externalBook r:id="rId1"><sheetNames><sheetName val="Sheet1"/></sheetNames><sheetDataSet><sheetData sheetId="0"><row r="1"><cell r="A1"><v>7</v></cell></row></sheetData></sheetDataSet></externalBook></externalLink>"#;
 const CONNECTIONS: &str = r#"<?xml version="1.0"?><connections xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><connection id="1" name="Query" type="5" refreshedVersion="6"><dbPr connection="Provider=Example" command="SELECT 1"/></connection></connections>"#;
 const QUERY_TABLE: &str = r#"<?xml version="1.0"?><queryTable xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" name="ExternalData_1" connectionId="1" autoFormatId="16" applyNumberFormats="0" applyBorderFormats="0" applyFontFormats="0" applyPatternFormats="0" applyAlignmentFormats="0" applyWidthHeightFormats="0"/>"#;
-const CTRL_PROP: &str = r#"<?xml version="1.0"?><formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="Drop" fmlaLink="$C$1" lockText="1"/>"#;
+const CTRL_PROP: &str = r#"<?xml version="1.0"?><formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="EditBox" fmlaLink="$C$1" lockText="1"/>"#;
 const COMMENTS: &str = r#"<?xml version="1.0"?><comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors><author>A</author></authors><commentList><comment ref="A1" authorId="0"><text><t>note</t></text></comment></commentList></comments>"#;
-const VML: &str = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shapetype id="_x0000_t75" coordsize="21600,21600" o:spt="75"/><v:shape id="_x0000_s1025" type="#_x0000_t75" style="position:absolute"><v:imagedata o:relid="rId1" o:title=""/><x:ClientData ObjectType="Pict"><x:Anchor>1, 0, 1, 0, 3, 0, 5, 0</x:Anchor><x:CF>Pict</x:CF></x:ClientData></v:shape><v:shape id="_x0000_s1026" type="#_x0000_t201" style="position:absolute"><x:ClientData ObjectType="Drop"><x:Anchor>4, 0, 1, 0, 6, 0, 2, 0</x:Anchor><x:FmlaLink>$C$1</x:FmlaLink></x:ClientData></v:shape><v:shape id="_x0000_s1027" type="#_x0000_t202" style="position:absolute"><v:textbox><div>old note<br></div></v:textbox><x:ClientData ObjectType="Note"><x:Row>0</x:Row><x:Column>0</x:Column></x:ClientData></v:shape></xml>"##;
+const VML: &str = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shapetype id="_x0000_t75" coordsize="21600,21600" o:spt="75"/><v:shape id="_x0000_s1025" type="#_x0000_t75" style="position:absolute"><v:imagedata o:relid="rId1" o:title=""/><x:ClientData ObjectType="Pict"><x:Anchor>1, 0, 1, 0, 3, 0, 5, 0</x:Anchor><x:CF>Pict</x:CF></x:ClientData></v:shape><v:shape id="_x0000_s1026" type="#_x0000_t201" style="position:absolute"><x:ClientData ObjectType="EditBox"><x:Anchor>4, 0, 1, 0, 6, 0, 2, 0</x:Anchor><x:FmlaLink>$C$1</x:FmlaLink></x:ClientData></v:shape><v:shape id="_x0000_s1027" type="#_x0000_t202" style="position:absolute"><v:textbox><div>old note<br></div></v:textbox><x:ClientData ObjectType="Note"><x:Row>0</x:Row><x:Column>0</x:Column></x:ClientData></v:shape></xml>"##;
 
 /// A workbook with every kind of kept content: package root custom properties, custom XML, an
 /// external link (with formulas using it), a connection, and on sheet "Data" a query table,
@@ -853,7 +853,7 @@ const LOGO: &[u8] = b"\x89PNG\r\n\x1a\n letterhead logo";
 const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n footer signature";
 const HF_VML: &str = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shapetype id="_x0000_t75" coordsize="21600,21600" o:spt="75" o:preferrelative="t" path="m@4@5l@4@11@9@11@9@5xe" filled="f" stroked="f"/><v:shape id="LH" o:spid="_x0000_s1025" type="#_x0000_t75" style="position:absolute;margin-left:0;margin-top:0;width:120pt;height:40pt;z-index:1"><v:imagedata o:relid="rId1" o:title="logo"/><o:lock v:ext="edit" rotation="t"/></v:shape><v:shape id="CF" o:spid="_x0000_s1026" type="#_x0000_t75" style="position:absolute;margin-left:0;margin-top:0;width:80pt;height:20pt;z-index:2"><v:imagedata o:relid="rId2" o:title="signature"/><o:lock v:ext="edit" rotation="t"/></v:shape></xml>"##;
 
-/// The VML drawing of one note and nothing else. [`VML`] also holds a drop-down that only the
+/// The VML drawing of one note and nothing else. [`VML`] also holds an edit box that only the
 /// drawing lists, which is kept with the drawing (and its source shape block).
 const NOTE_VML: &str = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shape id="_x0000_s1027" type="#_x0000_t202" style="position:absolute"><v:textbox><div>old note<br></div></v:textbox><x:ClientData ObjectType="Note"><x:Row>0</x:Row><x:Column>0</x:Column></x:ClientData></v:shape></xml>"##;
 
@@ -967,7 +967,7 @@ fn legacy_vml_without_control_fragments_merges_notes_and_keeps_preview_parts() {
         let (kind, target) = out.target(sheet, &attr_of(&sx, "legacyDrawing", "r:id"));
         assert_eq!(kind, format!("{NS_R}/vmlDrawing"));
         let vml = out.text(&target);
-        assert_eq!(vml.matches("ObjectType=\"Drop\"").count(), 1);
+        assert_eq!(vml.matches("ObjectType=\"EditBox\"").count(), 1);
         assert_eq!(vml.matches("ObjectType=\"Note\"").count(), 1);
         assert!(!vml.contains("old note"));
         let preview = out.target(&target, &attr_of(&vml, "v:imagedata", "o:relid")).1;
@@ -985,7 +985,7 @@ fn legacy_vml_without_control_fragments_merges_notes_and_keeps_preview_parts() {
 fn modelled_form_controls_join_kept_ones_in_one_controls_element() {
     use gridcraft_model::{Anchor, ControlKind, FormControl};
     let (mut wb, _) = read_xlsx(&rich_package()).unwrap();
-    assert!(wb.sheet(0).unwrap().controls.is_empty(), "a drop-down stays with pass-through");
+    assert!(wb.sheet(0).unwrap().controls.is_empty(), "an edit box stays with pass-through");
     let anchor = Anchor { cell: gridcraft_core::CellRef::new(8, 1), width: 120.0, height: 20.0, ..Default::default() };
     let slider = FormControl { id: 900, kind: ControlKind::Slider, anchor, link: Some("$B$9".into()), value: 40, ..Default::default() };
     if let Some(sh) = wb.sheet_mut(0) {
@@ -997,7 +997,7 @@ fn modelled_form_controls_join_kept_ones_in_one_controls_element() {
     let sheet = sheet_part(&u, "Data");
     let sx = u.text(&sheet);
     assert_eq!(sx.matches("<controls").count(), 1, "{sx}");
-    // The kept drop-down and the slider, each with its own properties part.
+    // The kept edit box and the slider, each with its own properties part.
     let ids: Vec<&str> = sx.split("<control shapeId=\"").skip(1).filter_map(|r| r.split('"').next()).collect();
     assert!(ids.contains(&"1026"), "{ids:?}");
     let ours = ids.iter().find(|i| **i != "1026").copied().unwrap_or_default();
@@ -1009,7 +1009,7 @@ fn modelled_form_controls_join_kept_ones_in_one_controls_element() {
     assert!(vml.contains("id=\"_x0000_t201\""), "the form control shape type is defined");
     assert_eq!(ours, "2050", "the note is 2049, the slider follows it");
 
-    // Read back: the slider is modelled again and the drop-down is kept, once.
+    // Read back: the slider is modelled again and the edit box is kept, once.
     let (wb2, rep) = read_xlsx(&out).unwrap();
     assert!(!rep.warnings.iter().any(|w| w.contains("dropped")), "{:?}", rep.warnings);
     let data = wb2.sheet(0).unwrap();

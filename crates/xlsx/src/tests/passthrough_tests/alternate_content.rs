@@ -17,8 +17,8 @@ const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relati
 const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n picture bytes";
 const FILL_PNG: &[u8] = b"\x89PNG\r\n\x1a\n control fill bytes";
-const CTRL_PROP: &str = r#"<?xml version="1.0"?><formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="Drop" fmlaLink="$C$1" lockText="1"/>"#;
-const VML: &str = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shape id="_x0000_s1025" type="#_x0000_t201" style="position:absolute"><x:ClientData ObjectType="Drop"><x:Anchor>1, 0, 1, 0, 3, 0, 2, 0</x:Anchor><x:FmlaLink>$C$1</x:FmlaLink></x:ClientData></v:shape></xml>"##;
+const CTRL_PROP: &str = r#"<?xml version="1.0"?><formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="EditBox" fmlaLink="$C$1" lockText="1"/>"#;
+const VML: &str = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shape id="_x0000_s1025" type="#_x0000_t201" style="position:absolute"><x:ClientData ObjectType="EditBox"><x:Anchor>1, 0, 1, 0, 3, 0, 2, 0</x:Anchor><x:FmlaLink>$C$1</x:FmlaLink></x:ClientData></v:shape></xml>"##;
 const CONTENT_TYPES: &str = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/><Override PartName="/xl/ctrlProps/ctrlProp1.xml" ContentType="application/vnd.ms-excel.controlproperties+xml"/></Types>"#;
 
 fn rels(items: &[(&str, &str, &str)]) -> String {
@@ -31,7 +31,7 @@ fn rels(items: &[(&str, &str, &str)]) -> String {
     s
 }
 
-/// A drop-down's DrawingML anchor as Excel 2010+ writes it, with `cNvPr id` `id`; `fill` gives the
+/// An edit box's DrawingML anchor as Excel 2010+ writes it, with `cNvPr id` `id`; `fill` gives the
 /// shape a picture fill through relationship `rId2`.
 fn control_anchor(id: u32, fill: bool) -> String {
     let blip = if fill { r#"<a:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>"# } else { "" };
@@ -42,7 +42,7 @@ fn control_anchor(id: u32, fill: bool) -> String {
 
 const PICTURE_ANCHOR: &str = r#"<xdr:twoCellAnchor><xdr:from><xdr:col>5</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>5</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>7</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>9</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="3" name="Picture 2" descr="logo"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:twoCellAnchor>"#;
 
-/// Sheet "Controls" with a drop-down (its `<controls>` entry, ctrlProp part and VML shape) whose
+/// Sheet "Controls" with an edit box (its `<controls>` entry, ctrlProp part and VML shape) whose
 /// DrawingML anchor is `control_anchor(control_id, picture)`, after a picture when `picture`;
 /// sheet "Other" holds a value.
 fn package(control_id: u32, picture: bool) -> Vec<u8> {
