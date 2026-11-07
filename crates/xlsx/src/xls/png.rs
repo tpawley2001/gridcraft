@@ -57,10 +57,8 @@ pub(super) fn bitmap_to_png(dib: &[u8]) -> Option<Vec<u8>> {
         let start = src.checked_mul(stride)?;
         let row = rows.get(start..start.checked_add(row_bytes)?)?;
         raw.push(0);
-        for px in row.chunks_exact(3) {
-            if let [b, g, r] = px {
-                raw.extend_from_slice(&[*r, *g, *b]);
-            }
+        for [b, g, r] in row.as_chunks::<3>().0 {
+            raw.extend_from_slice(&[*r, *g, *b]);
         }
     }
     Some(encode_rgb(width, height, &raw))

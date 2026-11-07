@@ -714,8 +714,11 @@ impl Embedded {
     /// A BIFF5 IMDATA record ([MS-XLS] 2.4.140): `cf`, `env`, `lcb`, then `lcb` bytes of image
     /// data, the image of the picture Obj before it. A 24-bit Windows bitmap is imported as a PNG;
     /// any other format is skipped with a warning when the sheet is finished. An IMDATA without a
-    /// picture Obj before it is ignored.
-    pub(super) fn imdata(&mut self, rec: &Record<'_>) {
+    /// picture Obj before it, or in a BIFF8 workbook (`biff5` false), is ignored.
+    pub(super) fn imdata(&mut self, rec: &Record<'_>, biff5: bool) {
+        if !biff5 {
+            return;
+        }
         let Some((anchor, name)) = self.pending_biff5_picture.take() else { return };
         let data = rec.parts.concat();
         let png = (|| {

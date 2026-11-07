@@ -1498,7 +1498,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x005D => st.charts.obj(rec, st.g.biff5.as_ref(), report),
         0x01B6 => st.charts.txo(rec, report),
         // IMDATA: a BIFF5 picture's image (BIFF8 pictures are in the drawing's blip store).
-        0x007F if st.g.biff5.is_some() => st.charts.imdata(rec),
+        0x007F => st.charts.imdata(rec, st.g.biff5.is_some()),
         // DVAL is only a header; import actual DV records regardless of its declared count.
         0x01BE => validation::read(&mut c, st, budget, report)?,
         0x01B0 | 0x0879 => st.cond.header(&c.rest(), rec.id == 0x0879),
