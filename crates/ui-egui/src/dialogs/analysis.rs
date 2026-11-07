@@ -63,6 +63,7 @@ fn toolpak_fields(tool: &str, values: &Map<String, Json>) -> Vec<Field> {
             labels(),
             Check { key: "pareto", label: "Pareto (sorted histogram)" },
             Check { key: "cumulative", label: "Cumulative Percentage" },
+            Check { key: "chartOutput", label: "Chart Output" },
         ],
         "correlation" | "covariance" | "rankPercentile" => vec![range(), grouped(), labels()],
         "anovaSingle" => vec![range(), grouped(), labels(), Text { key: "alpha", label: "Alpha:" }],
@@ -88,7 +89,13 @@ fn toolpak_fields(tool: &str, values: &Map<String, Json>) -> Vec<Field> {
             Check { key: "normalProbability", label: "Normal Probability" },
         ],
         "movingAverage" => {
-            vec![range(), labels(), Text { key: "interval", label: "Interval:" }, Check { key: "standardErrors", label: "Standard Errors" }]
+            vec![
+                range(),
+                labels(),
+                Text { key: "interval", label: "Interval:" },
+                Check { key: "standardErrors", label: "Standard Errors" },
+                Check { key: "chartOutput", label: "Chart Output" },
+            ]
         }
         "randomNumberGeneration" => {
             let dist = values.get("distribution").and_then(Json::as_str).unwrap_or("uniform");
@@ -150,7 +157,13 @@ fn toolpak_fields(tool: &str, values: &Map<String, Json>) -> Vec<Field> {
         }
         "fourierAnalysis" => vec![range(), labels(), Check { key: "inverse", label: "Inverse" }],
         "exponentialSmoothing" => {
-            vec![range(), labels(), Text { key: "damping", label: "Damping factor:" }, Check { key: "standardErrors", label: "Standard Errors" }]
+            vec![
+                range(),
+                labels(),
+                Text { key: "damping", label: "Damping factor:" },
+                Check { key: "standardErrors", label: "Standard Errors" },
+                Check { key: "chartOutput", label: "Chart Output" },
+            ]
         }
         "fTest" => {
             let mut v = two();
@@ -299,9 +312,14 @@ pub(super) fn analysis_toolpak(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Di
                 }
             } else {
                 let mut t = d.values.get(key).and_then(Json::as_str).unwrap_or("").to_string();
-                if ui.add(egui::TextEdit::singleline(&mut t).desired_width(160.0)).changed() {
+                let response = ui.add(egui::TextEdit::singleline(&mut t).desired_width(160.0)).labelled_by(r.id);
+                if response.changed() || response.clicked() {
                     d.values.insert(key.into(), json!(t));
                     d.values.insert("outputTo".into(), json!(choice));
+                    // Naming a new sheet ends range picking, just like its radio button.
+                    if d.refs.target.as_deref() == Some("output") {
+                        d.refs.target = None;
+                    }
                 }
             }
         });
