@@ -1,6 +1,7 @@
 use super::controls::{act, anchor_keytip, control_keytip, invoke, popup_command, sep};
 use super::{
-    Icon, Sense, SheetApp, Stroke, StrokeKind, Tokens, Ui, big_button, big_split_button, icons, json, small_button, small_toggle_button, vec2,
+    Icon, Sense, SheetApp, Stroke, StrokeKind, Tokens, Ui, big_button, big_split_button, icons, json, small_button, small_toggle_button,
+    small_toggle_icon, vec2,
 };
 
 /// Draws the Insert tab: PivotTable, Table, Pictures, Shapes, Icons, charts, slicer, sparklines, form controls (button, slider, spin button), checkbox, links, comments, text box, header/footer and symbols.
@@ -184,12 +185,13 @@ pub(super) fn insert(app: &mut SheetApp, ui: &mut Ui) {
             "insert.optionButton",
         ),
     ];
-    // Three to a column, as the ribbon's small buttons stack.
-    for column in controls.chunks(3) {
+    // Three to a column, as the ribbon's small buttons stack; the second column shows icons only,
+    // so the group stays narrow.
+    for (n, column) in controls.chunks(3).enumerate() {
         ui.vertical(|ui| {
             for &(icon, kind, label, tip, id) in column {
                 let on = placing == Some(kind);
-                let r = small_toggle_button(ui, icon, label, tip, on);
+                let r = if n == 0 { small_toggle_button(ui, icon, label, tip, on) } else { small_toggle_icon(ui, icon, label, tip, on) };
                 control_keytip(app, ui, &r, id);
                 if r.clicked() {
                     app.grid.placing = if placing == Some(kind) { None } else { Some(kind) };

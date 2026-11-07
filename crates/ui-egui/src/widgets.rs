@@ -262,6 +262,26 @@ pub fn small_toggle_button(ui: &mut Ui, icon: Icon, label: &str, tip: &str, on: 
     resp.on_hover_text(tip_text(ui, tip))
 }
 
+/// [`small_toggle_button`] without its caption, where the ribbon has no room for one: the label
+/// names it for accessibility and starts its tooltip.
+pub fn small_toggle_icon(ui: &mut Ui, icon: Icon, label: &str, tip: &str, on: bool) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let label = tr(ui, label);
+    let (rect, resp) = ui.allocate_exact_size(vec2(24.0, 23.0), Sense::click());
+    if on || resp.is_pointer_button_down_on() {
+        ui.painter().rect_filled(rect, 4.0, t.pressed);
+        ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, t.separator), StrokeKind::Inside);
+    } else if resp.hovered() {
+        ui.painter().rect_filled(rect, 4.0, t.hover);
+    }
+    let color = if ui.is_enabled() { t.text } else { t.text_disabled };
+    icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(16.0, 16.0)), icon, color);
+    let enabled = ui.is_enabled();
+    let text = format!("{label}: {}", tip_text(ui, tip));
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, enabled, on, label.clone()));
+    resp.on_hover_text(text)
+}
+
 /// A split button: main part runs the default action, the arrow opens a menu.
 /// Returns (main clicked, arrow response).
 pub fn split_button(ui: &mut Ui, icon: Icon, accent: Option<Color32>, tip: &str) -> (bool, Response) {
