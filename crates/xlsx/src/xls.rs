@@ -1415,7 +1415,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         }
         0x001C => report.warn("Cell comments in .xls files are not imported yet."),
         0x00EC => st.charts.drawing(rec),
-        0x005D => st.charts.obj(rec, report),
+        0x005D => st.charts.obj(rec, st.g.biff5.as_ref(), report),
         0x01B6 => st.charts.txo(rec, report),
         // DVAL is only a header; import actual DV records regardless of its declared count.
         0x01BE => validation::read(&mut c, st, budget, report)?,
