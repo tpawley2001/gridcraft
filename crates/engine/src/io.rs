@@ -70,7 +70,8 @@ pub fn open_bytes_with_password(name: &str, bytes: &[u8], password: Option<&str>
 /// and ZIP codes survive). It does not apply to other formats.
 pub fn open_bytes_with(name: &str, bytes: &[u8], password: Option<&str>, csv_as_text: bool) -> Result<(Workbook, Vec<String>)> {
     if gridcraft_xlsx::sniff(bytes) != gridcraft_xlsx::Format::Encrypted {
-        let (mut wb, warnings) = open_plain(name, bytes, csv_as_text)?;
+        // A legacy `.xls` keeps its encryption inside the compound file, so it is decrypted there.
+        let (mut wb, warnings) = open_plain(name, bytes, password, csv_as_text)?;
         fit_imported_rows(&mut wb);
         return Ok((wb, warnings));
     }
@@ -84,7 +85,7 @@ pub fn open_bytes_with(name: &str, bytes: &[u8], password: Option<&str>, csv_as_
     if gridcraft_xlsx::sniff(&plain) == gridcraft_xlsx::Format::Encrypted {
         return Err(EngineError::Other(format!("We can't open '{name}': the encrypted file is damaged (it holds another encrypted file).")));
     }
-    let (mut wb, mut warnings) = open_plain(name, &plain, csv_as_text)?;
+    let (mut wb, mut warnings) = open_plain(name, &plain, None, csv_as_text)?;
     fit_imported_rows(&mut wb);
     warnings.insert(0, DECRYPTED_NOTICE.into());
     Ok((wb, warnings))
@@ -121,8 +122,8 @@ fn decrypt_message(name: &str, e: gridcraft_xlsx::DecryptError) -> String {
 /// Parses bytes that aren't encrypted, then takes the workbook's macros, and the button actions
 /// xlsx has no place for, out of their hidden names, and adopts the Python cells they hold (see
 /// [`adopt_python`]) within the limits of [`enforce_python_limits`].
-fn open_plain(name: &str, bytes: &[u8], csv_as_text: bool) -> Result<(Workbook, Vec<String>)> {
-    let (mut wb, mut warnings) = read_plain(name, bytes, csv_as_text)?;
+fn open_plain(name: &str, bytes: &[u8], password: Option<&str>, csv_as_text: bool) -> Result<(Workbook, Vec<String>)> {
+    let (mut wb, mut warnings) = read_plain(name, bytes, password, csv_as_text)?;
     warnings.extend(crate::macros::load(&mut wb));
     crate::cmd::controls::load_action_names(&mut wb);
     warnings.extend(adopt_python(&mut wb));
@@ -254,8 +255,33 @@ fn sane_python_output(v: &gridcraft_core::Value) -> bool {
     }
 }
 
-/// Parses bytes that aren't encrypted, as they are.
-fn read_plain(name: &str, bytes: &[u8], csv_as_text: bool) -> Result<(Workbook, Vec<String>)> {
+/// Reads a legacy `.xls`. One encrypted with Excel's default password opens silently, as in
+/// Excel; one encrypted with another password needs `password` and opens with
+/// [`DECRYPTED_NOTICE`] as its first warning.
+fn read_xls(name: &str, bytes: &[u8], password: Option<&str>) -> Result<(Workbook, Vec<String>)> {
+    use gridcraft_xlsx::XlsOpenError;
+    let error = |e: XlsOpenError| {
+        EngineError::Other(match e {
+            XlsOpenError::PasswordRequired => format!("'{name}' {PASSWORD_REQUIRED}"),
+            XlsOpenError::Decrypt(e) => decrypt_message(name, e),
+            XlsOpenError::Io(e) => format!("We can't open '{name}': {e}"),
+        })
+    };
+    // Without a password first: whether the given one was needed decides the notice.
+    match gridcraft_xlsx::read_xls_with_password(bytes, None) {
+        Ok((wb, report)) => Ok((wb, report.warnings)),
+        Err(XlsOpenError::PasswordRequired) if password.is_some() => {
+            let (wb, mut report) = gridcraft_xlsx::read_xls_with_password(bytes, password).map_err(error)?;
+            report.warnings.insert(0, DECRYPTED_NOTICE.into());
+            Ok((wb, report.warnings))
+        }
+        Err(e) => Err(error(e)),
+    }
+}
+
+/// Parses bytes that aren't encrypted as a whole, as they are. `password` opens a legacy `.xls`
+/// encrypted inside its compound file.
+fn read_plain(name: &str, bytes: &[u8], password: Option<&str>, csv_as_text: bool) -> Result<(Workbook, Vec<String>)> {
     let kind = FileKind::from_path(name);
     let sniffed = gridcraft_xlsx::sniff(bytes);
     if gridcraft_xlsx::is_sylk(bytes) || (kind == Some(FileKind::Sylk) && sniffed == gridcraft_xlsx::Format::Csv) {
@@ -270,8 +296,7 @@ fn read_plain(name: &str, bytes: &[u8], csv_as_text: bool) -> Result<(Workbook, 
     }
 
     if sniffed == gridcraft_xlsx::Format::Xls {
-        let (wb, report) = gridcraft_xlsx::read_xls(bytes).map_err(|e| EngineError::Other(format!("We can't open '{name}': {e}")))?;
-        return Ok((wb, report.warnings));
+        return read_xls(name, bytes, password);
     }
     if sniffed == gridcraft_xlsx::Format::LegacyBinary {
         return Err(EngineError::Other(format!(

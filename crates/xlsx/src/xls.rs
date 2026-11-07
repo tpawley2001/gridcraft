@@ -22,8 +22,8 @@
 //! their data connections (kept for .xlsx, in `xls/connections.rs`). Everything else (other shapes, comments, macros) is
 //! skipped with a warning.
 //! Workbooks encrypted with Excel's default password (`VelvetSweatshop`) are decrypted first
-//! (see `xls_crypto`), as Excel opens them without a prompt; other encrypted workbooks and
-//! versions before BIFF5 are refused.
+//! (see `xls_crypto`), as Excel opens them without a prompt; others open with their password
+//! ([`read_xls_with_password`]). Versions before BIFF5 are refused.
 
 mod autofilter;
 mod cetab;
@@ -52,6 +52,7 @@ use std::sync::Arc;
 use gridcraft_core::{CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_model::{CalcMode, CalcSettings, Cell, DefinedName, Formula, LineInfo, Sheet, StyleId, Visibility, Workbook, WorkbookView};
 
+use crate::DecryptError;
 use crate::cfb::{self, Compound};
 use crate::tables::{col_width_to_px, pt_to_px};
 use crate::xls_crypto;
@@ -221,27 +222,45 @@ pub fn read_xls(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
 }
 
 /// [`read_xls`] with an explicit resource budget.
-pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workbook, ReadReport), IoError> {
+pub(crate) fn read_xls_with(bytes: &[u8], budget: Budget) -> Result<(Workbook, ReadReport), IoError> {
+    read_xls_inner(bytes, budget, Lock::Refuse).map_err(|e| match e {
+        XlsOpenError::Io(e) => e,
+        // `Lock::Refuse` turns these into ENCRYPTED already.
+        XlsOpenError::PasswordRequired | XlsOpenError::Decrypt(_) => invalid(ENCRYPTED),
+    })
+}
+
+/// How [`read_xls_inner`] treats a workbook encrypted with a password other than the default.
+#[derive(Clone, Copy)]
+enum Lock<'a> {
+    /// Refuse it with [`ENCRYPTED`] ([`read_xls`]).
+    Refuse,
+    /// Decrypt it with this password, or ask for one when there is none.
+    Password(Option<&'a str>),
+}
+
+fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>) -> Result<(Workbook, ReadReport), XlsOpenError> {
     let cf = Compound::open(bytes).map_err(invalid)?;
     // Excel 5.0/95 keeps the workbook in a `Book` stream.
     let (stream, book) = match cf.root_stream("Workbook").map_err(invalid)? {
         Some(s) => (s, false),
         None => match cf.root_stream("Book").map_err(invalid)? {
             Some(s) => (s, true),
-            None => return Err(invalid("the file has no Workbook stream, so it is not an Excel workbook")),
+            None => return Err(invalid("the file has no Workbook stream, so it is not an Excel workbook").into()),
         },
     };
+    let encrypted = || invalid(if book { format!("Excel 5.0/95 (BIFF5) workbook: {ENCRYPTED}") } else { ENCRYPTED.to_string() });
     let mut report = ReadReport::default();
-    let (stream, decrypted) = match unlock(stream) {
-        Err(IoError::Format(msg)) if book && msg.contains(ENCRYPTED) => {
-            return Err(invalid(format!("Excel 5.0/95 (BIFF5) workbook: {ENCRYPTED}")));
-        }
-        other => other?,
+    let password = match lock {
+        Lock::Refuse => None,
+        Lock::Password(p) => p,
+    };
+    let (stream, decrypted) = match (unlock(stream, password), lock) {
+        (Err(XlsOpenError::PasswordRequired | XlsOpenError::Decrypt(_)), Lock::Refuse) => return Err(encrypted().into()),
+        (other, _) => other?,
     };
     let mut g = match globals(&stream, decrypted, &mut budget, &mut report) {
-        Err(IoError::Format(msg)) if book && msg.contains(ENCRYPTED) => {
-            return Err(invalid(format!("Excel 5.0/95 (BIFF5) workbook: {ENCRYPTED}")));
-        }
+        Err(IoError::Format(msg)) if book && msg.contains(ENCRYPTED) => return Err(encrypted().into()),
         other => other?,
     };
 
@@ -345,7 +364,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         wb.sheets.push(Arc::new(sheet));
     }
     if wb.sheets.is_empty() {
-        return Err(invalid("the workbook has no worksheets that can be read"));
+        return Err(invalid("the workbook has no worksheets that can be read").into());
     }
     wb.calc.precision_as_displayed = g.precision_as_displayed;
     // Chart, picture and shape ids are unique in the workbook, as the .xlsx reader numbers
@@ -443,25 +462,53 @@ fn bof(rec: &Record<'_>) -> Result<(u16, u16), IoError> {
 /// Excel's built-in password for workbooks that are encrypted but open without a prompt.
 const DEFAULT_PASSWORD: &str = "VelvetSweatshop";
 
-/// Decrypts a stream whose globals begin with a FilePass ([MS-XLS] 2.4.117) encrypted with
-/// Excel's default password, as Excel opens them without asking. Returns the stream and whether
-/// it was decrypted. A FilePass for another password, or one that can't be read, is refused.
-fn unlock(stream: Vec<u8>) -> Result<(Vec<u8>, bool), IoError> {
+/// Decrypts a stream whose globals begin with a FilePass ([MS-XLS] 2.4.117). Excel's default
+/// password is tried first, as Excel opens those workbooks without asking; then `password`, or
+/// [`XlsOpenError::PasswordRequired`] without one. A FilePass no password can open is refused
+/// at once. Returns the stream and whether it was decrypted.
+fn unlock(stream: Vec<u8>, password: Option<&str>) -> Result<(Vec<u8>, bool), XlsOpenError> {
     let header = |at: usize| -> Option<(u16, usize)> {
         let h = stream.get(at..at.checked_add(4)?)?;
         Some((u16::from_le_bytes([*h.first()?, *h.get(1)?]), usize::from(u16::from_le_bytes([*h.get(2)?, *h.get(3)?]))))
     };
     let Some((BOF, bof_len)) = header(0) else { return Ok((stream, false)) };
-    let version = header(4).map(|(v, _)| v);
+    let biff5 = header(4).map(|(v, _)| v) == Some(BIFF5);
     let mut at = 4 + bof_len;
     // The globals may begin with WriteProtect before the FilePass ([MS-XLS] 2.1.7.20.1).
     if let Some((0x0086, len)) = header(at) {
         at += 4 + len;
     }
     let Some((0x002F, len)) = header(at) else { return Ok((stream, false)) };
-    let filepass = stream.get(at + 4..at + 4 + len).ok_or_else(|| invalid(ENCRYPTED))?;
-    let plain = xls_crypto::decrypt(filepass, version == Some(BIFF5), DEFAULT_PASSWORD, &stream).map_err(|_| invalid(ENCRYPTED))?;
-    Ok((plain, true))
+    let filepass = stream.get(at + 4..at + 4 + len).ok_or_else(|| DecryptError::Malformed("the FilePass record is cut short".into()))?;
+    let wrong_password = match xls_crypto::decrypt(filepass, biff5, DEFAULT_PASSWORD, &stream) {
+        Ok(plain) => return Ok((plain, true)),
+        Err(e) => e,
+    };
+    if wrong_password != xls_crypto::XlsCryptoError::WrongPassword {
+        return Err(unreadable_filepass(filepass, biff5).into());
+    }
+    let password = password.ok_or(XlsOpenError::PasswordRequired)?;
+    match xls_crypto::decrypt(filepass, biff5, password, &stream) {
+        Ok(plain) => Ok((plain, true)),
+        Err(xls_crypto::XlsCryptoError::WrongPassword) => Err(DecryptError::WrongPassword.into()),
+        Err(xls_crypto::XlsCryptoError::Unsupported) => Err(unreadable_filepass(filepass, biff5).into()),
+    }
+}
+
+/// Why no password can open a FilePass: an encryption scheme we don't know, or a damaged
+/// record for one we do.
+fn unreadable_filepass(filepass: &[u8], biff5: bool) -> DecryptError {
+    let word = |i: usize| Some(u16::from_le_bytes([*filepass.get(i)?, *filepass.get(i + 1)?]));
+    let damaged = || DecryptError::Malformed("the FilePass record can't be read".into());
+    if biff5 {
+        return damaged();
+    }
+    match (word(0), word(2), word(4)) {
+        (Some(0), ..) | (Some(1), Some(1), Some(1)) | (Some(1), Some(2..=4), Some(2)) => damaged(),
+        (Some(1), Some(major), Some(minor)) => DecryptError::Unsupported(format!("RC4 version {major}.{minor}")),
+        (Some(1), ..) | (None, ..) => damaged(),
+        (Some(kind), ..) => DecryptError::Unsupported(format!("type {kind}")),
+    }
 }
 
 fn globals(stream: &[u8], decrypted: bool, budget: &mut Budget, report: &mut ReadReport) -> Result<Globals, IoError> {
@@ -1587,4 +1634,23 @@ pub(crate) fn add_defined_names(
             None => wb.names.push(DefinedName { name: lbl.name.clone(), scope, formula: text, comment: String::new(), hidden: lbl.hidden }),
         }
     }
+}
+
+/// Why [`read_xls_with_password`] could not open a workbook.
+#[derive(Debug, thiserror::Error)]
+pub enum XlsOpenError {
+    /// Encrypted with a password other than Excel's default, and no password was given.
+    #[error("the workbook is password-protected")]
+    PasswordRequired,
+    /// The password is wrong, or the encryption can't be read.
+    #[error(transparent)]
+    Decrypt(#[from] DecryptError),
+    #[error(transparent)]
+    Io(#[from] IoError),
+}
+
+/// [`read_xls`], decrypting a workbook encrypted with `password`. Excel's default password is
+/// always tried first, so an unencrypted or default-password workbook opens with any password.
+pub fn read_xls_with_password(bytes: &[u8], password: Option<&str>) -> Result<(Workbook, ReadReport), XlsOpenError> {
+    read_xls_inner(bytes, Budget::default(), Lock::Password(password))
 }

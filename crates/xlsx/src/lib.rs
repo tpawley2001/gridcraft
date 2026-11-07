@@ -68,7 +68,7 @@ pub use package::MAX_PART;
 pub use passthrough::rebase_links;
 pub use spreadsheetml::{is_spreadsheetml, read_spreadsheetml};
 pub use sylk::{is_sylk, read_sylk, write_sylk};
-pub use xls::read_xls;
+pub use xls::{XlsOpenError, read_xls, read_xls_with_password};
 pub use xlsb::read_xlsb;
 
 /// Errors from reading or writing files.

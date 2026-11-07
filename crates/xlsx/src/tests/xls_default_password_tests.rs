@@ -45,7 +45,7 @@ fn xor(data: &[u8], ks: &[u8]) -> Vec<u8> {
 }
 
 #[derive(Clone, Copy)]
-enum Scheme {
+pub(super) enum Scheme {
     /// RC4 CryptoAPI with this key size in bits (40 or 128).
     CryptoApi(u32),
     /// Office binary document RC4 (version 1.1, MD5).
@@ -191,7 +191,7 @@ fn workbook(fp: &[u8], sheets: &[&[f64]], pad: u16) -> Vec<u8> {
     stream
 }
 
-fn encrypted_book(scheme: Scheme, password: &str, sheets: &[&[f64]], pad: u16) -> Vec<u8> {
+pub(super) fn encrypted_book(scheme: Scheme, password: &str, sheets: &[&[f64]], pad: u16) -> Vec<u8> {
     let stream = workbook(&filepass(scheme, password), sheets, pad);
     compound("Workbook", &encrypt(&stream, scheme, password))
 }
