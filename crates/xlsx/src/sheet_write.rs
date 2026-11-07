@@ -224,6 +224,7 @@ struct CellWriteInput<'a> {
     spill_value: Option<&'a Value>,
     dynamic_range: Option<&'a RangeRef>,
     data_table: Option<&'a gridcraft_model::DataTable>,
+    in_data_table: bool,
 }
 
 fn write_sheet_extensions(s: &mut String, sheet: &Sheet, prio: &[u32]) {
@@ -792,7 +793,19 @@ fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcr
             continue;
         }
         s.push('>');
+        // Walk sorted result spans once per row, without expanding ranges into cells or
+        // searching every table for each cell. Overlapping spans still describe their union.
+        let mut table_spans: Vec<_> = sheet
+            .data_tables
+            .iter()
+            .filter(|t| t.range.start.row <= row && row <= t.range.end.row)
+            .map(|t| (t.range.start.col, t.range.end.col))
+            .collect();
+        table_spans.sort_unstable();
+        let mut table_spans = table_spans.into_iter().peekable();
         for &(cell_ref, cell) in cells {
+            while table_spans.next_if(|&(_, end)| end < cell_ref.col).is_some() {}
+            let in_data_table = table_spans.peek().is_some_and(|&(start, _)| start <= cell_ref.col);
             let ov = overrides.get(&cell_ref);
             let ex = extra.get(&cell_ref);
             let array = dynamic.get(&cell_ref).copied().or_else(|| {
@@ -809,6 +822,7 @@ fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcr
                     spill_value: ex,
                     dynamic_range: array.as_ref(),
                     data_table: tables.get(&cell_ref).copied(),
+                    in_data_table,
                 },
                 sid,
                 out,
@@ -918,7 +932,8 @@ fn write_sheet_views(s: &mut String, sheet: &Sheet, selected: bool) {
 }
 
 fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_model::StyleId) -> u32, out: &mut Out) {
-    let CellWriteInput { reference: c, cell, picture, header_override: ov, spill_value: extra, dynamic_range: dynamic, data_table } = input;
+    let CellWriteInput { reference: c, cell, picture, header_override: ov, spill_value: extra, dynamic_range: dynamic, data_table, in_data_table } =
+        input;
     let style = cell.map(|x| sid(x.style)).unwrap_or(0);
     s.push_str("<c r=\"");
     push_a1(s, c);
@@ -1012,7 +1027,7 @@ fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_
     // A What-If data table's formula sits on its top-left result cell, before the cached value.
     if let Some(table) = data_table {
         match &value {
-            Value::Text(_) => s.push_str(" t=\"s\""),
+            Value::Text(_) => s.push_str(" t=\"str\""),
             Value::Bool(_) => s.push_str(" t=\"b\""),
             Value::Error(_) => s.push_str(" t=\"e\""),
             _ => {}
@@ -1024,7 +1039,7 @@ fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_
                 let _ = write!(s, "<v>{}</v></c>", num(*n));
             }
             Value::Text(t) => {
-                let _ = write!(s, "<v>{}</v></c>", out.sst.index(t));
+                let _ = write!(s, "<v>{}</v></c>", esc(&encode_xstring(t)));
             }
             Value::Bool(b) => {
                 let _ = write!(s, "<v>{}</v></c>", *b as u8);
@@ -1040,6 +1055,9 @@ fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_
         Value::Empty | Value::Array(_) => s.push_str("/>"),
         Value::Number(n) => {
             let _ = write!(s, "><v>{}</v></c>", num(*n));
+        }
+        Value::Text(t) if in_data_table => {
+            let _ = write!(s, " t=\"str\"><v>{}</v></c>", esc(&encode_xstring(t)));
         }
         Value::Text(t) => {
             let i = out.sst.index(t);
