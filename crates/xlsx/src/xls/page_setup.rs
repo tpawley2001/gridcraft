@@ -72,8 +72,8 @@ pub(super) fn read(
         PRINT_ROW_COL => flag(&mut c).map(|on| pr.headings = on),
         HCENTER => flag(&mut c).map(|on| pr.center_h = on),
         VCENTER => flag(&mut c).map(|on| pr.center_v = on),
-        HORIZONTAL_BREAKS => breaks(&mut c, MAX_ROWS).map(|b| pr.row_breaks = b),
-        VERTICAL_BREAKS => breaks(&mut c, MAX_COLS).map(|b| pr.col_breaks = b),
+        HORIZONTAL_BREAKS => breaks(&mut c, MAX_ROWS, biff5.is_some()).map(|b| pr.row_breaks = b),
+        VERTICAL_BREAKS => breaks(&mut c, MAX_COLS, biff5.is_some()).map(|b| pr.col_breaks = b),
         SHEET_EXT => sheet_ext(&mut c).map(|color| *tab = color),
         _ => return false,
     };
@@ -202,16 +202,18 @@ fn flag(c: &mut Cursor<'_, '_>) -> Option<bool> {
 }
 
 /// HorizontalPageBreaks / VerticalPageBreaks (2.4.142, 2.4.350): a count, then 6-byte entries
-/// whose first field is the first row (column) after the break, the `.xlsx` `<brk id>`.
-fn breaks(c: &mut Cursor<'_, '_>, limit: u32) -> Option<Vec<u32>> {
+/// whose first field is the first row (column) after the break, the `.xlsx` `<brk id>`. Excel
+/// 5.0/95 (`biff5`) writes 2-byte entries holding only that row (column).
+fn breaks(c: &mut Cursor<'_, '_>, limit: u32, biff5: bool) -> Option<Vec<u32>> {
     let n = usize::from(c.u16().ok()?);
-    if c.remaining() < n.saturating_mul(6) {
+    let entry = if biff5 { 2 } else { 6 };
+    if c.remaining() < n.saturating_mul(entry) {
         return None;
     }
     let mut out = Vec::with_capacity(n.min(MAX_BREAKS));
     for _ in 0..n {
         let at = u32::from(c.u16().ok()?);
-        c.skip(4).ok()?;
+        c.skip(entry - 2).ok()?;
         if at > 0 && at < limit && out.len() < MAX_BREAKS && !out.contains(&at) {
             out.push(at);
         }
