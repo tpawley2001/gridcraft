@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gridcraft_calc::Calc;
+use gridcraft_calc::{Calc, Key};
 use gridcraft_core::{CellRef, RangeRef, Value};
 use gridcraft_model::{CalcMode, Cell, DataTable, DefinedName, Sheet, StyleId, Workbook};
 use serde::{Deserialize, Serialize};
@@ -474,8 +474,15 @@ fn table_results(
 /// recalculation, writing the result cells and recalculating their dependents. Input cells are
 /// only changed inside trials. Tables with a deleted input cell, or without the input cells their
 /// mode needs, keep their values. At most [`MAX_TABLE_CELLS`] result cells are computed per pass.
-pub(crate) fn recalc_data_tables(calc: &mut Calc, wb: &mut Workbook) {
+///
+/// With `changed` (the edited cells and the formulas the edit recalculated), only the tables
+/// that read one of them are recomputed: a table depends on its input cells and on the top row
+/// and left column of its range (the input values, and the formulas whose own precedents make
+/// them recalculate). `None` recomputes them all. Returns the number of tables recomputed.
+pub(crate) fn recalc_data_tables(calc: &mut Calc, wb: &mut Workbook, changed: Option<Vec<Key>>) -> usize {
     let mut budget = MAX_TABLE_CELLS;
+    let mut changed: Option<HashSet<Key>> = changed.map(|c| c.into_iter().collect());
+    let mut recomputed = 0usize;
     for si in 0..wb.sheets.len() {
         let tables = match wb.sheet(si) {
             Some(sh) if !sh.data_tables.is_empty() => sh.data_tables.clone(),
@@ -497,6 +504,14 @@ pub(crate) fn recalc_data_tables(calc: &mut Calc, wb: &mut Workbook) {
             if [row_in, col_in].into_iter().flatten().any(|(_, c)| full.contains(c)) {
                 continue;
             }
+            if let Some(changed) = &changed {
+                let top = RangeRef::new(full.start, CellRef::new(full.start.row, full.end.col));
+                let left = RangeRef::new(full.start, CellRef::new(full.end.row, full.start.col));
+                let reads = |&(s, c): &Key| s == si && (top.contains(c) || left.contains(c) || t.r1 == Some(c) || t.r2 == Some(c));
+                if !changed.iter().any(reads) {
+                    continue;
+                }
+            }
             let cells = t.range.count();
             if cells > budget {
                 continue;
@@ -516,11 +531,18 @@ pub(crate) fn recalc_data_tables(calc: &mut Calc, wb: &mut Workbook) {
                 sh.set_cell(c, Cell { value: v, formula: None, style, py: None });
                 keys.push((si, c));
             }
+            recomputed += 1;
             if !keys.is_empty() {
-                calc.cells_changed(wb, &keys);
+                // A table's results can feed another table's inputs or formulas.
+                let dirty = calc.cells_changed_dirty(wb, &keys);
+                if let Some(changed) = changed.as_mut() {
+                    changed.extend(keys);
+                    changed.extend(dirty);
+                }
             }
         }
     }
+    recomputed
 }
 
 #[cfg(test)]

@@ -930,7 +930,7 @@ fn calc_now(s: &mut Session, _: &Json) -> Result<Json> {
     let mut wb = (*d.wb).clone();
     d.calc.recalc_all(&mut wb);
     let cells = d.calc.last_recalc_cells;
-    crate::cmd::whatif::recalc_data_tables(&mut d.calc, &mut wb);
+    d.last_data_tables_recalculated = crate::cmd::whatif::recalc_data_tables(&mut d.calc, &mut wb, None);
     d.wb = std::sync::Arc::new(wb);
     Ok(json!({"cells": cells}))
 }
