@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-07 · **Change:** minor (`.xls` text boxes keep their fill, outline and font; doc cleanup: merged duplicated rows and sentences)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-07 · **Change:** minor (§7: password-protected `.xls` files ask for their password and open; `.xls` text boxes keep their fill, outline and font; doc cleanup: merged duplicated rows and sentences)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -112,9 +112,10 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   written. Excel 5.0/95 (BIFF5) files open through the same reader (values, number formats, cell
   formatting, names and formulas; 8-bit code-page text); BIFF2-4 files are refused. Password-encrypted
   `.xlsx` workbooks (Agile and Standard encryption) open with their password since #11, but are
-  saved without it: GridCraft can't write an encrypted file yet. `.xls` files encrypted with Excel's
-  default password (XOR, RC4, RC4 CryptoAPI) now open without a prompt, as Excel does; `.xls` files
-  encrypted with any other password (FILEPASS) are still refused with a message.
+  saved without it: GridCraft can't write an encrypted file yet. Encrypted `.xls` (FILEPASS: XOR,
+  RC4, RC4 CryptoAPI) open too: Excel's default password without a prompt, any other password
+  when the user gives it; RC4-encrypted `.xlsx` files are still refused
+  with a message.
 - **Impact:** common in finance, government and anything older than 2007; encrypted files are
   routine in business.
 - **Estimate:** 14–21 h (`.xls` objects 10–15, encryption 4–6). [file-format-parity.md](file-format-parity.md)
@@ -251,6 +252,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 | Date | Change | Summary |
 |---|---|---|
 | 2026-11-07 | minor | XLSX `rightArrow` block arrows survive Save as preset geometry instead of line arrows; block-arrow rendering remains unsupported. |
+| 2026-11-07 | minor | §7: password-protected `.xls` (BIFF8 and BIFF5; XOR, RC4, RC4 CryptoAPI) asks for its password and opens, as in Excel. |
 | 2026-11-07 | minor | BIFF8 `.xls` text boxes keep their fill, outline and font; text boxes and drawn shapes use the first TxO run’s FONT record, including palette text colour. |
 | 2026-11-07 | minor | §7: Excel 5.0/95 (BIFF5) `.xls` Font and XF records are read: fonts, fills, borders and alignment. |
 | 2026-11-06 | minor | XLSX What-If data table text results save as inline formula strings (`t="str"`), including cells after the formula anchor. |

@@ -120,6 +120,7 @@ mod xls_textbox_format_tests;
 mod xls_textbox_tests;
 mod xls_theme_tests;
 mod xls_user_password_tests;
+mod xls_user_xor_password_tests;
 mod xls_vba_tests;
 mod xls_xor_password_tests;
 mod xlsb_array_const_tests;

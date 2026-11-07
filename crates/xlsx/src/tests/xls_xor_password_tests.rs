@@ -32,7 +32,7 @@ const MATRIX: [[u16; 7]; 15] = [
 const PAD: [u8; 15] = [0xBB, 0xFF, 0xFF, 0xBA, 0xFF, 0xFF, 0xB9, 0x80, 0x00, 0xBE, 0x0F, 0x00, 0xBF, 0x0F, 0x00];
 
 /// CreateXorKey_Method1: the last character uses the last matrix row, bit 6 first.
-fn xor_key(pw: &[u8]) -> u16 {
+pub(super) fn xor_key(pw: &[u8]) -> u16 {
     let mut key = INITIAL_CODE[pw.len() - 1];
     for (i, &ch) in pw.iter().enumerate() {
         let row = 15 - pw.len() + i;
@@ -46,7 +46,7 @@ fn xor_key(pw: &[u8]) -> u16 {
 }
 
 /// CreatePasswordVerifier_Method1: over (length, password bytes) in reverse, a 15-bit rotation.
-fn verifier(pw: &[u8]) -> u16 {
+pub(super) fn verifier(pw: &[u8]) -> u16 {
     let mut arr = vec![pw.len() as u8];
     arr.extend_from_slice(pw);
     let mut v: u16 = 0;
@@ -91,7 +91,7 @@ fn xor_array(pw: &[u8]) -> [u8; 16] {
 /// Obfuscates every record body except BOF, FilePass and the other always-plain records, and
 /// the lbPlyPos of each BoundSheet: rotate left 5, then XOR with the array at
 /// (stream offset + record size) mod 16.
-fn obfuscate(stream: &[u8], pw: &str) -> Vec<u8> {
+pub(super) fn obfuscate(stream: &[u8], pw: &str) -> Vec<u8> {
     let array = xor_array(pw.as_bytes());
     let mut out = stream.to_vec();
     let mut at = 0;
@@ -111,13 +111,13 @@ fn obfuscate(stream: &[u8], pw: &str) -> Vec<u8> {
     out
 }
 
-fn filepass8(pw: &str) -> Vec<u8> {
+pub(super) fn filepass8(pw: &str) -> Vec<u8> {
     u16s(&[0, xor_key(pw.as_bytes()), verifier(pw.as_bytes())])
 }
 
 /// BIFF8: Sheet1 A1 = 42, A2 = "hello" (shared string), B1 = A1*2 (cached 84), padded with
 /// numbers in column D so the stream crosses several 1024-byte blocks.
-fn biff8_workbook(fp: &[u8], pad: u16) -> Vec<u8> {
+pub(super) fn biff8_workbook(fp: &[u8], pad: u16) -> Vec<u8> {
     let mut sheet = bof(0x0010);
     sheet.extend(rec(0x0203, &cat(&[&cell(0, 0, 0), &42f64.to_le_bytes()])));
     sheet.extend(rec(0x00FD, &cat(&[&cell(1, 0, 0), &0u32.to_le_bytes()])));
@@ -145,7 +145,7 @@ fn biff5_bof(dt: u16) -> Vec<u8> {
 }
 
 /// BIFF5 `Book` stream: a 4-byte FilePass (key, verifier) and Sheet1 A1 = 42.
-fn biff5_book(fp: &[u8]) -> Vec<u8> {
+pub(super) fn biff5_book(fp: &[u8]) -> Vec<u8> {
     let sheet = cat(&[&biff5_bof(0x0010), &rec(0x0203, &cat(&[&cell(0, 0, 0), &42f64.to_le_bytes()])), &eof()]);
     let globals = |pos: u32| {
         cat(&[

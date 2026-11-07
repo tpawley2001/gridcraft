@@ -879,3 +879,46 @@ fn xls_automatic_row_height_survives_open_and_recalc() {
     s.execute("formulas.calculateNow", serde_json::json!({})).unwrap();
     assert!((pt(&s) - 33.75).abs() < 0.5, "after recalc: {} pt", pt(&s));
 }
+
+/// A BIFF8 `.xls` whose Workbook stream is XOR-obfuscated ([MS-OFFCRYPTO] 2.3.7) under the
+/// password "hunter2": Sheet1 A1 = 42, A2 = "hello", B1 = A1*2. Made by the xlsx crate's test
+/// helpers (`xls_user_xor_password_tests.rs`).
+fn xls_with_user_password() -> Vec<u8> {
+    const STREAM: &str = "0908100000060500bb0dcc0700000000000000002f0006000000a58158c285000e004800000060f90b1d47322393a33afc00100040f9cb1d\
+                          0d3f8f3f8d1c92cd4af768170a0000000908100000061000bb0dcc07000000000000000003020e0092c0e67ae5fa60f9cb1d2d3f2737fd00\
+                          0a000d1c92c0e67ae5fa60f906001f00c0e65ae5fa60f9cb1d2d3f8f95251c92c0e67ae5db607dcb1d2d274c7f2dbc0a000000";
+    let stream: Vec<u8> = (0..STREAM.len()).step_by(2).map(|i| u8::from_str_radix(&STREAM[i..i + 2], 16).unwrap()).collect();
+    gridcraft_xlsx::testing::compound_file(&[("Workbook", &stream)])
+}
+
+#[test]
+fn xls_with_user_password_asks_for_it_and_opens_with_it() {
+    let file = xls_with_user_password();
+    for name in ["a.xls", "a.xlt", "a"] {
+        let msg = open_bytes_with_password(name, &file, None).unwrap_err().to_string();
+        assert!(msg.contains(PASSWORD_REQUIRED), "{name}: {msg}");
+    }
+    let msg = open_bytes_with_password("a.xls", &file, Some("Hunter2")).unwrap_err().to_string();
+    assert!(msg.contains(WRONG_PASSWORD) && !msg.contains(PASSWORD_REQUIRED) && !msg.contains("Hunter2"), "{msg}");
+
+    let (wb, warnings) = open_bytes_with_password("a.xls", &file, Some("hunter2")).unwrap();
+    assert_eq!(warnings.first().map(String::as_str), Some(DECRYPTED_NOTICE), "{warnings:?}");
+    assert!(!warnings.iter().any(|w| w.contains("hunter2")), "{warnings:?}");
+    let a1 = |wb: &Workbook| wb.sheets[0].cell(CellRef::parse("A1").unwrap()).map(|c| c.value.clone());
+    assert_eq!(a1(&wb), Some(gridcraft_core::Value::Number(42.0)));
+    // Saved without the password: it opens again with none.
+    let saved = save_bytes(&wb, "a.xlsx").unwrap();
+    assert_ne!(gridcraft_xlsx::sniff(&saved), gridcraft_xlsx::Format::Encrypted);
+    let (again, warnings) = open_bytes("a.xlsx", &saved).unwrap();
+    assert_eq!(a1(&again), Some(gridcraft_core::Value::Number(42.0)));
+    assert!(!warnings.iter().any(|w| w == DECRYPTED_NOTICE), "{warnings:?}");
+}
+
+#[test]
+fn unencrypted_xls_gets_no_decrypted_notice_from_a_password() {
+    // A password given for a file that needs none (or only Excel's default) changes nothing.
+    let file = gridcraft_xlsx::testing::compound_file(&[("Workbook", b"")]);
+    let plain = open_bytes_with_password("a.xls", &file, None).map(|(_, w)| w).map_err(|e| e.to_string());
+    let with = open_bytes_with_password("a.xls", &file, Some("pw")).map(|(_, w)| w).map_err(|e| e.to_string());
+    assert_eq!(plain, with);
+}
