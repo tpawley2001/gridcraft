@@ -250,5 +250,6 @@ mod workbook_protection_locks {
         assert!(at("workbookProtection") < at("bookViews"));
     }
 }
+mod codex_day_alignment_extras;
 mod codex_day_print_options;
 mod codex_day_table_metadata;

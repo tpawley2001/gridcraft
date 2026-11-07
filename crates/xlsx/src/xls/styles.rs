@@ -601,6 +601,7 @@ fn xf_palette_style(xf: &Xf, fonts: &[Font], formats: &HashMap<u16, String>, tab
         },
         indent: a2 & 0x0F,
         shrink: a2 & 0x10 != 0,
+        ..Alignment::default()
     };
     let b1 = word32(4);
     let b2 = word32(8);

@@ -210,7 +210,7 @@ fn xf(b: &mut Bytes<'_>) -> Result<Xf, IoError> {
         255 => 255,
         _ => 0,
     };
-    let align = Alignment { h, v, wrap: flags & 1 << 6 != 0, shrink: flags & 1 << 8 != 0, indent: indent.min(250), rotation };
+    let align = Alignment { h, v, wrap: flags & 1 << 6 != 0, shrink: flags & 1 << 8 != 0, indent: indent.min(250), rotation, ..Alignment::default() };
     let protection = Protection { locked: flags & 1 << 12 != 0, hidden: flags & 1 << 13 != 0 };
     Ok(Xf { fmt, font, fill, border, align, protection })
 }

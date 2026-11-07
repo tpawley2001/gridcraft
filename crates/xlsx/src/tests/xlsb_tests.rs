@@ -1019,7 +1019,7 @@ fn xlsb_formats_alignment_and_protection_are_imported() {
     use gridcraft_model::style::Protection;
     use gridcraft_model::{Alignment, HAlign, Style, VAlign};
     let (wb, _) = read_xlsb(&formats_file(&formats_part())).unwrap();
-    let al = |h, v, wrap, shrink, indent, rotation| Alignment { h, v, wrap, shrink, indent, rotation };
+    let al = |h, v, wrap, shrink, indent, rotation| Alignment { h, v, wrap, shrink, indent, rotation, ..Alignment::default() };
     assert_eq!(style_at(&wb, "B1").align, al(HAlign::Center, VAlign::Top, true, false, 0, 0));
     assert_eq!(style_at(&wb, "C1").align, al(HAlign::Right, VAlign::Center, false, true, 2, 45));
     assert_eq!(style_at(&wb, "D1").align, al(HAlign::Distributed, VAlign::Distributed, false, false, 0, -45));
