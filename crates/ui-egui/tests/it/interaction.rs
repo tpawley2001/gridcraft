@@ -1288,7 +1288,6 @@ fn solver_results_offer_population_only_for_evolutionary() {
     h.state_mut().open_dialog("solverResults", r);
     h.run_steps(2);
     assert!(!h.get_by_label("Population").accesskit_node().is_disabled());
-    h.state_mut().dialog.as_mut().unwrap().values.insert("populationReport".into(), json!(true));
     h.get_by_label("Population").click();
     h.run_steps(2);
     key(&mut h, Key::Enter, Modifiers::NONE);
