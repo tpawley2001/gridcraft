@@ -372,6 +372,9 @@ pub struct Ctx<'a> {
     /// The command applied sheet protection itself (row/column inserts and deletes the
     /// protection allows), so cells it shifts aren't refused as edits of locked cells.
     pub protection_checked: bool,
+    /// The command rewrote a What-If data table as a whole (`data.dataTable`), so its result
+    /// cells aren't refused as an edit of part of the table.
+    pub data_tables_checked: bool,
     /// The structural edits the command made, in order (the sheet's name, the edit), as
     /// references were rewritten for them.
     pub edits: Vec<(String, gridcraft_formula::adjust::Edit)>,
@@ -403,10 +406,11 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
         sel: &mut sel,
         fit_rows: Vec::new(),
         protection_checked: false,
+        data_tables_checked: false,
         edits: Vec::new(),
     };
     let r = f(&mut ctx)?;
-    let Ctx { mut wb, mut changed, structural, mut fit_rows, protection_checked, edits, .. } = ctx;
+    let Ctx { mut wb, mut changed, structural, mut fit_rows, protection_checked, data_tables_checked, edits, .. } = ctx;
     // Equations whose source changed (or that arrived without a layout, as from a paste) are
     // laid out here, so painting only ever reads the cache.
     wb.refresh_equations();
@@ -415,6 +419,9 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
     }
     if !structural {
         check_arrays(&d.wb, &wb)?;
+        if !data_tables_checked {
+            check_data_tables(&d.wb, &mut wb)?;
+        }
     }
     if wb.calc.precision_as_displayed {
         round_edited_as_displayed(&d.wb, &mut wb, &mut changed, structural);
@@ -435,10 +442,14 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
     if let Some(t0) = t0 {
         eprintln!("commit: edit {:?}, {} changed", since(t0), changed.len());
     }
+    let recalculated = structural || !changed.is_empty();
     if structural {
         d.calc.recalc_all(&mut wb);
     } else if !changed.is_empty() {
         d.calc.cells_changed(&mut wb, &changed);
+    }
+    if recalculated && wb.calc.mode == gridcraft_model::CalcMode::Automatic {
+        crate::cmd::whatif::recalc_data_tables(&mut d.calc, &mut wb);
     }
     controls::sync_linked_values(&mut wb);
     if let Some(t0) = t0 {
@@ -660,6 +671,41 @@ fn check_arrays(old: &Workbook, new: &Workbook) -> Result<()> {
             if in_array {
                 return Err(EngineError::Other("You can't change part of an array.".into()));
             }
+        }
+    }
+    Ok(())
+}
+
+/// Refuses an edit of part of a What-If data table's result cells ("Cannot change part of a data
+/// table.", as Excel says). Clearing all of them removes the table, leaving the cells empty.
+fn check_data_tables(old: &Workbook, new: &mut Workbook) -> Result<()> {
+    for sh in &old.sheets {
+        if sh.data_tables.is_empty() {
+            continue;
+        }
+        let Some(si) = new.sheet_index(&sh.name) else { continue };
+        let Some(after) = new.sheets.get(si) else { continue };
+        if std::sync::Arc::ptr_eq(sh, after) {
+            continue;
+        }
+        let edited: Vec<CellRef> = sh.cells.diff(&after.cells).into_iter().filter(|&c| !same_content(sh.cell(c), after.cell(c))).collect();
+        if edited.is_empty() {
+            continue;
+        }
+        let mut cleared = Vec::new();
+        for t in &sh.data_tables {
+            if !after.data_tables.contains(t) || !edited.iter().any(|&c| t.range.contains(c)) {
+                continue;
+            }
+            if after.cells.iter_range(t.range).any(|(_, c)| c.has_content()) {
+                return Err(EngineError::Other("Cannot change part of a data table.".into()));
+            }
+            cleared.push(t.clone());
+        }
+        if !cleared.is_empty()
+            && let Some(sh) = new.sheet_mut(si)
+        {
+            sh.data_tables.retain(|t| !cleared.contains(t));
         }
     }
     Ok(())

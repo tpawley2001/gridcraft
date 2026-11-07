@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use gridcraft_calc::Calc;
 use gridcraft_core::{CellRef, RangeRef, Value};
-use gridcraft_model::{CalcMode, Cell, DefinedName, Sheet, StyleId, Workbook};
+use gridcraft_model::{CalcMode, Cell, DataTable, DefinedName, Sheet, StyleId, Workbook};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
 
@@ -73,7 +73,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Data Table…",
             ["Data", "Forecast", "What-If Analysis"],
             None,
-            "{range: \"D2:E10\", rowInput?: \"B1\", columnInput?: \"B2\"} one-variable (values down the first column with columnInput, or across the top row with rowInput; formulas in the other edge) or two-variable (formula in the top-left corner). Computes every result by substitution and writes static values (a snapshot, not a live {=TABLE()}); ≤100,000 cells.",
+            "{range: \"D2:E10\", rowInput?: \"B1\", columnInput?: \"B2\"} one-variable (values down the first column with columnInput, or across the top row with rowInput; formulas in the other edge) or two-variable (formula in the top-left corner). Computes every result by substitution and records a live {=TABLE()} that every recalculation recomputes (a snapshot when an input cell is on another sheet); ≤100,000 cells. Editing part of the result cells is refused; clearing all of them removes the table.",
             has_doc,
             data_table
         ),
@@ -200,10 +200,14 @@ pub(crate) struct Trial {
 
 impl Trial {
     pub(crate) fn new(d: &DocState) -> Trial {
-        let mut base = (*d.wb).clone();
+        Trial::from_parts(&d.wb, &d.calc)
+    }
+
+    pub(crate) fn from_parts(wb: &Workbook, calc: &Calc) -> Trial {
+        let mut base = wb.clone();
         // What-if analysis always recalculates, even in manual mode.
         base.calc.mode = CalcMode::Automatic;
-        Trial { base, calc: d.calc.clone() }
+        Trial { base, calc: calc.clone() }
     }
 
     /// Sets `sets` to constants, recalculates their dependents and reads `reads`.
@@ -378,9 +382,54 @@ fn data_table(s: &mut Session, p: &Json) -> Result<Json> {
     }
     let d = s.doc()?;
     let sh = d.wb.sheet(si).ok_or(EngineError::NoDocument)?;
-    let (r0, c0) = (r.start.row, r.start.col);
     let mut trial = Trial::new(d);
-    let mut out: Vec<(CellRef, Value)> = Vec::with_capacity(body.count() as usize);
+    let (out, mode) = table_results(&mut trial, si, sh, r, row_in, col_in).ok_or_else(|| bad(CMD, "give `rowInput`, `columnInput` or both"))?;
+    // The table is live (a `{=TABLE()}`) when its input cells are on its own sheet, as Excel
+    // requires; otherwise it stays a snapshot.
+    let live = match (row_in, col_in) {
+        (Some((rsi, rc)), Some((csi, cc))) if rsi == si && csi == si => {
+            Some(DataTable { range: body, two_d: true, r1: Some(rc), r2: Some(cc), ..DataTable::default() })
+        }
+        (Some((rsi, rc)), None) if rsi == si => Some(DataTable { range: body, row: true, r1: Some(rc), ..DataTable::default() }),
+        (None, Some((csi, cc))) if csi == si => Some(DataTable { range: body, r1: Some(cc), ..DataTable::default() }),
+        _ => None,
+    };
+    let is_live = live.is_some();
+    let n = out.len();
+    edit(s, |cx| {
+        for (c, v) in out {
+            let sh = cx.sheet_mut(si)?;
+            let style = sh.style_id(c);
+            sh.set_cell(c, Cell { value: v, formula: None, style, py: None });
+            cx.touch(si, c);
+        }
+        let sh = cx.sheet_mut(si)?;
+        sh.data_tables.retain(|t| t.range != body);
+        if let Some(t) = live {
+            sh.data_tables.push(t);
+        }
+        // This command rewrites the whole table itself.
+        cx.data_tables_checked = true;
+        Ok(())
+    })?;
+    Ok(json!({"range": body.a1(), "cells": n, "mode": mode, "static": !is_live}))
+}
+
+/// Computes the result cells of the data table `r` (input values and formulas included) on
+/// sheet `si` (`sh`) by substitution: one-variable down the first column (`col_in`), across the first row
+/// (`row_in`), or two-variable (both; formula in the corner). Returns the results and the mode
+/// name, or `None` without an input cell.
+fn table_results(
+    trial: &mut Trial,
+    si: usize,
+    sh: &Sheet,
+    r: RangeRef,
+    row_in: Option<(usize, CellRef)>,
+    col_in: Option<(usize, CellRef)>,
+) -> Option<(Vec<(CellRef, Value)>, &'static str)> {
+    let (r0, c0) = (r.start.row, r.start.col);
+    let body = u64::from(r.height().saturating_sub(1)) * u64::from(r.width().saturating_sub(1));
+    let mut out: Vec<(CellRef, Value)> = Vec::with_capacity(body.min(MAX_TABLE_CELLS) as usize);
     let mode = match (row_in, col_in) {
         (None, Some((isi, ic))) => {
             let reads: Vec<(usize, CellRef)> = (c0 + 1..=r.end.col).map(|c| (si, CellRef::new(r0, c))).collect();
@@ -416,19 +465,62 @@ fn data_table(s: &mut Session, p: &Json) -> Result<Json> {
             }
             "twoVariable"
         }
-        (None, None) => return Err(bad(CMD, "give `rowInput`, `columnInput` or both")),
+        (None, None) => return None,
     };
-    let n = out.len();
-    edit(s, |cx| {
-        for (c, v) in out {
-            let sh = cx.sheet_mut(si)?;
-            let style = sh.style_id(c);
-            sh.set_cell(c, Cell { value: v, formula: None, style, py: None });
-            cx.touch(si, c);
+    Some((out, mode))
+}
+
+/// Recomputes every live data table of `wb` (each `{=TABLE()}` on every sheet) after a
+/// recalculation, writing the result cells and recalculating their dependents. Input cells are
+/// only changed inside trials. Tables with a deleted input cell, or without the input cells their
+/// mode needs, keep their values. At most [`MAX_TABLE_CELLS`] result cells are computed per pass.
+pub(crate) fn recalc_data_tables(calc: &mut Calc, wb: &mut Workbook) {
+    let mut budget = MAX_TABLE_CELLS;
+    for si in 0..wb.sheets.len() {
+        let tables = match wb.sheet(si) {
+            Some(sh) if !sh.data_tables.is_empty() => sh.data_tables.clone(),
+            _ => continue,
+        };
+        for t in tables {
+            if t.del1 || t.del2 {
+                continue;
+            }
+            let (row_in, col_in) = match (t.two_d, t.row, t.r1, t.r2) {
+                (true, _, Some(r1), Some(r2)) => (Some((si, r1)), Some((si, r2))),
+                (false, true, Some(r1), _) => (Some((si, r1)), None),
+                (false, false, Some(r1), _) => (None, Some((si, r1))),
+                _ => continue,
+            };
+            let (Some(row), Some(col)) = (t.range.start.row.checked_sub(1), t.range.start.col.checked_sub(1)) else { continue };
+            let full = RangeRef::new(CellRef::new(row, col), t.range.end);
+            // An input cell inside its own table would make the substitution meaningless.
+            if [row_in, col_in].into_iter().flatten().any(|(_, c)| full.contains(c)) {
+                continue;
+            }
+            let cells = t.range.count();
+            if cells > budget {
+                continue;
+            }
+            budget -= cells;
+            let mut trial = Trial::from_parts(wb, calc);
+            let Some(sh) = wb.sheet(si) else { continue };
+            let Some((out, _)) = table_results(&mut trial, si, sh, full, row_in, col_in) else { continue };
+            let Some(sh) = wb.sheet_mut(si) else { continue };
+            let mut keys = Vec::new();
+            for (c, v) in out {
+                let same = sh.cell(c).is_some_and(|x| x.formula.is_none() && x.py.is_none() && x.value == v);
+                if same {
+                    continue;
+                }
+                let style = sh.style_id(c);
+                sh.set_cell(c, Cell { value: v, formula: None, style, py: None });
+                keys.push((si, c));
+            }
+            if !keys.is_empty() {
+                calc.cells_changed(wb, &keys);
+            }
         }
-        Ok(())
-    })?;
-    Ok(json!({"range": body.a1(), "cells": n, "mode": mode, "static": true}))
+    }
 }
 
 #[cfg(test)]

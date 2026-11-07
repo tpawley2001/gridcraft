@@ -169,6 +169,28 @@ fn data_tables() {
 }
 
 #[test]
+fn clearing_a_whole_data_table_removes_it() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "B1", "values": [[0.05], [1000]]})).unwrap();
+    s.execute("range.setValues", json!({"range": "D3", "values": [[100], [200], [300]]})).unwrap();
+    s.execute("cell.set", json!({"cell": "E2", "input": "=B2*(1+B1)"})).unwrap();
+    let r = s.execute("data.dataTable", json!({"range": "D2:E5", "columnInput": "B2"})).unwrap();
+    assert_eq!(r["static"], false);
+    let tables = |s: &Session| s.doc().unwrap().wb.active().unwrap().data_tables.len();
+    assert_eq!(tables(&s), 1);
+    // Part of it: refused, with Excel's message.
+    let e = s.execute("edit.clearAll", json!({"range": "E3:E4"})).unwrap_err();
+    assert!(e.to_string().contains("Cannot change part of a data table."), "{e}");
+    // Formatting part of it is no edit of its content.
+    s.execute("home.bold", json!({"range": "E4"})).unwrap();
+    // The whole result range (and more): the table goes and stays empty.
+    s.execute("edit.clearAll", json!({"range": "E2:E6"})).unwrap();
+    assert_eq!(tables(&s), 0);
+    s.execute("cell.set", json!({"cell": "B1", "input": "0.1"})).unwrap();
+    assert_eq!(v(&s, "E3"), Value::Empty);
+}
+
+#[test]
 fn advanced_filter_in_place_and_copy() {
     let mut s = s();
     s.execute(
