@@ -10,11 +10,13 @@ pub struct SheetKept<'a> {
 }
 
 impl<'a> SheetKept<'a> {
-    /// Writes the sheet's kept parts and adds their relationships to the sheet's.
-    pub fn write(sheet: &'a Sheet, rels: &mut Rels, out: &mut Out) -> SheetKept<'a> {
+    /// Writes the sheet's kept parts and adds their relationships to the sheet's (`part` is the
+    /// sheet's part name, whose folder the relationship targets are relative to).
+    pub fn write(sheet: &'a Sheet, part: &str, rels: &mut Rels, out: &mut Out) -> SheetKept<'a> {
         let Some(p) = sheet.preserved.as_deref() else { return SheetKept { p: None, names: NameMap::new(), ids: HashMap::new() } };
         let names = write_parts(out, &p.parts);
-        let ids = attach(rels, &p.rels, &names);
+        let (from, _) = package::split_dir(part);
+        let ids = attach(rels, &p.rels, &names, from);
         SheetKept { p: Some(p), names, ids }
     }
 
@@ -24,7 +26,7 @@ impl<'a> SheetKept<'a> {
 
     fn write_vml_rels(&self, vml: &PreservedPart, name: &str, out: &mut Out) {
         if !vml.rels.is_empty() {
-            out.part(&rels_part_name(name), None, part_rels_xml(&vml.rels, &self.names).into_bytes());
+            out.part(&rels_part_name(name), None, part_rels_xml(&vml.rels, &self.names, name).into_bytes());
         }
     }
 
@@ -45,7 +47,7 @@ impl<'a> SheetKept<'a> {
     /// name), written to the part's relationships with the kept ones.
     pub fn notes_vml(&self, ours: String, name: &str, pictures: &[(String, String)], out: &mut Out) -> String {
         let vml = self.vml();
-        let mut rels = vml.filter(|v| !v.rels.is_empty()).map(|v| part_rels_xml(&v.rels, &self.names)).unwrap_or_default();
+        let mut rels = vml.filter(|v| !v.rels.is_empty()).map(|v| part_rels_xml(&v.rels, &self.names, name)).unwrap_or_default();
         if !pictures.is_empty() {
             let mut add = String::new();
             for (id, file) in pictures {
@@ -85,7 +87,7 @@ impl<'a> SheetKept<'a> {
         if p.anchors.is_empty() {
             return vec![];
         }
-        let ids = attach_kept(drels, &p.drawing_rels, &self.names);
+        let ids = attach_kept(drels, &p.drawing_rels, &self.names, "xl/drawings");
         p.anchors.iter().filter_map(|a| Some((a.index, remap(&a.xml, &ids)?))).collect()
     }
 

@@ -440,7 +440,8 @@ fn keep_printer_settings(
     if rel.external {
         return dropped(report, "the relationship is external");
     }
-    let content_type = match types.iter().find(|e| e.name == "Override" && e.attr("PartName").is_some_and(|p| normalize(p) == normalize(&rel.target))) {
+    let content_type = match types.iter().find(|e| e.name == "Override" && e.attr("PartName").is_some_and(|p| normalize(p) == normalize(&rel.target)))
+    {
         Some(e) => e.attr("ContentType").unwrap_or(CT_PRINTER_SETTINGS).to_string(),
         None => CT_PRINTER_SETTINGS.to_string(),
     };

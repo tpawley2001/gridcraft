@@ -81,15 +81,31 @@ impl KeptOut {
 /// Original part name (normalized) → written part name.
 pub(super) type NameMap = HashMap<String, String>;
 
-fn rel_target(r: &PreservedRel, names: &NameMap) -> Option<String> {
-    if r.external { Some(r.target.clone()) } else { names.get(&normalize(&r.target)).map(|n| format!("/{n}")) }
+/// The target of a kept relationship as written from the part in `from` (its folder): the written
+/// name of the part it points at, relative to that folder, as Excel writes it.
+fn rel_target(r: &PreservedRel, names: &NameMap, from: &str) -> Option<String> {
+    if r.external {
+        return Some(r.target.clone());
+    }
+    names.get(&normalize(&r.target)).map(|n| relative_target(from, n))
 }
 
-/// A kept part's relationships, ids unchanged, targets renamed.
-pub(super) fn part_rels_xml(rels: &[PreservedRel], names: &NameMap) -> String {
+/// `target` (a part name) relative to the folder `from`.
+fn relative_target(from: &str, target: &str) -> String {
+    let from: Vec<&str> = from.split('/').filter(|s| !s.is_empty()).collect();
+    let to: Vec<&str> = target.split('/').filter(|s| !s.is_empty()).collect();
+    let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut out = "../".repeat(from.len().saturating_sub(common));
+    out.push_str(&to.get(common..).unwrap_or_default().join("/"));
+    out
+}
+
+/// A kept part's relationships, ids unchanged, targets renamed and made relative to the part.
+pub(super) fn part_rels_xml(rels: &[PreservedRel], names: &NameMap, part: &str) -> String {
+    let (from, _) = package::split_dir(part);
     let mut s = format!("{XML_DECL}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">");
     for r in rels {
-        let Some(target) = rel_target(r, names) else { continue };
+        let Some(target) = rel_target(r, names, from) else { continue };
         let _ = write!(
             s,
             "<Relationship Id=\"{}\" Type=\"{}\" Target=\"{}\"{}/>",
@@ -142,14 +158,14 @@ fn write_parts_with_media(out: &mut Out, parts: &[PreservedPart], theme_media: b
         if out.kept.written.contains(&key) {
             // Media bytes may have been emitted by the deduplicating writer above.
             if theme_media && !p.rels.is_empty() {
-                out.part(&rels_part_name(&new), None, part_rels_xml(&p.rels, &names).into_bytes());
+                out.part(&rels_part_name(&new), None, part_rels_xml(&p.rels, &names, &new).into_bytes());
             }
             continue;
         }
         out.kept.written.insert(key);
         out.part(&new, Some(&p.content_type), p.data.to_vec());
         if !p.rels.is_empty() {
-            out.part(&rels_part_name(&new), None, part_rels_xml(&p.rels, &names).into_bytes());
+            out.part(&rels_part_name(&new), None, part_rels_xml(&p.rels, &names, &new).into_bytes());
         }
     }
     names
@@ -160,15 +176,15 @@ pub fn write_theme_relationships(theme: &gridcraft_model::Theme, out: &mut Out) 
     let Some(p) = &theme.preserved else { return };
     let names = write_parts_with_media(out, &p.parts, true, &HashSet::new());
     if !p.rels.is_empty() {
-        out.part("xl/theme/_rels/theme1.xml.rels", None, part_rels_xml(&p.rels, &names).into_bytes());
+        out.part("xl/theme/_rels/theme1.xml.rels", None, part_rels_xml(&p.rels, &names, "xl/theme/theme1.xml").into_bytes());
     }
 }
 
-/// Adds the owner's relationships; returns old id → new id.
-pub(super) fn attach(rels: &mut Rels, list: &[PreservedRel], names: &NameMap) -> HashMap<String, String> {
+/// Adds the owner's relationships (the owner part is in `from`); returns old id → new id.
+pub(super) fn attach(rels: &mut Rels, list: &[PreservedRel], names: &NameMap, from: &str) -> HashMap<String, String> {
     let mut ids = HashMap::new();
     for r in list {
-        if let Some(target) = rel_target(r, names) {
+        if let Some(target) = rel_target(r, names, from) {
             let id = rels.add_raw(&r.rel_type, &target, r.external);
             ids.insert(r.id.clone(), id);
         }
@@ -177,10 +193,10 @@ pub(super) fn attach(rels: &mut Rels, list: &[PreservedRel], names: &NameMap) ->
 }
 
 /// [`attach`] keeping the source ids (see [`Rels::add_kept`]).
-pub(super) fn attach_kept(rels: &mut Rels, list: &[PreservedRel], names: &NameMap) -> HashMap<String, String> {
+pub(super) fn attach_kept(rels: &mut Rels, list: &[PreservedRel], names: &NameMap, from: &str) -> HashMap<String, String> {
     let mut ids = HashMap::new();
     for r in list {
-        if let Some(target) = rel_target(r, names) {
+        if let Some(target) = rel_target(r, names, from) {
             let id = rels.add_kept(&r.id, &r.rel_type, &target, r.external);
             ids.insert(r.id.clone(), id);
         }
@@ -384,9 +400,9 @@ pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out, macros: 
     let rels: Vec<PreservedRel> = p.rels.iter().filter(|r| !dropped_ids.contains(r.id.as_str())).cloned().collect();
     let third_party: HashSet<String> = rels.iter().filter(|r| !r.external && is_third_party(&r.rel_type)).flat_map(|r| reachable(p, r)).collect();
     let names = write_parts_with_media(out, &parts, false, &third_party);
-    let ids = attach(wb_rels, &rels, &names);
+    let ids = attach(wb_rels, &rels, &names, "xl");
     for r in &p.package_rels {
-        if let Some(target) = rel_target(r, &names) {
+        if let Some(target) = rel_target(r, &names, "") {
             out.kept.root.push((r.rel_type.clone(), target, r.external));
         }
     }
