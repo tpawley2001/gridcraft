@@ -9,6 +9,7 @@ use std::sync::Arc;
 use gridcraft_core::{CellError, CellRef, RangeRef};
 use gridcraft_formula::{Anchor, BinOp, Expr, RefKind, Reference, SheetSel, StructItem, StructRef, UnOp};
 
+use super::cetab::cetab;
 use super::ftab::FTAB;
 
 /// Formula token bytes decoded at most (Excel's limit is 1,800 per formula).
@@ -596,10 +597,17 @@ fn decode_in(
                 push(&mut stack, kids, Expr::Call(name.to_string(), args))?;
             }
             0x22 => {
-                let n = usize::from(t.u8()?);
+                // cparams (7 bits) and fPrompt (bit 7): the dialog-box form of a command.
+                let cparams = t.u8()?;
+                let n = usize::from(cparams & 0x7F);
                 let tab = t.u16()?;
                 if tab & 0x8000 != 0 {
-                    return Err(Unsupported("macro sheet commands"));
+                    // fCeFunc: the low 15 bits are a Cetab value, a macro sheet command.
+                    let name = cetab(tab & 0x7FFF).ok_or(Unsupported("macro sheet commands"))?;
+                    let args = pop_n(&mut stack, n, &mut kids)?;
+                    let name = if cparams & 0x80 != 0 { format!("{name}?") } else { name.to_string() };
+                    push(&mut stack, kids, Expr::Call(name, args))?;
+                    continue;
                 }
                 let mut args = pop_n(&mut stack, n, &mut kids)?;
                 if tab & 0x7FFF == 0x00FF {

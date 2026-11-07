@@ -24,6 +24,7 @@
 //! Encrypted workbooks and versions before BIFF5 are refused.
 
 mod autofilter;
+mod cetab;
 mod chart;
 mod cond_format;
 mod connections;
