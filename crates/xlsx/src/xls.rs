@@ -400,7 +400,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     report.warnings.insert(
         0,
         if g.biff5.is_some() {
-            "Imported from an Excel 5.0/95 (.xls) workbook: values, formulas, number formats, column widths, row heights and defined names were read. Fonts, fills, borders, charts, pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
+            "Imported from an Excel 5.0/95 (.xls) workbook: values, formulas, cell formatting, column widths, row heights and defined names were read. Charts, pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         } else {
             "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights, defined names, charts and pictures were read. Comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         }
@@ -692,9 +692,11 @@ fn biff5_global(
                 e.names.push(name);
             }
         }
-        // XF: only the number format and flags are read; BIFF5 fonts and styles aren't imported.
+        // XF: 16 bytes with the alignment, fill and borders packed differently from BIFF8.
         0x00E0 => styles.xf_biff5(c, MAX_XFS),
-        0x0031 | 0x0293 => {}
+        // Font: the name is a 1-byte count and 8-bit characters.
+        0x0031 => styles.font_biff5(c, |raw| b5.text(raw)),
+        0x0293 => {}
         // No SST or SupBook in BIFF5.
         0x00FC | 0x01AE => {}
         _ => return Ok(false),
