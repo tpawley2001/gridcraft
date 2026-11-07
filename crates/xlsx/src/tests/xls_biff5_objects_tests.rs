@@ -146,10 +146,12 @@ fn short_or_garbled_obj_records_never_panic() {
         r[2..4].copy_from_slice(&(cut as u16).to_le_bytes());
         let _ = read_xls(&book(&r));
     }
-    // Other objects (a line, ot 1) keep today's warning.
+    // A line (ot 1) with its line fields opens as a line.
     let mut line = header(1, 1, [0, 0, 0, 0, 2, 0, 2, 0]);
     line.extend_from_slice(&[0x08, 0x00, 0x01, 0x00, 0x10, 0x01, 0x00, 0x00]);
     let (wb, report) = read_xls(&book(&rec(0x005D, &line))).unwrap();
-    assert!(wb.sheet(0).unwrap().shapes.is_empty());
-    assert!(warned(&report), "{:?}", report.warnings);
+    let shapes = &wb.sheet(0).unwrap().shapes;
+    assert_eq!(shapes.len(), 1, "{:?}", report.warnings);
+    assert_eq!(shapes[0].kind, ShapeKind::Line);
+    assert!(!warned(&report), "{:?}", report.warnings);
 }
