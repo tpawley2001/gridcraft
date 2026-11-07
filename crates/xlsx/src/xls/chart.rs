@@ -20,8 +20,8 @@ use std::sync::Arc;
 use gridcraft_core::CellRef;
 use gridcraft_core::color::INDEXED;
 use gridcraft_model::{
-    Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, Image, LegendPos, Orientation, PreservedPart, PreservedRel,
-    PreservedSheet, PrintSettings, Series, Shape, ShapeFormat, ShapeKind, Sheet, Visibility, Workbook,
+    Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, ControlKind, FormControl, Image, LegendPos, Orientation,
+    PreservedPart, PreservedRel, PreservedSheet, PrintSettings, Series, Shape, ShapeFormat, ShapeKind, Sheet, Visibility, Workbook,
 };
 
 use super::drawing::{self, BStore, Blip, ShapeProps};
@@ -92,6 +92,13 @@ const OT_OFFICE_ART: u16 = 0x001E;
 /// Form controls: button, check box, option button, edit box, label, spinner, scroll bar, list,
 /// group box and drop-down (an AutoFilter arrow is a drop-down too).
 const OT_FORM_CONTROLS: [u16; 10] = [0x0007, 0x000B, 0x000C, 0x000D, 0x000E, 0x0010, 0x0011, 0x0012, 0x0013, 0x0014];
+/// A button ([MS-XLS] 2.5.152 FtCmo `ot`), the one form control imported.
+const OT_BUTTON: u16 = 0x0007;
+/// FtCmo `fUIObj` ([MS-XLS] 2.5.143): an object the application created itself, such as the
+/// drop-down arrow of an AutoFilter or of a list validation. It is not a user form control.
+const F_UI_OBJ: u16 = 0x0100;
+/// FtCmo `fLocked` ([MS-XLS] 2.5.143).
+const F_LOCKED: u16 = 0x0001;
 /// OfficeArtClientAnchorSheet record type ([MS-XLS] 2.5.193).
 const CLIENT_ANCHOR: u16 = 0xF010;
 
@@ -173,6 +180,12 @@ struct PendingShape {
     kind: ShapeKind,
 }
 
+/// A button, before its TxO record (if any) has been read.
+struct PendingButton {
+    anchor: ClientAnchor,
+    locked: bool,
+}
+
 /// The model kind of a drawn shape: the Obj `ot` for the BIFF8 kinds, the OfficeArtFSP instance
 /// (the shape type) for an Office Art object. `None` is a kind that isn't imported.
 fn shape_kind(ot: u16, props: &ShapeProps) -> Option<ShapeKind> {
@@ -210,10 +223,13 @@ pub(super) struct Embedded {
     pending_text: Option<PendingTextBox>,
     /// The drawn shape whose TxO record (if any) comes next.
     pending_shape: Option<PendingShape>,
+    /// The button whose TxO record (if any) comes next.
+    pending_button: Option<PendingButton>,
     charts: Vec<(Option<ClientAnchor>, Chart)>,
     pictures: Vec<(ClientAnchor, ShapeProps)>,
     text_boxes: Vec<(ClientAnchor, ShapeProps, Text)>,
     shapes: Vec<(ClientAnchor, ShapeProps, ShapeKind, Option<Text>)>,
+    buttons: Vec<(ClientAnchor, bool, Option<Text>)>,
     /// The workbook's colour table, for the shapes' palette colours.
     palette: Palette,
 }
@@ -245,19 +261,29 @@ impl Embedded {
         }
     }
 
-    /// A drawn shape whose Obj record had no TxO after it: imported with empty text.
+    /// A drawn shape or button whose Obj record had no TxO after it: imported with empty text.
     fn flush_shape(&mut self) {
         if let Some(PendingShape { anchor, props, kind }) = self.pending_shape.take() {
             self.shapes.push((anchor, props, kind, None));
         }
+        if let Some(PendingButton { anchor, locked }) = self.pending_button.take() {
+            self.buttons.push((anchor, locked, None));
+        }
     }
 
-    /// An Obj record: a chart, picture, text box or drawn shape takes the shape's anchor; form
-    /// controls and other objects are reported.
+    /// An Obj record: a chart, picture, text box, button or drawn shape takes the shape's anchor;
+    /// other form controls and objects are reported. An object the application created itself
+    /// (fUIObj: an AutoFilter or validation drop-down arrow) is skipped silently.
     pub(super) fn obj(&mut self, rec: &Record<'_>, report: &mut ReadReport) {
         self.flush_shape();
-        let ot = rec.parts.first().and_then(|p| u16_at(p, 4));
+        let head = rec.parts.first().copied().unwrap_or_default();
+        let ot = u16_at(head, 4);
+        // FtCmo: ft, cb, ot, id, then the flags.
+        let flags = u16_at(head, 8).unwrap_or(0);
         let anchor = self.anchor.take();
+        if flags & F_UI_OBJ != 0 {
+            return;
+        }
         match ot {
             Some(OT_CHART) => self.pending = anchor.map(|(a, _)| a),
             Some(OT_PICTURE) => {
@@ -270,6 +296,14 @@ impl Embedded {
                 self.pending_text = anchor.map(|(anchor, props)| PendingTextBox { anchor, props });
             }
             Some(OT_NOTE) => {}
+            Some(OT_BUTTON) => {
+                // A button without its drawing shape has no anchor to place it with.
+                if let Some((anchor, _)) = anchor {
+                    self.pending_button = Some(PendingButton { anchor, locked: flags & F_LOCKED != 0 });
+                } else {
+                    report.warn("Form controls in .xls files are not imported yet.");
+                }
+            }
             Some(ot) if OT_FORM_CONTROLS.contains(&ot) => report.warn("Form controls in .xls files are not imported yet."),
             Some(ot) => {
                 // A shape without its drawing shape has no anchor to place it with.
@@ -285,8 +319,8 @@ impl Embedded {
         }
     }
 
-    /// A TxO record: the text of the text box or drawn shape whose Obj record came before it. A
-    /// TxO without one is a form control's, which isn't imported.
+    /// A TxO record: the text of the text box, drawn shape or button whose Obj record came before
+    /// it. A TxO without one is another form control's, which isn't imported.
     pub(super) fn txo(&mut self, rec: &Record<'_>, report: &mut ReadReport) {
         let text = textbox::read(&rec.parts, report);
         if let Some(PendingTextBox { anchor, props }) = self.pending_text.take() {
@@ -296,6 +330,8 @@ impl Embedded {
         } else if let Some(PendingShape { anchor, props, kind }) = self.pending_shape.take() {
             // A line has no text of its own; its TxO, if any, is ignored.
             self.shapes.push((anchor, props, kind, if kind == ShapeKind::Line || kind == ShapeKind::Arrow { None } else { text }));
+        } else if let Some(PendingButton { anchor, locked }) = self.pending_button.take() {
+            self.buttons.push((anchor, locked, text));
         }
     }
 
@@ -397,6 +433,18 @@ impl Embedded {
         }
         if rotated {
             report.warn("The rotation of text boxes in .xls files is not imported; their text was kept upright.");
+        }
+        // Ids follow the controls the sheet already has (a kept `.xlsx` control's id is reused).
+        let first = sheet.controls.iter().map(|c| c.id).max().unwrap_or(0);
+        for (i, (a, locked, text)) in self.buttons.into_iter().enumerate() {
+            sheet.controls.push(FormControl {
+                id: first.saturating_add(u32::try_from(i).unwrap_or(u32::MAX)).saturating_add(1),
+                kind: ControlKind::Button,
+                anchor: place(sheet, &a),
+                text: text.map_or(String::new(), |t| t.text),
+                locked,
+                ..FormControl::default()
+            });
         }
     }
 }
