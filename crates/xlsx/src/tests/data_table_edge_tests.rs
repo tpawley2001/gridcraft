@@ -47,7 +47,7 @@ fn a_table_with_an_error_text_or_bool_top_left_writes_well_formed_xml() {
     let xml = sheet_xml(&wb);
     // The `t` attribute sits on the `<c>` start tag, before the `<f>`, as in a normal cell.
     assert!(xml.contains(r#"<c r="B2" t="e"><f t="dataTable" ref="B2:B3" dt2D="0" dtr="0" r1="A1"/><v>#DIV/0!</v></c>"#), "{xml}");
-    assert!(xml.contains(r#"<c r="C5" t="s"><f t="dataTable" ref="C5:C6" dt2D="0" dtr="1" r1="A1"/><v>"#), "{xml}");
+    assert!(xml.contains(r#"<c r="C5" t="str"><f t="dataTable" ref="C5:C6" dt2D="0" dtr="1" r1="A1"/><v>text</v></c>"#), "{xml}");
     assert!(xml.contains(r#"<c r="D8" t="b"><f t="dataTable" ref="D8:D9" dt2D="0" dtr="0" r1="A1" ca="1"/><v>1</v></c>"#), "{xml}");
     // The saved XML parses as XML.
     let mut reader = quick_xml::Reader::from_str(&xml);
