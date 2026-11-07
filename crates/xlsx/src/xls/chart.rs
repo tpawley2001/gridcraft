@@ -25,7 +25,7 @@ use gridcraft_model::{
 };
 
 use super::drawing::{self, BStore, Blip, ShapeProps};
-use super::formula::{Biff5, Links, Mode, decode};
+use super::formula::{Biff5, Links, Mode, decode_version};
 use super::records::{Cursor, Record, Records};
 use super::textbox::{self, Text};
 use super::{BOF, Budget, EOF};
@@ -661,8 +661,10 @@ impl Embedded {
                 };
                 self.shapes.push((Place::Cells(anchor), ShapeProps::default(), ShapeKind::Rectangle, None));
             }
-            // A chart's substream follows its Obj; a picture, note or group imports nothing.
-            OT_CHART | OT_PICTURE | OT_NOTE | OT_GROUP => {}
+            // The chart substream that follows is placed where the Obj says.
+            OT_CHART => self.pending = biff5_anchor(data).map(Place::Cells),
+            // A picture, note or group imports nothing.
+            OT_PICTURE | OT_NOTE | OT_GROUP => {}
             ot if OT_FORM_CONTROLS.contains(&ot) => report.warn("Form controls in .xls files are not imported yet."),
             _ => report.warn("Shapes in .xls files are not imported yet."),
         }
@@ -685,10 +687,18 @@ impl Embedded {
     }
 
     /// A chart substream (its BOF just read): read to its EOF. Returns `false` when the stream
-    /// ends inside it (cut off), so nothing more of the sheet can be read.
-    pub(super) fn chart(&mut self, recs: &mut Records<'_>, budget: &mut Budget, links: &Links, report: &mut ReadReport) -> Result<bool, IoError> {
+    /// ends inside it (cut off), so nothing more of the sheet can be read. `biff5` is set for an
+    /// Excel 5.0/95 workbook, whose chart records use the BIFF5 layouts.
+    pub(super) fn chart(
+        &mut self,
+        recs: &mut Records<'_>,
+        budget: &mut Budget,
+        links: &Links,
+        biff5: Option<&Biff5>,
+        report: &mut ReadReport,
+    ) -> Result<bool, IoError> {
         let anchor = self.pending.take();
-        match read(recs, budget, links, None, None, report)? {
+        match read(recs, budget, links, None, biff5, report)? {
             Read::Chart(ch) => self.charts.push((anchor, *ch)),
             Read::Skipped => {}
             Read::CutOff => return Ok(false),
@@ -962,7 +972,7 @@ fn read(
         report.warn("A damaged chart was skipped.");
         return Ok(Read::Skipped);
     }
-    match parse(&records, links, report) {
+    match parse(&records, links, biff5, report) {
         Ok(ch) => Ok(Read::Chart(Box::new(ch))),
         Err(Skip::Damaged) => {
             report.warn("A damaged chart was skipped.");
@@ -1100,7 +1110,7 @@ impl Parser {
         }
     }
 
-    fn record(&mut self, rec: &Record<'_>, links: &Links, report: &mut ReadReport) -> Result<(), Skip> {
+    fn record(&mut self, rec: &Record<'_>, links: &Links, biff5: Option<&Biff5>, report: &mut ReadReport) -> Result<(), Skip> {
         let mut c = Cursor::new(&rec.parts);
         let opens = match rec.id {
             BEGIN => {
@@ -1123,11 +1133,11 @@ impl Parser {
             }
             SERIES => self.series_record(report),
             BRAI => {
-                self.brai(&mut c, links)?;
+                self.brai(&mut c, links, biff5)?;
                 None
             }
             SERIES_TEXT => {
-                self.series_text(&mut c)?;
+                self.series_text(&mut c, biff5)?;
                 None
             }
             TEXT => {
@@ -1215,7 +1225,15 @@ impl Parser {
             NUMBER | LABEL if (1..=3).contains(&self.cache_kind) && self.cached < MAX_CACHED => {
                 let (row, col) = (c.u16()?, c.u16()?);
                 c.u16()?;
-                let v = if rec.id == NUMBER { Lit::Num(c.f64()?) } else { Lit::Str(c.string()?) };
+                let v = match biff5 {
+                    _ if rec.id == NUMBER => Lit::Num(c.f64()?),
+                    // A BIFF5 Label: a 2-byte count, then 8-bit characters in the code page.
+                    Some(b5) => {
+                        let cch = usize::from(c.u16()?);
+                        Lit::Str(b5.text(&c.bytes(cch)?))
+                    }
+                    None => Lit::Str(c.string()?),
+                };
                 self.cache.entry((self.cache_kind, col)).or_default().push((row, v));
                 self.cached += 1;
                 None
@@ -1239,8 +1257,9 @@ impl Parser {
         None
     }
 
-    /// BRAI: a series' name, values, categories or bubble sizes as a reference.
-    fn brai(&mut self, c: &mut Cursor<'_, '_>, links: &Links) -> Result<(), Skip> {
+    /// BRAI: a series' name, values, categories or bubble sizes as a reference (BIFF5 tokens when
+    /// `biff5` is set).
+    fn brai(&mut self, c: &mut Cursor<'_, '_>, links: &Links, biff5: Option<&Biff5>) -> Result<(), Skip> {
         if self.top_series().is_none() {
             return Ok(());
         }
@@ -1256,7 +1275,7 @@ impl Parser {
         }
         let rgce = c.rest();
         let rgce = rgce.get(..cce).unwrap_or(&rgce);
-        let Ok(e) = decode(rgce, &[], CellRef::new(0, 0), Mode::Cell, links) else {
+        let Ok(e) = decode_version(rgce, &[], CellRef::new(0, 0), Mode::Cell, links, biff5) else {
             self.unreadable = true;
             return Ok(());
         };
@@ -1273,10 +1292,17 @@ impl Parser {
         Ok(())
     }
 
-    /// SeriesText: a literal series name, or a title's text.
-    fn series_text(&mut self, c: &mut Cursor<'_, '_>) -> Result<(), Skip> {
+    /// SeriesText: a literal series name, or a title's text. BIFF5 has no flags byte: its `cch`
+    /// 8-bit characters are in the workbook's code page.
+    fn series_text(&mut self, c: &mut Cursor<'_, '_>, biff5: Option<&Biff5>) -> Result<(), Skip> {
         c.u16()?;
-        let text = c.short_string()?;
+        let text = match biff5 {
+            Some(b5) => {
+                let cch = usize::from(c.u8()?);
+                b5.text(&c.bytes(cch)?)
+            }
+            None => c.short_string()?,
+        };
         match self.top() {
             Some(Block::Series(i)) => {
                 if let Some(s) = self.series.get_mut(i)
@@ -1537,10 +1563,10 @@ fn kind_of(g: &Group, members: &[&Ser]) -> ChartKind {
     }
 }
 
-fn parse(records: &[Record<'_>], links: &Links, report: &mut ReadReport) -> Result<Chart, Skip> {
+fn parse(records: &[Record<'_>], links: &Links, biff5: Option<&Biff5>, report: &mut ReadReport) -> Result<Chart, Skip> {
     let mut p = Parser::default();
     for rec in records {
-        p.record(rec, links, report)?;
+        p.record(rec, links, biff5, report)?;
     }
     p.finish(report)
 }

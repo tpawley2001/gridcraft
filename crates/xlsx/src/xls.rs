@@ -410,7 +410,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     report.warnings.insert(
         0,
         if g.biff5.is_some() {
-            "Imported from an Excel 5.0/95 (.xls) workbook: values, formulas, cell formatting, column widths, row heights and defined names were read. Charts, pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
+            "Imported from an Excel 5.0/95 (.xls) workbook: values, formulas, cell formatting, column widths, row heights and defined names were read. Pictures, comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         } else {
             "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights, defined names, charts and pictures were read. Comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         }
@@ -1134,7 +1134,7 @@ fn worksheet(
         match rec.id {
             BOF if depth == 1 && chart::is_chart_bof(&rec) => {
                 // An embedded chart's substream, read to its EOF.
-                if !st.charts.chart(&mut recs, budget, &g.links, report)? {
+                if !st.charts.chart(&mut recs, budget, &g.links, g.biff5.as_ref(), report)? {
                     break;
                 }
                 continue;
