@@ -88,7 +88,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Population Report",
             [],
             None,
-            "{} → {sheets: [names]}. Writes the Population report retained from the last Evolutionary solve in this session, before the model sheet. No search is run.",
+            "{doc?: workbook id (Solver Results supplies it)} → {sheets: [names]}. Writes the Population report retained from the last Evolutionary solve in this session, before the model sheet. No search is run.",
             has_doc,
             reports::retained_population_report
         ),

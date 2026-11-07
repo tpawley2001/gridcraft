@@ -822,7 +822,8 @@ pub(super) fn solver_results(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dial
             }
         }
         if solved && evolutionary && d.values.get("populationReport").and_then(Json::as_bool) == Some(true) {
-            app.run_or_alert("data.solverPopulationReport", json!({}));
+            let doc = app.session.active().map(|d| d.uid);
+            app.run_or_alert("data.solverPopulationReport", json!({"doc": doc}));
         }
         *open = false;
     }

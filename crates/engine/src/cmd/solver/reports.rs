@@ -262,20 +262,17 @@ pub(super) fn population_report(d: &DocState, sh: &Sheet, inp: &ReportInput) -> 
 
 /// The Results dialog can write retained statistics without running another search or accepting
 /// a caller-supplied population. Bind them to the originating document and model sheet.
-pub(super) fn retained_population_report(s: &mut Session, _: &Json) -> Result<Json> {
-    let d = s.doc()?;
+pub(super) fn retained_population_report(s: &mut Session, p: &Json) -> Result<Json> {
+    let uid = p.get("doc").and_then(Json::as_u64).or_else(|| s.doc().ok().map(|d| d.uid));
     let pending = s
         .solver_population
         .as_ref()
-        .filter(|p| p.uid == d.uid)
+        .filter(|pending| Some(pending.uid) == uid)
         .ok_or_else(|| EngineError::Other("No Evolutionary population is available in this workbook.".into()))?;
-    let at = d.wb.sheet_index(&pending.sheet).ok_or(EngineError::NoDocument)?;
-    if d.wb.protected_structure {
-        return Err(protected());
-    }
+    let at = s.documents().iter().find(|d| d.uid == pending.uid).and_then(|d| d.wb.sheet_index(&pending.sheet)).ok_or(EngineError::NoDocument)?;
     let name = (1..=10_000u32)
         .map(|i| format!("Population Report {i}"))
-        .find(|n| d.wb.sheet_index(n).is_none())
+        .find(|n| s.doc().is_ok_and(|d| d.wb.sheet_index(n).is_none()))
         .ok_or_else(|| EngineError::Other("Too many report sheets.".into()))?;
     let built = vec![(name, pending.lines.clone())];
     let names = edit(s, |cx| Ok(write_reports(cx, at, built)))?;
@@ -612,5 +609,26 @@ mod population_tests {
         s.new_workbook();
         assert!(s.execute("data.solverPopulationReport", json!({})).is_err());
         assert_eq!(s.doc().unwrap().wb.sheets.len(), 1);
+    }
+
+    #[test]
+    fn retained_population_can_write_to_its_own_document() {
+        let mut s = Session::new();
+        s.new_workbook();
+        for (cell, input) in [("A1", "2"), ("B1", "=A1*A1")] {
+            s.execute("cell.set", json!({"cell": cell, "input": input})).unwrap();
+        }
+        s.execute(
+            "data.solver",
+            json!({"objective": "B1", "goal": "min", "variables": "A1", "method": "evolutionary",
+                "constraints": ["A1 >= 0", "A1 <= 10"]}),
+        )
+        .unwrap();
+        let uid = s.doc().unwrap().uid;
+        s.new_workbook();
+        s.execute("data.solverPopulationReport", json!({"doc": uid})).unwrap();
+        let d = s.doc().unwrap();
+        assert_eq!(d.wb.sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Population Report 1", "Sheet1"]);
+        assert_eq!(d.wb.active().unwrap().name, "Sheet1");
     }
 }

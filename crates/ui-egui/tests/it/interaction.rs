@@ -1273,6 +1273,32 @@ fn solver_results_write_the_chosen_reports() {
 }
 
 #[test]
+fn solver_results_offer_population_only_for_evolutionary() {
+    let mut s = blank();
+    for (c, v) in [("A1", "0"), ("B1", "=ABS(A1-3)")] {
+        s.execute("cell.set", json!({"cell": c, "input": v})).unwrap();
+    }
+    let r = s
+        .execute(
+            "data.solver",
+            json!({"objective": "B1", "goal": "min", "variables": "A1", "constraints": ["A1 >= -10", "A1 <= 10"], "method": "evolutionary"}),
+        )
+        .unwrap();
+    let mut h = harness(s);
+    h.state_mut().open_dialog("solverResults", r);
+    h.run_steps(2);
+    assert!(!h.get_by_label("Population").accesskit_node().is_disabled());
+    h.state_mut().dialog.as_mut().unwrap().values.insert("populationReport".into(), json!(true));
+    h.get_by_label("Population").click();
+    h.run_steps(2);
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert!(h.state().dialog.is_none());
+    assert!(h.state().message.is_none(), "{:?}", h.state().message);
+    let names: Vec<String> = h.state().session.active().unwrap().wb.sheets.iter().map(|s| s.name.clone()).collect();
+    assert_eq!(names, ["Population Report 1", "Sheet1"]);
+}
+
+#[test]
 fn about_renders_every_tab() {
     let mut h = harness(blank());
     for tab in ["About", "Contributors", "Models"] {
