@@ -213,6 +213,12 @@ pub fn parse(xml: &[u8]) -> Result<El, IoError> {
     parse_streaming(xml, &[], &mut |_| Ok(()))
 }
 
+/// Parses a legacy VML drawing part, where text boxes may hold HTML-style `<br>` tags with no
+/// closing tag. Stub: to be implemented (P03-111).
+pub fn parse_vml(xml: &[u8]) -> Result<El, IoError> {
+    parse(xml)
+}
+
 /// The first element named `local_name` (namespace prefix dropped) in `xml`, read from its start tag
 /// alone: no children, and nothing after the tag is read, so unbalanced markup around it (a VML
 /// caption's unclosed `<br>`) neither hides nor moves it. `None` when there is none, or when the

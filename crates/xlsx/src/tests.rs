@@ -83,6 +83,7 @@ mod table_ids;
 mod theme_fmt_scheme_tests;
 mod third_party_workbook_parts;
 mod trendline_roundtrip;
+mod vml_html_br_tests;
 mod volatile_dependencies;
 mod webextension_passthrough;
 mod xlm_names_tests;
