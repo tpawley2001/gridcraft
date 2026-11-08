@@ -13,6 +13,9 @@ impl SheetApp {
             self.clipboard_text_at_copy = self.system_clipboard_text();
             self.cut_text = if id == "edit.cut" { self.clipboard_text_at_copy.clone() } else { None };
         }
+        if self.grid.paste_tag.as_ref().is_some_and(|tag| !tag.current(self)) {
+            self.grid.paste_tag = None;
+        }
         r
     }
 
@@ -126,11 +129,18 @@ impl SheetApp {
             self.open_switch_windows = true;
             return;
         }
+        let paste = (id == "edit.paste" && params.get("text").is_none())
+            .then(|| self.session.clipboard.as_ref().filter(|clip| !clip.cut).map(|clip| (clip.clone(), params.clone())))
+            .flatten();
         match self.run(id, params) {
             // A refused cell draft already shows its own message (with the rule's title).
             Err(e) if self.message.as_ref().is_some_and(|(_, m)| *m == e) => {}
             Err(e) => self.alert(e),
-            Ok(_) => {}
+            Ok(_) => {
+                if let Some((clipboard, params)) = paste {
+                    crate::grid::paste_options::record(self, clipboard, params);
+                }
+            }
         }
     }
 

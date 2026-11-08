@@ -31,6 +31,7 @@ mod geo;
 mod interact;
 mod keyboard;
 mod menus;
+pub(crate) mod paste_options;
 mod quadrant;
 mod selection;
 mod show;
@@ -304,6 +305,8 @@ pub struct GridState {
     pub fill_menu: Option<(RangeRef, RangeRef, Pos2)>,
     /// After a left-drag of the fill handle: the Auto Fill Options button beside the filled cells.
     pub fill_tag: Option<FillTag>,
+    /// Copied cells just pasted through the shared UI paste entry point.
+    pub paste_tag: Option<paste_options::PasteTag>,
     /// The right-clicked chart, picture, shape or slicer: where to open its menu, its kind and id.
     pub object_menu: Option<(Pos2, &'static str, u32)>,
     pub marching_phase: f32,
