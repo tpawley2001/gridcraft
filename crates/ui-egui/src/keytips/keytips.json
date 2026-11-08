@@ -1921,9 +1921,8 @@
    "seq": "AGA",
    "kind": "command",
    "target": "data.autoOutline",
-   "pending": true,
    "excel": "Auto Outline",
-   "note": "Auto Outline; reserved until the command lands"
+   "note": "Auto Outline"
   },
   {
    "seq": "AGG",

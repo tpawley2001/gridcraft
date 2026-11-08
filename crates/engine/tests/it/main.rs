@@ -1,6 +1,7 @@
 //! The crate's integration tests, one module per file, built as one test binary.
 
 mod analysis_chart_output;
+mod auto_outline;
 mod auto_row_height_on_open;
 mod autocorrect;
 mod autocorrect_boundaries;
