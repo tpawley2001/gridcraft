@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-07 · **Change:** minor (`.xls` links to other workbooks are read and kept on save; check boxes, option buttons, spin buttons and scroll bars open as form controls; `.xls` links to other workbooks are read and kept on save; `.xlsx` form list boxes, drop-downs, group boxes and labels are read, drawn and written)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-07 · **Change:** minor (`.xls` links to other workbooks are read and kept on save; check boxes, option buttons, spin buttons and scroll bars open as form controls; `.xlsx` form list boxes, drop-downs, group boxes and labels are read, drawn and written)
 
 
 Every format Excel opens or saves, with GridCraft's read and write support, fidelity and tests.
