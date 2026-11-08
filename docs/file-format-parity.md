@@ -1,7 +1,9 @@
 # File-format parity
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-08 · **Change:** minor (G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; earlier: `.xls` WsBool and `.xlsb` BrtWsProp `fApplyStyles` (Outline Settings › Automatic styles) are read; earlier: binary named-style identity; XLSX picture locks survive open + save; `outlinePr applyStyles` (Outline Settings › Automatic styles) is read and written back; `outlinePr applyStyles` is read and written back; `.xls` shapes in Continue records after Obj are imported; `.xls` links to other workbooks are read and kept on save; check boxes, option buttons, spin buttons, scroll bars, list boxes, drop-downs, group boxes and labels open as form controls; `.xlsx` form list boxes, drop-downs, group boxes and labels are read, drawn and written; `.xls` and `.xlsb` worksheet macro commands keep saved values; `.xls` names holding relative-offset references open as `#N/A`; `.xls` names defined in linked workbooks are read and kept on save; `.xls` defined names into other workbooks are kept)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-08 · **Change:** minor (VML captions with HTML-style `br` tags are read; earlier: G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; earlier: `.xls` WsBool and `.xlsb` BrtWsProp `fApplyStyles` (Outline Settings › Automatic styles) are read; earlier: binary named-style identity; XLSX picture locks survive open + save; `outlinePr applyStyles` (Outline Settings › Automatic styles) is read and written back; `outlinePr applyStyles` is read and written back; `.xls` shapes in Continue records after Obj are imported; `.xls` links to other workbooks are read and kept on save; check boxes, option buttons, spin buttons, scroll bars, list boxes, drop-downs, group boxes and labels open as form controls; `.xlsx` form list boxes, drop-downs, group boxes and labels are read, drawn and written; `.xls` and `.xlsb` worksheet macro commands keep saved values; `.xls` names holding relative-offset references open as `#N/A`; `.xls` names defined in linked workbooks are read and kept on save; `.xls` defined names into other workbooks are kept)
 
+
+Legacy VML captions accept HTML-style `br` line breaks, preserving buttons, macro assignments and shown notes through open + save (`vml_html_br_tests.rs`).
 
 Every format Excel opens or saves, with GridCraft's read and write support, fidelity and tests.
 Part of [target-app-parity.md](target-app-parity.md). **File formats: ~50% ready, 80–120 h**
@@ -190,6 +192,7 @@ Truncated packages. When an `.xlsx`, `.xlsm` or `.xlsb` file has lost its ZIP ce
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | minor | G0205: XLSX VML captions accept HTML-style `br` tags as line breaks, keeping buttons, macro assignments and shown notes through open + save. |
 | 2026-11-08 | minor | G0202: XLSX Camera pictures retain `a14:cameraTool` range and shape id, their VML `Pict` shape with `FmlaPict`, and its image relationship and part across repeated saves. Snapshots are not refreshed (`camera_picture_vml_tests.rs`). |
 | 2026-11-08 | minor | G0199: `.xls` WsBool and `.xlsb` BrtWsProp `fApplyStyles` (bit 5, Outline Settings › Automatic styles) are read into the sheet and saved as `.xlsx` `outlinePr applyStyles` instead of dropped (`legacy_outline_apply_styles.rs`) |
 | 2026-11-08 | minor | `.xlsb` named styles keep builtinId, iLevel, hidden and customBuiltin on Save As `.xlsx`; `.xlsb` and `.xls` user styles keep their user identity even when named like built-ins. |

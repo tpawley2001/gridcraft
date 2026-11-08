@@ -351,7 +351,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
     // a warning.
     if !sheet.comments.is_empty() {
         for rel in rels.iter().filter(|r| r.kind == "vmlDrawing") {
-            if let Ok(Some(x)) = cx.pkg.read_xml(&rel.target) {
+            if let Ok(Some(x)) = cx.pkg.read_vml(&rel.target) {
                 read_note_shapes(&x, &mut sheet, 0, &mut NotePictures::new(&mut cx.pkg, &rel.target));
             }
         }
