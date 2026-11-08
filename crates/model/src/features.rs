@@ -7,9 +7,11 @@ use serde::{Deserialize, Serialize};
 use crate::style::{Color, Style};
 
 mod pivot;
+mod preset_geometry;
 mod print;
 mod table_sort;
 
+pub use preset_geometry::preset_paths;
 pub use pivot::{PivotCalcField, PivotDateGroup, PivotField, PivotFilter, PivotFunc, PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue};
 pub use print::{
     ChartSheetPrint, EditRange, HfPage, LineInfo, Orientation, PageOrder, PrintComments, PrintErrors, PrintOutput, PrintSettings, SheetProtection,
