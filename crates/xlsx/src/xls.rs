@@ -61,7 +61,8 @@ use crate::tables::{col_width_to_px, pt_to_px};
 use crate::xls_crypto;
 use crate::{IoError, ReadReport};
 use formula::{
-    Biff5, Extern, ExternKind, Links, Mode, SupBook, Unsupported, Xti, cell_error, decode, decode_cell, decode_version, external_sheet_text,
+    Biff5, Extern, ExternKind, Links, Mode, SupBook, Unsupported, Xti, cell_error, decode, decode_cell, decode_name, decode_version,
+    external_sheet_text,
 };
 use gridcraft_formula::Expr;
 use records::{Cursor, Record, Records};
@@ -290,6 +291,8 @@ fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>) -> Result<(W
     }
     wb.sheets.clear();
     std::mem::take(&mut g.external).finish(&mut g.links, &mut wb, &mut report);
+    // Names into the linked workbooks decode only now that the links are kept.
+    g.links.skipped = skipped_names(&g.names, &g.links, g.biff5.as_ref());
     wb.view = g.view;
     wb.code_name = g.code_name.clone();
     wb.protected_structure = g.protection.locked;
@@ -705,15 +708,13 @@ fn globals(stream: &[u8], decrypted: bool, budget: &mut Budget, report: &mut Rea
     rename_invalid_names(&mut g, report);
     // The same test `defined_names` applies, before any cell formula is decoded. A name that was
     // skipped (unnameable) is marked the same way, so formulas using it keep their saved result.
-    let skipped = g
-        .names
-        .iter()
-        .map(|l| {
-            l.skip || (!l.rgce.is_empty() && decode_version(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::XlsName, &g.links, g.biff5.as_ref()).is_err())
-        })
-        .collect();
-    g.links.skipped = skipped;
+    g.links.skipped = skipped_names(&g.names, &g.links, g.biff5.as_ref());
     Ok(g)
+}
+
+/// Which names `defined_names` skips (unnameable, or a formula that can't be decoded).
+fn skipped_names(names: &[Lbl], links: &Links, biff5: Option<&Biff5>) -> Vec<bool> {
+    names.iter().map(|l| l.skip || (!l.rgce.is_empty() && decode_name(&l.rgce, &l.rgcb, links, biff5).is_err())).collect()
 }
 
 /// Built-in defined names ([MS-XLS] 2.4.150, Lbl.Name).
@@ -1675,7 +1676,10 @@ fn filter_database(g: &Globals, sheet: usize) -> Option<RangeRef> {
 }
 
 fn defined_names(names: &[Lbl], links: &Links, biff5: Option<&Biff5>, model_index: &[Option<usize>], wb: &mut Workbook, report: &mut ReadReport) {
-    add_defined_names(names, model_index, wb, report, |l| decode_version(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::XlsName, links, biff5));
+    // References into other workbooks keep the `.xlsx` text (`[1]Data!$B$2`), as cells do.
+    add_defined_names(names, model_index, wb, report, |l| {
+        decode_name(&l.rgce, &l.rgcb, links, biff5).map(|e| external_sheet_text(&gridcraft_formula::print(&e)).0)
+    });
 }
 
 /// Adds the defined names to `wb`: print areas and print titles go to their sheet's page setup,
@@ -1686,7 +1690,7 @@ pub(crate) fn add_defined_names(
     model_index: &[Option<usize>],
     wb: &mut Workbook,
     report: &mut ReadReport,
-    decode: impl Fn(&Lbl) -> Result<Expr, Unsupported>,
+    decode: impl Fn(&Lbl) -> Result<String, Unsupported>,
 ) {
     for lbl in names {
         let scope = match lbl.scope {
@@ -1700,7 +1704,7 @@ pub(crate) fn add_defined_names(
             continue;
         }
         let text = match decode(lbl) {
-            Ok(e) => gridcraft_formula::print(&e),
+            Ok(text) => text,
             Err(_) if lbl.rgce.is_empty() => continue,
             Err(Unsupported(why)) => {
                 report.warn(format!("Some defined names use {why} and were skipped."));

@@ -462,6 +462,12 @@ pub(super) fn decode_cell(
     decode_in(rgce, rgcb, base, mode, links, grid, Site { external: true, commands, ..Site::default() }, biff5)
 }
 
+/// [`decode_cell`] for a defined name's formula (`Mode::XlsName` at A1): references into the
+/// other workbooks read decode to `[n]Sheet`, as in cells.
+pub(super) fn decode_name(rgce: &[u8], rgcb: &[u8], links: &Links, biff5: Option<&Biff5>) -> Result<Expr, Unsupported> {
+    decode_cell(rgce, rgcb, CellRef::new(0, 0), Mode::XlsName, links, biff5, false)
+}
+
 /// Decodes an XLSB cell, shared, array or name formula's `rgce` and `rgcb` at `base`. Shared
 /// formulas' `PtgRefN` / `PtgAreaN` hold offsets from it; defined names and other sheets resolve
 /// through `links`. `PtgArray` and `PtgMemArea` consume their corresponding extra data.
@@ -734,7 +740,7 @@ fn decode_in(
                 let tab = t.u16()?;
                 if tab & 0x8000 != 0 {
                     // fCeFunc: the low 15 bits are a Cetab value, a macro sheet command.
-                    if !site.commands && mode != Mode::Name {
+                    if !site.commands && !mode.is_name() {
                         return Err(Unsupported("macro sheet commands"));
                     }
                     let name = cetab(tab & 0x7FFF).ok_or(Unsupported("macro sheet commands"))?;

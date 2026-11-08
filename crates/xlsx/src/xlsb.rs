@@ -373,7 +373,9 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     crate::binary_custom_views::finish_book(&views, &mut wb.preserved, |id| {
         sheet_ids.iter().position(|&s| s == id).and_then(|i| model_index.get(i).copied().flatten()).unwrap_or(0)
     });
-    add_defined_names(&names, &model_index, &mut wb, &mut report, |l| decode_xlsb(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &links));
+    add_defined_names(&names, &model_index, &mut wb, &mut report, |l| {
+        decode_xlsb(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &links).map(|e| gridcraft_formula::print(&e))
+    });
     if budget.formulas_kept > 0 {
         report.warn(format!(
             "{} XLSB formula(s) use features that can't be imported yet (including links to other workbooks); they were kept as their saved results and will not recalculate.",
