@@ -435,6 +435,25 @@ pub fn read_styles(root: &El, checkboxes: &[bool], minor_font: &str, theme_fonts
     StylesIn { xfs, dxfs, palette, named, named_ids, num_fmts: fmts }
 }
 
+/// The `builtinId`, `iLevel`, `hidden` and `customBuiltin` attributes of a `cellStyle`, each only
+/// when set.
+fn cell_style_id_attrs(id: &CellStyleId) -> String {
+    let mut a = String::new();
+    if let Some(b) = id.builtin_id {
+        let _ = write!(a, " builtinId=\"{b}\"");
+    }
+    if let Some(l) = id.i_level {
+        let _ = write!(a, " iLevel=\"{l}\"");
+    }
+    if id.hidden {
+        a.push_str(" hidden=\"1\"");
+    }
+    if id.custom_builtin {
+        a.push_str(" customBuiltin=\"1\"");
+    }
+    a
+}
+
 /// The identity a named style made in the app takes from its name: Excel's `builtinId` for a
 /// built-in style name (exact match), none for any other name.
 fn builtin_style_id(name: &str) -> CellStyleId {
@@ -878,18 +897,7 @@ pub fn write_styles(wb: &Workbook, dxfs: &[Style], extra_fmts: &[String]) -> (St
         }
         let _ = write!(cell_styles, "<cellStyle name=\"{}\" xfId=\"{named}\"", esc_attr(name));
         let id = wb.cell_style_ids.iter().find(|(n, _)| n == name).map(|(_, id)| id.clone()).unwrap_or_else(|| builtin_style_id(name));
-        if let Some(b) = id.builtin_id {
-            let _ = write!(cell_styles, " builtinId=\"{b}\"");
-        }
-        if let Some(l) = id.i_level {
-            let _ = write!(cell_styles, " iLevel=\"{l}\"");
-        }
-        if id.hidden {
-            cell_styles.push_str(" hidden=\"1\"");
-        }
-        if id.custom_builtin {
-            cell_styles.push_str(" customBuiltin=\"1\"");
-        }
+        cell_styles.push_str(&cell_style_id_attrs(&id));
         cell_styles.push_str("/>");
         named += 1;
     }
