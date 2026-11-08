@@ -39,6 +39,11 @@ impl SheetApp {
         } else {
             self.cut_text = None;
         }
+        // The engine treats text matching our copy as an internal paste. Keep that identity
+        // here too, so every UI paste of copied cells records the same Paste Options state.
+        if self.session.clipboard.as_ref().is_some_and(|clip| clip.text.trim_end_matches(['\r', '\n']) == text.trim_end_matches(['\r', '\n'])) {
+            return self.run_or_alert("edit.paste", json!({}));
+        }
         let html = self.services.paste_html.as_mut().and_then(|read| read());
         let params = match html {
             Some(html) => json!({"text": text, "html": html}),

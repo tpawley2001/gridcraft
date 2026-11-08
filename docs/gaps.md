@@ -134,6 +134,9 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - **Estimate:** 20–30 h for beta (25–40 h full).
 
 ### 9. Keyboard-first users: key tips, shortcuts, context menus (U)
+- Paste Options now redoes copied-cell pastes in one undo step. Transpose uses existing Paste
+  Special semantics: copying `A1:A2` with `A2 = =A1*3` to `C1` gives `D1 = =#REF!*3`.
+  Relative formula references still shift normally instead of following cells within the transposed block.
 - AutoCorrect typed entries now supports two initial capitals, day names, accidental Caps Lock and
   token replacements, with four persisted Proofing options. Editable replacements, sentence
   capitalization, exceptions and AutoFormat As You Type remain.

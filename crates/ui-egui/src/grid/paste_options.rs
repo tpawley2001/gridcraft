@@ -147,7 +147,9 @@ fn reapply(app: &mut SheetApp, tag: PasteTag, choice: &Choice) {
     app.session.clipboard = kept_clipboard;
     if let Err(e) = result {
         // A failed replacement leaves the original paste available, rather than losing it.
-        let _ = app.run("edit.redo", json!({}));
+        if app.run("edit.redo", json!({})).is_ok() {
+            record(app, tag.clipboard, tag.params);
+        }
         app.message = Some((crate::brand::APP_NAME.into(), crate::clean_error(&e.to_string())));
     } else {
         app.after_engine();
@@ -199,6 +201,22 @@ mod tests {
     }
 
     #[test]
+    fn transpose_uses_existing_paste_special_formula_adjustment() {
+        let mut app = app("C1");
+        let tag = app.grid.paste_tag.clone().unwrap();
+        let mut expected = Session::new();
+        expected.new_workbook();
+        expected.clipboard = Some(tag.clipboard.clone());
+        expected.execute("selection.set", json!({"range": "C1"})).unwrap();
+        expected.execute("edit.pasteSpecial", json!({"what": "all", "transpose": true})).unwrap();
+        reapply(&mut app, tag, CHOICES.iter().find(|c| c.transpose).unwrap());
+        let formula = CellRef::parse("D1").unwrap();
+        let actual = app.session.active().unwrap().wb.active().unwrap().input_text(formula);
+        let want = expected.active().unwrap().wb.active().unwrap().input_text(formula);
+        assert_eq!(actual, want);
+    }
+
+    #[test]
     fn refused_replacement_restores_original_paste() {
         let mut app = app("XFD1");
         let tag = app.grid.paste_tag.clone().unwrap();
@@ -208,6 +226,17 @@ mod tests {
         assert_eq!(d.undo.len(), before);
         assert_eq!(d.wb.active().unwrap().input_text(CellRef::parse("XFD1").unwrap()), "2");
         assert!(app.message.is_some());
+        assert!(app.grid.paste_tag.is_some());
+    }
+
+    #[test]
+    fn matching_system_clipboard_text_records_an_internal_paste() {
+        let mut app = app("C1");
+        let text = app.session.clipboard.as_ref().unwrap().text.clone();
+        app.run("edit.undo", json!({})).unwrap();
+        assert!(app.grid.paste_tag.is_none());
+        app.paste_external(text);
+        assert!(app.grid.paste_tag.is_some());
     }
 
     #[test]
