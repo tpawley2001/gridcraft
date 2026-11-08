@@ -284,6 +284,8 @@ impl Trace {
 #[derive(Default)]
 pub struct GridState {
     pub drag: Drag,
+    /// The modifier keys held during the last frame's object drag (Shift, Ctrl/Cmd, Alt).
+    pub drag_mods: crate::objects::DragMods,
     pub ensure_visible: bool,
     /// With `ensure_visible`: scroll to the moving end of the selection instead of the active cell
     /// (Shift/Ctrl+Shift+arrows keep the active cell on the anchor while the far corner moves).
