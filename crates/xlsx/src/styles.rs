@@ -6,7 +6,8 @@ use std::fmt::Write as _;
 
 use gridcraft_model::style::{DxfStated, Protection};
 use gridcraft_model::{
-    Alignment, BorderLine, BorderStyle, Borders, Color, Fill, Font, HAlign, NumFmt, PatternType, Style, Underline, VAlign, VertAlign, Workbook,
+    Alignment, BorderLine, BorderStyle, Borders, CellStyleId, Color, Fill, Font, HAlign, NumFmt, PatternType, Style, Underline, VAlign, VertAlign,
+    Workbook,
 };
 
 use crate::tables::{INDEXED, builtin_format, builtin_id};
@@ -27,6 +28,9 @@ pub struct StylesIn {
     pub palette: Vec<u32>,
     /// Named cell styles (`cellStyles` with their `cellStyleXfs`).
     pub named: Vec<(String, Style)>,
+    /// Built-in identity of the named styles that state one (`builtinId`, `iLevel`, `hidden`,
+    /// `customBuiltin`), by name.
+    pub named_ids: Vec<(String, CellStyleId)>,
     /// Custom number formats (`numFmts`) by id.
     pub num_fmts: HashMap<u32, String>,
 }
@@ -410,17 +414,66 @@ pub fn read_styles(root: &El, checkboxes: &[bool], minor_font: &str, theme_fonts
         .map(|x| x.kids("xf").map(|xf| read_xf(xf, &fonts, &fills, &borders, &shared_fmts, &[])).collect())
         .unwrap_or_default();
     let mut named = Vec::new();
+    let mut named_ids = Vec::new();
     if let Some(cs) = root.child("cellStyles") {
         for c in cs.kids("cellStyle") {
             if let (Some(name), Some(s)) = (c.attr("name"), c.attr_u32("xfId").and_then(|i| style_xfs.get(i as usize)))
                 && name != "Normal"
             {
                 named.push((name.to_string(), s.clone()));
+                let id = CellStyleId {
+                    builtin_id: c.attr_u32("builtinId"),
+                    i_level: c.attr_u32("iLevel"),
+                    hidden: c.attr_bool("hidden").unwrap_or(false),
+                    custom_builtin: c.attr_bool("customBuiltin").unwrap_or(false),
+                };
+                named_ids.push((name.to_string(), id));
             }
         }
     }
     let dxfs = root.child("dxfs").map(|d| d.kids("dxf").map(|x| read_dxf(x, &palette, &shared_fmts)).collect()).unwrap_or_default();
-    StylesIn { xfs, dxfs, palette, named, num_fmts: fmts }
+    StylesIn { xfs, dxfs, palette, named, named_ids, num_fmts: fmts }
+}
+
+/// The identity a named style made in the app takes from its name: Excel's `builtinId` for a
+/// built-in style name (exact match), none for any other name.
+fn builtin_style_id(name: &str) -> CellStyleId {
+    let level = |rest: &str| rest.parse::<u32>().ok().filter(|n| (1..=7).contains(n)).map(|n| n - 1);
+    let (builtin_id, i_level) = if let Some(n) = name.strip_prefix("RowLevel_").and_then(level) {
+        (Some(1), Some(n))
+    } else if let Some(n) = name.strip_prefix("ColLevel_").and_then(level) {
+        (Some(2), Some(n))
+    } else {
+        let id = match name {
+            "Comma" => 3,
+            "Currency" => 4,
+            "Percent" => 5,
+            "Comma [0]" => 6,
+            "Currency [0]" => 7,
+            "Hyperlink" => 8,
+            "Followed Hyperlink" => 9,
+            "Note" => 10,
+            "Warning Text" => 11,
+            "Title" => 15,
+            "Heading 1" => 16,
+            "Heading 2" => 17,
+            "Heading 3" => 18,
+            "Heading 4" => 19,
+            "Input" => 20,
+            "Output" => 21,
+            "Calculation" => 22,
+            "Check Cell" => 23,
+            "Linked Cell" => 24,
+            "Total" => 25,
+            "Good" => 26,
+            "Bad" => 27,
+            "Neutral" => 28,
+            "Explanatory Text" => 53,
+            _ => return CellStyleId::default(),
+        };
+        (Some(id), None)
+    };
+    CellStyleId { builtin_id, i_level, ..CellStyleId::default() }
 }
 
 /// A font linked to the theme's heading or body font takes the theme's face (ECMA-376 §18.8.35).
@@ -823,7 +876,21 @@ pub fn write_styles(wb: &Workbook, dxfs: &[Style], extra_fmts: &[String]) -> (St
         } else {
             let _ = write!(style_xfs, ">{}{}</xf>", al.unwrap_or_default(), pr.unwrap_or_default());
         }
-        let _ = write!(cell_styles, "<cellStyle name=\"{}\" xfId=\"{named}\" customBuiltin=\"1\"/>", esc_attr(name));
+        let _ = write!(cell_styles, "<cellStyle name=\"{}\" xfId=\"{named}\"", esc_attr(name));
+        let id = wb.cell_style_ids.iter().find(|(n, _)| n == name).map(|(_, id)| id.clone()).unwrap_or_else(|| builtin_style_id(name));
+        if let Some(b) = id.builtin_id {
+            let _ = write!(cell_styles, " builtinId=\"{b}\"");
+        }
+        if let Some(l) = id.i_level {
+            let _ = write!(cell_styles, " iLevel=\"{l}\"");
+        }
+        if id.hidden {
+            cell_styles.push_str(" hidden=\"1\"");
+        }
+        if id.custom_builtin {
+            cell_styles.push_str(" customBuiltin=\"1\"");
+        }
+        cell_styles.push_str("/>");
         named += 1;
     }
 

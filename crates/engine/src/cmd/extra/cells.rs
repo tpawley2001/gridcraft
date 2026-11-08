@@ -118,6 +118,8 @@ pub(super) fn new_cell_style(s: &mut Session, p: &Json) -> Result<Json> {
     let style = d.wb.styles.get(sh.style_id(c)).clone();
     edit(s, |cx| {
         cx.wb.cell_styles.retain(|(n, _)| !n.eq_ignore_ascii_case(&name));
+        // A replaced style spelled differently is gone, and so is its built-in identity.
+        cx.wb.cell_style_ids.retain(|(n, _)| n == &name || !n.eq_ignore_ascii_case(&name));
         cx.wb.cell_styles.push((name.clone(), style.clone()));
         Ok(json!({"name": name}))
     })
