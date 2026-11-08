@@ -259,6 +259,39 @@ pub(crate) fn objects_hidden(wb: &Workbook) -> bool {
     wb.show_objects == gridcraft_engine::model::ShowObjects::None
 }
 
+/// Paints geometry paths on the box `r`, curves and arcs flattened: closed filled subpaths with the
+/// shape fill, then stroked ones outlined.
+fn paint_geometry_paths(
+    p: &Painter,
+    paths: &[gridcraft_engine::model::GeometryPath],
+    r: Rect,
+    sp: &gridcraft_engine::model::Shape,
+    fill: Color32,
+    line: Color32,
+) {
+    let has_fill = !sp.format.no_fill && fill != Color32::TRANSPARENT;
+    for o in crate::freeform::outlines(paths, r) {
+        if o.closed
+            && o.fill
+            && has_fill
+            && let Some(tris) = crate::freeform::triangulate(&o.points)
+        {
+            let mut mesh = egui::epaint::Mesh::default();
+            for q in &o.points {
+                mesh.colored_vertex(*q, fill);
+            }
+            for [a, b, c] in tris {
+                mesh.add_triangle(a as u32, b as u32, c as u32);
+            }
+            p.add(egui::Shape::mesh(mesh));
+        }
+        if o.stroke && !sp.format.no_line && o.points.len() >= 2 {
+            let stroke = PathStroke::new(1.0, line);
+            p.add(if o.closed { PathShape::closed_line(o.points, stroke) } else { PathShape::line(o.points, stroke) });
+        }
+    }
+}
+
 pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workbook, si: usize, sh: &Sheet) -> Vec<PaintedObject> {
     let mut painted = Vec::new();
     if objects_hidden(wb) {
@@ -294,7 +327,12 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
         let fill = sp.fill.resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::TRANSPARENT);
         let line =
             if sp.format.no_line { Color32::TRANSPARENT } else { sp.line.resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::DARK_GRAY) };
+        // A preset kept from the file (block arrows, chevron, diamond, …) draws its own outline,
+        // at a resolution of the box in hundredths of a point, whatever its kind.
+        let res = |v: f32| (v.abs() / geo.z.max(0.01) * 100.0).round().min(1.0e9) as i64;
+        let preset = sp.geometry.as_ref().and_then(|g| gridcraft_engine::model::preset_paths(g, res(r.width()), res(r.height())));
         match sp.kind {
+            _ if preset.is_some() => paint_geometry_paths(p, preset.as_deref().unwrap_or_default(), r, sp, fill, line),
             ShapeKind::Rectangle | ShapeKind::TextBox => {
                 p.rect_filled(r, 0.0, fill);
                 p.rect_stroke(r, 0.0, Stroke::new(1.0, line), StrokeKind::Inside);
@@ -345,27 +383,7 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
                     p.rect_filled(r, 0.0, fill);
                     p.rect_stroke(r, 0.0, Stroke::new(1.0, line), StrokeKind::Inside);
                 }
-                let has_fill = !sp.format.no_fill && fill != Color32::TRANSPARENT;
-                for o in crate::freeform::outlines(paths, r) {
-                    if o.closed
-                        && o.fill
-                        && has_fill
-                        && let Some(tris) = crate::freeform::triangulate(&o.points)
-                    {
-                        let mut mesh = egui::epaint::Mesh::default();
-                        for q in &o.points {
-                            mesh.colored_vertex(*q, fill);
-                        }
-                        for [a, b, c] in tris {
-                            mesh.add_triangle(a as u32, b as u32, c as u32);
-                        }
-                        p.add(egui::Shape::mesh(mesh));
-                    }
-                    if o.stroke && !sp.format.no_line && o.points.len() >= 2 {
-                        let stroke = PathStroke::new(1.0, line);
-                        p.add(if o.closed { PathShape::closed_line(o.points, stroke) } else { PathShape::line(o.points, stroke) });
-                    }
-                }
+                paint_geometry_paths(p, paths, r, sp, fill, line);
             }
             ShapeKind::Line | ShapeKind::Arrow => {
                 p.line_segment([r.left_top(), r.right_bottom()], Stroke::new(2.0, line));

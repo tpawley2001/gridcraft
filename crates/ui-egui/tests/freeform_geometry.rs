@@ -117,3 +117,20 @@ fn degenerate_and_self_intersecting_polygons_are_not_filled() {
     assert_eq!(triangulate(&[pos2(0.0, 0.0), pos2(100.0, 100.0), pos2(100.0, 0.0), pos2(0.0, 100.0)]), None);
     assert_eq!(triangulate(&[pos2(0.0, 0.0), pos2(1.0, 1.0)]), None);
 }
+
+#[test]
+fn right_arrow_preset_outline_is_drawn_like_a_freeform() {
+    use gridcraft_engine::model::{ShapeGeometry, preset_paths};
+    let g = ShapeGeometry { preset: "rightArrow".into(), adjust: Vec::new(), paths: Vec::new() };
+    let r = Rect::from_min_max(pos2(10.0, 20.0), pos2(210.0, 120.0));
+    let paths = preset_paths(&g, 20_000, 10_000).unwrap();
+    let out = outlines(&paths, r);
+    assert_eq!(out.len(), 1);
+    assert!(out[0].closed && out[0].fill && out[0].stroke);
+    assert_eq!(out[0].points.len(), 7, "{:?}", out[0].points);
+    // The tip on the right edge, the shaft's back on the left.
+    assert!(has_point_near(&out[0].points, pos2(210.0, 70.0)), "{:?}", out[0].points);
+    assert!(has_point_near(&out[0].points, pos2(10.0, 45.0)), "{:?}", out[0].points);
+    // Concave, so filled through triangulation: 5 triangles.
+    assert_eq!(triangulate(&out[0].points).map(|t| t.len()), Some(5));
+}
