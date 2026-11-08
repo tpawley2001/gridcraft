@@ -824,6 +824,33 @@ fn kept_ids(kept: &[(usize, String)]) -> HashSet<usize> {
     ids
 }
 
+fn write_picture_locks(locks: &Option<PictureLocks>) -> String {
+    match locks {
+        None => "<xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr>".to_string(),
+        Some(l) => {
+            let mut attrs = String::new();
+            for (name, enabled) in [
+                ("noGrp", l.no_grp),
+                ("noSelect", l.no_select),
+                ("noRot", l.no_rot),
+                ("noChangeAspect", l.no_change_aspect),
+                ("noMove", l.no_move),
+                ("noResize", l.no_resize),
+                ("noEditPoints", l.no_edit_points),
+                ("noAdjustHandles", l.no_adjust_handles),
+                ("noChangeArrowheads", l.no_change_arrowheads),
+                ("noChangeShapeType", l.no_change_shape_type),
+                ("noCrop", l.no_crop),
+            ] {
+                if enabled {
+                    let _ = write!(attrs, " {name}=\"1\"");
+                }
+            }
+            if attrs.is_empty() { "<xdr:cNvPicPr/>".to_string() } else { format!("<xdr:cNvPicPr><a:picLocks{attrs}/></xdr:cNvPicPr>") }
+        }
+    }
+}
+
 /// The drawing part for a sheet's objects (relationship ids already assigned), with the kept
 /// anchors GridCraft doesn't model (`(position, XML)`, relationship ids rewritten) back at their
 /// positions. Object ids skip the ids the kept anchors use; adds click hyperlink relationships.
@@ -862,30 +889,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                     (true, Some(l)) => format!("r:link=\"{l}\""),
                     (true, None) => String::new(),
                 };
-                let locks = match &img.locks {
-                    None => "<xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr>".to_string(),
-                    Some(l) => {
-                        let mut attrs = String::new();
-                        for (name, enabled) in [
-                            ("noGrp", l.no_grp),
-                            ("noSelect", l.no_select),
-                            ("noRot", l.no_rot),
-                            ("noChangeAspect", l.no_change_aspect),
-                            ("noMove", l.no_move),
-                            ("noResize", l.no_resize),
-                            ("noEditPoints", l.no_edit_points),
-                            ("noAdjustHandles", l.no_adjust_handles),
-                            ("noChangeArrowheads", l.no_change_arrowheads),
-                            ("noChangeShapeType", l.no_change_shape_type),
-                            ("noCrop", l.no_crop),
-                        ] {
-                            if enabled {
-                                let _ = write!(attrs, " {name}=\"1\"");
-                            }
-                        }
-                        if attrs.is_empty() { "<xdr:cNvPicPr/>".to_string() } else { format!("<xdr:cNvPicPr><a:picLocks{attrs}/></xdr:cNvPicPr>") }
-                    }
-                };
+                let locks = write_picture_locks(&img.locks);
                 let link = write_hyperlink(img.hyperlink.as_ref(), rels);
                 let name = esc_attr(&img.name.clone().unwrap_or_else(|| format!("Picture {}", id - 1)));
                 let (open, close) = anchor_open(sheet, &img.anchor);
