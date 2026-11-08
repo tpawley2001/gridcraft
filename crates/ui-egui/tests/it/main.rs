@@ -10,6 +10,7 @@ mod accounting_fill;
 mod active_row_highlight;
 mod advanced_filter;
 mod argument_names;
+mod autocorrect_entry;
 mod autosave_persist;
 mod borders;
 mod cell_editor_caret;

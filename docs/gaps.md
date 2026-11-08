@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (`.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (G0189: four AutoCorrect typing options in Proofing; `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -134,6 +134,9 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - **Estimate:** 20–30 h for beta (25–40 h full).
 
 ### 9. Keyboard-first users: key tips, shortcuts, context menus (U)
+- AutoCorrect typed entries now supports two initial capitals, day names, accidental Caps Lock and
+  token replacements, with four persisted Proofing options. Editable replacements, sentence
+  capitalization, exceptions and AutoFormat As You Type remain.
 - Next/previous sheet navigation now skips Hidden and VeryHidden worksheets without activating a
   hidden sheet at the workbook boundary. Other keyboard gaps below remain.
 - **Evidence:** #33, #49 (key tips: initial Home-tab support landed in #43 on 10-10, the rest of the ribbon not yet), #110, #28 (selection),
@@ -254,6 +257,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | minor | G0189: §9: four AutoCorrect rules for typed entries and File › Options › Proofing preferences; advanced AutoCorrect and AutoFormat remain. |
 | 2026-11-08 | minor | G0186: BIFF8 `.xls` shapes whose OfficeArt data continues after the previous Obj import in order with their anchors; genuine Obj continuations and TxO text handling are unchanged. |
 | 2026-11-07 | minor | §7: `.xls` names holding PtgRefN/PtgAreaN open as `#N/A`, retained through Save As `.xlsx`; cells keep their name references. |
 | 2026-11-07 | minor | `.xls` and `.xlsb` worksheet formulas containing Excel 4.0 macro commands keep their saved values with a warning, so Save As `.xlsx` omits invalid command formulas; macro sheets and defined names retain their existing decoding (`xls_worksheet_command_tests.rs`). |

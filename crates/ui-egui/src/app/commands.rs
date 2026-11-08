@@ -206,6 +206,20 @@ impl SheetApp {
                 self.ui.autocomplete = p.get("on").and_then(Json::as_bool).unwrap_or(!self.ui.autocomplete);
                 Ok(json!({"on": self.ui.autocomplete}))
             }
+            "options.autoCorrect" => {
+                let options = &mut self.ui.auto_correct;
+                for (key, flag) in [
+                    ("twoInitialCaps", &mut options.two_initial_caps),
+                    ("dayNames", &mut options.day_names),
+                    ("capsLock", &mut options.caps_lock),
+                    ("replaceText", &mut options.replace_text),
+                ] {
+                    if let Some(on) = p.get(key).and_then(Json::as_bool) {
+                        *flag = on;
+                    }
+                }
+                Ok(json!(options))
+            }
             "options.highlightActiveRow" => {
                 self.ui.highlight_active_row = p.get("on").and_then(Json::as_bool).unwrap_or(!self.ui.highlight_active_row);
                 Ok(json!({"on": self.ui.highlight_active_row}))

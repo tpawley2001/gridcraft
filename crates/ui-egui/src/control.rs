@@ -272,6 +272,11 @@ pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -
                 ("view.darkMode", "Dark Mode", ""),
                 ("view.theme", "Display Theme", ""),
                 ("view.animations", "Animations", "{on?: bool} (toggles without it) → {on}"),
+                (
+                    "options.autoCorrect",
+                    "AutoCorrect typed text (File > Options > Proofing)",
+                    "{twoInitialCaps?: bool, dayNames?: bool, capsLock?: bool, replaceText?: bool} → current options",
+                ),
                 ("options.autoComplete", "Enable AutoComplete for cell values", "{on?: bool} (toggles without it) → {on}"),
                 ("options.pirateSpeak", "Pirate speak (flavour text)", "{on?: bool} (toggles without it) → {on}"),
                 ("options.highlightActiveRow", "Highlight the active cell's row", "{on?: bool} (toggles without it) → {on}"),
