@@ -2008,6 +2008,7 @@ mod tests {
                 alt: String::new(),
                 link: None,
                 blip_ext: Vec::new(),
+                camera: None,
             });
             let mut params = params;
             params["id"] = json!(id);
