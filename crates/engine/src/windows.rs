@@ -100,6 +100,25 @@ pub struct TargetGuard {
     back: Option<u64>,
 }
 
+/// View › View Side by Side: the two windows compared, and whether they scroll together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SideBySide {
+    pub windows: [u64; 2],
+    pub synchronous: bool,
+}
+
+impl Session {
+    /// The side-by-side pair, `None` while View Side by Side is off.
+    pub fn side_by_side(&self) -> Option<SideBySide> {
+        None // TODO(P06-023)
+    }
+
+    /// The window that scrolls with `window`: its side-by-side partner while Synchronous Scrolling is on.
+    pub fn scroll_partner(&self, _window: u64) -> Option<u64> {
+        None // TODO(P06-024)
+    }
+}
+
 impl Session {
     /// The open windows, in the order they were opened.
     pub fn windows(&self) -> &[WindowState] {

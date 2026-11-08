@@ -44,7 +44,7 @@ pub use gridcraft_math as math;
 pub use gridcraft_model as model;
 pub use gridcraft_numfmt as numfmt;
 pub use selection::Selection;
-pub use windows::{Target, TargetGuard, WindowState, WindowView};
+pub use windows::{SideBySide, Target, TargetGuard, WindowState, WindowView};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
