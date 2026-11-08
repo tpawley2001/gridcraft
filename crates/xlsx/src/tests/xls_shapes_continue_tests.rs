@@ -7,7 +7,7 @@ use gridcraft_model::ShapeKind;
 use crate::read_xls;
 
 use super::xls_chart_tests::{cat, obj};
-use super::xls_shapes_tests::{shape, xls, OT_OFFICE_ART};
+use super::xls_shapes_tests::{OT_OFFICE_ART, shape, xls};
 
 /// The first MsoDrawing record of [`shape`] (its spContainer), re-tagged as a Continue record.
 fn continued(spt: u16, col_l: u16, col_r: u16) -> Vec<u8> {
