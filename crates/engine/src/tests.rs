@@ -6140,6 +6140,7 @@ mod controls;
 mod equation;
 mod filter_date_tests;
 mod form_check_option;
+mod form_list;
 mod macros;
 mod objects;
 mod python_cells;

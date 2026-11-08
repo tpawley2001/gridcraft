@@ -1,4 +1,5 @@
-//! Form controls (buttons, scroll bars, spin buttons, check boxes, option buttons) in xlsx, from the published ECMA-376 and
+//! Form controls (buttons, scroll bars, spin buttons, check boxes, option buttons, list boxes,
+//! drop-downs, group boxes, labels) in xlsx, from the published ECMA-376 and
 //! MS-XLSX formats. A control is written three ways, as spreadsheet applications expect:
 //!
 //! - a control properties part (`xl/ctrlProps/ctrlPropN.xml`, `formControlPr`) with its type,
@@ -9,15 +10,19 @@
 //!
 //! Reading prefers the properties part and falls back to the VML. Values are clamped to the
 //! 0..30000 whole numbers sliders and spin buttons take; a check box's state is 0..=2 (2 = mixed)
-//! and an option button's 0..=1, anything else reading as 0. Controls of other kinds (list boxes,
-//! drop-downs, group boxes, ActiveX controls) are left to pass-through (`passthrough.rs`), which
-//! keeps them unchanged; a sheet can hold both, in one `<controls>` element and one VML drawing.
+//! and an option button's 0..=1, anything else reading as 0. A list box's or drop-down's value is
+//! its 1-based selected item (`sel`, 0 = none) and its items are the `fmlaRange` reference.
+//! Controls of other kinds (edit boxes, dialog frames, ActiveX controls) are left to pass-through
+//! (`passthrough.rs`), which keeps them unchanged; a sheet can hold both, in one `<controls>`
+//! element and one VML drawing.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
 use gridcraft_core::CellRef;
-use gridcraft_model::{Anchor, AnchorMode, CONTROL_MAX, ControlAction, ControlKind, FormControl, MacroInput, Sheet};
+use gridcraft_model::{
+    Anchor, AnchorMode, CONTROL_MAX, ControlAction, ControlKind, DEFAULT_DROP_LINES, FormControl, ListSelection, MacroInput, Sheet,
+};
 
 use crate::package::Rel;
 use crate::read::Ctx;
@@ -35,6 +40,9 @@ const NS_XDR: &str = "http://schemas.openxmlformats.org/drawingml/2006/spreadshe
 /// The most controls read from one sheet.
 const MAX_CONTROLS: usize = 10_000;
 
+/// The largest selected item or drop-down line count read (the most items a list holds).
+const MAX_ITEMS: i64 = 32_767;
+
 fn object_type(k: ControlKind) -> &'static str {
     match k {
         ControlKind::Button => "Button",
@@ -42,6 +50,10 @@ fn object_type(k: ControlKind) -> &'static str {
         ControlKind::Spin => "Spin",
         ControlKind::CheckBox => "CheckBox",
         ControlKind::OptionButton => "Radio",
+        ControlKind::ListBox => "List",
+        ControlKind::DropDown => "Drop",
+        ControlKind::GroupBox => "GBox",
+        ControlKind::Label => "Label",
     }
 }
 
@@ -57,6 +69,10 @@ fn kind_of(t: &str) -> Option<ControlKind> {
         "spin" => Some(ControlKind::Spin),
         "checkbox" => Some(ControlKind::CheckBox),
         "radio" => Some(ControlKind::OptionButton),
+        "list" => Some(ControlKind::ListBox),
+        "drop" => Some(ControlKind::DropDown),
+        "gbox" => Some(ControlKind::GroupBox),
+        "label" => Some(ControlKind::Label),
         _ => None,
     }
 }
@@ -148,6 +164,19 @@ pub fn write(out: &mut Out, rels: &mut Rels, sheet: &Sheet, shape_id: impl Fn(us
             AnchorMode::Absolute => (false, false),
         };
         let name = esc_attr(&c.display_name());
+        let markers = (marker("from", from, fdx, fdy), marker("to", to, tdx, tdy));
+        let anchor_attrs =
+            format!("{}{}", if move_cells { " moveWithCells=\"1\"" } else { "" }, if size_cells { " sizeWithCells=\"1\"" } else { "" });
+        if matches!(c.kind, ControlKind::ListBox | ControlKind::DropDown | ControlKind::GroupBox | ControlKind::Label) {
+            // As Excel writes these kinds: the 2010 control only, without a fallback entry.
+            let _ = write!(
+                xml,
+                "<mc:AlternateContent xmlns:mc=\"{NS_MC}\"><mc:Choice xmlns:x14=\"{NS_X14}\" Requires=\"x14\"><control shapeId=\"{id}\" r:id=\"{rid}\" name=\"{name}\"><controlPr{pr}><anchor{anchor_attrs} xmlns:xdr=\"{NS_XDR}\">{}{}</anchor></controlPr></control></mc:Choice></mc:AlternateContent>",
+                markers.0, markers.1,
+            );
+            vml.push_str(&vml_shape(sheet, c, id, i));
+            continue;
+        }
         let _ = write!(
             xml,
             "<mc:AlternateContent xmlns:mc=\"{NS_MC}\"><mc:Choice xmlns:x14=\"{NS_X14}\" Requires=\"x14\"><control shapeId=\"{id}\" r:id=\"{rid}\" name=\"{name}\"><controlPr{pr}><anchor{}{} xmlns:xdr=\"{NS_XDR}\">{}{}</anchor></controlPr></control></mc:Choice><mc:Fallback><control shapeId=\"{id}\" r:id=\"{rid}\" name=\"{name}\"/></mc:Fallback></mc:AlternateContent>",
@@ -181,6 +210,40 @@ fn ctrl_prop(c: &FormControl) -> String {
             if !c.three_d {
                 s.push_str(" noThreeD=\"1\"");
             }
+        }
+        ControlKind::ListBox | ControlKind::DropDown => {
+            if c.kind == ControlKind::DropDown {
+                if c.drop_lines != DEFAULT_DROP_LINES {
+                    let _ = write!(s, " dropLines=\"{}\"", c.drop_lines);
+                }
+                s.push_str(" dropStyle=\"combo\"");
+            }
+            s.push_str(" dx=\"16\"");
+            if let Some(l) = &c.link {
+                let _ = write!(s, " fmlaLink=\"{}\"", esc_attr(l));
+            }
+            if let Some(r) = &c.input_range {
+                let _ = write!(s, " fmlaRange=\"{}\"", esc_attr(r));
+            }
+            if !c.three_d {
+                s.push_str(" noThreeD=\"1\"");
+            }
+            if c.value != 0 {
+                let _ = write!(s, " sel=\"{}\"", c.value);
+            }
+            match c.selection {
+                ListSelection::Single => {}
+                ListSelection::Multi => s.push_str(" selType=\"multi\""),
+                ListSelection::Extend => s.push_str(" selType=\"extend\""),
+            }
+        }
+        ControlKind::GroupBox => {
+            if !c.three_d {
+                s.push_str(" noThreeD=\"1\"");
+            }
+        }
+        ControlKind::Label => {
+            s.push_str(" lockText=\"1\"");
         }
         ControlKind::Slider | ControlKind::Spin => {
             s.push_str(" dx=\"22\"");
@@ -263,6 +326,35 @@ fn vml_shape(sheet: &Sheet, c: &FormControl, id: u64, z: usize) -> String {
             }
             data.push_str("<x:Dx>22</x:Dx>");
         }
+        ControlKind::ListBox | ControlKind::DropDown => {
+            if let Some(l) = &c.link {
+                let _ = write!(data, "<x:FmlaLink>{}</x:FmlaLink>", esc(l));
+            }
+            if let Some(r) = &c.input_range {
+                let _ = write!(data, "<x:FmlaRange>{}</x:FmlaRange>", esc(r));
+            }
+            if c.value != 0 {
+                let _ = write!(data, "<x:Sel>{}</x:Sel>", c.value);
+            }
+            match c.selection {
+                ListSelection::Single => {}
+                ListSelection::Multi => data.push_str("<x:SelType>Multi</x:SelType>"),
+                ListSelection::Extend => data.push_str("<x:SelType>Extend</x:SelType>"),
+            }
+            if c.kind == ControlKind::DropDown {
+                let _ = write!(data, "<x:DropLines>{}</x:DropLines><x:DropStyle>Combo</x:DropStyle>", c.drop_lines);
+            }
+            if !c.three_d {
+                data.push_str("<x:NoThreeD/>");
+            }
+            data.push_str("<x:Dx>16</x:Dx>");
+        }
+        ControlKind::GroupBox => {
+            if !c.three_d {
+                data.push_str("<x:NoThreeD/>");
+            }
+        }
+        ControlKind::Label => {}
     }
     data.push_str("</x:ClientData>");
     let text = match c.kind {
@@ -272,13 +364,13 @@ fn vml_shape(sheet: &Sheet, c: &FormControl, id: u64, z: usize) -> String {
                 esc(&c.text)
             )
         }
-        ControlKind::CheckBox | ControlKind::OptionButton => {
+        ControlKind::CheckBox | ControlKind::OptionButton | ControlKind::GroupBox | ControlKind::Label => {
             format!(
                 "<v:textbox style=\"mso-direction-alt:auto\" o:singleclick=\"f\"><div style=\"text-align:left\">{}</div></v:textbox>",
                 esc(&c.text)
             )
         }
-        ControlKind::Slider | ControlKind::Spin => String::new(),
+        ControlKind::Slider | ControlKind::Spin | ControlKind::ListBox | ControlKind::DropDown => String::new(),
     };
     format!(
         "<v:shape id=\"_x0000_s{id}\" type=\"#_x0000_t201\" style=\"position:absolute;margin-left:{:.2}pt;margin-top:{:.2}pt;width:{:.2}pt;height:{:.2}pt;z-index:{}\"{} o:insetmode=\"auto\"><o:lock v:ext=\"edit\" rotation=\"t\"/>{text}{data}</v:shape>",
@@ -314,6 +406,22 @@ struct Props {
     /// A check box's or option button's state (0 unchecked, 1 checked, 2 mixed).
     checked: Option<i64>,
     three_d: Option<bool>,
+    /// A list box's or drop-down's items (`fmlaRange`), selected item, selection type and open
+    /// rows.
+    range: Option<String>,
+    sel: Option<i64>,
+    sel_type: Option<ListSelection>,
+    drop_lines: Option<i64>,
+}
+
+/// A list box's selection type, `single`/`multi`/`extend` in any case.
+fn sel_type_of(t: &str) -> Option<ListSelection> {
+    match t.trim().to_ascii_lowercase().as_str() {
+        "single" => Some(ListSelection::Single),
+        "multi" => Some(ListSelection::Multi),
+        "extend" => Some(ListSelection::Extend),
+        _ => None,
+    }
 }
 
 fn props_from_ctrl_prop(e: &El) -> Props {
@@ -338,6 +446,10 @@ fn props_from_ctrl_prop(e: &El) -> Props {
             _ => 0,
         }),
         three_d: Some(!e.attr_bool("noThreeD").unwrap_or(false)),
+        range: e.attr("fmlaRange").map(str::to_string),
+        sel: int("sel"),
+        sel_type: e.attr("selType").and_then(sel_type_of),
+        drop_lines: int("dropLines"),
     }
 }
 
@@ -363,6 +475,10 @@ fn props_from_vml(shape: &El) -> Option<Props> {
         locked: truth("Locked"),
         checked: Some(int("Checked").filter(|v| (1..=2).contains(v)).unwrap_or(0)),
         three_d: Some(data.child("NoThreeD").is_none()),
+        range: text_of("FmlaRange").filter(|t| !t.is_empty()),
+        sel: int("Sel"),
+        sel_type: text_of("SelType").as_deref().and_then(sel_type_of),
+        drop_lines: int("DropLines"),
     })
 }
 
@@ -402,7 +518,8 @@ fn build(p: Props, kind: ControlKind, anchor: Anchor, name: Option<&str>, id: u3
     c.value = c.snap(clamp(p.val, c.min) as f64);
     // Only sliders have an orientation; `horiz` is left out for a vertical one.
     c.horizontal = kind != ControlKind::Slider || p.horiz.unwrap_or(false);
-    c.link = p.link.map(|l| l.trim().trim_start_matches('=').to_string()).filter(|l| !l.is_empty() && l.chars().count() <= 300);
+    let reference = |t: Option<String>| t.map(|l| l.trim().trim_start_matches('=').to_string()).filter(|l| !l.is_empty() && l.chars().count() <= 300);
+    c.link = reference(p.link);
     c.text = p.text.chars().take(1_024).collect();
     if let Some(n) = name {
         c.name = n.chars().take(255).collect();
@@ -412,6 +529,15 @@ fn build(p: Props, kind: ControlKind, anchor: Anchor, name: Option<&str>, id: u3
     if let Some(top) = kind.max_state() {
         // An out-of-range state reads as unchecked.
         c.value = p.checked.and_then(|v| u32::try_from(v).ok()).filter(|v| *v <= top).unwrap_or(0);
+        c.three_d = p.three_d.unwrap_or(true);
+    }
+    if kind.is_list() {
+        c.input_range = reference(p.range);
+        c.value = p.sel.map_or(0, |v| v.clamp(0, MAX_ITEMS) as u32);
+        c.selection = p.sel_type.unwrap_or_default();
+        c.drop_lines = p.drop_lines.map_or(DEFAULT_DROP_LINES, |v| v.clamp(1, MAX_ITEMS) as u32);
+    }
+    if kind.is_list() || kind == ControlKind::GroupBox {
         c.three_d = p.three_d.unwrap_or(true);
     }
     if kind == ControlKind::Button
@@ -493,7 +619,8 @@ pub(crate) fn is_note_data(data: &El) -> bool {
     data.attr("ObjectType").is_some_and(|t| t.trim().eq_ignore_ascii_case("note"))
 }
 
-/// Reads a sheet's buttons, scroll bars, spin buttons, check boxes and option buttons: each `<control>` with its properties
+/// Reads a sheet's buttons, scroll bars, spin buttons, check boxes, option buttons, list boxes,
+/// drop-downs, group boxes and labels: each `<control>` with its properties
 /// part, else its VML shape, and VML shapes the sheet doesn't list (files that only have VML).
 /// The shapes come from the VML drawing with relationship id `vml_rid` (`<legacyDrawing r:id>`).
 /// Returns the shape numbers of the controls it read, so pass-through keeps only the others.
@@ -563,7 +690,7 @@ pub fn read(cx: &mut Ctx<'_>, controls: Option<&El>, vml_rid: Option<&str>, rels
             p.print = pr.attr_bool("print").or(p.print);
             p.locked = pr.attr_bool("locked").or(p.locked);
         }
-        // Other kinds (a list box, a drop-down) stay with pass-through.
+        // Other kinds (an edit box, a dialog frame) stay with pass-through.
         let Some(kind) = p.kind else { continue };
         let anchor =
             pr.and_then(|pr| pr.child("anchor")).and_then(|a| anchor_from_markers(a, sheet)).or_else(|| shape.and_then(|s| vml_anchor(s, sheet)));
@@ -572,7 +699,7 @@ pub fn read(cx: &mut Ctx<'_>, controls: Option<&El>, vml_rid: Option<&str>, rels
         sheet.controls.push(build(p, kind, anchor, ctl.attr("name"), id));
         read.insert(n);
     }
-    // Controls known only from the VML. The ones not read (a drop-down, or past the limit) stay
+    // Controls known only from the VML. The ones not read (an edit box, or past the limit) stay
     // in the kept drawing.
     let mut vml_only_unmodelled = false;
     for s in &shapes {

@@ -1016,10 +1016,15 @@ pub enum ControlKind {
     Spin,
     CheckBox,
     OptionButton,
+    ListBox,
+    DropDown,
+    GroupBox,
+    Label,
 }
 
 impl ControlKind {
-    /// The kind's name in the window: Button, Slider, Spin Button, Check Box, Option Button.
+    /// The kind's name in the window: Button, Slider, Spin Button, Check Box, Option Button, List
+    /// Box, Drop-down, Group Box, Label.
     pub fn label(self) -> &'static str {
         match self {
             ControlKind::Button => "Button",
@@ -1027,7 +1032,17 @@ impl ControlKind {
             ControlKind::Spin => "Spin Button",
             ControlKind::CheckBox => "Check Box",
             ControlKind::OptionButton => "Option Button",
+            ControlKind::ListBox => "List Box",
+            ControlKind::DropDown => "Drop-down",
+            ControlKind::GroupBox => "Group Box",
+            ControlKind::Label => "Label",
         }
+    }
+
+    /// Whether the kind picks one item of its input range (a list box or drop-down); its value is
+    /// the 1-based item (0 = none).
+    pub fn is_list(self) -> bool {
+        matches!(self, ControlKind::ListBox | ControlKind::DropDown)
     }
 
     /// Whether the kind holds a number in a range (a slider or spin button), with min, max, step
@@ -1082,7 +1097,24 @@ pub enum MacroInput {
     Fixed(String),
 }
 
-/// A form control (button, slider, spin button, check box, option button) floating over the sheet.
+/// How many items of a list box can be selected at once.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ListSelection {
+    /// One item; the linked cell holds its 1-based position.
+    #[default]
+    Single,
+    /// Each click adds or removes an item.
+    Multi,
+    /// Shift extends the selection over a block of items.
+    Extend,
+}
+
+/// The rows a new drop-down shows when it is open.
+pub const DEFAULT_DROP_LINES: u32 = 8;
+
+/// A form control (button, slider, spin button, check box, option button, list box, drop-down,
+/// group box, label) floating over the sheet.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FormControl {
@@ -1091,13 +1123,14 @@ pub struct FormControl {
     pub anchor: Anchor,
     /// The name shown in the Selection Pane (`Button 3`); empty means the kind and id.
     pub name: String,
-    /// The caption of a button, check box or option button.
+    /// The caption of a button, check box, option button, group box or label.
     pub text: String,
     /// The linked cell as reference text: `$B$2` on the control's own sheet, or `Sheet2!$B$2`.
     /// Structural edits rewrite it like a formula reference.
     pub link: Option<String>,
     /// The current value of a slider or spin button (the linked cell holds it too); the state of
-    /// a check box (0 unchecked, 1 checked, 2 mixed) or option button (1 selected).
+    /// a check box (0 unchecked, 1 checked, 2 mixed) or option button (1 selected); the 1-based
+    /// selected item of a list box or drop-down (0 = none).
     pub value: u32,
     pub min: u32,
     pub max: u32,
@@ -1115,6 +1148,13 @@ pub struct FormControl {
     pub locked: bool,
     /// Drawn with 3-D shading (check boxes and option buttons).
     pub three_d: bool,
+    /// The items of a list box or drop-down as reference text (`$E$1:$E$4`, `Lists!$A$1:$A$3`).
+    /// Structural edits rewrite it like `link`.
+    pub input_range: Option<String>,
+    /// The rows a drop-down shows when it is open.
+    pub drop_lines: u32,
+    /// How many items of a list box can be selected.
+    pub selection: ListSelection,
 }
 
 impl Default for FormControl {
@@ -1136,6 +1176,9 @@ impl Default for FormControl {
             print: true,
             locked: true,
             three_d: true,
+            input_range: None,
+            drop_lines: DEFAULT_DROP_LINES,
+            selection: ListSelection::Single,
         }
     }
 }
@@ -1148,7 +1191,7 @@ impl FormControl {
 
     /// Checks the numbers of a slider or spin button: 0 ≤ min < max ≤ 30000, 1 ≤ step ≤ max − min,
     /// and (sliders) page ≥ step. Each rule has its own message. A check box's state is 0..=2 and
-    /// an option button's 0..=1; their other numbers are ignored.
+    /// an option button's 0..=1; their other numbers, and those of the other kinds, are ignored.
     pub fn check_numbers(&self) -> Result<(), String> {
         if let Some(top) = self.kind.max_state() {
             if self.value > top {
@@ -1156,7 +1199,7 @@ impl FormControl {
             }
             return Ok(());
         }
-        if self.kind == ControlKind::Button {
+        if !self.kind.is_number() {
             return Ok(());
         }
         if self.max > CONTROL_MAX {

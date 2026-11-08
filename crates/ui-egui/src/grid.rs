@@ -301,6 +301,8 @@ pub struct GridState {
     pub control: Option<crate::form_controls::Gesture>,
     /// The form control that takes the arrow keys (the one last worked).
     pub focused_control: Option<u32>,
+    /// The drop-down whose list is open.
+    pub drop_open: Option<u32>,
     /// Insert › Controls: the kind a click or drag on the grid places, and where the drag began
     /// (logical position).
     pub placing: Option<gridcraft_engine::model::ControlKind>,

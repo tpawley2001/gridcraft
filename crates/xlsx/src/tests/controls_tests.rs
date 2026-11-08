@@ -158,7 +158,7 @@ const VML_ONLY: &str = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o=
 <v:shape id="_x0000_s1025" type="#_x0000_t201"><x:ClientData ObjectType="Scroll"><x:Anchor>2, 0, 3, 0, 5, 0, 4, 0</x:Anchor><x:FmlaLink>$B$1</x:FmlaLink><x:Val>50000</x:Val><x:Min>-5</x:Min><x:Max>99999</x:Max><x:Inc>0</x:Inc><x:Page>-3</x:Page><x:Horiz/></x:ClientData></v:shape>
 <v:shape id="_x0000_s1026" type="#_x0000_t201"><x:ClientData ObjectType="Spin"><x:Anchor>1, 0, 1, 0, 1, 20, 3, 0</x:Anchor><x:Val>7</x:Val><x:Min>9</x:Min><x:Max>9</x:Max></x:ClientData></v:shape>
 <v:shape id="_x0000_s1027" o:button="t"><v:textbox><div>Go</div></v:textbox><x:ClientData ObjectType="Button"><x:Anchor>1, 0, 6, 0, 3, 0, 7, 0</x:Anchor><x:FmlaMacro>[0]!Tidy</x:FmlaMacro></x:ClientData></v:shape>
-<v:shape id="_x0000_s1028"><x:ClientData ObjectType="Drop"><x:Anchor>1, 0, 1, 0, 2, 0, 2, 0</x:Anchor></x:ClientData></v:shape>
+<v:shape id="_x0000_s1028"><x:ClientData ObjectType="EditBox"><x:Anchor>1, 0, 1, 0, 2, 0, 2, 0</x:Anchor></x:ClientData></v:shape>
 <v:shape id="_x0000_s1029"><x:ClientData ObjectType="Scroll"><x:Anchor>junk</x:Anchor></x:ClientData></v:shape>
 </xml>"##;
 
@@ -174,7 +174,7 @@ fn vml_only_controls_are_read_and_clamped() {
     let (wb, report) = read_xlsx(&bytes).unwrap();
     assert!(report.warnings.iter().all(|w| !w.contains("form controls are not supported")), "{:?}", report.warnings);
     let c = &wb.sheet(0).unwrap().controls;
-    assert_eq!(c.len(), 3, "the drop-down and the shape without an anchor are skipped");
+    assert_eq!(c.len(), 3, "the edit box and the shape without an anchor are skipped");
     assert_eq!((c[0].kind, c[0].min, c[0].max, c[0].step, c[0].value, c[0].horizontal), (ControlKind::Slider, 0, 30_000, 1, 30_000, true));
     assert!(c[0].page >= c[0].step && c[0].check_numbers().is_ok());
     assert_eq!((c[1].min, c[1].max), (9, 10), "a range with no width gets one");
@@ -219,16 +219,16 @@ fn a_single_quoted_shape_id_is_dropped_from_the_kept_controls_too() {
     assert_eq!(back.sheet(0).unwrap().controls.len(), 1);
 }
 
-/// One `mc:AlternateContent` holds a scroll bar, which is modelled, and a list box, which stays
-/// with pass-through: only the scroll bar leaves the kept fragment, the list box keeps its
+/// One `mc:AlternateContent` holds a scroll bar, which is modelled, and a dialog frame, which stays
+/// with pass-through: only the scroll bar leaves the kept fragment, the dialog frame keeps its
 /// worksheet entry, its VML shape and its properties part through a save, and the file reads
 /// back with the one modelled control and the kept one.
 #[test]
 fn an_unsupported_control_beside_a_modelled_one_in_one_alternate_content_is_kept() {
     let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing1.vml"/><Relationship Id="rIdA" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/ctrlProp" Target="../ctrlProps/a.xml"/><Relationship Id="rIdB" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/ctrlProp" Target="../ctrlProps/b.xml"/></Relationships>"#;
     let prop_a = r#"<?xml version="1.0"?><formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="Scroll" fmlaLink="$B$1" min="0" max="100" inc="1" page="10" val="40"/>"#;
-    let prop_b = r#"<?xml version="1.0"?><formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="List" fmlaRange="$D$1:$D$3" sel="2"/>"#;
-    let vml = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape id="_x0000_s1025" type="#_x0000_t201"><x:ClientData ObjectType="Scroll"><x:Anchor>2, 0, 3, 0, 5, 0, 4, 0</x:Anchor><x:FmlaLink>$B$1</x:FmlaLink><x:Val>40</x:Val><x:Min>0</x:Min><x:Max>100</x:Max><x:Inc>1</x:Inc><x:Page>10</x:Page></x:ClientData></v:shape><v:shape id="_x0000_s1026" type="#_x0000_t201"><x:ClientData ObjectType="List"><x:Anchor>2, 0, 6, 0, 5, 0, 9, 0</x:Anchor><x:FmlaRange>$D$1:$D$3</x:FmlaRange><x:Sel>2</x:Sel></x:ClientData></v:shape></xml>"##;
+    let prop_b = r#"<?xml version="1.0"?><formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="Dialog" fmlaRange="$D$1:$D$3" sel="2"/>"#;
+    let vml = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape id="_x0000_s1025" type="#_x0000_t201"><x:ClientData ObjectType="Scroll"><x:Anchor>2, 0, 3, 0, 5, 0, 4, 0</x:Anchor><x:FmlaLink>$B$1</x:FmlaLink><x:Val>40</x:Val><x:Min>0</x:Min><x:Max>100</x:Max><x:Inc>1</x:Inc><x:Page>10</x:Page></x:ClientData></v:shape><v:shape id="_x0000_s1026" type="#_x0000_t201"><x:ClientData ObjectType="Dialog"><x:Anchor>2, 0, 6, 0, 5, 0, 9, 0</x:Anchor><x:FmlaRange>$D$1:$D$3</x:FmlaRange><x:Sel>2</x:Sel></x:ClientData></v:shape></xml>"##;
     let anchor = |from: u32, to: u32| {
         format!(
             r#"<controlPr><anchor><from><xdr:col>2</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>{from}</xdr:row><xdr:rowOff>0</xdr:rowOff></from><to><xdr:col>5</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>{to}</xdr:row><xdr:rowOff>0</xdr:rowOff></to></anchor></controlPr>"#
@@ -252,12 +252,12 @@ fn an_unsupported_control_beside_a_modelled_one_in_one_alternate_content_is_kept
     );
     let (wb, _) = read_xlsx(&bytes).unwrap();
     let sh = wb.sheet(0).unwrap();
-    assert_eq!(sh.controls.len(), 1, "the scroll bar is modelled, the list box is not");
+    assert_eq!(sh.controls.len(), 1, "the scroll bar is modelled, the dialog frame is not");
     assert_eq!((sh.controls[0].kind, sh.controls[0].name.as_str()), (ControlKind::Slider, "Scroll 1"));
     let kept = sh.preserved.as_ref().and_then(|k| k.elements.iter().find(|e| e.slot == "controls")).map(|e| e.xml.clone()).unwrap_or_default();
-    assert!(kept.contains("List 1") && kept.contains("<mc:Fallback>"), "the list box stays, in its wrapper: {kept}");
+    assert!(kept.contains("List 1") && kept.contains("<mc:Fallback>"), "the dialog frame stays, in its wrapper: {kept}");
     assert!(!kept.contains("Scroll 1") && !kept.contains("shapeId=\"1025\""), "the scroll bar leaves every branch: {kept}");
-    // Saved: the scroll bar once (one Fallback of ours), the list box in the kept wrapper with its
+    // Saved: the scroll bar once (one Fallback of ours), the dialog frame in the kept wrapper with its
     // shape and its properties part.
     let out = write_xlsx(&wb).unwrap();
     let mut pkg = Package::open(&out).unwrap();
@@ -267,12 +267,12 @@ fn an_unsupported_control_beside_a_modelled_one_in_one_alternate_content_is_kept
     assert_eq!(sheet.matches("name=\"List 1\"").count(), 2, "the kept control, in its Choice and Fallback: {sheet}");
     assert_eq!(sheet.matches("shapeId=\"1026\"").count(), 2, "{sheet}");
     let vml_out = text(&mut pkg, "xl/drawings/vmlDrawing1.vml");
-    assert!(vml_out.contains("_x0000_s1026") && vml_out.contains("ObjectType=\"List\""), "the list box's shape is kept: {vml_out}");
+    assert!(vml_out.contains("_x0000_s1026") && vml_out.contains("ObjectType=\"Dialog\""), "the dialog frame's shape is kept: {vml_out}");
     assert_eq!(vml_out.matches("ObjectType=\"Scroll\"").count(), 1, "{vml_out}");
     // Part names keep their case; compare without it.
     let props: Vec<String> = pkg.names().into_iter().filter(|n| n.to_ascii_lowercase().starts_with("xl/ctrlprops/")).collect();
     assert_eq!(props.len(), 2, "ours and the kept one: {props:?}");
-    assert!(props.iter().any(|n| text(&mut pkg, n).contains("objectType=\"List\"")), "the list box's properties part survives: {props:?}");
+    assert!(props.iter().any(|n| text(&mut pkg, n).contains("objectType=\"Dialog\"")), "the dialog frame's properties part survives: {props:?}");
     // Read back: the one modelled control and the kept one.
     let (back, _) = read_xlsx(&out).unwrap();
     let sh = back.sheet(0).unwrap();
@@ -288,8 +288,8 @@ fn an_unsupported_control_beside_a_modelled_one_in_one_alternate_content_is_kept
 fn a_modelled_control_joins_a_kept_controls_element_with_a_namespace_prefix() {
     use gridcraft_model::{Anchor, ControlKind, FormControl};
     let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing1.vml"/><Relationship Id="rIdB" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/ctrlProp" Target="../ctrlProps/b.xml"/></Relationships>"#;
-    let prop_b = r#"<?xml version="1.0"?><formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="List" fmlaRange="$D$1:$D$3" sel="2"/>"#;
-    let vml = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape id="_x0000_s1026" type="#_x0000_t201"><x:ClientData ObjectType="List"><x:Anchor>2, 0, 6, 0, 5, 0, 9, 0</x:Anchor><x:FmlaRange>$D$1:$D$3</x:FmlaRange><x:Sel>2</x:Sel></x:ClientData></v:shape></xml>"##;
+    let prop_b = r#"<?xml version="1.0"?><formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="Dialog" fmlaRange="$D$1:$D$3" sel="2"/>"#;
+    let vml = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape id="_x0000_s1026" type="#_x0000_t201"><x:ClientData ObjectType="Dialog"><x:Anchor>2, 0, 6, 0, 5, 0, 9, 0</x:Anchor><x:FmlaRange>$D$1:$D$3</x:FmlaRange><x:Sel>2</x:Sel></x:ClientData></v:shape></xml>"##;
     let controls = r#"<x:controls xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"><x:control shapeId="1026" r:id="rIdB" name="List 1"><x:controlPr><x:anchor><x:from><xdr:col>2</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>6</xdr:row><xdr:rowOff>0</xdr:rowOff></x:from><x:to><xdr:col>5</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>9</xdr:row><xdr:rowOff>0</xdr:rowOff></x:to></x:anchor></x:controlPr></x:control></x:controls>"#;
     let bytes = minimal(
         &format!(r#"<sheetData/><legacyDrawing r:id="rId9"/>{controls}"#),
@@ -298,7 +298,7 @@ fn a_modelled_control_joins_a_kept_controls_element_with_a_namespace_prefix() {
         "",
     );
     let (mut wb, _) = read_xlsx(&bytes).unwrap();
-    assert!(wb.sheet(0).unwrap().controls.is_empty(), "the list box stays with pass-through");
+    assert!(wb.sheet(0).unwrap().controls.is_empty(), "the dialog frame stays with pass-through");
     let kept = wb
         .sheet(0)
         .unwrap()
@@ -327,7 +327,7 @@ fn a_modelled_control_joins_a_kept_controls_element_with_a_namespace_prefix() {
     let inner = &sheet[start..end];
     assert!(inner.contains("name=\"List 1\"") && inner.contains("<mc:Fallback>"), "both controls inside the one element: {sheet}");
     let (back, _) = read_xlsx(&out).unwrap();
-    assert_eq!(back.sheet(0).unwrap().controls.len(), 1, "the slider reads back; the list box stays kept");
+    assert_eq!(back.sheet(0).unwrap().controls.len(), 1, "the slider reads back; the dialog frame stays kept");
 }
 
 /// A kept `mc:AlternateContent` with separate `<controls>` elements in its Choice and Fallback:
@@ -338,8 +338,8 @@ fn a_modelled_control_joins_a_kept_controls_element_with_a_namespace_prefix() {
 fn a_modelled_control_joins_the_choice_controls_element_of_a_kept_alternate_content() {
     use gridcraft_model::{Anchor, ControlKind, FormControl};
     let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing1.vml"/><Relationship Id="rIdB" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/ctrlProp" Target="../ctrlProps/b.xml"/></Relationships>"#;
-    let prop_b = r#"<?xml version="1.0"?><formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="List" fmlaRange="$D$1:$D$3" sel="2"/>"#;
-    let vml = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape id="_x0000_s1026" type="#_x0000_t201"><x:ClientData ObjectType="List"><x:Anchor>2, 0, 6, 0, 5, 0, 9, 0</x:Anchor><x:FmlaRange>$D$1:$D$3</x:FmlaRange><x:Sel>2</x:Sel></x:ClientData></v:shape></xml>"##;
+    let prop_b = r#"<?xml version="1.0"?><formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="Dialog" fmlaRange="$D$1:$D$3" sel="2"/>"#;
+    let vml = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape id="_x0000_s1026" type="#_x0000_t201"><x:ClientData ObjectType="Dialog"><x:Anchor>2, 0, 6, 0, 5, 0, 9, 0</x:Anchor><x:FmlaRange>$D$1:$D$3</x:FmlaRange><x:Sel>2</x:Sel></x:ClientData></v:shape></xml>"##;
     let list = r#"<control shapeId="1026" r:id="rIdB" name="List 1"><controlPr><anchor><from><xdr:col>2</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>6</xdr:row><xdr:rowOff>0</xdr:rowOff></from><to><xdr:col>5</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>9</xdr:row><xdr:rowOff>0</xdr:rowOff></to></anchor></controlPr></control>"#;
     let controls = format!(
         r#"<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"><mc:Choice Requires="x14"><controls>{list}</controls></mc:Choice><mc:Fallback><controls><control shapeId="1026" r:id="rIdB" name="List 1"/></controls></mc:Fallback></mc:AlternateContent>"#
@@ -351,7 +351,7 @@ fn a_modelled_control_joins_the_choice_controls_element_of_a_kept_alternate_cont
         "",
     );
     let (mut wb, _) = read_xlsx(&bytes).unwrap();
-    assert!(wb.sheet(0).unwrap().controls.is_empty(), "the list box stays with pass-through");
+    assert!(wb.sheet(0).unwrap().controls.is_empty(), "the dialog frame stays with pass-through");
     let anchor = Anchor { cell: gridcraft_core::CellRef::new(2, 1), width: 120.0, height: 20.0, ..Default::default() };
     wb.sheet_mut(0).unwrap().controls.push(FormControl {
         id: 900,
@@ -577,7 +577,7 @@ fn controls_naming_one_properties_part_read_it_once() {
     assert_eq!(sh.comments.len(), 1, "a part read after the controls still reads: {:?}", report.warnings);
 }
 
-/// A legacy VML drawing with a button (`1025`, modelled), a drop-down (`1026`) and a list
+/// A legacy VML drawing with a button (`1025`, modelled), an edit box (`1026`) and a list
 /// box (`1027`, with a picture through the drawing's own relationship) that only the drawing
 /// lists, plus `note` (a note shape for A1 whose client data carries that `ObjectType` attribute,
 /// with its comments part) when given. `listed`: the sheet's
@@ -604,8 +604,8 @@ fn vml_only_others(listed: bool, button: bool, note: Option<&str>) -> Vec<u8> {
     if button {
         shapes.push_str(r##"<v:shape id="_x0000_s1025" type="#_x0000_t201"><v:textbox><div>Go</div></v:textbox><x:ClientData ObjectType="Button"><x:Anchor>2, 0, 3, 0, 4, 0, 5, 0</x:Anchor><x:FmlaMacro>[0]!Go</x:FmlaMacro></x:ClientData></v:shape>"##);
     }
-    shapes.push_str(r##"<v:shape id="_x0000_s1026" type="#_x0000_t201"><v:textbox><div>Paid</div></v:textbox><x:ClientData ObjectType="Drop"><x:Anchor>2, 0, 7, 0, 4, 0, 8, 0</x:Anchor><x:FmlaLink>$B$7</x:FmlaLink></x:ClientData></v:shape>"##);
-    shapes.push_str(r##"<v:shape id="_x0000_s1027" type="#_x0000_t201"><v:imagedata o:relid="rId1" o:title=""/><x:ClientData ObjectType="List"><x:Anchor>2, 0, 9, 0, 4, 0, 10, 0</x:Anchor><x:FmlaLink>$B$9</x:FmlaLink></x:ClientData></v:shape>"##);
+    shapes.push_str(r##"<v:shape id="_x0000_s1026" type="#_x0000_t201"><v:textbox><div>Paid</div></v:textbox><x:ClientData ObjectType="EditBox"><x:Anchor>2, 0, 7, 0, 4, 0, 8, 0</x:Anchor><x:FmlaLink>$B$7</x:FmlaLink></x:ClientData></v:shape>"##);
+    shapes.push_str(r##"<v:shape id="_x0000_s1027" type="#_x0000_t201"><v:imagedata o:relid="rId1" o:title=""/><x:ClientData ObjectType="Dialog"><x:Anchor>2, 0, 9, 0, 4, 0, 10, 0</x:Anchor><x:FmlaLink>$B$9</x:FmlaLink></x:ClientData></v:shape>"##);
     let vml = format!(
         r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout>{shapes}</xml>"#
     );
@@ -644,7 +644,7 @@ fn vml_only_others(listed: bool, button: bool, note: Option<&str>) -> Vec<u8> {
     super::make_zip(&files.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect::<Vec<_>>())
 }
 
-/// Checks a saved package keeps the drop-down and list box shapes once each, in the sheet's
+/// Checks a saved package keeps the edit box and dialog frame shapes once each, in the sheet's
 /// one VML drawing, with that drawing's one relationship to its one picture; returns the drawing.
 fn kept_vml_only_others(out: &[u8]) -> String {
     let mut pkg = Package::open(out).unwrap();
@@ -657,17 +657,17 @@ fn kept_vml_only_others(out: &[u8]) -> String {
     assert_eq!(vmls.len(), 1, "{names:?}");
     let vml_name = vmls[0].clone();
     let vml = text(&mut pkg, &vml_name);
-    assert_eq!(vml.matches("ObjectType=\"Drop\"").count(), 1, "the drop-down is kept once: {vml}");
-    assert_eq!(vml.matches("ObjectType=\"List\"").count(), 1, "the list box is kept once: {vml}");
+    assert_eq!(vml.matches("ObjectType=\"EditBox\"").count(), 1, "the edit box is kept once: {vml}");
+    assert_eq!(vml.matches("ObjectType=\"Dialog\"").count(), 1, "the dialog frame is kept once: {vml}");
     let (dir, file) = vml_name.rsplit_once('/').unwrap();
     let vml_rels = text(&mut pkg, &format!("{dir}/_rels/{file}.rels"));
     assert_eq!(vml_rels.matches("<Relationship ").count(), 1, "{vml_rels}");
     let media: Vec<&String> = names.iter().filter(|n| n.starts_with("xl/media/")).collect();
-    assert_eq!(media.len(), 1, "the list box's picture once: {names:?}");
+    assert_eq!(media.len(), 1, "the dialog frame's picture once: {names:?}");
     vml
 }
 
-/// The sheet's `<controls>` lists only a button, which is modelled; a drop-down and a list
+/// The sheet's `<controls>` lists only a button, which is modelled; an edit box and a list
 /// box in the same VML drawing have no worksheet entry. With the button's entry gone from the
 /// kept content no `<controls>` element is left, but the drawing still holds the two, so it is
 /// kept: the save writes them beside the regenerated button, and they survive a second round trip.
@@ -693,7 +693,7 @@ fn vml_only_controls_survive_when_the_last_listed_control_is_modelled() {
     assert_eq!(vml.matches("ObjectType=\"Button\"").count(), 1, "{vml}");
 }
 
-/// A sheet whose only controls are a drop-down and a list box that only the VML drawing
+/// A sheet whose only controls are an edit box and a dialog frame that only the VML drawing
 /// lists (no `<controls>`, no notes, nothing modelled): the drawing is kept on its own.
 #[test]
 fn a_sheet_whose_only_controls_are_vml_only_and_unmodelled_keeps_them() {
@@ -710,8 +710,8 @@ fn a_sheet_whose_only_controls_are_vml_only_and_unmodelled_keeps_them() {
 }
 
 /// The same with a note in the drawing (one VML drawing for one comments part) and a VML-only
-/// button that is modelled: the note and the button are written from the model, the drop-down and
-/// list box stay, all in the one drawing.
+/// button that is modelled: the note and the button are written from the model, the edit box and
+/// dialog frame stay, all in the one drawing.
 #[test]
 fn vml_only_controls_beside_a_note_are_kept() {
     let bytes = vml_only_others(false, true, Some(r#"ObjectType="Note""#));
@@ -772,15 +772,15 @@ fn with_vml(shapes: &str) -> Vec<u8> {
     )
 }
 
-/// Text that reads like a note's `ObjectType` in a drop-down's caption or in another attribute of
-/// a list box doesn't make either a note: both are kept, and a modelled button with that
+/// Text that reads like a note's `ObjectType` in an edit box's caption or in another attribute of
+/// a dialog frame doesn't make either a note: both are kept, and a modelled button with that
 /// caption keeps it.
 #[test]
 fn a_control_whose_text_reads_like_a_note_object_type_is_kept() {
     let bytes = with_vml(concat!(
         r##"<v:shape id="_x0000_s1025" type="#_x0000_t201"><v:textbox><div>ObjectType="Note"</div></v:textbox><x:ClientData ObjectType="Button"><x:Anchor>2, 0, 3, 0, 4, 0, 5, 0</x:Anchor></x:ClientData></v:shape>"##,
-        r##"<v:shape id="_x0000_s1026" type="#_x0000_t201"><v:textbox><div>ObjectType="Note"</div></v:textbox><x:ClientData ObjectType="Drop"><x:Anchor>2, 0, 7, 0, 4, 0, 8, 0</x:Anchor><x:FmlaLink>$B$7</x:FmlaLink></x:ClientData></v:shape>"##,
-        r##"<v:shape id="_x0000_s1027" type="#_x0000_t201" alt="ObjectType='note'"><x:ClientData ObjectType="List"><x:Anchor>2, 0, 9, 0, 4, 0, 10, 0</x:Anchor></x:ClientData></v:shape>"##,
+        r##"<v:shape id="_x0000_s1026" type="#_x0000_t201"><v:textbox><div>ObjectType="Note"</div></v:textbox><x:ClientData ObjectType="EditBox"><x:Anchor>2, 0, 7, 0, 4, 0, 8, 0</x:Anchor><x:FmlaLink>$B$7</x:FmlaLink></x:ClientData></v:shape>"##,
+        r##"<v:shape id="_x0000_s1027" type="#_x0000_t201" alt="ObjectType='note'"><x:ClientData ObjectType="Dialog"><x:Anchor>2, 0, 9, 0, 4, 0, 10, 0</x:Anchor></x:ClientData></v:shape>"##,
     ));
     let (wb, report) = read_xlsx(&bytes).unwrap();
     let sh = wb.sheet(0).unwrap();
@@ -789,8 +789,8 @@ fn a_control_whose_text_reads_like_a_note_object_type_is_kept() {
     let mut out = write_xlsx(&wb).unwrap();
     for _ in 0..2 {
         let vml = only_vml(&out);
-        assert_eq!(vml.matches("ObjectType=\"Drop\"").count(), 1, "the drop-down is kept: {vml}");
-        assert_eq!(vml.matches("ObjectType=\"List\"").count(), 1, "the list box is kept: {vml}");
+        assert_eq!(vml.matches("ObjectType=\"EditBox\"").count(), 1, "the edit box is kept: {vml}");
+        assert_eq!(vml.matches("ObjectType=\"Dialog\"").count(), 1, "the dialog frame is kept: {vml}");
         assert_eq!(vml.matches("ObjectType=\"Button\"").count(), 1, "the button once: {vml}");
         assert_eq!(note_shapes(&vml), 0, "{vml}");
         let (back, _) = read_xlsx(&out).unwrap();
@@ -803,7 +803,7 @@ fn a_control_whose_text_reads_like_a_note_object_type_is_kept() {
 
 /// Kept VML leaves out the modelled controls by the number the reader gave them: the `id`, else
 /// the `o:spid`, wherever either comes in the shape's tag. A button whose `o:spid` comes before a
-/// different `id`, and one with a plain numeric `id`, are written once, from the model; a drop-down
+/// different `id`, and one with a plain numeric `id`, are written once, from the model; an edit box
 /// whose `o:spid` is a modelled button's number but whose `id` is its own is kept; a button
 /// with no number isn't modelled and is kept; notes are dropped whatever their numbers.
 #[test]
@@ -811,7 +811,7 @@ fn kept_vml_leaves_out_modelled_controls_by_the_readers_shape_number() {
     let bytes = with_vml(concat!(
         r##"<v:shape o:spid="_x0000_s1030" id="_x0000_s1025" type="#_x0000_t201"><v:textbox><div>A</div></v:textbox><x:ClientData ObjectType="Button"><x:Anchor>2, 0, 1, 0, 4, 0, 2, 0</x:Anchor></x:ClientData></v:shape>"##,
         r##"<v:shape id="1026" o:spid="_x0000_s1031" type="#_x0000_t201"><v:textbox><div>B</div></v:textbox><x:ClientData ObjectType="Button"><x:Anchor>2, 0, 3, 0, 4, 0, 4, 0</x:Anchor></x:ClientData></v:shape>"##,
-        r##"<v:shape o:spid="_x0000_s1025" id="_x0000_s1027" type="#_x0000_t201"><v:textbox><div>Paid</div></v:textbox><x:ClientData ObjectType="Drop"><x:Anchor>2, 0, 5, 0, 4, 0, 6, 0</x:Anchor></x:ClientData></v:shape>"##,
+        r##"<v:shape o:spid="_x0000_s1025" id="_x0000_s1027" type="#_x0000_t201"><v:textbox><div>Paid</div></v:textbox><x:ClientData ObjectType="EditBox"><x:Anchor>2, 0, 5, 0, 4, 0, 6, 0</x:Anchor></x:ClientData></v:shape>"##,
         r##"<v:shape id="Button 9" type="#_x0000_t201"><v:textbox><div>C</div></v:textbox><x:ClientData ObjectType="Button"><x:Anchor>2, 0, 7, 0, 4, 0, 8, 0</x:Anchor></x:ClientData></v:shape>"##,
         r##"<v:shape id="_x0000_s1028" o:spid="_x0000_s1040" type="#_x0000_t202"><x:ClientData ObjectType="Note"><x:Row>0</x:Row><x:Column>0</x:Column></x:ClientData></v:shape>"##,
         r##"<v:shape type="#_x0000_t202"><x:ClientData ObjectType="Note"><x:Row>1</x:Row><x:Column>0</x:Column></x:ClientData></v:shape>"##,
@@ -825,7 +825,7 @@ fn kept_vml_leaves_out_modelled_controls_by_the_readers_shape_number() {
         for caption in [">A</div>", ">B</div>", ">C</div>", ">Paid</div>"] {
             assert_eq!(vml.matches(caption).count(), 1, "each control once, kept or written: {caption} {vml}");
         }
-        assert_eq!(vml.matches("ObjectType=\"Drop\"").count(), 1, "the drop-down is kept: {vml}");
+        assert_eq!(vml.matches("ObjectType=\"EditBox\"").count(), 1, "the edit box is kept: {vml}");
         assert_eq!(note_shapes(&vml), 0, "{vml}");
         let (back, _) = read_xlsx(&out).unwrap();
         assert_eq!(back.sheet(0).unwrap().controls.len(), 2);

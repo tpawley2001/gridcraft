@@ -421,9 +421,11 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
             continue;
         }
         let start = p.add(egui::Shape::Noop);
-        crate::form_controls::paint(p, r, c, geo.z, crate::form_controls::look(app, geo, c, r, hover));
+        let items = crate::form_controls::items(wb, si, c);
+        crate::form_controls::paint(p, r, c, geo.z, crate::form_controls::look(app, geo, c, r, hover), &items);
         done(start, r);
     }
+    paint_open_drop_down(app, p, geo, wb, si, sh);
     // The selected object's frame and handles go over every object, and move with it on a
     // right-to-left sheet.
     if let Some(r) = app.selected_object.and_then(|o| object_rect(geo, sh, o))
@@ -467,6 +469,14 @@ pub fn slicer_layout(rect: Rect, z: f32, n: usize, columns: u32) -> SlicerLayout
         tiles.push(Rect::from_min_size(pos2(x, y), vec2(tile_w, tile_h)));
     }
     SlicerLayout { header, clear, tiles }
+}
+
+/// An open drop-down's list, over every other control.
+fn paint_open_drop_down(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workbook, si: usize, sh: &Sheet) {
+    if let Some(c) = app.grid.drop_open.and_then(|id| crate::form_controls::find(sh, id)) {
+        let r = anchor_rect(geo, sh, &c.anchor);
+        crate::form_controls::paint_drop_list(p, r, c, geo.z, &crate::form_controls::items(wb, si, c));
+    }
 }
 
 fn paint_slicers(p: &Painter, geo: &Geo, wb: &Workbook, si: usize, sh: &Sheet) {
