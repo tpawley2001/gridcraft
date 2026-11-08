@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-08 · **Change:** minor (`outlinePr applyStyles` (Outline Settings › Automatic styles) is read and written back; `.xls` shapes in Continue records after Obj are imported; `.xls` links to other workbooks are read and kept on save; check boxes, option buttons, spin buttons, scroll bars, list boxes, drop-downs, group boxes and labels open as form controls; `.xlsx` form list boxes, drop-downs, group boxes and labels are read, drawn and written; `.xls` and `.xlsb` worksheet macro commands keep saved values; `.xls` names holding relative-offset references open as `#N/A`; `.xls` names defined in linked workbooks are read and kept on save; `.xls` defined names into other workbooks are kept)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-08 · **Change:** minor (XLSX picture locks survive open + save; `outlinePr applyStyles` (Outline Settings › Automatic styles) is read and written back; `.xls` shapes in Continue records after Obj are imported; `.xls` links to other workbooks are read and kept on save; check boxes, option buttons, spin buttons, scroll bars, list boxes, drop-downs, group boxes and labels open as form controls; `.xlsx` form list boxes, drop-downs, group boxes and labels are read, drawn and written; `.xls` and `.xlsb` worksheet macro commands keep saved values; `.xls` names holding relative-offset references open as `#N/A`; `.xls` names defined in linked workbooks are read and kept on save; `.xls` defined names into other workbooks are kept)
 
 
 Every format Excel opens or saves, with GridCraft's read and write support, fidelity and tests.
@@ -190,6 +190,7 @@ Truncated packages. When an `.xlsx`, `.xlsm` or `.xlsb` file has lost its ZIP ce
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | minor | G0198: XLSX pictures retain all `a:picLocks`, including an unlocked aspect ratio, through open + save. |
 | 2026-11-08 | minor | G0194: `.xlsx` `<sheetPr><outlinePr applyStyles="1"/>` (ECMA-376 Part 1 §18.3.1.61, Outline Settings › Automatic styles) is read and written back, before `summaryBelow` / `summaryRight`, instead of dropped |
 | 2026-11-08 | minor | G0186: BIFF8 `.xls` shapes whose OfficeArt data continues after the previous Obj import in order with their anchors; genuine Obj continuations and TxO text handling are unchanged. |
 | 2026-11-07 | minor | `.xls` defined names that refer to cells in other workbooks (BIFF8 PtgRef3d/PtgArea3d through an external SupBook) are kept as `[n]Sheet!$A$1` instead of skipped, and formulas using them keep their formula; names using names in linked workbooks are still skipped. |

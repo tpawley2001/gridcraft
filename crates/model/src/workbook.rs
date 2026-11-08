@@ -755,6 +755,7 @@ mod tests {
     fn object_ids_never_overflow_or_repeat() {
         let mut wb = Workbook::new();
         let image = |id| crate::Image {
+            locks: None,
             hidden: false,
             hyperlink: None,
             name: None,
@@ -813,6 +814,7 @@ mod tests {
     fn free_object_ids_come_from_below_when_nothing_is_free_above() {
         let mut wb = Workbook::new();
         let image = |id| crate::Image {
+            locks: None,
             hidden: false,
             hyperlink: None,
             name: None,

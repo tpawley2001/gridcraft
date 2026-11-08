@@ -774,8 +774,30 @@ impl Chart {
     }
 }
 
+/// Picture editing locks (`a:picLocks`, ECMA-376 Part 1 §20.1.2.2.31).
+/// Each flag prohibits the named operation; omitted flags default to false.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PictureLocks {
+    pub no_grp: bool,
+    pub no_select: bool,
+    pub no_rot: bool,
+    pub no_change_aspect: bool,
+    pub no_move: bool,
+    pub no_resize: bool,
+    pub no_edit_points: bool,
+    pub no_adjust_handles: bool,
+    pub no_change_arrowheads: bool,
+    pub no_change_shape_type: bool,
+    pub no_crop: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Image {
+    /// Imported picture locks. `None` uses the inserted-picture default aspect lock on save;
+    /// `Some(PictureLocks::default())` explicitly leaves every lock off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locks: Option<PictureLocks>,
     /// Hidden drawing objects stay in the workbook but are not displayed or printed.
     #[serde(default)]
     pub hidden: bool,
