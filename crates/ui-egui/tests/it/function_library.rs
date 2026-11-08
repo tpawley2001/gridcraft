@@ -330,3 +330,17 @@ fn insert_function_keeps_the_category_column_clear_of_long_names() {
         assert!(x + w < column, "{name} ends at {} and the category column starts at {column}", x + w);
     }
 }
+
+#[test]
+fn a_search_lists_the_function_it_names_first() {
+    let mut h = formulas_tab(1440.0);
+    click(&mut h, "Insert Function");
+    // DEVSQ's description mentions "sum" and comes first in the catalog; SUM is the name searched.
+    h.state_mut().dialog.as_mut().unwrap().search = "sum".into();
+    h.run_steps(2);
+    let sum = h.get_by_label(&row("SUM", "Math & Trig")).rect();
+    assert!(sum.top() < h.get_by_label(&row("SUMIF", "Math & Trig")).rect().top(), "the exact name, then names starting with it");
+    assert!(sum.top() < h.get_by_label(&row("DEVSQ", "Statistical")).rect().top(), "names before descriptions");
+    click(&mut h, "   OK   ");
+    assert_eq!(editor_text(&h).as_deref(), Some("=SUM("));
+}
