@@ -13,6 +13,7 @@ pub(super) fn auto_correct(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog
     }
     let mut replace = d.values.get("replace").and_then(Json::as_str).unwrap_or_default().to_string();
     let mut with = d.values.get("with").and_then(Json::as_str).unwrap_or_default().to_string();
+    let mut selected_replace = d.values.get("selectedReplace").and_then(Json::as_str).unwrap_or_default().to_string();
     let mut changed = false;
     egui::Grid::new("auto_correct_fields").num_columns(2).min_col_width(210.0).show(ui, |ui| {
         let replace_label = ui.label(lang.tr("Replace:"));
@@ -25,19 +26,23 @@ pub(super) fn auto_correct(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog
     let prefix = replace.to_lowercase();
     let entries = &app.ui.auto_correct.entries;
     let first = entries.iter().position(|(key, _)| !prefix.is_empty() && key.to_lowercase().starts_with(&prefix));
-    let exact = entries.iter().any(|(key, _)| key == &replace);
     // Agent edits through ui.dialog.set also move the list to the new prefix.
     let scroll = changed || d.search != replace;
+    if scroll {
+        selected_replace.clear();
+    }
+    let selected_index = entries.iter().position(|(key, _)| key == &selected_replace).or(first);
     egui::ScrollArea::vertical().id_salt("auto_correct_entries").max_height(220.0).show(ui, |ui| {
         egui::Grid::new("auto_correct_list").num_columns(2).min_col_width(210.0).striped(true).show(ui, |ui| {
             for (index, (key, value)) in entries.iter().enumerate() {
-                let selected = Some(index) == first;
+                let selected = Some(index) == selected_index;
                 let key_response = ui.selectable_label(selected, key);
                 let value_response = ui.selectable_label(selected, value);
                 if selected && scroll {
                     key_response.scroll_to_me(Some(egui::Align::Center));
                 }
                 if key_response.clicked() || value_response.clicked() {
+                    selected_replace.clone_from(key);
                     replace.clone_from(key);
                     with.clone_from(value);
                 }
@@ -45,6 +50,7 @@ pub(super) fn auto_correct(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog
             }
         });
     });
+    let exact = app.ui.auto_correct.entries.iter().any(|(key, _)| key == &replace);
     ui.horizontal(|ui| {
         if ui.button(lang.tr(if exact { "Replace" } else { "Add" })).clicked() {
             run(app, d, "options.autoCorrectEntry.set", json!({"replace": replace, "with": with}));
@@ -60,6 +66,7 @@ pub(super) fn auto_correct(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog
         ui.label(error);
     }
     d.search.clone_from(&replace);
+    d.values.insert("selectedReplace".into(), json!(selected_replace));
     d.values.insert("replace".into(), json!(replace));
     d.values.insert("with".into(), json!(with));
 }
