@@ -14,7 +14,7 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
     let (wi, hi) = (i128::from(w), i128::from(h));
     let ss = wi.min(hi);
     let (l, t, r, b, hc, vc) = (0, 0, wi, hi, wi / 2, hi / 2);
-    // `x * y / z`, truncating; `z` is never zero here (w, h, ss > 0 and constants).
+    // `x * y / z`, truncating; 0 when `z` is zero.
     let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
     let adj = |name: &str, default: i128, max: i128| adjust(g, name, default).clamp(0, max.max(0));
     let pts: Vec<(i128, i128)> = match g.preset.as_str() {
@@ -82,6 +82,35 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             let x2 = md(ss, a, 100000);
             let x3 = r - x2;
             vec![(l, b), (x2, t), (x3, t), (r, b)]
+        }
+        "octagon" => {
+            let a = adj("adj", 29289, 50000);
+            let x1 = md(ss, a, 100000);
+            let (x2, y2) = (r - x1, b - x1);
+            vec![(l, x1), (x1, t), (x2, t), (r, x1), (r, y2), (x2, b), (x1, b), (l, y2)]
+        }
+        "plus" => {
+            let a = adj("adj", 25000, 50000);
+            let x1 = md(ss, a, 100000);
+            let (x2, y2) = (r - x1, b - x1);
+            vec![(l, x1), (x1, x1), (x1, t), (x2, t), (x2, x1), (r, x1), (r, y2), (x2, y2), (x2, b), (x1, b), (x1, y2), (l, y2)]
+        }
+        "triangle" => {
+            let a = adj("adj", 50000, 100000);
+            let x2 = md(wi, a, 100000);
+            vec![(l, b), (x2, t), (r, b)]
+        }
+        "rtTriangle" => vec![(l, t), (r, b), (l, b)],
+        "notchedRightArrow" => {
+            let a1 = adj("adj1", 50000, 100000);
+            let a2 = adj("adj2", 50000, md(100000, wi, ss));
+            let dx2 = md(ss, a2, 100000);
+            let x2 = r - dx2;
+            let dy1 = md(hi, a1, 200000);
+            let (y1, y2) = (vc - dy1, vc + dy1);
+            // `vc` is zero for a one-unit-high box; `md` then yields 0.
+            let x1 = md(dy1, dx2, vc);
+            vec![(l, y1), (x2, y1), (x2, t), (r, vc), (x2, b), (x2, y2), (l, y2), (x1, vc)]
         }
         _ => return None,
     };
