@@ -1,6 +1,6 @@
 //! `.xls` form controls ([MS-XLS] 2.4.181 Obj): check boxes, option buttons, scroll bars and spin
 //! buttons open as form controls with their state, range and linked cell, and keep them through
-//! Save As `.xlsx`. Other control kinds are still reported.
+//! Save As `.xlsx`. List boxes, drop-downs, group boxes and labels: `xls_list_control_tests.rs`.
 
 use gridcraft_core::CellRef;
 use gridcraft_model::ControlKind;
@@ -14,7 +14,6 @@ const OT_CHECK_BOX: u16 = 0x000B;
 const OT_OPTION_BUTTON: u16 = 0x000C;
 const OT_SPIN: u16 = 0x0010;
 const OT_SCROLL_BAR: u16 = 0x0011;
-const OT_LIST: u16 = 0x0012;
 
 /// FtCmo flags: fLocked | fPrint | fAutoFill | fAutoLine (Excel's usual set for a new control).
 const CONTROL_FLAGS: u16 = 0x6011;
@@ -159,12 +158,4 @@ fn a_truncated_scroll_bar_obj_opens_without_panicking() {
     let o = rec(0x005D, &cat(&[&cmo(OT_SCROLL_BAR, 1, CONTROL_FLAGS), &u16s(&[0x0C, 0x14, 0, 0, 7])]));
     let (wb, _) = read_xls(&xls(&cat(&[&shape(201, &[], 0, 0, 2, 1), &o]))).unwrap();
     assert!(wb.sheet(0).unwrap().shapes.is_empty());
-}
-
-#[test]
-fn a_list_box_is_still_reported() {
-    let o = obj(&[&cmo(OT_LIST, 1, CONTROL_FLAGS), &sbs(0, 0, 0, 1, 0, 0, 0)]);
-    let (wb, report) = read_xls(&xls(&cat(&[&shape(201, &[], 0, 0, 2, 4), &o]))).unwrap();
-    assert!(wb.sheet(0).unwrap().controls.is_empty());
-    assert!(report.warnings.iter().any(|w| w.contains("Form controls in .xls files are not imported yet.")), "{:?}", report.warnings);
 }
