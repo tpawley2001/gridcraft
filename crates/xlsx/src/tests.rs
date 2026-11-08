@@ -71,6 +71,7 @@ mod shared_media;
 mod sheet_custom_properties;
 mod sheet_data_pin;
 mod sheet_names;
+mod signature_line_vml_tests;
 mod smartart_passthrough;
 mod smooth_roundtrip;
 mod spreadsheetml_tests;
