@@ -838,6 +838,14 @@ pub struct Image {
     pub blip_ext: Vec<KeptExtension>,
 }
 
+impl Image {
+    /// Whether "Lock aspect ratio" is on (`noChangeAspect`). `None` is the inserted-picture
+    /// default, which saves `noChangeAspect="1"`.
+    pub fn aspect_locked(&self) -> bool {
+        self.locks.as_ref().is_none_or(|locks| locks.no_change_aspect)
+    }
+}
+
 /// One file-format extension element GridCraft does not model (an `a:ext`), kept verbatim with
 /// the namespace declarations it needs and the package parts its relationship ids name.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
