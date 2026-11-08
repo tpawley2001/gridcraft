@@ -177,6 +177,7 @@ fn draw_shape(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Bl
         }
         ShapeKind::RoundedRectangle => pg.polygon(&rounded_rect_points((x, y, w, h)), fill, line),
         ShapeKind::Freeform if draw_freeform(pg, shp, b, (x, y, w, h), fill, line) => {}
+        _ if draw_preset(pg, shp, b, (x, y, w, h), fill, line) => {}
         _ => {
             pg.polygon(&[[x, y], [x + w, y], [x + w, y + h], [x, y + h]], fill, line);
         }
@@ -242,9 +243,39 @@ fn draw_freeform(
     line: Option<([u8; 3], f32)>,
 ) -> bool {
     let Some(geom) = shp.geometry.as_ref() else { return false };
+    draw_paths(pg, &geom.paths, b, rect, fill, line)
+}
+
+/// Draws a preset shape kept in `geometry` (block arrows, chevron, diamond, …) by its own outline
+/// from [`gridcraft_model::preset_paths`]; false for a preset without one, so the caller prints
+/// the box instead. The outline's resolution is the box in hundredths of a point.
+fn draw_preset(
+    pg: &mut Page,
+    shp: &gridcraft_model::Shape,
+    b: &Block,
+    rect: (f32, f32, f32, f32),
+    fill: Option<[u8; 3]>,
+    line: Option<([u8; 3], f32)>,
+) -> bool {
+    let Some(geom) = shp.geometry.as_ref() else { return false };
+    let res = |v: f32| (v.abs() * 100.0).round().min(1.0e9) as i64;
+    let Some(paths) = gridcraft_model::preset_paths(geom, res(rect.2), res(rect.3)) else { return false };
+    draw_paths(pg, &paths, b, rect, fill, line)
+}
+
+/// Draws geometry paths flattened into polygons and polylines on the shape box; false when there
+/// is nothing to draw.
+fn draw_paths(
+    pg: &mut Page,
+    paths: &[gridcraft_model::GeometryPath],
+    b: &Block,
+    rect: (f32, f32, f32, f32),
+    fill: Option<[u8; 3]>,
+    line: Option<([u8; 3], f32)>,
+) -> bool {
     let mut budget = MAX_OUTLINE_POINTS;
     let mut drew = false;
-    for path in &geom.paths {
+    for path in paths {
         let line = line.filter(|_| path.stroke);
         for sub in flatten_path(path, rect, b.k, &mut budget) {
             if sub.points.len() < 2 {

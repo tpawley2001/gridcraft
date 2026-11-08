@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (binary named-style identity; earlier: XLSX picture locks survive open + save; §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (§17: ten preset shapes draw and print their own outline; earlier: binary named-style identity; XLSX picture locks survive open + save; earlier: §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -208,6 +208,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   no structured (WYSIWYG) equation editing and no ink equations. **Estimate:** 25–40 h.
 - SmartArt and grouped drawing objects are kept through XLSX open + save but not shown, printed or editable; WordArt, equations, signature line, objects, 3-D models, screenshot; 8 shape kinds vs
   ~170; pictures in cells (#61, PR #105). **Estimate:** 25–40 h.
+- Ten presets kept from XLSX (right/left/up/down/left-right arrows, chevron, pentagon, diamond, parallelogram, trapezoid) draw and print their own outline; other presets still show as a rectangle.
 
 ### 18. Accessibility (U)
 - AccessKit on, but no accessible grid/ribbon tree, no high contrast, no checker. **Estimate:** 12–18 h.
@@ -261,6 +262,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | minor | §17: block arrows, chevron, pentagon, diamond, parallelogram and trapezoid presets kept from XLSX are drawn and printed with their own outline (`preset_paths`). |
 | 2026-11-08 | minor | `.xlsb` named styles keep builtinId, iLevel, hidden and customBuiltin on Save As `.xlsx`; `.xlsb` and `.xls` user styles keep their user identity even when named like built-ins. |
 | 2026-11-08 | minor | G0198: XLSX pictures retain all `a:picLocks`, including an unlocked aspect ratio, through open + save. |
 | 2026-11-08 | minor | §20: View › View Side by Side (Compare Side by Side with more than two windows), Synchronous Scrolling and Reset Window Position (`view.sideBySide`, `view.synchronousScrolling`, `view.resetWindowPosition`) |

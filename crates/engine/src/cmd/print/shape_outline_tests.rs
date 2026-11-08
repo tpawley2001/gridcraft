@@ -140,3 +140,35 @@ fn huge_freeform_prints_with_a_bounded_point_count() {
     let p = red_paths(&mut s);
     assert!(p.iter().map(Vec::len).sum::<usize>() <= 200_001, "point cap");
 }
+
+fn preset(name: &str) -> Option<ShapeGeometry> {
+    Some(ShapeGeometry { preset: name.into(), adjust: Vec::new(), paths: Vec::new() })
+}
+
+#[test]
+fn right_arrow_preset_prints_its_seven_point_outline() {
+    let mut s = shape_session(ShapeKind::Rectangle, preset("rightArrow"));
+    let p = red_paths(&mut s);
+    assert_eq!(p.len(), 1, "{p:?}");
+    assert_eq!(p[0].len(), 7, "{p:?}");
+    // Head top, shaft top, the tip, shaft bottom and head bottom: five distinct y, three distinct x.
+    assert_eq!(distinct(p[0].iter().map(|v| v.1)), 5, "{p:?}");
+    assert_eq!(distinct(p[0].iter().map(|v| v.0)), 3, "{p:?}");
+}
+
+#[test]
+fn diamond_preset_prints_four_points_off_the_corners() {
+    let mut s = shape_session(ShapeKind::Rectangle, preset("diamond"));
+    let p = red_paths(&mut s);
+    assert_eq!(p.len(), 1, "{p:?}");
+    assert_eq!(p[0].len(), 4, "{p:?}");
+    assert_eq!(distinct(p[0].iter().map(|v| v.0)), 3, "{p:?}");
+}
+
+#[test]
+fn preset_without_an_outline_prints_its_box() {
+    let mut s = shape_session(ShapeKind::Rectangle, preset("star5"));
+    let p = red_paths(&mut s);
+    assert_eq!(p.len(), 1, "{p:?}");
+    assert_eq!(p[0].len(), 4, "{p:?}");
+}
