@@ -48,8 +48,9 @@ fn set_arg(h: &mut Harness, i: usize, text: &str) {
     h.run_steps(3);
 }
 
+/// Clicks a button by its label, ignoring the padding dialog buttons put around "OK" and "Cancel".
 fn click(h: &mut Harness, label: &str) {
-    h.get_by_label(label).click();
+    h.get_by(|n| n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.trim() == label)).click();
     h.run_steps(4);
 }
 
