@@ -353,6 +353,7 @@ fn show_grid_interactions(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Re
     context_menu(app, ui);
     fill_menu(app, ui, previous_popups.3 == app.grid.fill_menu);
     fill_options_tag(app, ui, geo, sh);
+    super::paste_options::show(app, ui, geo, sh);
     object_menu(app, ui);
     error_check_tag(app, ui, geo, sh);
 }
