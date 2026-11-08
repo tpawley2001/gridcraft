@@ -237,7 +237,44 @@ impl SheetApp {
                         *flag = on;
                     }
                 }
-                Ok(json!(options))
+                Ok(json!({
+                    "twoInitialCaps": options.two_initial_caps,
+                    "dayNames": options.day_names,
+                    "capsLock": options.caps_lock,
+                    "replaceText": options.replace_text,
+                }))
+            }
+            "options.autoCorrectEntries" => Ok(json!(self.ui.auto_correct.entries)),
+            "options.autoCorrectEntry.set" => {
+                let replace = p.get("replace").and_then(Json::as_str).unwrap_or("");
+                let with = p.get("with").and_then(Json::as_str).unwrap_or("");
+                if replace.is_empty() || replace.chars().any(char::is_whitespace) {
+                    return Some(Err("Replace must be nonempty and contain no whitespace.".into()));
+                }
+                if with.is_empty() {
+                    return Some(Err("With must be nonempty.".into()));
+                }
+                let entries = &mut self.ui.auto_correct.entries;
+                if let Some((_, value)) = entries.iter_mut().find(|(key, _)| key == replace) {
+                    *value = with.into();
+                } else {
+                    entries.push((replace.into(), with.into()));
+                }
+                crate::sort_auto_correct_entries(entries);
+                Ok(json!(entries))
+            }
+            "options.autoCorrectEntry.delete" => {
+                let replace = p.get("replace").and_then(Json::as_str);
+                let entries = &mut self.ui.auto_correct.entries;
+                let Some(index) = entries.iter().position(|(key, _)| Some(key.as_str()) == replace) else {
+                    return Some(Err("No entry has that exact Replace text.".into()));
+                };
+                entries.remove(index);
+                Ok(json!(entries))
+            }
+            "options.autoCorrectEntries.reset" => {
+                self.ui.auto_correct.entries = crate::default_auto_correct_entries();
+                Ok(json!(self.ui.auto_correct.entries))
             }
             "options.highlightActiveRow" => {
                 self.ui.highlight_active_row = p.get("on").and_then(Json::as_bool).unwrap_or(!self.ui.highlight_active_row);
