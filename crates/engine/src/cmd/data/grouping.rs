@@ -285,3 +285,129 @@ pub(super) fn subtotal(s: &mut Session, p: &Json) -> Result<Json> {
     }
     Ok(json!({"groups": inserted}))
 }
+
+/// Most detail spans Auto Outline nests per axis (longest first): nesting compares each span with
+/// the accepted ones, so a sheet of running totals must not make that quadratic in its formulas.
+const AUTO_OUTLINE_MAX_SPANS: usize = 4096;
+
+/// The detail spans a formula at `at` summarises: a same-sheet `X1:Y2` reference one line wide on
+/// the formula's own column (rows) or row (columns) that ends just before it (summary below/right)
+/// or starts just after it (summary above/left). Returns `(rows, start, end)` triples.
+fn summary_spans(e: &gridcraft_formula::Expr, at: CellRef, sheet: &str, before: (bool, bool), out: &mut Vec<(bool, u32, u32)>) {
+    use gridcraft_formula::{Expr, RefKind, SheetSel};
+    e.walk(&mut |x| {
+        let Expr::Ref(r) = x else { return };
+        if !matches!(r.kind, RefKind::Range(..)) {
+            return;
+        }
+        let same_sheet = match &r.sheet {
+            SheetSel::Current => true,
+            SheetSel::Named(n) => n.eq_ignore_ascii_case(sheet),
+            SheetSel::Span(..) => false,
+        };
+        let rr = r.range();
+        if !same_sheet || rr.is_single() {
+            return;
+        }
+        if rr.start.col == rr.end.col && rr.start.col == at.col {
+            let next = if before.0 { at.row.checked_add(1) == Some(rr.start.row) } else { rr.end.row.checked_add(1) == Some(at.row) };
+            if next {
+                out.push((true, rr.start.row, rr.end.row));
+            }
+        } else if rr.start.row == rr.end.row && rr.start.row == at.row {
+            let next = if before.1 { at.col.checked_add(1) == Some(rr.start.col) } else { rr.end.col.checked_add(1) == Some(at.col) };
+            if next {
+                out.push((false, rr.start.col, rr.end.col));
+            }
+        }
+    });
+}
+
+/// Nests detail spans: longest first, dropping any that partly overlaps an accepted one.
+fn nest_spans(mut spans: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
+    spans.sort_unstable_by_key(|&(a, b)| (std::cmp::Reverse(b.saturating_sub(a)), a));
+    spans.dedup();
+    spans.truncate(AUTO_OUTLINE_MAX_SPANS);
+    let mut kept: Vec<(u32, u32)> = Vec::new();
+    for (a, b) in spans {
+        let partial = kept.iter().any(|&(x, y)| a <= y && x <= b && !(x <= a && b <= y) && !(a <= x && y <= b));
+        if !partial {
+            kept.push((a, b));
+        }
+    }
+    kept
+}
+
+/// Data ▸ Outline ▸ Group ▸ Auto Outline: groups the detail rows and columns that summary formulas
+/// total, nested by span, in the sheet's outline direction. The outline of each axis it groups is
+/// replaced within the outlined block (the whole sheet for a single-cell selection).
+pub(super) fn auto_outline(s: &mut Session, p: &Json) -> Result<Json> {
+    let si = target_sheet(s, p)?;
+    let d = s.doc()?;
+    let block = if str_param(p, "range").is_some() {
+        Some(super::target_range(s, p)?)
+    } else if si == d.wb.active_sheet() {
+        Some(d.selection.current()).filter(|r| !r.is_single())
+    } else {
+        None
+    };
+    let sh = d.wb.sheet(si).ok_or(EngineError::NoDocument)?;
+    let before = (outline::summary_before(sh, true), outline::summary_before(sh, false));
+    let mut found = Vec::new();
+    for (at, cell) in sh.cells.iter() {
+        if block.is_some_and(|b| !b.contains(at)) {
+            continue;
+        }
+        if let Some(e) = cell.formula.as_ref().and_then(|f| f.expr()) {
+            summary_spans(&e, at, &sh.name, before, &mut found);
+        }
+    }
+    let inside =
+        |rows: bool, a: u32, b: u32| block.is_none_or(|r| if rows { r.start.row <= a && b <= r.end.row } else { r.start.col <= a && b <= r.end.col });
+    let axis = |rows: bool| nest_spans(found.iter().filter(|&&(r, a, b)| r == rows && inside(r, a, b)).map(|&(_, a, b)| (a, b)).collect());
+    let (row_spans, col_spans) = (axis(true), axis(false));
+    if row_spans.is_empty() && col_spans.is_empty() {
+        return Err(bad("data.autoOutline", "Cannot create an outline. No summary formulas refer to the rows or columns next to them."));
+    }
+    for (spans, rows) in [(&row_spans, true), (&col_spans, false)] {
+        if !spans.is_empty() {
+            refuse_unless_outline_allowed(s, si, rows)?;
+        }
+    }
+    edit(s, |cx| {
+        let sh = cx.sheet_mut(si)?;
+        for (spans, rows) in [(row_spans, true), (col_spans, false)] {
+            if spans.is_empty() {
+                continue;
+            }
+            let lines = block.map_or((0, u32::MAX), |r| if rows { (r.start.row, r.end.row) } else { (r.start.col, r.end.col) });
+            let map = if rows { &mut sh.rows } else { &mut sh.cols };
+            for (_, e) in map.range_mut(lines.0..=lines.1) {
+                e.outline = 0;
+                e.collapsed = false;
+            }
+            // Each line's level is the number of spans holding it: a sweep over the span edges.
+            let mut edges: std::collections::BTreeMap<u32, i64> = std::collections::BTreeMap::new();
+            for &(a, b) in &spans {
+                *edges.entry(a).or_default() += 1;
+                if let Some(end) = b.checked_add(1) {
+                    *edges.entry(end).or_default() -= 1;
+                }
+            }
+            let mut depth = 0i64;
+            let mut edges = edges.into_iter().peekable();
+            while let Some((at, delta)) = edges.next() {
+                depth += delta;
+                let Some(next) = edges.peek().map(|&(n, _)| n) else { break };
+                if depth > 0 {
+                    let level = u8::try_from(depth).unwrap_or(u8::MAX).min(outline::MAX_LEVEL);
+                    for i in at..next {
+                        map.entry(i).or_default().outline = level;
+                    }
+                }
+            }
+        }
+        cx.structural = true;
+        Ok(Json::Null)
+    })
+}

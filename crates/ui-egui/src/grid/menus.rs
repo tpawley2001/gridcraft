@@ -506,6 +506,7 @@ pub(super) fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool)
                     ("Hide", "home.hideRows"),
                     ("Unhide", "home.unhideRows"),
                     ("Group", "data.group"),
+                    ("Auto Outline", "data.autoOutline"),
                 ]
             } else {
                 vec![
@@ -524,6 +525,7 @@ pub(super) fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool)
                     ("Unhide", "home.unhideColumns"),
                     ("Sort A to Z", "data.sortAscending"),
                     ("Group", "data.group"),
+                    ("Auto Outline", "data.autoOutline"),
                 ]
             };
             if let Some(item) = insert_copied {

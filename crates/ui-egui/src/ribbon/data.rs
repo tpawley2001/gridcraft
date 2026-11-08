@@ -1,5 +1,5 @@
 use super::controls::{act, control_keytip, keytip, menu_items, sep};
-use super::{Icon, SheetApp, Ui, big_button, json, keytip_table, small_button};
+use super::{Icon, SheetApp, Ui, big_button, json, keytip_table, small_button, small_split_button};
 
 pub(super) fn data(app: &mut SheetApp, ui: &mut Ui) {
     let gd = big_button(ui, Icon::Folder, "Get Data\n(Text/CSV)", "Import a text or CSV file", false);
@@ -101,11 +101,14 @@ pub(super) fn data(app: &mut SheetApp, ui: &mut Ui) {
     }
     sep(ui);
     ui.vertical(|ui| {
-        let __k = small_button(ui, Icon::Group, "Group", "Group", false);
+        let (__k, group_arrow) = small_split_button(ui, Icon::Group, "Group", "Group");
         control_keytip(app, ui, &__k, "data.group");
         if __k.clicked() {
             act(app, "data.group", json!({}));
         }
+        egui::Popup::menu(&group_arrow).show(|ui| {
+            menu_items(app, ui, &[("Group", "data.group", json!({})), ("Auto Outline", "data.autoOutline", json!({}))]);
+        });
         let __k = small_button(ui, Icon::Ungroup, "Ungroup", "Ungroup", false);
         control_keytip(app, ui, &__k, "data.ungroup");
         if __k.clicked() {
