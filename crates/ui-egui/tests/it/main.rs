@@ -80,6 +80,7 @@ mod more_colors;
 mod native_print;
 mod nowrap_line_breaks;
 mod number_stored_as_text;
+mod object_resize_modifiers;
 mod objects;
 mod open_encrypted;
 mod outline;

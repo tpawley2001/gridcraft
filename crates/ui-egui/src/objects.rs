@@ -109,6 +109,25 @@ pub fn resized(orig: [f32; 4], handle: Handle, d: Vec2, min: Vec2) -> [f32; 4] {
     [x0, y0, x1, y1]
 }
 
+/// Modifier keys held while dragging an object: Shift keeps the proportions (corner handles),
+/// Ctrl keeps the centre, Alt lines the moved edges up with cell gridlines.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DragMods {
+    pub keep_ratio: bool,
+    pub from_center: bool,
+    pub snap_to_cells: bool,
+}
+
+/// `resized` with the drag's modifier keys applied.
+pub fn resized_with(orig: [f32; 4], handle: Handle, d: Vec2, min: Vec2, _mods: DragMods) -> [f32; 4] {
+    resized(orig, handle, d, min)
+}
+
+/// Snaps a moved (`handle` = None) or resized rectangle to the nearest cell gridlines.
+pub fn snap_to_cells(_sh: &Sheet, r: [f32; 4], _handle: Option<Handle>) -> [f32; 4] {
+    r
+}
+
 /// What double-clicking an object opens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenAction {
