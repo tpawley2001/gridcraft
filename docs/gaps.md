@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (XLSX picture locks survive open + save; §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (binary named-style identity; earlier: XLSX picture locks survive open + save; §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -261,6 +261,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | minor | `.xlsb` named styles keep builtinId, iLevel, hidden and customBuiltin on Save As `.xlsx`; `.xlsb` and `.xls` user styles keep their user identity even when named like built-ins. |
 | 2026-11-08 | minor | G0198: XLSX pictures retain all `a:picLocks`, including an unlocked aspect ratio, through open + save. |
 | 2026-11-08 | minor | §20: View › View Side by Side (Compare Side by Side with more than two windows), Synchronous Scrolling and Reset Window Position (`view.sideBySide`, `view.synchronousScrolling`, `view.resetWindowPosition`) |
 | 2026-11-08 | minor | G0188: copied-cell Paste Options offers twelve paste modes with access keys and one-step undo; external text, pictures and cut pastes do not show the button. |

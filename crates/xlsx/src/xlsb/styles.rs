@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use gridcraft_core::color::INDEXED;
 use gridcraft_model::style::Protection;
 use gridcraft_model::{
-    Alignment, BorderLine, BorderStyle, Borders, Color, Fill, Font, HAlign, NumFmt, PatternType, Style, StyleId, Underline, VAlign, VertAlign,
-    Workbook,
+    Alignment, BorderLine, BorderStyle, Borders, CellStyleId, Color, Fill, Font, HAlign, NumFmt, PatternType, Style, StyleId, Underline, VAlign,
+    VertAlign, Workbook,
 };
 
 use super::{Budget, Bytes, MAX_STYLE_RECORDS, MAX_TEXT, Records, invalid};
@@ -37,8 +37,8 @@ pub(super) struct Parsed {
     borders: Vec<Borders>,
     xfs: Vec<Xf>,
     style_xfs: Vec<Xf>,
-    /// BrtStyle records in file order: index into `style_xfs` and the style name.
-    styles: Vec<(u32, String)>,
+    /// BrtStyle records in file order: index into `style_xfs`, name and identity.
+    styles: Vec<(u32, String, CellStyleId)>,
 }
 
 fn count(n: &mut usize, what: &str) -> Result<(), IoError> {
@@ -120,13 +120,20 @@ pub(super) fn parse(bytes: &[u8], budget: &mut Budget) -> Result<Parsed, IoError
                 count(&mut styles, "style")?;
                 if block == Some(619) {
                     let ixf = b.u32()?;
-                    b.u16()?; // grbitObj1
-                    b.u8()?; // iStyBuiltIn
-                    b.u8()?; // iLevel
+                    let flags = b.u16()?; // grbitObj1
+                    let builtin = b.u8()?; // iStyBuiltIn
+                    let level = b.u8()?; // iLevel
+                    let builtin_id = (flags & 1 != 0).then_some(u32::from(builtin));
+                    let identity = CellStyleId {
+                        builtin_id,
+                        i_level: (matches!(builtin_id, Some(1 | 2)) && level < 7).then_some(u32::from(level)),
+                        hidden: flags & 2 != 0,
+                        custom_builtin: flags & 4 != 0,
+                    };
                     let name = b.text(MAX_TEXT.saturating_sub(budget.text) as u32)?;
                     b.finish()?;
                     budget.text(name.len())?;
-                    out.styles.push((ixf, name));
+                    out.styles.push((ixf, name, identity));
                 }
             }
             _ => {}
@@ -148,10 +155,14 @@ pub(super) fn build(parsed: Parsed, wb: &mut Workbook, report: &mut ReadReport) 
         })
         .collect();
     let mut skipped = false;
-    for (ixf, name) in &parsed.styles {
+    for (ixf, name, identity) in &parsed.styles {
         match usize::try_from(*ixf).ok().and_then(|i| parsed.style_xfs.get(i)) {
             Some(_) if name == "Normal" => {}
-            Some(xf) => wb.cell_styles.push((name.clone(), style(&parsed, xf))),
+            Some(xf) => {
+                wb.cell_styles.push((name.clone(), style(&parsed, xf)));
+                // Explicit user identities prevent XLSX save from guessing a built-in by name.
+                wb.cell_style_ids.push((name.clone(), identity.clone()));
+            }
             None => skipped = true,
         }
     }
