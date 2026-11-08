@@ -150,7 +150,7 @@ pub(crate) struct List {
     pub range: RangeRef,
 }
 
-/// Where an XLSB formula lives, for the structured references that leave out their table name.
+/// Where a formula lives, including XLSB structured references that omit their table name.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Site<'a> {
     /// The sheet holding the formula (empty for defined names).
@@ -159,6 +159,9 @@ pub(crate) struct Site<'a> {
     pub table: Option<u32>,
     /// Whether references into other workbooks read (see [`ExternalBook`]) decode to `[n]Sheet`.
     pub external: bool,
+    /// Whether cell formulas belong to an Excel 4.0 macro sheet. Commands in ordinary
+    /// sheets must keep their cached values to avoid invalid worksheet formulas on save.
+    pub commands: bool,
 }
 
 /// What a BIFF5 EXTERNSHEET entry points at.
@@ -424,9 +427,17 @@ pub(super) fn decode_version(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode
 
 /// [`decode_version`] for a cell formula: references into the other workbooks read (see
 /// [`ExternalBook`]) decode to `[n]Sheet`.
-pub(super) fn decode_cell(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links: &Links, biff5: Option<&Biff5>) -> Result<Expr, Unsupported> {
+pub(super) fn decode_cell(
+    rgce: &[u8],
+    rgcb: &[u8],
+    base: CellRef,
+    mode: Mode,
+    links: &Links,
+    biff5: Option<&Biff5>,
+    commands: bool,
+) -> Result<Expr, Unsupported> {
     let grid = if biff5.is_some() { Grid::Biff5 } else { Grid::Biff8 };
-    decode_in(rgce, rgcb, base, mode, links, grid, Site { external: true, ..Site::default() }, biff5)
+    decode_in(rgce, rgcb, base, mode, links, grid, Site { external: true, commands, ..Site::default() }, biff5)
 }
 
 /// Decodes an XLSB cell, shared, array or name formula's `rgce` and `rgcb` at `base`. Shared
@@ -696,6 +707,9 @@ fn decode_in(
                 let tab = t.u16()?;
                 if tab & 0x8000 != 0 {
                     // fCeFunc: the low 15 bits are a Cetab value, a macro sheet command.
+                    if !site.commands && mode != Mode::Name {
+                        return Err(Unsupported("macro sheet commands"));
+                    }
                     let name = cetab(tab & 0x7FFF).ok_or(Unsupported("macro sheet commands"))?;
                     let args = pop_n(&mut stack, n, &mut kids)?;
                     let name = if cparams & 0x80 != 0 { format!("{name}?") } else { name.to_string() };
@@ -1203,3 +1217,7 @@ mod tests {
         assert!(text(&ok, &[]).is_ok());
     }
 }
+
+#[cfg(test)]
+#[path = "formula_command_tests.rs"]
+mod command_tests;

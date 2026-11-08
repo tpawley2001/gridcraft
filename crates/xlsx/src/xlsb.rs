@@ -312,6 +312,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             &mut parts,
             &mut drawing,
             &mut report,
+            false,
         )?;
         if let Some(id) = drawing {
             // Drawing parts are DrawingML XML, as in .xlsx: read them with the .xlsx reader's state.
@@ -1255,12 +1256,12 @@ impl Groups {
 
     /// Attaches the formulas the sheet's `PtgExp` cells refer to; the others keep their saved
     /// values and count as kept.
-    fn resolve(self, sheet: &mut Sheet, links: &Links, budget: &mut Budget, report: &mut ReadReport) {
+    fn resolve(self, sheet: &mut Sheet, links: &Links, budget: &mut Budget, report: &mut ReadReport, commands: bool) {
         if self.invalid {
             report.warn("Invalid XLSB shared or array formula ranges were skipped; their cells kept their saved results.");
         }
         let pending: Vec<Pending> = self.pending.iter().map(|&(pos, row)| Pending { pos, anchor: self.anchor(pos, row) }).collect();
-        let mut target = Target { sheet, links };
+        let mut target = Target { sheet, links, commands };
         if resolve_pending(&mut target, &self.arrays, &self.shared, &pending) >= MAX_SHARED_ATTACHES {
             report.warn("An XLSB sheet has more shared formulas than can be expanded; the rest kept their saved results.");
         }
@@ -1273,7 +1274,7 @@ impl Groups {
                 !own && !array_of(p.anchor).is_some_and(|r| r.contains(p.pos))
             })
             .count();
-        blank_array_followers(&mut Target { sheet, links }, &pending);
+        blank_array_followers(&mut Target { sheet, links, commands }, &pending);
         spill_dynamic(sheet, &self.dynamic);
     }
 }
@@ -1306,6 +1307,7 @@ fn spill_dynamic(sheet: &mut Sheet, anchors: &HashSet<CellRef>) {
 
 /// The sheet shared and array formulas are attached to.
 struct Target<'a> {
+    commands: bool,
     sheet: &'a mut Sheet,
     links: &'a Links,
 }
@@ -1319,7 +1321,7 @@ impl FormulaGroups for Target<'_> {
     }
     fn attach_group(&mut self, pos: CellRef, p: &Parsed, _shared: bool, array: Option<RangeRef>) {
         // Shared formulas use PtgRefN / PtgAreaN, which the decoder resolves against `pos`.
-        let Ok(Some(mut f)) = formula(&p.rgce, &p.rgcb, pos, self.links, &self.sheet.name) else { return };
+        let Ok(Some(mut f)) = formula(&p.rgce, &p.rgcb, pos, self.links, &self.sheet.name, self.commands) else { return };
         f.array = array.filter(|r| !r.is_single());
         if let Some(cell) = self.sheet.cells.get_mut(pos) {
             cell.formula = Some(Arc::new(f));
@@ -1361,8 +1363,8 @@ fn value<'a>(id: u16, b: &mut Bytes<'a>, strings: &[Arc<str>], budget: &mut Budg
 
 /// The formula of `rgce` at `pos`: `Ok(None)` for a lone constant (`=1`), which calculates
 /// nothing and is kept as its saved value; `Err` when it can't be represented.
-fn formula(rgce: &[u8], rgcb: &[u8], pos: CellRef, links: &Links, sheet: &str) -> Result<Option<Formula>, ()> {
-    let e = decode_xlsb_at(rgce, rgcb, pos, Mode::Cell, links, Site { sheet, table: None, external: true }).map_err(|_| ())?;
+fn formula(rgce: &[u8], rgcb: &[u8], pos: CellRef, links: &Links, sheet: &str, commands: bool) -> Result<Option<Formula>, ()> {
+    let e = decode_xlsb_at(rgce, rgcb, pos, Mode::Cell, links, Site { sheet, table: None, external: true, commands }).map_err(|_| ())?;
     if matches!(e, Expr::Number(_) | Expr::Bool(_) | Expr::Error(_) | Expr::Text(_)) {
         return Ok(None);
     }
@@ -1570,7 +1572,8 @@ fn macro_sheet(
     // A part that fails part-way reports only that it was skipped.
     let mut notes = ReadReport::default();
     let sheet =
-        worksheet(&bytes, name, strings, styles, dxfs, links, cell_meta, &[], budget, &mut SheetParts::default(), &mut None, &mut notes).ok()?;
+        worksheet(&bytes, name, strings, styles, dxfs, links, cell_meta, &[], budget, &mut SheetParts::default(), &mut None, &mut notes, true)
+            .ok()?;
     for note in notes.warnings {
         report.warn(note);
     }
@@ -1591,6 +1594,7 @@ fn worksheet(
     parts: &mut SheetParts,
     drawing: &mut Option<String>,
     report: &mut ReadReport,
+    commands: bool,
 ) -> Result<Sheet, IoError> {
     let mut records = Records::new(bytes);
     records.first(129, report)?;
@@ -1622,7 +1626,7 @@ fn worksheet(
                     return Err(invalid("incomplete worksheet data"));
                 }
                 records.end(payload, report)?;
-                groups.resolve(&mut sheet, links, budget, report);
+                groups.resolve(&mut sheet, links, budget, report, commands);
                 selections.apply(&mut sheet, report);
                 if page.fit_to_page {
                     let (w, h) = page.fit.unwrap_or((1, 1));
@@ -1700,7 +1704,7 @@ fn worksheet(
                     groups.dynamic.insert(pos);
                 }
                 let formula = rgce.filter(|_| exp.is_none()).and_then(|(rgce, rgcb)| {
-                    formula(rgce, rgcb, pos, links, name).unwrap_or_else(|()| {
+                    formula(rgce, rgcb, pos, links, name, commands).unwrap_or_else(|()| {
                         budget.formulas_kept += 1;
                         None
                     })

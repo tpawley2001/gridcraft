@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-07 · **Change:** minor (§19: `.xlsb` gradient fills open as their first stop's colour, as in `.xlsx`)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-07 · **Change:** minor (`.xls` and `.xlsb` worksheet macro commands keep saved values)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -92,6 +92,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - **Estimate:** — [function-parity.md](function-parity.md#formula-language)
 
 ### 7. Legacy `.xls` only partly read; encrypted workbooks can't be saved with a password (FF)
+- `.xls` and `.xlsb` worksheet formulas containing Excel 4.0 macro commands keep their saved values with a warning; saving as `.xlsx` omits invalid command formulas.
 - `.xls` rectangles, ovals, lines, arrows and Office Art shapes open as shapes (fill and line colours, outline-only fills, TxO text) and save as `.xlsx`; form controls and other shapes still warn (`xls_shapes_tests.rs`).
 - `.xls` pie and doughnut charts keep their first slice angle and doughnut hole size when saved as `.xlsx`.
 - Empty BIFF8 LABEL strings may omit the flags byte at record end; cells retain empty text and their XF. Truncated nonempty strings are still refused (`xls_label_tail_tests.rs`).
@@ -251,6 +252,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-07 | minor | `.xls` and `.xlsb` worksheet formulas containing Excel 4.0 macro commands keep their saved values with a warning, so Save As `.xlsx` omits invalid command formulas; macro sheets and defined names retain their existing decoding (`xls_worksheet_command_tests.rs`). |
 | 2026-11-07 | minor | §19: `.xlsb` gradient fills open as their first stop's colour, as in `.xlsx`, instead of no fill |
 | 2026-11-07 | minor | XLSX `rightArrow` block arrows survive Save as preset geometry instead of line arrows; block-arrow rendering remains unsupported. |
 | 2026-11-07 | minor | §7: password-protected `.xls` (BIFF8 and BIFF5; XOR, RC4, RC4 CryptoAPI) asks for its password and opens, as in Excel. |

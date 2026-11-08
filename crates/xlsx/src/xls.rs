@@ -997,6 +997,7 @@ fn parsed(c: &mut Cursor<'_, '_>) -> Result<Parsed, IoError> {
 }
 
 struct SheetState<'g> {
+    macro_sheet: bool,
     protection: protection::Protection,
     g: &'g Globals,
     styles: &'g [StyleId],
@@ -1070,7 +1071,7 @@ impl SheetState<'_> {
 
     /// Decodes a formula and attaches it to the cell at `pos`, or records why it can't be.
     fn attach(&mut self, pos: CellRef, p: &Parsed, mode: Mode, array: Option<RangeRef>) {
-        match decode_cell(&p.rgce, &p.rgcb, pos, mode, &self.g.links, self.g.biff5.as_ref()) {
+        match decode_cell(&p.rgce, &p.rgcb, pos, mode, &self.g.links, self.g.biff5.as_ref(), self.macro_sheet) {
             Ok(e) => {
                 // References into other workbooks keep the `.xlsx` text (`[1]Data!B2`) and their
                 // saved value, as the .xlsx reader keeps them, even where that text doesn't parse.
@@ -1171,6 +1172,7 @@ fn worksheet(
         return Ok(None);
     }
     let mut st = SheetState {
+        macro_sheet,
         protection: protection::Protection::default(),
         g,
         styles,
