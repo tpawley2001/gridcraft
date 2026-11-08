@@ -46,6 +46,8 @@ fn names() -> Vec<(&'static str, Vec<u8>)> {
         ("Mixed", cat(&[&ref3d(0, 0), &ref_n(0x4C, 0, -1), &[0x03]])),
         ("Plain", ref3d(2, 1)),
         ("Two", vec![0x1E, 2, 0]),
+        // WINDOW.RESTORE(): PtgFuncVar with fCeFunc and Cetab 0x00A3, a macro command.
+        ("Restore", vec![0x42, 0, 0xA3, 0x80]),
     ]
 }
 
@@ -107,4 +109,11 @@ fn saved_xlsx_writes_na_not_an_a1_reference() {
     assert!(xml.contains(r#"<definedName name="SHARED_FORMULA_0">#N/A</definedName>"#), "{xml}");
     assert!(!xml.contains("IU1") && !xml.contains("IR1"), "{xml}");
     assert!(xml.contains(r#"<definedName name="Plain">Sheet1!$B$3</definedName>"#), "{xml}");
+}
+
+#[test]
+fn a_name_holding_a_macro_command_is_still_decoded() {
+    let wb = workbook();
+    let restore = formula_of(&wb, "Restore");
+    assert!(restore.as_deref().is_some_and(|f| f.contains("WINDOW.RESTORE")), "{restore:?}");
 }
