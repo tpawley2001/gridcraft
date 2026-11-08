@@ -2,6 +2,7 @@
 //! equations and slicers). Painting and hit-testing live in `chartview`.
 
 use egui::{CursorIcon, Pos2, Rect, Vec2};
+use gridcraft_engine::core::{MAX_COLS, MAX_ROWS};
 use gridcraft_engine::model::{ObjKind, ObjRef, ShapeKind, Sheet};
 use serde_json::json;
 
@@ -118,14 +119,107 @@ pub struct DragMods {
     pub snap_to_cells: bool,
 }
 
-/// `resized` with the drag's modifier keys applied.
-pub fn resized_with(orig: [f32; 4], handle: Handle, d: Vec2, min: Vec2, _mods: DragMods) -> [f32; 4] {
-    resized(orig, handle, d, min)
+/// `resized` with the drag's modifier keys applied: Shift keeps the proportions on a corner
+/// handle, Ctrl moves the opposite edge the other way so the centre stays put.
+pub fn resized_with(orig: [f32; 4], handle: Handle, d: Vec2, min: Vec2, mods: DragMods) -> [f32; 4] {
+    if !mods.from_center && !mods.keep_ratio {
+        return resized(orig, handle, d, min);
+    }
+    let [x0, y0, x1, y1] = orig;
+    let (w, h) = ((x1 - x0).max(0.0), (y1 - y0).max(0.0));
+    let (sx, sy) = handle.sides();
+    let corner = sx != 0 && sy != 0;
+    // The unconstrained size the grabbed edges ask for. From the centre the opposite edge moves
+    // the other way by the same amount, so the size changes by twice the pointer travel.
+    let mult = if mods.from_center { 2.0 } else { 1.0 };
+    let mut nw = if sx == 0 { w } else { (w + f32::from(sx) * d.x * mult).max(0.0) };
+    let mut nh = if sy == 0 { h } else { (h + f32::from(sy) * d.y * mult).max(0.0) };
+    if mods.keep_ratio && corner {
+        let mut s = 0.0f32;
+        if w > 0.0 {
+            s = s.max(nw / w);
+        }
+        if h > 0.0 {
+            s = s.max(nh / h);
+        }
+        if w > 0.0 {
+            s = s.max(min.x / w);
+        }
+        if h > 0.0 {
+            s = s.max(min.y / h);
+        }
+        (nw, nh) = (w * s, h * s);
+    }
+    if mods.from_center {
+        // The centre stays; the size keeps `min` and the top-left stays on the sheet.
+        let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+        let half_w = (nw / 2.0).max(min.x / 2.0).min(cx.max(0.0));
+        let half_h = (nh / 2.0).max(min.y / 2.0).min(cy.max(0.0));
+        return [cx - half_w, cy - half_h, cx + half_w, cy + half_h];
+    }
+    // Anchored at the edge opposite the handle; an edge the handle does not move stays put.
+    let (mut nx0, mut nx1) = (x0, x1);
+    if sx < 0 {
+        nx0 = (x1 - nw).min(x1 - min.x).max(0.0);
+    } else if sx > 0 {
+        nx1 = (x0 + nw).max(x0 + min.x);
+    }
+    let (mut ny0, mut ny1) = (y0, y1);
+    if sy < 0 {
+        ny0 = (y1 - nh).min(y1 - min.y).max(0.0);
+    } else if sy > 0 {
+        ny1 = (y0 + nh).max(y0 + min.y);
+    }
+    [nx0, ny0, nx1, ny1]
 }
 
-/// Snaps a moved (`handle` = None) or resized rectangle to the nearest cell gridlines.
-pub fn snap_to_cells(_sh: &Sheet, r: [f32; 4], _handle: Option<Handle>) -> [f32; 4] {
-    r
+/// The nearest gridline to `v` among the lines `line(i)` for `i` in `0..=count`, ties going to
+/// the lower line. `index_at` gives the line containing `v`.
+fn nearest_line(v: f32, count: u32, line: impl Fn(u32) -> f64, index_at: impl Fn(f32) -> u32) -> f32 {
+    let at = |i: u32| line(i) as f32;
+    let i = index_at(v).min(count);
+    let (lo, hi) = (i, i.saturating_add(1).min(count));
+    let (a, b) = (at(lo), at(hi));
+    if (v - a).abs() <= (b - v).abs() { a } else { b }
+}
+
+/// Snaps a moved (`handle` = None) or resized rectangle to the nearest cell gridlines. A move
+/// keeps its size; a resize snaps only the edges the handle moves, and keeps an edge unsnapped
+/// when snapping it would leave less than a point of size.
+pub fn snap_to_cells(sh: &Sheet, r: [f32; 4], handle: Option<Handle>) -> [f32; 4] {
+    let (cols, rows) = (MAX_COLS - 1, MAX_ROWS - 1);
+    let x = |v: f32| nearest_line(v, cols, |c| sh.col_left(c), |v| sh.col_at(f64::from(v)));
+    let y = |v: f32| nearest_line(v, rows, |row| sh.row_top(row), |v| sh.row_at(f64::from(v)));
+    let [x0, y0, x1, y1] = r;
+    let Some(handle) = handle else {
+        let (nx0, ny0) = (x(x0), y(y0));
+        return [nx0, ny0, nx0 + (x1 - x0), ny0 + (y1 - y0)];
+    };
+    let (sx, sy) = handle.sides();
+    let mut out = r;
+    if sx < 0 {
+        let v = x(x0);
+        if x1 - v >= 1.0 {
+            out[0] = v;
+        }
+    } else if sx > 0 {
+        let v = x(x1);
+        if v - x0 >= 1.0 {
+            out[2] = v;
+        }
+    }
+    if sy < 0 {
+        let v = y(y0);
+        if y1 - v >= 1.0 {
+            out[1] = v;
+        }
+    } else if sy > 0 {
+        let v = y(y1);
+        if v - y0 >= 1.0 {
+            out[3] = v;
+        }
+    }
+    out
 }
 
 /// What double-clicking an object opens.

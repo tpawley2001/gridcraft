@@ -58,6 +58,9 @@ pub(super) fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Respo
     let primary_clicked = resp.clicked_by(egui::PointerButton::Primary);
     let pointer = ctx.input(|i| i.pointer.clone());
     let mods = ctx.input(|i| i.modifiers);
+    // An object drag reads the keys every frame, so releasing one mid-drag recomputes from the
+    // drag's start without it.
+    app.grid.drag_mods = crate::objects::DragMods { keep_ratio: mods.shift, from_center: mods.command, snap_to_cells: mods.alt };
     // Hit-testing works in logical coordinates (see `Geo::rtl`).
     let pos = pointer.interact_pos().or(pointer.hover_pos()).map(|p| geo.mirror_pos(p));
     let in_cells = pos.is_some_and(|p| geo.in_cells(p));
@@ -1085,11 +1088,19 @@ fn drag_object(app: &mut SheetApp, geo: &Geo, sh: &Sheet, p: Pos2) {
     let (cell, dx, dy, w, h) = orig;
     let x0 = sh.col_left(cell.col) as f32 + dx;
     let y0 = sh.row_top(cell.row) as f32 + dy;
+    // Shift keeps a corner handle's proportions, Ctrl (Cmd) keeps the centre, Alt lines the moved
+    // edges up with cell gridlines. Every frame re-derives from the drag's start, so releasing a
+    // key mid-drag recomputes without it.
+    let mods = app.grid.drag_mods;
     let [x0, y0, x1, y1] = match handle {
-        Some(hd) => crate::objects::resized([x0, y0, x0 + w, y0 + h], hd, d, crate::objects::min_size(sh, obj)),
+        Some(hd) => {
+            let r = crate::objects::resized_with([x0, y0, x0 + w, y0 + h], hd, d, crate::objects::min_size(sh, obj), mods);
+            if mods.snap_to_cells { crate::objects::snap_to_cells(sh, r, Some(hd)) } else { r }
+        }
         None => {
             let (x0, y0) = ((x0 + d.x).max(0.0), (y0 + d.y).max(0.0));
-            [x0, y0, x0 + w, y0 + h]
+            let r = [x0, y0, x0 + w, y0 + h];
+            if mods.snap_to_cells { crate::objects::snap_to_cells(sh, r, None) } else { r }
         }
     };
     // Re-anchor at the cell under the new top-left.
