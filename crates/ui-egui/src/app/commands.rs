@@ -276,6 +276,28 @@ impl SheetApp {
                 self.ui.auto_correct.entries = crate::default_auto_correct_entries();
                 Ok(json!(self.ui.auto_correct.entries))
             }
+            "options.autoCorrectExceptions" => Ok(json!(self.ui.auto_correct.two_caps_exceptions)),
+            "options.autoCorrectException.add" => {
+                let word = p.get("word").and_then(Json::as_str).unwrap_or("");
+                if word.is_empty() || word.chars().any(char::is_whitespace) {
+                    return Some(Err("The word must be nonempty and contain no whitespace.".into()));
+                }
+                let words = &mut self.ui.auto_correct.two_caps_exceptions;
+                if !words.iter().any(|w| w == word) {
+                    words.push(word.into());
+                    crate::sort_auto_correct_exceptions(words);
+                }
+                Ok(json!(words))
+            }
+            "options.autoCorrectException.delete" => {
+                let word = p.get("word").and_then(Json::as_str);
+                let words = &mut self.ui.auto_correct.two_caps_exceptions;
+                let Some(index) = words.iter().position(|w| Some(w.as_str()) == word) else {
+                    return Some(Err("No exception is exactly that word.".into()));
+                };
+                words.remove(index);
+                Ok(json!(words))
+            }
             "options.highlightActiveRow" => {
                 self.ui.highlight_active_row = p.get("on").and_then(Json::as_bool).unwrap_or(!self.ui.highlight_active_row);
                 Ok(json!({"on": self.ui.highlight_active_row}))

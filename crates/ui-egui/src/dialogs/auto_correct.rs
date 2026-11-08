@@ -58,6 +58,9 @@ pub(super) fn auto_correct(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog
         if ui.add_enabled(exact, egui::Button::new(lang.tr("Delete"))).clicked() {
             run(app, d, "options.autoCorrectEntry.delete", json!({"replace": replace}));
         }
+        if ui.button(lang.tr("Exceptions...")).clicked() {
+            run(app, d, "ui.dialog", json!({"name": "autoCorrectExceptions"}));
+        }
         if ui.button(lang.tr("OK")).clicked() {
             *open = false;
         }
@@ -69,4 +72,37 @@ pub(super) fn auto_correct(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog
     d.values.insert("selectedReplace".into(), json!(selected_replace));
     d.values.insert("replace".into(), json!(replace));
     d.values.insert("with".into(), json!(with));
+}
+
+/// Exceptions > INitial CAps: words the TWo INitial CApitals rule leaves as typed.
+pub(super) fn exceptions(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, open: &mut bool) {
+    let lang = app.ui.language;
+    ui.strong(lang.tr("INitial CAps"));
+    let mut word = d.values.get("word").and_then(Json::as_str).unwrap_or_default().to_string();
+    let label = ui.label(lang.tr("Don't correct:"));
+    ui.add(egui::TextEdit::singleline(&mut word).desired_width(240.0)).labelled_by(label.id);
+    egui::ScrollArea::vertical().id_salt("auto_correct_exceptions").max_height(160.0).show(ui, |ui| {
+        for listed in &app.ui.auto_correct.two_caps_exceptions {
+            if ui.selectable_label(listed == &word, listed).clicked() {
+                word.clone_from(listed);
+            }
+        }
+    });
+    let exact = app.ui.auto_correct.two_caps_exceptions.iter().any(|listed| listed == &word);
+    ui.horizontal(|ui| {
+        if ui.add_enabled(!exact, egui::Button::new(lang.tr("Add"))).clicked() {
+            run(app, d, "options.autoCorrectException.add", json!({"word": word}));
+        }
+        if ui.add_enabled(exact, egui::Button::new(lang.tr("Delete"))).clicked() {
+            run(app, d, "options.autoCorrectException.delete", json!({"word": word}));
+        }
+        let ok = ui.button(lang.tr("OK")).clicked();
+        if ui.button(lang.tr("Close")).clicked() || ok {
+            *open = false;
+        }
+    });
+    if let Some(error) = d.result.as_ref().and_then(Json::as_str) {
+        ui.label(error);
+    }
+    d.values.insert("word".into(), json!(word));
 }

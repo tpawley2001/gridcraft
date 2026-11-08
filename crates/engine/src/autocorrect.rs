@@ -71,6 +71,7 @@ impl AutoCorrect {
             && second.is_uppercase()
             && letters.clone().next().is_some()
             && letters.clone().all(char::is_lowercase)
+            && !self.two_caps_exceptions.iter().any(|exception| exception == word)
         {
             return std::iter::once(first).chain(second.to_lowercase()).chain(letters).collect();
         }
