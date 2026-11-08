@@ -56,6 +56,7 @@ mod page_setup_scale_zero;
 mod passthrough_tests;
 mod phonetic_tests;
 mod picture_effects;
+mod picture_locks_tests;
 mod pivot_tests;
 mod richdata_tests;
 mod roundtrip;
