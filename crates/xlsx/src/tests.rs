@@ -8,6 +8,7 @@ mod binary_cell_style_identity_tests;
 mod binary_custom_props_tests;
 mod binary_doc_props;
 mod binary_workbook_view_tests;
+mod camera_picture_vml_tests;
 mod cellmetadata;
 mod chart_book_names;
 mod chart_bool_default;
