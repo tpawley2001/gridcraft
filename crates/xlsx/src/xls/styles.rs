@@ -10,8 +10,8 @@ use std::collections::HashMap;
 
 use gridcraft_model::style::Protection;
 use gridcraft_model::{
-    Alignment, BorderLine, BorderStyle, Borders, Color, Fill, Font, HAlign, NumFmt, PatternType, Style, StyleId, StyleTable, Theme, Underline,
-    VAlign, VertAlign, Workbook,
+    Alignment, BorderLine, BorderStyle, Borders, CellStyleId, Color, Fill, Font, HAlign, NumFmt, PatternType, Style, StyleId, StyleTable, Theme,
+    Underline, VAlign, VertAlign, Workbook,
 };
 
 use super::invalid;
@@ -739,6 +739,8 @@ pub(super) fn build(r: &StyleRecords, formats: &HashMap<u16, String>, wb: &mut W
         if let Some(xf) = r.xfs.get(usize::from(ns.ixf)) {
             seen.insert(key);
             named.push((ns.name.clone(), xf_style(xf, ext_of(r, usize::from(ns.ixf)), &fonts, formats, &table)));
+            // Keep user styles as user styles even when their names match built-ins.
+            wb.cell_style_ids.push((ns.name.clone(), CellStyleId::default()));
         }
     }
     wb.cell_styles = named;
