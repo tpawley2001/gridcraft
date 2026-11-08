@@ -14,12 +14,12 @@ pub(super) fn auto_correct(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog
     let mut replace = d.values.get("replace").and_then(Json::as_str).unwrap_or_default().to_string();
     let mut with = d.values.get("with").and_then(Json::as_str).unwrap_or_default().to_string();
     let mut changed = false;
-    egui::Grid::new("auto_correct_fields").num_columns(2).show(ui, |ui| {
+    egui::Grid::new("auto_correct_fields").num_columns(2).min_col_width(210.0).show(ui, |ui| {
         let replace_label = ui.label(lang.tr("Replace:"));
         let with_label = ui.label(lang.tr("With:"));
         ui.end_row();
-        changed = ui.text_edit_singleline(&mut replace).labelled_by(replace_label.id).changed();
-        ui.text_edit_singleline(&mut with).labelled_by(with_label.id);
+        changed = ui.add(egui::TextEdit::singleline(&mut replace).desired_width(210.0)).labelled_by(replace_label.id).changed();
+        ui.add(egui::TextEdit::singleline(&mut with).desired_width(210.0)).labelled_by(with_label.id);
         ui.end_row();
     });
     let prefix = replace.to_lowercase();
@@ -29,7 +29,7 @@ pub(super) fn auto_correct(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog
     // Agent edits through ui.dialog.set also move the list to the new prefix.
     let scroll = changed || d.search != replace;
     egui::ScrollArea::vertical().id_salt("auto_correct_entries").max_height(220.0).show(ui, |ui| {
-        egui::Grid::new("auto_correct_list").num_columns(2).striped(true).show(ui, |ui| {
+        egui::Grid::new("auto_correct_list").num_columns(2).min_col_width(210.0).striped(true).show(ui, |ui| {
             for (index, (key, value)) in entries.iter().enumerate() {
                 let selected = Some(index) == first;
                 let key_response = ui.selectable_label(selected, key);
