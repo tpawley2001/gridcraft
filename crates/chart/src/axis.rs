@@ -22,15 +22,14 @@ impl Scale {
             return vec![self.min];
         }
         let n = ((span / self.step).floor() as i64 + i64::from((span / self.step).fract() > 1.0 - 1e-9)).clamp(1, 50);
-        // A fixed minimum (Format Axis ▸ Bounds) need not be a multiple of the step: ticks then
-        // start at the minimum, as in Excel, and only multiples of the step are snapped.
-        let aligned = ((self.min / self.step).round() * self.step - self.min).abs() < self.step * 1e-9;
         (0..=n)
             .map(|i| {
                 let v = self.min + i as f64 * self.step;
-                // Snap away accumulated float error.
-                let snapped = if aligned { (v / self.step).round() * self.step } else { v };
-                if snapped.abs() < self.step * 1e-9 { 0.0 } else { snapped }
+                // Snap away accumulated float error, but only onto a multiple of the step that is
+                // really that close: a `min` off the step grid must keep its own ticks.
+                let snapped = (v / self.step).round() * self.step;
+                let v = if (snapped - v).abs() < self.step * 1e-9 { snapped } else { v };
+                if v.abs() < self.step * 1e-9 { 0.0 } else { v }
             })
             .collect()
     }
@@ -125,11 +124,6 @@ pub fn with_fixed(auto: Scale, fixed: &gridcraft_model::AxisScale) -> Scale {
         None if (min, max) == (auto.min, auto.max) => auto.step,
         None => nice_scale(min, max, false).step,
     };
-    Scale { min, max, step }
-}
-
-/// Exact fixed scale (100% stacked axes).
-pub(crate) fn fixed_scale(min: f64, max: f64, step: f64) -> Scale {
     Scale { min, max, step }
 }
 
