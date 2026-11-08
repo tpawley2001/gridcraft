@@ -115,6 +115,7 @@ impl AutoCorrectOptions {
             caps_lock: self.caps_lock,
             replace_text: self.replace_text,
             entries: self.entries.clone(),
+            two_caps_exceptions: Vec::new(),
         }
         .correct(text)
     }
