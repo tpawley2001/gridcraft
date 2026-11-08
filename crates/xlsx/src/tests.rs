@@ -38,6 +38,7 @@ mod hidden_drawings;
 mod ink_roundtrip;
 mod kept_macro_dialog_sheets;
 mod legacy_active_sheet_tests;
+mod legacy_outline_apply_styles;
 mod legacy_outline_settings;
 mod legacy_vml_controls_tests;
 mod linked_picture_tests;
