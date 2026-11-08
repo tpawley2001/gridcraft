@@ -100,6 +100,54 @@ pub struct TargetGuard {
     back: Option<u64>,
 }
 
+/// View › View Side by Side: the two windows compared, and whether they scroll together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SideBySide {
+    pub windows: [u64; 2],
+    pub synchronous: bool,
+}
+
+impl Session {
+    /// The side-by-side pair, `None` while View Side by Side is off.
+    /// It ends when either window closes or is hidden.
+    pub fn side_by_side(&self) -> Option<SideBySide> {
+        self.side_by_side.filter(|p| p.windows.iter().all(|id| self.window(*id).is_some_and(|w| !w.hidden)))
+    }
+
+    /// The window that scrolls with `window`: its side-by-side partner while Synchronous Scrolling is on.
+    pub fn scroll_partner(&self, window: u64) -> Option<u64> {
+        let p = self.side_by_side().filter(|p| p.synchronous)?;
+        match p.windows {
+            [a, b] if a == window => Some(b),
+            [a, b] if b == window => Some(a),
+            _ => None,
+        }
+    }
+
+    /// Turns View Side by Side on for two windows (synchronous scrolling on), or off with `None`.
+    pub(crate) fn set_side_by_side(&mut self, windows: Option<[u64; 2]>) {
+        self.side_by_side = windows.map(|windows| SideBySide { windows, synchronous: true });
+    }
+
+    /// Synchronous Scrolling; `false` when side by side is off.
+    pub(crate) fn set_synchronous_scrolling(&mut self, on: bool) -> bool {
+        self.side_by_side = self.side_by_side();
+        match self.side_by_side.as_mut() {
+            Some(p) => {
+                p.synchronous = on;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Forgets a side-by-side pair whose window closed or was hidden, so showing it again later
+    /// doesn't bring the comparison back.
+    pub(crate) fn drop_stale_side_by_side(&mut self) {
+        self.side_by_side = self.side_by_side();
+    }
+}
+
 impl Session {
     /// The open windows, in the order they were opened.
     pub fn windows(&self) -> &[WindowState] {
@@ -251,6 +299,7 @@ impl Session {
                 }
             }
         }
+        self.drop_stale_side_by_side();
         if self.active_window == Some(id) {
             self.activate_recent();
         }
@@ -260,6 +309,7 @@ impl Session {
     pub fn hide_window(&mut self, id: u64) {
         let Some(w) = self.windows.iter_mut().find(|w| w.id == id) else { return };
         w.hidden = true;
+        self.drop_stale_side_by_side();
         if self.active_window == Some(id) && self.windows.iter().any(|w| !w.hidden) {
             self.activate_recent();
         }

@@ -255,6 +255,9 @@ pub struct SheetApp {
     /// Scroll position per (window id, sheet uid): each sheet keeps its own when sheets are
     /// inserted, deleted or moved.
     pub views: HashMap<(u64, u64), SheetView>,
+    /// View Side by Side: each window's first scrolled (sheet uid, row, column) when it last drew,
+    /// to scroll its partner by as many rows and columns when it moves (Synchronous Scrolling).
+    pub(crate) scroll_tops: HashMap<u64, (u64, u32, u32)>,
     pub editor: Option<editor::EditState>,
     pub text_box_editor: Option<text_box::EditState>,
     pub dialog: Option<dialogs::Dialog>,

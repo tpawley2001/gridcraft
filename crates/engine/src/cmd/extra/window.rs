@@ -150,6 +150,56 @@ pub(super) fn arrange_all(s: &mut Session, p: &Json) -> Result<Json> {
     Ok(json!({"arrange": arrange, "windows": windows}))
 }
 
+/// View › View Side by Side: compares the active window with another visible one, arranged one
+/// above the other, scrolling together. `with` picks the other window when more than two are
+/// visible (the Compare Side by Side dialog); `on` sets instead of toggling.
+pub(super) fn side_by_side(s: &mut Session, p: &Json) -> Result<Json> {
+    const CMD: &str = "view.sideBySide";
+    let on = bool_param(p, "on").unwrap_or(s.side_by_side().is_none());
+    if !on {
+        s.set_side_by_side(None);
+        return Ok(json!({"on": false}));
+    }
+    let active = s.active_window().ok_or(EngineError::NoDocument)?;
+    let others: Vec<u64> = s.windows().iter().filter(|w| !w.hidden && w.id != active).map(|w| w.id).collect();
+    if others.is_empty() {
+        return Err(bad(CMD, "View Side by Side needs two visible windows (View › New Window opens another)"));
+    }
+    let other = match p.get("with").filter(|v| !v.is_null()) {
+        Some(v) => {
+            let id = v.as_u64().ok_or_else(|| bad(CMD, "`with` must be a window id number"))?;
+            if id == active {
+                return Err(bad(CMD, "`with` must be another window than the active one"));
+            }
+            if !others.contains(&id) {
+                return Err(bad(CMD, format!("no visible window has id {id}")));
+            }
+            id
+        }
+        None => match others.as_slice() {
+            [one] => *one,
+            _ => return Err(bad(CMD, "more than two windows are open: choose one in Compare Side by Side (`with`: a window id)")),
+        },
+    };
+    s.set_side_by_side(Some([active, other]));
+    Ok(json!({"on": true, "windows": [active, other], "synchronousScrolling": true, "arrange": "horizontal"}))
+}
+
+pub(super) fn synchronous_scrolling(s: &mut Session, p: &Json) -> Result<Json> {
+    let current = s.side_by_side().ok_or_else(|| bad("view.synchronousScrolling", "View Side by Side is off"))?;
+    let on = bool_param(p, "on").unwrap_or(!current.synchronous);
+    s.set_synchronous_scrolling(on);
+    Ok(json!({"on": on}))
+}
+
+/// View › Reset Window Position: the compared windows one above the other again, the active one
+/// of the pair first.
+pub(super) fn reset_window_position(s: &mut Session, _: &Json) -> Result<Json> {
+    let [a, b] = s.side_by_side().ok_or_else(|| bad("view.resetWindowPosition", "View Side by Side is off"))?.windows;
+    let windows = if s.active_window() == Some(b) { [b, a] } else { [a, b] };
+    Ok(json!({"arrange": "horizontal", "windows": windows}))
+}
+
 pub(super) fn hide_window(s: &mut Session, p: &Json) -> Result<Json> {
     let id = window_param(s, "view.hideWindow", p)?;
     s.hide_window(id);

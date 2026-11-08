@@ -11,6 +11,7 @@ use super::insert_function::insert_function;
 use super::names::{name_manager, paste_name};
 use super::paste::{paste_special, paste_special_shortcuts};
 use super::ref_edit::{RefLabel, SHEET_DELETED, end_pick, home_sheet_deleted, place_window, ref_edit, window_shown};
+use super::side_by_side::compare_side_by_side;
 use super::spelling::spelling;
 use super::zoom::zoom;
 use super::{Dialog, Field, Json, Key, Map, RefPick, SheetApp, json, vec2};
@@ -192,6 +193,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                 "find" => find(app, ui, &mut d),
                 "goTo" => go_to(app, ui, &mut d, &mut confirm),
                 "zoom" => zoom(ui, &mut d, &mut confirm, &mut open),
+                "compareSideBySide" => compare_side_by_side(ui, &mut d, &mut confirm, &mut open),
                 "sort" => sort(app, ui, &mut d, &mut confirm),
                 "nameManager" => name_manager(app, ui, &mut d, &mut open),
                 "pasteName" => paste_name(app, ui, &mut d, &mut confirm, &mut open),

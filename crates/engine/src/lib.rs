@@ -44,7 +44,7 @@ pub use gridcraft_math as math;
 pub use gridcraft_model as model;
 pub use gridcraft_numfmt as numfmt;
 pub use selection::Selection;
-pub use windows::{Target, TargetGuard, WindowState, WindowView};
+pub use windows::{SideBySide, Target, TargetGuard, WindowState, WindowView};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -475,6 +475,8 @@ pub struct Session {
     next_window: u64,
     /// Window activation counter (most recently used order).
     activation: u64,
+    /// View › View Side by Side ([`Session::side_by_side`]).
+    side_by_side: Option<SideBySide>,
     pub clipboard: Option<Clipboard>,
     pub prefs: Prefs,
     pub mode: Mode,
@@ -605,6 +607,7 @@ impl Session {
                 self.macro_debug = None;
             }
             self.windows.retain(|w| w.doc_uid != d.uid);
+            self.drop_stale_side_by_side();
             if self.active_window.is_some_and(|w| self.window(w).is_none()) {
                 self.activate_recent();
             } else if let Some(di) = self.active_window.and_then(|w| self.window(w)).and_then(|w| self.document_index(w.doc_uid)) {

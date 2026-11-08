@@ -38,6 +38,7 @@ mod recently_used;
 mod row_autofit;
 mod sheet_copy_spill;
 mod sheet_name_quoting;
+mod side_by_side;
 mod solver_population_report;
 mod sparse_clear_invalidation;
 mod stored_list_shape;

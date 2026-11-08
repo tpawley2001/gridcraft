@@ -2463,9 +2463,8 @@
    "seq": "WT",
    "kind": "command",
    "target": "view.resetWindowPosition",
-   "pending": true,
    "excel": "Reset Window Position",
-   "note": "reserved until the command lands"
+   "note": ""
   },
   {
    "seq": "WU",

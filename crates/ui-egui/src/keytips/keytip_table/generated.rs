@@ -355,7 +355,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("WQ", Entry::Finish(Action::Dialog("zoom"))),                  // Excel: Zoom; opens the Zoom dialog
     ("WR", Entry::Finish(Action::Command("view.ruler"))),           // Excel: Ruler
     ("WS", Entry::Finish(Action::Command("view.split"))),           // Excel: Split
-    ("WT", Entry::Finish(Action::Pending("view.resetWindowPosition"))), // pending; Excel: Reset Window Position; reserved until the command lands
+    ("WT", Entry::Finish(Action::Command("view.resetWindowPosition"))), // Excel: Reset Window Position
     ("WU", Entry::Finish(Action::Command("view.unhideWindow"))),    // Excel: Unhide Window
     ("WVC", Entry::Finish(Action::Pending("view.focusCell"))),      // pending; Excel: Focus Cell Menu; Focus Cell; reserved until the command lands
     ("WVF", Entry::Finish(Action::Control("view.formulaBar"))),     // Excel: Toggle Formula Bar; toggles the formula bar

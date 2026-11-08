@@ -27,6 +27,7 @@ mod names;
 mod paste;
 mod ref_edit;
 mod show;
+mod side_by_side;
 mod spelling;
 mod zoom;
 
@@ -1018,6 +1019,14 @@ impl Dialog {
                     Some(t @ ("Contributors" | "Models")) => t.to_string(),
                     _ => "About".into(),
                 };
+                d
+            }
+            "compareSideBySide" => {
+                let choices = side_by_side::compare_choices(app);
+                let first = choices.first().and_then(|c| c.get("window")).cloned().unwrap_or(Json::Null);
+                let mut d = Dialog::custom("compareSideBySide", "Compare Side by Side", json!({"on": true, "with": first}));
+                d.command = Some("view.sideBySide");
+                d.result = Some(Json::Array(choices));
                 d
             }
             "recommendedCharts" => {
