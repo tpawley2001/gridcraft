@@ -1117,7 +1117,7 @@ fn form_control(ot: u16, flags: u16, data: &[u8], links: &Links) -> (FormControl
 /// returns its input range. Fields the body is too short for keep their defaults.
 fn lbs_data(body: &[u8], drop: bool, c: &mut FormControl, links: &Links) -> Option<Reference> {
     // fmla: an ObjFmla, cbFmla then cbFmla bytes.
-    let Some(cb_fmla) = u16_at(body, 0) else { return None };
+    let cb_fmla = u16_at(body, 0)?;
     let fmla_end = 2usize.saturating_add(usize::from(cb_fmla));
     let input = if cb_fmla == 0 { None } else { body.get(2..fmla_end).and_then(|f| input_area(f, links)) };
     // cLines, iSel, flags, idEdit.
