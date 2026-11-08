@@ -30,6 +30,18 @@ pub(super) fn options(app: &mut SheetApp, ui: &mut Ui) {
         app.run_or_alert("options.autoComplete", json!({"on": autocomplete}));
     }
     ui.add_space(18.0);
+    section(ui, lang, "Options|Proofing");
+    for (key, mut on, label) in [
+        ("twoInitialCaps", app.ui.auto_correct.two_initial_caps, "Correct TWo INitial CApitals"),
+        ("dayNames", app.ui.auto_correct.day_names, "Capitalize names of days"),
+        ("capsLock", app.ui.auto_correct.caps_lock, "Correct accidental use of cAPS LOCK key"),
+        ("replaceText", app.ui.auto_correct.replace_text, "Replace text as you type"),
+    ] {
+        if ui.checkbox(&mut on, lang.tr(label)).changed() {
+            app.run_or_alert("options.autoCorrect", json!({(key): on}));
+        }
+    }
+    ui.add_space(18.0);
     section(ui, lang, "Options|Save");
     let mut autosave = app.ui.autosave;
     if ui.checkbox(&mut autosave, lang.tr("Save .xlsx workbooks automatically after every change")).changed() {

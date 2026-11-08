@@ -73,6 +73,35 @@ pub use services::{Chrome, Inbox, Services};
 pub use state::{NoticeKind, OpenWindow, SaveAnswer, SheetView};
 pub mod desktop_theme;
 
+/// AutoCorrect preferences shared by typed cell and formula-bar entries.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AutoCorrectOptions {
+    pub two_initial_caps: bool,
+    pub day_names: bool,
+    pub caps_lock: bool,
+    pub replace_text: bool,
+}
+
+impl Default for AutoCorrectOptions {
+    fn default() -> Self {
+        Self { two_initial_caps: true, day_names: true, caps_lock: true, replace_text: true }
+    }
+}
+
+impl AutoCorrectOptions {
+    fn correct(&self, text: &str) -> String {
+        gridcraft_engine::autocorrect::AutoCorrect {
+            two_initial_caps: self.two_initial_caps,
+            day_names: self.day_names,
+            caps_lock: self.caps_lock,
+            replace_text: self.replace_text,
+            ..Default::default()
+        }
+        .correct(text)
+    }
+}
+
 /// Persisted UI preferences.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -95,6 +124,8 @@ pub struct UiState {
     /// Tint the active cell's whole row (File ▸ Options ▸ General), on every sheet and workbook, so
     /// the eye keeps its place across a wide table. A preference: nothing goes into the file.
     pub highlight_active_row: bool,
+    /// File > Options > Proofing; older settings enable all four corrections.
+    pub auto_correct: AutoCorrectOptions,
     /// AutoSave (the title-bar switch): save saved-to-file .xlsx workbooks shortly after every
     /// change. A preference like the rest of this struct — it stays on across restarts (#1901).
     pub autosave: bool,
@@ -151,6 +182,7 @@ impl Default for UiState {
             animations: true,
             autocomplete: true,
             highlight_active_row: false,
+            auto_correct: AutoCorrectOptions::default(),
             autosave: false,
             pirate_speak: true,
             recent: vec![],

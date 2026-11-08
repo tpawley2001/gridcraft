@@ -161,6 +161,7 @@ impl SheetApp {
             }
             None => text,
         };
+        let text = self.ui.auto_correct.correct(&text);
         // Data validation.
         if let Some(d) = self.session.active()
             && let Some((dv, msg)) = gridcraft_engine::cmd::data::check_validation(&d.wb, ed.sheet, ed.cell, &text)
