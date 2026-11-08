@@ -27,7 +27,10 @@ use data::{from_csv, from_table_range, queries, table_resize};
 use objects::{align, arrange, rotate, selection_pane, shape_fill, shape_outline};
 pub(crate) use scripts::has_scripts;
 use scripts::{all_scripts, delete_script, new_script, record, run_script, stop_action, trust_scripts};
-use window::{arrange_all, custom_views, hide_window, new_window, ruler, set_view, split, switch_windows, unhide_window, watch_window};
+use window::{
+    arrange_all, custom_views, hide_window, new_window, reset_window_position, ruler, set_view, side_by_side, split, switch_windows,
+    synchronous_scrolling, unhide_window, watch_window,
+};
 pub(crate) use window::{keep_view_modes, keep_watch_list, window_param};
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -173,6 +176,33 @@ pub fn specs() -> Vec<CommandSpec> {
             "{arrange?: tiled|horizontal|vertical|cascade, activeWorkbook?: bool} → {arrange, windows}: lays out the visible windows (tiled by default; `activeWorkbook` only the active workbook's), the active window first",
             has_doc,
             arrange_all
+        ),
+        cmd!(
+            noundo "view.sideBySide",
+            "View Side by Side",
+            ["View", "Window"],
+            None,
+            "{on?: bool, with?: window id} → {on, windows, synchronousScrolling, arrange}: compares the active window with another visible window, one above the other, scrolling together (toggles without `on`; `with` is required when more than two windows are visible)",
+            has_doc,
+            side_by_side
+        ),
+        cmd!(
+            noundo "view.synchronousScrolling",
+            "Synchronous Scrolling",
+            ["View", "Window"],
+            None,
+            "{on?: bool} → {on}: the windows compared side by side scroll together (toggles without `on`; side by side must be on)",
+            has_doc,
+            synchronous_scrolling
+        ),
+        cmd!(
+            noundo "view.resetWindowPosition",
+            "Reset Window Position",
+            ["View", "Window"],
+            None,
+            "{} → {arrange, windows}: lays the windows compared side by side out again, one above the other, the active one first",
+            has_doc,
+            reset_window_position
         ),
         cmd!(noundo "view.hideWindow", "Hide", ["View", "Window"], None, "{window?, doc?} (the active window by default)", has_doc, hide_window),
         cmd!(noundo "view.unhideWindow", "Unhide…", ["View", "Window"], None, "{window?, doc?, index?} (the most recently hidden window by default)", has_doc, unhide_window),

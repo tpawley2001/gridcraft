@@ -2628,10 +2628,7 @@ fn keytip_ws_() {
 fn keytip_wt_() {
     let mut h = harness(blank());
     sequence(&mut h, "WT", false);
-    assert!(h.state().dialog.is_none(), "WT must not open a dialog");
-    assert!(h.state().message.is_none(), "WT must not open a message box");
-    assert!(h.state().toast.is_none(), "WT must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "WT must not journal");
+    assert!(h.state().message.is_some() || h.state().toast.is_some(), "WT must invoke view.resetWindowPosition and surface its missing-params error");
 }
 
 #[test]

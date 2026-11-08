@@ -33,6 +33,7 @@ impl SheetApp {
             ui: UiState::default(),
             chrome: Chrome::default(),
             views: HashMap::new(),
+            scroll_tops: HashMap::new(),
             editor: None,
             text_box_editor: None,
             dialog: None,
@@ -240,6 +241,7 @@ impl SheetApp {
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.grid_bg)).show(ui, |ui| {
                 let g0 = now_ms();
                 grid::show(self, ui);
+                self.sync_scrolling();
                 self.perf.grid_ms = now_ms() - g0;
             });
         }

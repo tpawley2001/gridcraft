@@ -1,5 +1,5 @@
 use super::controls::{act, checkbox_on, control_keytip, invoke, keytip, menu_items, popup_command, sep};
-use super::{Icon, Rect, SheetApp, Tokens, Ui, big_button, json, keytip_table, pos2, theme, vec2};
+use super::{Icon, Rect, SheetApp, Tokens, Ui, big_button, json, keytip_table, pos2, small_button, small_toggle_button, theme, vec2};
 
 /// Draws the View tab: view modes, ruler/gridlines/formula-bar/headings toggles, zoom, freeze panes, theme, animations, interface size and language.
 pub(super) fn view(app: &mut SheetApp, ui: &mut Ui) {
@@ -80,6 +80,7 @@ pub(super) fn view(app: &mut SheetApp, ui: &mut Ui) {
     if __k.clicked() {
         app.open_dialog("arrangeAll", json!({}));
     }
+    side_by_side(app, ui);
     let fp = big_button(ui, Icon::Freeze, "Freeze\nPanes", "Freeze Panes", true);
     for sequence in
         keytip_table::group_extension(app.keytips.prefix().unwrap_or_default(), &["view.freezePanes", "view.freezeTopRow", "view.freezeFirstColumn"])
@@ -165,6 +166,41 @@ pub(super) fn view(app: &mut SheetApp, ui: &mut Ui) {
 
 /// View › Switch Windows: the open workbooks, the active one checked and unsaved ones marked;
 /// choosing one brings it forward.
+/// View Side by Side, Synchronous Scrolling and Reset Window Position. With more than two visible
+/// windows, View Side by Side asks which one to compare with (Compare Side by Side).
+fn side_by_side(app: &mut SheetApp, ui: &mut Ui) {
+    let pair = app.session.side_by_side();
+    let visible = app.session.windows().iter().filter(|w| !w.hidden).count();
+    ui.vertical(|ui| {
+        let r = ui
+            .add_enabled_ui(pair.is_some() || visible >= 2, |ui| {
+                small_toggle_button(ui, Icon::Book, "View Side by Side", "View Side by Side", pair.is_some())
+            })
+            .inner;
+        control_keytip(app, ui, &r, "view.sideBySide");
+        if r.clicked() {
+            if pair.is_none() && visible > 2 {
+                app.open_dialog("compareSideBySide", json!({}));
+            } else {
+                act(app, "view.sideBySide", json!({}));
+            }
+        }
+        let sync = pair.is_some_and(|p| p.synchronous);
+        let r = ui
+            .add_enabled_ui(pair.is_some(), |ui| small_toggle_button(ui, Icon::Expand, "Synchronous Scrolling", "Synchronous Scrolling", sync))
+            .inner;
+        control_keytip(app, ui, &r, "view.synchronousScrolling");
+        if r.clicked() {
+            act(app, "view.synchronousScrolling", json!({"on": !sync}));
+        }
+        let r = ui.add_enabled_ui(pair.is_some(), |ui| small_button(ui, Icon::Table, "Reset Window Position", "Reset Window Position", false)).inner;
+        control_keytip(app, ui, &r, "view.resetWindowPosition");
+        if r.clicked() {
+            act(app, "view.resetWindowPosition", json!({}));
+        }
+    });
+}
+
 fn switch_windows(app: &mut SheetApp, ui: &mut Ui) {
     let anchor = big_button(ui, Icon::Book, "Switch\nWindows", "Switch Windows", true);
     anchor.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Switch Windows"));

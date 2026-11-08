@@ -79,6 +79,15 @@ impl SheetApp {
             ed.anchor = ed.caret;
             ed.sync_caret = true;
         }
+        // View Side by Side and Reset Window Position lay the pair out as Arrange All › Horizontal.
+        if matches!(id, "view.sideBySide" | "view.resetWindowPosition")
+            && self.native_windows
+            && let Ok(r) = &r
+            && r.get("arrange").is_some()
+        {
+            let windows = r.get("windows").and_then(Json::as_array).map(|a| a.iter().filter_map(Json::as_u64).collect()).unwrap_or_default();
+            self.arrange_windows = Some(("horizontal".to_string(), windows));
+        }
         if id == "view.arrangeAll"
             && self.native_windows
             && let Ok(r) = &r
