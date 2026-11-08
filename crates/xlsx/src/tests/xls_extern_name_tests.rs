@@ -82,7 +82,7 @@ fn file_with(link_names: &[u8], extra: &[u8]) -> Vec<u8> {
         &bof(0x0010),
         &formula(0, 0, 84.0, &cat(&[&namex(1, 1), &[0x1E, 2, 0], &[0x05]])),
         &formula(0, 1, 6.0, &cat(&[&namex(1, 2), &[0x1E, 1, 0], &[0x03]])),
-        &formula(0, 2, 3.0, &cat(&[&[0x39], &1u16.to_le_bytes(), &3u32.to_le_bytes(), &[0x41, 4, 0]])),
+        &formula(0, 2, 3.0, &cat(&[&[0x39], &1u16.to_le_bytes(), &3u32.to_le_bytes(), &[0x42, 1, 4, 0]])),
         &formula(0, 3, 7.0, &namex(1, 4)),
         extra,
         &eof(),
