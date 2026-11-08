@@ -707,7 +707,7 @@ fn globals(stream: &[u8], decrypted: bool, budget: &mut Budget, report: &mut Rea
         .names
         .iter()
         .map(|l| {
-            l.skip || (!l.rgce.is_empty() && decode_version(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &g.links, g.biff5.as_ref()).is_err())
+            l.skip || (!l.rgce.is_empty() && decode_version(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::XlsName, &g.links, g.biff5.as_ref()).is_err())
         })
         .collect();
     g.links.skipped = skipped;
@@ -1673,7 +1673,7 @@ fn filter_database(g: &Globals, sheet: usize) -> Option<RangeRef> {
 }
 
 fn defined_names(names: &[Lbl], links: &Links, biff5: Option<&Biff5>, model_index: &[Option<usize>], wb: &mut Workbook, report: &mut ReadReport) {
-    add_defined_names(names, model_index, wb, report, |l| decode_version(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, links, biff5));
+    add_defined_names(names, model_index, wb, report, |l| decode_version(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::XlsName, links, biff5));
 }
 
 /// Adds the defined names to `wb`: print areas and print titles go to their sheet's page setup,
