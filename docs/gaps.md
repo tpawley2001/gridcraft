@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (G0201: persisted editable AutoCorrect replacement list; earlier: G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; earlier: §17: ten preset shapes draw and print their own outline; binary named-style identity; XLSX picture locks survive open + save; earlier: §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (G0204: picture aspect-lock and proportional size commands; earlier: G0201: persisted editable AutoCorrect replacement list; G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; earlier: §17: ten preset shapes draw and print their own outline; earlier: binary named-style identity; XLSX picture locks survive open + save; earlier: §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -201,6 +201,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   conversion; cloud storage requested (#86). **Estimate:** 35–55 h (co-authoring scope needs the owner).
 
 ### 17. Insert objects (F)
+- Picture aspect locking and proportional Height/Width edits are available as undoable commands; picture size fields and a Format Picture pane remain missing.
 - Ink strokes now survive XLSX save/reopen as editable polylines. Inserted icons still lose their
   identity/artwork on save (#551); native Office InkML import is not implemented.
 - SmartArt, WordArt, signature line, objects, 3-D models, screenshot; 8 shape kinds vs ~170;
@@ -262,6 +263,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | minor | G0204: `image.setLockAspectRatio` toggles picture aspect locking; `image.setSize` preserves proportions for a single dimension while locked, including size caps. Picture size fields and a Format Picture pane remain missing. |
 | 2026-11-08 | minor | G0201: AutoCorrect Options edits the persisted replacement list with Replace/With and Add/Replace/Delete; commands list, set, delete and reset entries. Older settings retain the eight built-ins. |
 | 2026-11-08 | minor | G0202: XLSX Camera pictures retain `a14:cameraTool` range and shape id, their VML `Pict` shape with `FmlaPict`, and its image relationship and part across repeated saves. Snapshots are not refreshed (`camera_picture_vml_tests.rs`). |
 | 2026-11-08 | minor | §17: block arrows, chevron, pentagon, diamond, parallelogram and trapezoid presets kept from XLSX are drawn and printed with their own outline (`preset_paths`). |

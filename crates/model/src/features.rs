@@ -842,7 +842,7 @@ impl Image {
     /// Whether "Lock aspect ratio" is on (`noChangeAspect`). `None` is the inserted-picture
     /// default, which saves `noChangeAspect="1"`.
     pub fn aspect_locked(&self) -> bool {
-        todo!("G0204")
+        self.locks.as_ref().map_or(true, |locks| locks.no_change_aspect)
     }
 }
 
