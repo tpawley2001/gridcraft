@@ -29,6 +29,7 @@ mod ink_roundtrip;
 mod line_count_overflow;
 mod long_operator_chains;
 mod offset_overflow;
+mod outline_apply_styles;
 mod percent_entry;
 mod pivot_unknown_func;
 mod pivotchart_link;
