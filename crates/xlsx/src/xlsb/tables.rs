@@ -403,7 +403,7 @@ fn table(bytes: &[u8], ctx: Context<'_>, dxfs: &[Style], report: &mut ReadReport
                 // formulas to its totals row cell.
                 let row = if id == LIST_CC_FMLA { t.range.start.row.saturating_add(u32::from(t.header_row)) } else { t.range.end.row };
                 let col = u32::try_from(i).ok().and_then(|i| t.range.start.col.checked_add(i));
-                let site = Site { sheet, table: Some(list_id), external: false };
+                let site = Site { sheet, table: Some(list_id), ..Site::default() };
                 let text = col.and_then(|col| list_formula(payload, CellRef::new(row, col), links, site));
                 let Some(text) = text else {
                     report.warn(if id == LIST_CC_FMLA {
