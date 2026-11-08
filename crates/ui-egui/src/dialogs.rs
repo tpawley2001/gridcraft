@@ -21,6 +21,7 @@ mod cond_format_rules;
 mod data;
 mod find;
 mod format_cells;
+mod function_arguments;
 mod insert_function;
 mod names;
 mod paste;
@@ -33,6 +34,7 @@ use analysis::toolpak_defaults;
 use charts::select_chart;
 use data::{abs, data_validation_fields, remove_duplicates_range, validation_defaults};
 use find::go_to_entries;
+pub(crate) use function_arguments::open_on_call as open_function_arguments;
 pub(crate) use names::insert_name;
 use names::pasteable_names;
 pub(crate) use ref_edit::SHEET_DELETED;
@@ -945,6 +947,7 @@ impl Dialog {
                 d.focus_first_field = true;
                 d
             }
+            "functionArguments" => function_arguments::dialog(&params),
             "find" => {
                 let mut d = Dialog::custom("find", "Find and Replace", json!({"what": "", "with": "", "within": "sheet", "lookIn": "formulas"}));
                 d.tab = if p("replace").as_bool() == Some(true) { "Replace".into() } else { "Find".into() };

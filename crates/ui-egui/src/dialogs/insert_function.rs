@@ -121,6 +121,8 @@ pub(super) fn insert_function(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dia
             _ => format!("={n}("),
         };
         app.begin_edit(Some(text), false);
+        // Then Function Arguments, for the call just started.
+        super::function_arguments::open_after_insert(app, &f.name);
     }
     if !open {
         *confirm = true;

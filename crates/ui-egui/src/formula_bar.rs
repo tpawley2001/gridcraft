@@ -122,7 +122,11 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
                 }
                 let fx = crate::widgets::icon_button(ui, Icon::Fx, t.text, "Insert Function", vec2(26.0, 24.0));
                 if fx.clicked() {
-                    app.open_dialog("insertFunction", json!({}));
+                    // While editing inside a call it opens Function Arguments on that call.
+                    match app.editor.as_ref().and_then(crate::editor::EditState::call_at_caret) {
+                        Some(call) => crate::dialogs::open_function_arguments(app, call),
+                        None => app.open_dialog("insertFunction", json!({})),
+                    }
                 }
                 layout.buttons = cancel.rect.union(fx.rect);
                 if let Some(badge) = python_badge(app, ui, &t) {
@@ -790,6 +794,17 @@ fn editor_other_shortcuts(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, e
             state.store(ui.ctx(), id);
         }
     }
+    // Ctrl+A (Cmd+A) after a function name or inside a call opens Function Arguments on it;
+    // anywhere else it selects all the text, as the text box does.
+    let select_all = ui.input(|i| {
+        i.events.iter().any(|e| matches!(e, egui::Event::Key { key: Key::A, pressed: true, modifiers, .. } if modifiers.command && !modifiers.shift))
+    });
+    if select_all
+        && let Some(call) = ed.call_at_caret()
+        && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::A))
+    {
+        crate::dialogs::open_function_arguments(app, call);
+    }
     if ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::U)) {
         app.run_or_alert("view.expandFormulaBar", json!({}));
     }
@@ -1135,7 +1150,13 @@ fn show_editor_suggestions(ui: &mut egui::Ui, suggestion: EditorSuggestion<'_>) 
     // editor was allotted, not from its response: egui 0.37 gives every text field a
     // `spacing.interact_size.y` floor, so a one-line cell editor's response can reach below a short
     // cell and touch the visible quadrant even while the cell itself is hidden under a frozen row.
-    if mine && ui.max_rect().intersect(ui.clip_rect()).is_positive() && (!ed.autocomplete.is_empty() || ed.current_function().is_some()) {
+    // Function Arguments shows the call's arguments itself: no hint under the editor meanwhile.
+    let arguments_open = app.dialog.as_ref().is_some_and(|d| d.name == "functionArguments");
+    if mine
+        && !arguments_open
+        && ui.max_rect().intersect(ui.clip_rect()).is_positive()
+        && (!ed.autocomplete.is_empty() || ed.current_function().is_some())
+    {
         let below = resp.rect.left_bottom() + vec2(0.0, 4.0);
         let language = app.ui.language;
         // Areas have their own clip rect: keep cell helpers inside the worksheet.
