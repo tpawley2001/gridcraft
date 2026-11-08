@@ -31,16 +31,8 @@ fn pairs(list: &[(&str, &str)]) -> Json {
     Json::Array(list.iter().map(|(k, v)| json!([k, v])).collect())
 }
 
-const BUILT_IN: [(&str, &str); 8] = [
-    ("(c)", "©"),
-    ("(e)", "€"),
-    ("(r)", "®"),
-    ("(tm)", "™"),
-    ("...", "…"),
-    ("adn", "and"),
-    ("recieve", "receive"),
-    ("teh", "the"),
-];
+const BUILT_IN: [(&str, &str); 8] =
+    [("(c)", "©"), ("(e)", "€"), ("(r)", "®"), ("(tm)", "™"), ("...", "…"), ("adn", "and"), ("recieve", "receive"), ("teh", "the")];
 
 #[test]
 fn the_list_starts_with_the_built_ins_sorted() {
