@@ -46,6 +46,21 @@ pub enum UpdateLinks {
     Always,
 }
 
+/// The built-in identity of a named cell style (ECMA-376 Part 1 §18.8.7 `cellStyle`): which of
+/// the application's built-in styles it is, and how it is listed. Kept across an open + save.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CellStyleId {
+    /// `builtinId`: the built-in style this one is (0 Normal, 3 Comma, 8 Hyperlink, …).
+    pub builtin_id: Option<u32>,
+    /// `iLevel`: the outline level of a RowLevel_n / ColLevel_n style (builtinId 1 / 2), n - 1.
+    pub i_level: Option<u32>,
+    /// `hidden`: not shown in the style gallery.
+    pub hidden: bool,
+    /// `customBuiltin`: a built-in style the user changed.
+    pub custom_builtin: bool,
+}
+
 /// `workbookProtection` settings besides the structure lock ([`Workbook::protected_structure`]
 /// and [`Workbook::structure_password`] stay the authority for it).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -324,6 +339,10 @@ pub struct Workbook {
     pub custom_lists: Vec<Vec<String>>,
     /// Named cell styles (Cell Styles gallery): name → style.
     pub cell_styles: Vec<(String, crate::style::Style)>,
+    /// Built-in identity of named cell styles read from a file, by style name (styles without
+    /// an entry are written with the identity their name implies).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cell_style_ids: Vec<(String, CellStyleId)>,
     /// Phonetic (furigana) data of shared strings (`xl/sharedStrings.xml`), one entry per string
     /// text, so that an open + save keeps a Japanese workbook's readings. Written back next to the
     /// `<si>` holding the same text.
@@ -462,6 +481,7 @@ impl Workbook {
             locks: WorkbookLocks::default(),
             custom_lists: vec![],
             cell_styles: vec![],
+            cell_style_ids: vec![],
             phonetics: vec![],
             vba_project: None,
             csv_delimiter: None,

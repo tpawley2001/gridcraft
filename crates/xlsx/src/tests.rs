@@ -232,6 +232,7 @@ mod workbook_options_controls;
 mod worksheet_settings;
 
 mod border_inside_lines;
+mod cell_style_identity_tests;
 mod codex_day_border_extras;
 mod codex_day_protection;
 
