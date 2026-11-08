@@ -167,7 +167,7 @@ fn a_genuinely_split_obj_keeps_its_control_properties() {
     let records = cat(&[&shape(201, &[], 4, 1, 8, 2), &rec(0x005D, &body[..30]), &rec(0x003C, &body[30..])]);
     let (wb, report) = read_xls(&xls(&records)).unwrap();
     let control = &wb.sheet(0).unwrap().controls[0];
-    assert_eq!(control.kind, ControlKind::ScrollBar);
+    assert_eq!(control.kind, ControlKind::Slider);
     assert_eq!((control.value, control.min, control.max, control.step, control.page), (25, 0, 200, 5, 20));
     assert_eq!(control.link.as_deref(), Some("$C$3"));
     assert!(no_form_control_warning(&report.warnings), "{:?}", report.warnings);
