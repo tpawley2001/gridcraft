@@ -794,8 +794,19 @@ pub struct PictureLocks {
     pub no_crop: bool,
 }
 
+/// Camera picture metadata linking a saved snapshot to its range and legacy VML shape.
+/// Kept for file round-trips; GridCraft does not refresh the snapshot.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CameraTool {
+    pub cell_range: String,
+    pub spid: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Image {
+    /// Imported `a14:cameraTool` metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera: Option<CameraTool>,
     /// Imported picture locks. `None` uses the inserted-picture default aspect lock on save;
     /// `Some(PictureLocks::default())` explicitly leaves every lock off.
     #[serde(default, skip_serializing_if = "Option::is_none")]

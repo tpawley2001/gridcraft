@@ -602,10 +602,11 @@ pub struct ReadControls {
 }
 
 /// Whether a VML shape the sheet doesn't list is a control that only pass-through can keep: it
-/// has client data that is neither a note (GridCraft writes notes) nor an embedded object's
-/// picture (`Pict`, which means nothing without its sheet entry).
+/// has client data other than a note (GridCraft writes notes) or an embedded object's picture.
+/// A `Pict` with `FmlaPict` is a Camera picture: its DrawingML snapshot needs this VML shape.
 fn unlisted_kept(shape: &El) -> bool {
-    object_type_of(shape).is_some_and(|t| !t.eq_ignore_ascii_case("note") && !t.eq_ignore_ascii_case("pict"))
+    object_type_of(shape)
+        .is_some_and(|t| !t.eq_ignore_ascii_case("note") && (!t.eq_ignore_ascii_case("pict") || shape.path(&["ClientData", "FmlaPict"]).is_some()))
 }
 
 /// A VML shape's client data `ObjectType`, trimmed (`Note`, `Button`, `Checkbox`).
@@ -765,4 +766,24 @@ fn vml_anchor(shape: &El, sheet: &Sheet) -> Option<Anchor> {
         height: (y2 - y1).clamp(1.0, 10_000.0) as f32,
         mode,
     })
+}
+
+#[cfg(test)]
+mod camera_tests {
+    use super::unlisted_kept;
+    use crate::xml;
+
+    #[test]
+    fn only_formula_pictures_are_kept_alongside_unlisted_controls() {
+        for (kind, formula, kept) in
+            [("Pict", true, true), (" pIcT ", true, true), ("Pict", false, false), (" Note ", true, false), ("Button", false, true)]
+        {
+            let formula = if formula { "<x:FmlaPict/>" } else { "" };
+            let xml = format!(
+                r#"<v:shape xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><x:ClientData ObjectType="{kind}">{formula}</x:ClientData></v:shape>"#
+            );
+            let shape = xml::parse(xml.as_bytes()).unwrap();
+            assert_eq!(unlisted_kept(&shape), kept, "{xml}");
+        }
+    }
 }

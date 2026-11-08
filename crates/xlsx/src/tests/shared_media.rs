@@ -19,6 +19,7 @@ fn sheet_with(name: &str, pictures: &[(u32, &[u8])]) -> Arc<Sheet> {
     for (id, data) in pictures {
         let anchor = Anchor { cell: CellRef::parse("B2").unwrap(), width: 40.0, height: 30.0, ..Default::default() };
         s.images.push(Image {
+            camera: None,
             locks: None,
             hidden: false,
             hyperlink: None,
