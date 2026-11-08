@@ -130,6 +130,7 @@ mod xls_theme_tests;
 mod xls_user_password_tests;
 mod xls_user_xor_password_tests;
 mod xls_vba_tests;
+mod xls_worksheet_command_tests;
 mod xls_xor_password_tests;
 mod xlsb_array_const_tests;
 mod xlsb_block_warning_tests;
