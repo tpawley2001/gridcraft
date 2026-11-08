@@ -58,9 +58,19 @@ pub(crate) fn push_cell(out: &mut String, at: CellRef, value: &Cached) {
     }
 }
 
-/// The `externalLink` part: the linked file is relationship `rel_id`, then its sheet names and
-/// `tables` (the `<sheetData>` elements of its cached cells).
-pub(crate) fn link_xml(rel_id: &str, sheets: &[String], tables: &str) -> String {
+/// A defined name of a linked workbook (ECMA-376 Part 1 §18.14.5 `definedName`).
+pub(crate) struct LinkName {
+    pub name: String,
+    /// The index of the linked sheet the name is scoped to; `None` for a workbook-level name.
+    pub sheet: Option<usize>,
+    /// The definition when it is a single error (`=#REF!`); other definitions aren't kept.
+    pub refers_to: Option<CellError>,
+}
+
+/// The `externalLink` part: the linked file is relationship `rel_id`, then its sheet names, its
+/// defined `names` (`None` entries are skipped) and `tables` (the `<sheetData>` elements of its
+/// cached cells).
+pub(crate) fn link_xml(rel_id: &str, sheets: &[String], names: Option<&[Option<LinkName>]>, tables: &str) -> String {
     let mut xml = format!("{XML_DECL}<externalLink xmlns=\"{NS_MAIN}\" xmlns:r=\"{NS_REL}\"><externalBook r:id=\"{}\">", esc_attr(rel_id));
     if !sheets.is_empty() {
         xml.push_str("<sheetNames>");
@@ -68,6 +78,21 @@ pub(crate) fn link_xml(rel_id: &str, sheets: &[String], tables: &str) -> String 
             let _ = write!(xml, "<sheetName val=\"{}\"/>", esc_attr(s));
         }
         xml.push_str("</sheetNames>");
+    }
+    let mut names = names.unwrap_or_default().iter().flatten().filter(|n| !n.name.is_empty()).peekable();
+    if names.peek().is_some() {
+        xml.push_str("<definedNames>");
+        for n in names {
+            let _ = write!(xml, "<definedName name=\"{}\"", esc_attr(&n.name));
+            if let Some(e) = n.refers_to {
+                let _ = write!(xml, " refersTo=\"={}\"", esc_attr(e.as_str()));
+            }
+            if let Some(s) = n.sheet {
+                let _ = write!(xml, " sheetId=\"{s}\"");
+            }
+            xml.push_str("/>");
+        }
+        xml.push_str("</definedNames>");
     }
     if !tables.is_empty() {
         xml.push_str("<sheetDataSet>");
@@ -84,6 +109,8 @@ pub(crate) struct Kept {
     pub book: usize,
     /// The linked workbook's sheet names.
     pub sheets: Vec<String>,
+    /// The linked workbook's defined names, index-aligned with the records that named them.
+    pub names: Vec<Option<LinkName>>,
     /// The `externalLink` part and the workbook relationship to it.
     pub part: PreservedPart,
     pub rel: PreservedRel,
@@ -106,7 +133,7 @@ pub(crate) fn keep(kept: Vec<Kept>, links: &mut Links, wb: &mut Workbook, report
         p.parts.push(k.part);
         p.rels.push(k.rel);
         if let Some(b) = links.books.get_mut(k.book) {
-            b.external = Some(ExternalBook { number: n + 1, sheets: k.sheets });
+            b.external = Some(ExternalBook { number: n + 1, sheets: k.sheets, names: k.names });
         }
     }
     merge_preserved(&mut wb.preserved, Some(Arc::new(p)));

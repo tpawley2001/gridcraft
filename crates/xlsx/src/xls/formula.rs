@@ -119,6 +119,9 @@ pub(crate) struct ExternalBook {
     pub number: usize,
     /// The linked workbook's sheet names (BrtSupTabs).
     pub sheets: Vec<String>,
+    /// Its defined names (`.xls` EXTERNNAME), index-aligned with the records; `None` for an
+    /// entry that can't be used.
+    pub names: Vec<Option<crate::external_link::LinkName>>,
 }
 
 /// XTI ([MS-XLS] 2.5.344, [MS-XLSB] 2.5.172): a supporting link and a range of its sheets.
@@ -376,10 +379,21 @@ impl Links {
     fn extern_name(&self, ixti: u16, index: u32) -> Result<String, Unsupported> {
         let x = self.xti.get(usize::from(ixti)).ok_or(Unsupported("reference to a missing name link"))?;
         let book = usize::try_from(x.book).ok().and_then(|b| self.books.get(b)).ok_or(Unsupported("reference to a missing workbook link"))?;
+        let i = usize::try_from(index).ok().and_then(|i| i.checked_sub(1)).ok_or(Unsupported("invalid name index"))?;
+        if let Some(ext) = &book.external {
+            // A name of a linked workbook: `[1]!Rate`, or `[1]Totals!Limit` when sheet-level.
+            let n = ext.names.get(i).and_then(Option::as_ref).ok_or(Unsupported("a name in another workbook that can't be read"))?;
+            return match n.sheet {
+                None => Ok(format!("[{}]!{}", ext.number, n.name)),
+                Some(s) => {
+                    let sheet = ext.sheets.get(s).ok_or(Unsupported("a name in another workbook that can't be read"))?;
+                    Ok(format!("[{}]{sheet}!{}", ext.number, n.name))
+                }
+            };
+        }
         if !book.internal && !book.addin {
             return Err(Unsupported("names in other workbooks (external links)"));
         }
-        let i = usize::try_from(index).ok().and_then(|i| i.checked_sub(1)).ok_or(Unsupported("invalid name index"))?;
         book.names.get(i).cloned().ok_or(Unsupported("reference to a missing name"))
     }
 }
