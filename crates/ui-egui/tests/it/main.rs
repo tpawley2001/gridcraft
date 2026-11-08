@@ -54,6 +54,7 @@ mod formula_point_headers;
 mod formula_popup;
 mod freeze_handles;
 mod function_arguments;
+mod function_arguments_ref_edit;
 mod function_library;
 mod go_to_dialog;
 mod header_autofit;
