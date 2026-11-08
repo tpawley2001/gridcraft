@@ -63,13 +63,30 @@ pub(super) fn insert_function(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dia
             || locale.function_name(&f.name).to_lowercase().contains(&q)
             || language.function_description(&f.description).unwrap_or(&f.description).to_lowercase().contains(&q)
     };
-    let hits: Vec<&lib::FnEntry> = if category == MOST_RECENTLY_USED {
+    let mut hits: Vec<&lib::FnEntry> = if category == MOST_RECENTLY_USED {
         lib::recent(app).iter().filter_map(|n| lib::find(n)).filter(|f| matches(f)).collect()
     } else {
         let id = lib::category_id(&category);
         // The catalog is fixed (some 500 functions), so All lists every one.
         lib::all().iter().filter(|f| id.is_none_or(|id| f.category == id) && matches(f)).collect()
     };
+    // A search lists the function named so first, then names starting with it, then names
+    // containing it, then functions whose description mentions it (searching "sum" offers SUM
+    // before DEVSQ); the order within each group is kept.
+    if !q.is_empty() {
+        hits.sort_by_key(|f| {
+            let name = locale.function_name(&f.name).to_lowercase();
+            if name == q {
+                0
+            } else if name.starts_with(&q) {
+                1
+            } else if name.contains(&q) {
+                2
+            } else {
+                3
+            }
+        });
+    }
     let t = crate::theme::Tokens::get(ui.ctx());
     let font = egui::TextStyle::Body.resolve(ui.style());
     let rows: Vec<(&str, &str)> = hits.iter().map(|f| (locale.function_name(&f.name), language.tr(lib::category_label(&f.category)))).collect();

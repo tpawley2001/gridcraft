@@ -444,8 +444,11 @@ fn handle_press(app: &mut SheetApp, input: &InteractionInput<'_>) {
         }
         return;
     }
+    // While a reference box picks (Function Arguments, opened on the cell being edited), the
+    // press selects for the box: the edit is neither pointed into nor committed.
+    let ref_box_picks = app.dialog.as_ref().is_some_and(|d| d.ref_box_picks());
     // Point mode while editing a formula: clicking inserts a reference.
-    if let Some(ed) = app.editor.as_mut()
+    if let Some(ed) = app.editor.as_mut().filter(|_| !ref_box_picks)
         && ed.can_point()
     {
         let anchor = if mods.shift && ed.point_at_caret() {
@@ -477,7 +480,7 @@ fn handle_press(app: &mut SheetApp, input: &InteractionInput<'_>) {
         }
         return;
     }
-    if app.editor.is_some() && !app.commit_edit(0, 0, false, false) {
+    if app.editor.is_some() && !ref_box_picks && !app.commit_edit(0, 0, false, false) {
         return;
     }
     if on_handle(p) {
@@ -491,7 +494,6 @@ fn handle_press(app: &mut SheetApp, input: &InteractionInput<'_>) {
     let now = crate::now_ms();
     // While a reference box picks, a click only picks: a second click on a cell does not edit it,
     // and a link is not followed nor a checkbox toggled.
-    let ref_box_picks = app.dialog.as_ref().is_some_and(|d| d.ref_box_picks());
     let acts = primary_clicked && !ref_box_picks;
     if !ref_box_picks && handle_cell_double_click(app, input, c, now) {
         return;
@@ -824,6 +826,10 @@ fn format_painter_apply(app: &mut SheetApp) {
 /// Point mode on a header: inserts a whole-row or whole-column reference instead of selecting,
 /// and dragging on from there extends it.
 fn point_header(app: &mut SheetApp, wb: &Workbook, sh: &Sheet, range: RangeRef, extend: bool, add: bool) -> bool {
+    // A reference box picking takes the header's selection instead of the edit.
+    if app.dialog.as_ref().is_some_and(|d| d.ref_box_picks()) {
+        return false;
+    }
     let Some(ed) = app.editor.as_mut().filter(|ed| ed.can_point()) else { return false };
     let edit_sheet = ed.sheet;
     let active_sheet = wb.active_sheet();
@@ -911,7 +917,7 @@ fn select_to_pointer(app: &mut SheetApp, geo: &Geo, sh: &Sheet, wb: &Workbook, p
     );
     if let Some(d) = app.dialog.as_mut().filter(|d| d.picks_references()) {
         d.pick_reference(cell, &sh.name, true);
-    } else if let Some(ed) = app.editor.as_mut()
+    } else if let Some(ed) = app.editor.as_mut().filter(|_| !app.dialog.as_ref().is_some_and(|d| d.ref_box_picks()))
         && ed.point.is_some()
     {
         if let Some(start) = ed.point_anchor.filter(|(sheet, _)| *sheet == wb.active_sheet()).map(|(_, cell)| cell).or(ed.point_cell) {

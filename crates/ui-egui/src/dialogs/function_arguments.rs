@@ -1,3 +1,4 @@
+use super::ref_edit::{RefLabel, end_pick, ref_edit};
 use super::show::ok_cancel;
 use super::{Dialog, Json, SheetApp, json};
 use crate::editor::CallAtCaret;
@@ -146,9 +147,18 @@ pub(super) fn function_arguments(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut 
                         }
                     };
                     let l = ui.label(&label);
+                    let key = format!("arg{i}");
+                    let before = d.values.get(&key).cloned();
+                    // A reference box: typed into, or filled by a range picked on the grid.
+                    ref_edit(app, ui, d, &key, RefLabel::By(l.id), 250.0);
                     let Some(text) = args.get_mut(i) else { continue };
-                    if ui.add(egui::TextEdit::singleline(text).desired_width(220.0)).labelled_by(l.id).changed() {
-                        d.values.insert(format!("arg{i}"), json!(text));
+                    if let Some(now) = d.values.get(&key).and_then(Json::as_str) {
+                        text.clear();
+                        text.push_str(now);
+                    }
+                    if before.is_none() && text.is_empty() {
+                        // A box shown but never filled is not an argument yet.
+                        d.values.remove(&key);
                     }
                     let value = if text.trim().is_empty() { None } else { preview(app, text, locale) };
                     ui.label(value.map(|v| format!("= {v}")).unwrap_or_default());
@@ -164,6 +174,11 @@ pub(super) fn function_arguments(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut 
         ui.label(format!("{} = {result}", language.tr("Formula result")));
     }
     ok_cancel(ui, confirm, open);
+    // Back to the edited cell's sheet and selection before the formula goes in.
+    if *confirm && let Err(e) = end_pick(app, d) {
+        app.message = Some((d.title.clone(), crate::clean_error(&e)));
+        *confirm = false;
+    }
     if *confirm {
         enter(app, d, &call);
     }
