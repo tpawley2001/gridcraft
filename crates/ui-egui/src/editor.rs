@@ -475,9 +475,122 @@ pub fn completion_rest<'a>(full: &'a str, typed: &str) -> Option<&'a str> {
     full.get(start..)
 }
 
+/// The function call the caret is in (Ctrl+A, the formula bar's fx button): its canonical English
+/// name, the byte span from its name to its closing parenthesis (or the end of the text when
+/// unclosed) and its arguments as typed, split at its own top-level list separators.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CallAtCaret {
+    pub name: String,
+    pub start: usize,
+    pub end: usize,
+    pub args: Vec<String>,
+}
+
+/// The function whose name, as typed in `locale`, ends at byte `end` of `text`, with its name's
+/// start; `None` when the identifier there is not a function.
+fn function_name_before(text: &str, end: usize, locale: gridcraft_engine::formula::FormulaLocale) -> Option<(String, usize)> {
+    let head = text.get(..end)?;
+    let start = head.trim_end_matches(|c: char| c.is_alphanumeric() || c == '.' || c == '_').len();
+    let typed = head.get(start..)?;
+    if typed.is_empty() || typed.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    let signature = crate::formula_bar::function_signature(locale.canonical_name(typed))?;
+    let name = signature.split_once('(').map_or(signature.as_str(), |(n, _)| n).to_string();
+    Some((name, start))
+}
+
+impl EditState {
+    /// The innermost function call containing the caret, or the function whose name the caret
+    /// directly follows (`=VLOOKUP|`); `None` anywhere else and outside formulas.
+    pub fn call_at_caret(&self) -> Option<CallAtCaret> {
+        if !self.is_formula() {
+            return None;
+        }
+        let caret = self.byte_caret();
+        let before = self.text.get(..caret)?;
+        // The parentheses still open at the caret, outside text and quoted sheet names.
+        let (mut in_text, mut in_quote) = (false, false);
+        let mut open: Vec<usize> = Vec::new();
+        for (i, c) in before.char_indices() {
+            match c {
+                '"' if !in_quote => in_text = !in_text,
+                '\'' if !in_text => in_quote = !in_quote,
+                _ if in_text || in_quote => {}
+                '(' => open.push(i),
+                ')' => {
+                    open.pop();
+                }
+                _ => {}
+            }
+        }
+        let (name, start, paren) =
+            if let Some((name, start)) = (!in_text && !in_quote).then(|| function_name_before(&self.text, caret, self.locale)).flatten() {
+                (name, start, self.text.get(caret..).is_some_and(|rest| rest.starts_with('(')).then_some(caret))
+            } else {
+                open.iter().rev().find_map(|&p| function_name_before(&self.text, p, self.locale).map(|(name, start)| (name, start, Some(p))))?
+            };
+        let Some(paren) = paren else {
+            return Some(CallAtCaret { name, start, end: caret, args: Vec::new() });
+        };
+        let (end, args) = split_call_arguments(&self.text, paren + 1, self.locale.list_separator());
+        Some(CallAtCaret { name, start, end, args })
+    }
+}
+
+/// The arguments of a call whose text starts at byte `from` (after its `(`), split at top-level
+/// `sep`s (not inside text, quoted sheet names, parentheses or braces), and the byte just past its
+/// closing parenthesis (the text's end when unclosed).
+fn split_call_arguments(text: &str, from: usize, sep: char) -> (usize, Vec<String>) {
+    let Some(body) = text.get(from..) else { return (text.len(), Vec::new()) };
+    let (mut in_text, mut in_quote, mut depth) = (false, false, 0usize);
+    let mut args = Vec::new();
+    let mut arg_start = 0;
+    let mut end = None;
+    for (i, c) in body.char_indices() {
+        match c {
+            '"' if !in_quote => in_text = !in_text,
+            '\'' if !in_text => in_quote = !in_quote,
+            _ if in_text || in_quote => {}
+            '(' | '{' | '[' => depth += 1,
+            ')' if depth == 0 => {
+                end = Some(i);
+                break;
+            }
+            ')' | '}' | ']' => depth = depth.saturating_sub(1),
+            c if c == sep && depth == 0 => {
+                args.push(body.get(arg_start..i).unwrap_or("").trim().to_string());
+                arg_start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    let last = body.get(arg_start..end.unwrap_or(body.len())).unwrap_or("").trim().to_string();
+    if !(args.is_empty() && last.is_empty()) {
+        args.push(last);
+    }
+    (end.map_or(text.len(), |i| from + i + 1), args)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn call_at_caret_finds_the_innermost_call_and_its_top_level_arguments() {
+        let at = |text: &str, caret: usize| {
+            let mut e = EditState::new(1, 0, CellRef::new(0, 0), text.into(), true, false);
+            e.caret = caret;
+            e.call_at_caret().map(|c| (c.name, c.start, c.end, c.args))
+        };
+        let strings = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(at("=ROUND(PI(),2)+1", 9), Some(("PI".into(), 7, 11, vec![])));
+        assert_eq!(at("=ROUND(PI(),2)+1", 12), Some(("ROUND".into(), 1, 14, strings(&["PI()", "2"]))));
+        assert_eq!(at("=sum(\"a)\",{1,2})", 6), Some(("SUM".into(), 1, 16, strings(&["\"a)\"", "{1,2}"]))));
+        assert_eq!(at("=vlookup", 8), Some(("VLOOKUP".into(), 1, 8, vec![])));
+        assert_eq!(at("=A1+(A2", 7), None);
+        assert_eq!(at("plain", 5), None);
+    }
 
     #[test]
     fn point_mode() {
