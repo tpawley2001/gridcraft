@@ -567,3 +567,14 @@ fn column_starting_with_at_round_trips() {
         assert_eq!(parse(&text).ok(), Some(Expr::Struct(s)), "printed as {text}");
     }
 }
+
+#[test]
+fn names_of_a_linked_workbook_round_trip() -> Result<(), ParseError> {
+    for text in ["[1]!Rate*2", "SUM([12]!Größe)", "[1]!Été"] {
+        assert_eq!(print(&parse(text)?), text);
+    }
+    assert_eq!(parse("[1]!Rate")?, Expr::Name("[1]!Rate".into()));
+    // A table column named by digits stays a structured reference.
+    assert!(matches!(parse("Table1[1]")?, Expr::Struct(_)));
+    Ok(())
+}

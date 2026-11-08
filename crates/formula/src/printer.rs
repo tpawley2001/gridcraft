@@ -260,6 +260,17 @@ fn write_expr(s: &mut String, e: &Expr, r1c1: Option<CellRef>) {
         },
         Expr::Name(n) => match sheet_split(n) {
             // A sheet-qualified name is stored with the bare sheet name (`My Sheet!Total`): quote it so it parses back.
+            // A workbook-level name of a linked workbook (`[1]!Rate`) is written as is.
+            Some((sheet, name))
+                if sheet
+                    .strip_prefix('[')
+                    .and_then(|r| r.strip_suffix(']'))
+                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) =>
+            {
+                s.push_str(sheet);
+                s.push('!');
+                s.push_str(name);
+            }
             Some((sheet, name)) => {
                 s.push_str(&quote_sheet(sheet));
                 s.push('!');

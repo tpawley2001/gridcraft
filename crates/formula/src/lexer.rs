@@ -130,6 +130,13 @@ fn error_literal(src: &str, chars: &[(usize, char)], i: usize, start: usize, out
     Ok(end)
 }
 
+/// `[n]!` at `i` (digits only): the index of the `!`.
+fn linked_book(chars: &[(usize, char)], i: usize) -> Option<usize> {
+    let digits = chars.get(i + 1..)?.iter().take_while(|c| c.1.is_ascii_digit()).count();
+    let close = i + 1 + digits;
+    (digits > 0 && char_at(chars, close) == Some(']') && char_at(chars, close + 1) == Some('!')).then_some(close + 1)
+}
+
 fn structured_ref(src: &str, chars: &[(usize, char)], i: usize, start: usize, out: &mut Vec<Token>) -> Result<usize, LexError> {
     let mut depth = 0;
     let mut j = i;
@@ -295,8 +302,18 @@ pub fn tokenize_locale(src: &str, locale: crate::FormulaLocale) -> Result<Vec<To
             '#' => {
                 i = error_literal(src, &chars, i, start, &mut out)?;
             }
+            // A workbook-level name of a linked workbook: `[1]!Rate`.
             '[' => {
-                i = structured_ref(src, &chars, i, start, &mut out)?;
+                let after_word = out.last().is_some_and(|t: &Token| t.end == start && matches!(t.tok, Tok::Word(_)));
+                match linked_book(&chars, i).filter(|_| !after_word) {
+                    // A workbook-level name of a linked workbook: `[1]!Rate`.
+                    Some(bang) => {
+                        let book: String = chars.get(i..bang).map(|s| s.iter().map(|c| c.1).collect()).unwrap_or_default();
+                        emit(src, &chars, &mut out, Tok::Sheet(book, None), start, bang + 1);
+                        i = bang + 1;
+                    }
+                    None => i = structured_ref(src, &chars, i, start, &mut out)?,
+                }
             }
             '.' if ch(i + 1) == Some(':') => {
                 // Trim reference `A1.:E10` / `A1.:.E10` (the word before stopped at the dot).

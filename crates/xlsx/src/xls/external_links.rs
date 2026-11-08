@@ -5,7 +5,9 @@
 //! Each link becomes the SpreadsheetML part the `.xlsx` reader keeps for it (see
 //! [`crate::external_link`]), so saving as .xlsx keeps it, and formulas into it read as
 //! `[n]Sheet!A1`. As in the other readers, links are kept all together or not at all (`[n]` is a
-//! position). Links to other programs (DDE, OLE) and names defined in the linked workbook are not
+//! position). The EXTERNNAME records (2.4.105, an ExternDocName body 2.5.100) after a link are the
+//! names defined in the linked workbook: formulas use them as `[n]!Name` (`[n]Sheet!Name` when
+//! sheet-level) and they are kept in the link part. Links to other programs (DDE, OLE) are not
 //! read: formulas using them keep their saved results. The linked file is never opened.
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -16,7 +18,8 @@ use gridcraft_model::{PreservedPart, PreservedRel, Workbook};
 
 use super::formula::{Links, error_code};
 use super::records::Cursor;
-use crate::external_link::{CT_XML, Cached, Kept, MAX_CACHED_CELLS, keep, link_xml, push_cell};
+use super::{BUILTIN_NAMES, MAX_NAMES, valid_name};
+use crate::external_link::{CT_XML, Cached, Kept, LinkName, MAX_CACHED_CELLS, keep, link_xml, push_cell};
 use crate::{IoError, ReadReport};
 
 const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
@@ -28,6 +31,8 @@ struct Book {
     /// The linked file as a relationship target, or why the link can't be kept.
     target: Result<String, String>,
     sheets: Vec<String>,
+    /// Its defined names in record order (PtgNameX indexes them); `None` when one can't be used.
+    names: Vec<Option<LinkName>>,
     /// Cached cells: sheet index → row → column → value.
     cache: BTreeMap<u16, BTreeMap<u16, BTreeMap<u8, Cached>>>,
     cells: usize,
@@ -88,8 +93,23 @@ impl Reader {
             }
             Err(e) => (Err(format!("a link can't be read ({e})")), vec![]),
         };
-        self.books.push(Book { book, target, sheets, cache: BTreeMap::new(), cells: 0 });
+        self.books.push(Book { book, target, sheets, names: Vec::new(), cache: BTreeMap::new(), cells: 0 });
         self.latest = true;
+    }
+
+    /// EXTERNNAME after the latest SupBook: returns `false` when that SupBook isn't a linked
+    /// workbook (the record is then this workbook's or an add-in's). A name that can't be used
+    /// still takes its place, so later names keep their index.
+    pub(super) fn extern_name(&mut self, c: &mut Cursor<'_, '_>) -> bool {
+        if !self.latest {
+            return false;
+        }
+        let Some(b) = self.books.last_mut() else { return false };
+        if b.names.len() < MAX_NAMES {
+            let name = doc_name(c, b.sheets.len());
+            b.names.push(name);
+        }
+        true
     }
 
     /// Any other SupBook (this workbook, add-ins): XCT records after it are not a link's.
@@ -175,15 +195,50 @@ impl Reader {
                 }
                 tables.push_str("</sheetData>");
             }
-            let xml = link_xml("rId1", &b.sheets, &tables);
+            let xml = link_xml("rId1", &b.sheets, Some(&b.names), &tables);
             let name = format!("xl/externalLinks/externalLink{n}.xml");
             let path = PreservedRel { id: "rId1".into(), rel_type: format!("{REL}externalLinkPath"), target, external: true };
             let part = PreservedPart { name: name.clone(), content_type: CT_XML.into(), data: Arc::from(xml.as_bytes()), rels: vec![path] };
             let rel = PreservedRel { id: format!("rIdExternalLink{n}"), rel_type: format!("{REL}externalLink"), target: name, external: false };
-            kept.push(Kept { book: b.book, sheets: b.sheets, part, rel });
+            kept.push(Kept { book: b.book, sheets: b.sheets, names: b.names, part, rel });
         }
         keep(kept, links, wb, report);
     }
+}
+
+/// EXTERNNAME ([MS-XLS] 2.4.105) with an ExternDocName body (2.5.100): flags, `ixals` (0 for a
+/// workbook-level name, else 1 + the index of its sheet among the link's `sheets`), two reserved
+/// bytes, the name, then its definition (`cce` and tokens). `None` when the name is empty,
+/// truncated, not a legal name, or scoped to a sheet the link doesn't have.
+fn doc_name(c: &mut Cursor<'_, '_>, sheets: usize) -> Option<LinkName> {
+    let flags = c.u16().ok()?;
+    let ixals = usize::from(c.u16().ok()?);
+    c.skip(2).ok()?;
+    let raw = c.short_string().ok()?;
+    let name = match raw.chars().next().map(u32::from) {
+        // fBuiltIn: a one-character code for a built-in name.
+        Some(code) if flags & 1 != 0 && raw.chars().count() == 1 && code <= 0x0D => {
+            format!("_xlnm.{}", BUILTIN_NAMES.get(usize::try_from(code).ok()?)?)
+        }
+        _ => raw,
+    };
+    if !valid_name(&name) {
+        return None;
+    }
+    let sheet = match ixals.checked_sub(1) {
+        Some(s) if s >= sheets => return None,
+        s => s,
+    };
+    // The definition is kept only when it is one PtgErr (`=#REF!`); a missing or truncated
+    // definition leaves the name without one.
+    let refers_to = (|| {
+        let cce = usize::from(c.u16().ok()?);
+        match c.bytes(cce).ok()?.as_slice() {
+            [0x1C, code] => error_code(*code),
+            _ => None,
+        }
+    })();
+    Some(LinkName { name, sheet, refers_to })
 }
 
 /// SerAr ([MS-XLS] 2.5.192): one cached value; `None` when truncated or of an unknown type.
@@ -255,9 +310,11 @@ fn virtual_path(raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use gridcraft_core::CellRef;
+
     use super::{Reader, virtual_path};
     use crate::ReadReport;
-    use crate::xls::formula::{Links, SupBook};
+    use crate::xls::formula::{Links, Mode, SupBook, Xti, decode};
     use crate::xls::records::Cursor;
 
     /// Reads one SupBook body (after `ctab` and `cch`) and keeps what can be kept.
@@ -286,6 +343,42 @@ mod tests {
         let (links, wb, _) = finish(1, "ab.xls", &[1, 0, 0, b'S']);
         assert_eq!(links.books[0].external.as_ref().map(|e| (e.number, e.sheets.clone())), Some((1, vec!["S".to_string()])));
         assert!(wb.preserved.is_some());
+    }
+
+    /// EXTERNNAME body: flags, ixals, reserved, an 8-bit name, `cce` and tokens.
+    fn doc_name_record(flags: u16, ixals: u16, name: &[u8], rgce: &[u8]) -> Vec<u8> {
+        let head = [flags.to_le_bytes(), ixals.to_le_bytes(), [0, 0]].concat();
+        [&head[..], &[name.len() as u8, 0], name, &(rgce.len() as u16).to_le_bytes(), rgce].concat()
+    }
+
+    #[test]
+    fn names_of_a_linked_workbook_decode_through_ptg_name_x() {
+        let body = [&[0u8][..], b"b.xls", &[1, 0, 0, b'S']].concat();
+        let (mut links, mut wb, mut report, mut r) = (Links::default(), gridcraft_model::Workbook::new(), ReadReport::default(), Reader::default());
+        links.books.push(SupBook { internal: true, ..SupBook::default() });
+        links.books.push(SupBook::default());
+        r.supbook(&mut Cursor::new(&[&body[..]]), 1, 1, 5, &mut report);
+        for rec in [
+            doc_name_record(0, 0, b"Rate", &[0x1C, 0x17]),
+            doc_name_record(0, 1, b"Limit", &[]),
+            doc_name_record(1, 0, &[6], &[]),
+            doc_name_record(0, 2, b"Past", &[]),
+            doc_name_record(0, 0, b"A1", &[]),
+        ] {
+            assert!(r.extern_name(&mut Cursor::new(&[&rec[..]])));
+        }
+        r.finish(&mut links, &mut wb, &mut report);
+        links.xti.push(Xti { book: 1, first: -2, last: -2 });
+        let text = |rgce: &[u8]| decode(rgce, &[], CellRef::new(0, 0), Mode::Cell, &links).map(|e| gridcraft_formula::print(&e));
+        let namex = |i: u32| [&[0x39u8][..], &0u16.to_le_bytes(), &i.to_le_bytes()].concat();
+        // SUM through PtgFuncVar.
+        assert_eq!(text(&[&namex(1)[..], &[0x22, 1, 4, 0]].concat()).ok().as_deref(), Some("SUM([1]!Rate)"));
+        assert_eq!(text(&namex(2)).ok().as_deref(), Some("'[1]S'!Limit"));
+        assert_eq!(text(&namex(3)).ok().as_deref(), Some("[1]!_xlnm.Print_Area"));
+        // Scoped past the sheet list, not a legal name, past the end: refused.
+        assert!(text(&namex(4)).is_err() && text(&namex(5)).is_err() && text(&namex(6)).is_err());
+        let xml = std::str::from_utf8(&wb.preserved.as_ref().unwrap().parts[0].data).unwrap().to_string();
+        assert!(xml.contains(r#"<definedNames><definedName name="Rate" refersTo="=#REF!"/><definedName name="Limit" sheetId="0"/><definedName name="_xlnm.Print_Area"/></definedNames>"#), "{xml}");
     }
 
     #[test]

@@ -60,7 +60,7 @@ pub(super) fn read<'a>(
     let mut kept = vec![];
     for (n, (book, id)) in ids.iter().enumerate() {
         match link(&mut cx, types, rels, id, n + 1, report) {
-            Ok((link, part, rel)) => kept.push(Kept { book: *book, sheets: link.sheets, part, rel }),
+            Ok((link, part, rel)) => kept.push(Kept { book: *book, sheets: link.sheets, names: Vec::new(), part, rel }),
             Err(why) => {
                 report.warn(format!("links to external workbooks were dropped: {why}"));
                 return cx.pkg;
@@ -224,6 +224,6 @@ fn part(data: &[u8], report: &mut ReadReport) -> Result<Link, IoError> {
     }
     let rel_id = rel_id.ok_or_else(|| invalid("missing BrtBeginSupBook"))?;
     let sheets = sheets.ok_or_else(|| invalid("missing BrtSupTabs"))?;
-    let xml = link_xml(&rel_id, &sheets, &tables);
+    let xml = link_xml(&rel_id, &sheets, None, &tables);
     Ok(Link { rel_id, sheets, xml })
 }

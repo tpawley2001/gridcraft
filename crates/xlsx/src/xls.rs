@@ -660,6 +660,8 @@ fn globals(stream: &[u8], decrypted: bool, budget: &mut Budget, report: &mut Rea
             }
             0x0059 if g.biff5.is_none() => g.external.xct(&mut c, report),
             0x005A if g.biff5.is_none() => g.external.crn(&mut c, report),
+            // ExternName of a linked workbook: kept with the link.
+            0x0023 if g.external.extern_name(&mut c) => {}
             0x0023 => {
                 // ExternName: flags, then an AddinUdf or ExternDocName body; both start with
                 // four bytes before the name.
