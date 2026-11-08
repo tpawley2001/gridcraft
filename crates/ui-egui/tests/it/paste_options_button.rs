@@ -104,11 +104,20 @@ fn formatting_pastes_only_the_formats() {
 
 #[test]
 fn transpose_turns_the_column_into_a_row() {
+    // The formula cell is whatever Paste Special with Transpose makes (how references move under
+    // a transpose is Paste Special's job, not the button's).
+    let mut s = Session::new();
+    s.new_workbook();
+    setup(&mut s);
+    s.execute("edit.pasteSpecial", json!({"what": "all", "transpose": true})).unwrap();
+    let want = s.active().unwrap().wb.active().unwrap().input_text(CellRef::parse("D1").unwrap());
+
     let mut h = harness();
     paste(&mut h);
     pick(&mut h, "Transpose (T)");
     assert_eq!(input(&h, "C1"), "2");
-    assert_eq!(input(&h, "D1"), "=C1*3");
+    assert!(input(&h, "D1").starts_with('='), "D1 holds the transposed formula");
+    assert_eq!(input(&h, "D1"), want);
     assert_eq!(input(&h, "C2"), "", "the first paste's second cell is gone");
 }
 
