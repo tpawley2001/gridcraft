@@ -208,7 +208,14 @@ pub(super) fn outline_settings(s: &mut Session, p: &Json) -> Result<Json> {
             }
             move_marks(if rows { &mut sh.rows } else { &mut sh.cols }, was_before, on);
         }
-        Ok(json!({"summaryBelow": sh.summary_below, "summaryRight": sh.summary_right}))
+        if let Some(on) = bool_param(p, "automaticStyles") {
+            sh.outline_apply_styles = on;
+        }
+        Ok(json!({
+            "summaryBelow": sh.summary_below,
+            "summaryRight": sh.summary_right,
+            "automaticStyles": sh.outline_apply_styles,
+        }))
     })
 }
 

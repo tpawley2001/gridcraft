@@ -156,7 +156,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Outline Settings",
             ["Data", "Outline"],
             None,
-            "{sheet?, summaryBelow?: bool, summaryRight?: bool} (summary rows below their detail, summary columns right of it; off puts them above / left) → {summaryBelow, summaryRight}",
+            "{sheet?, summaryBelow?: bool, summaryRight?: bool, automaticStyles?: bool} (summary rows below their detail, summary columns right of it; off puts them above / left; automaticStyles is the Automatic styles check box, saved as outlinePr applyStyles) → {summaryBelow, summaryRight, automaticStyles}",
             has_doc,
             outline_settings
         ),

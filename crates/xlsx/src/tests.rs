@@ -235,6 +235,7 @@ mod border_inside_lines;
 mod cell_style_identity_tests;
 mod codex_day_border_extras;
 mod codex_day_protection;
+mod outline_apply_styles_tests;
 
 mod workbook_protection_locks {
     use super::minimal;

@@ -140,6 +140,9 @@ pub struct Sheet {
     pub summary_below: bool,
     #[serde(default = "yes")]
     pub summary_right: bool,
+    /// Outline ▸ Settings ▸ Automatic styles, saved as `outlinePr applyStyles`.
+    #[serde(default)]
+    pub outline_apply_styles: bool,
     pub right_to_left: bool,
     pub zoom: u16,
     pub cond_formats: Vec<CondFormat>,
@@ -238,6 +241,7 @@ impl Sheet {
             show_outline_symbols: true,
             summary_below: true,
             summary_right: true,
+            outline_apply_styles: false,
             show_headings: true,
             show_formulas: false,
             show_zeros: true,
