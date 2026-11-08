@@ -105,6 +105,7 @@ mod xls_default_password_tests;
 mod xls_doc_props_codepage_tests;
 mod xls_edit_ranges_tests;
 mod xls_external_link_tests;
+mod xls_form_control_tests;
 mod xls_group_shapes_tests;
 mod xls_invalid_names_tests;
 mod xls_label_tail_tests;
