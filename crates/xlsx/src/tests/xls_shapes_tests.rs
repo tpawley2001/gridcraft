@@ -227,3 +227,39 @@ fn a_button_survives_save_as_xlsx() {
     assert_eq!((controls[0].kind, controls[0].text.as_str()), (gridcraft_model::ControlKind::Button, "Go"));
     assert_eq!(controls[0].anchor.cell, CellRef::new(2, 1));
 }
+
+#[test]
+fn a_shape_continued_after_an_obj_keeps_its_own_anchor() {
+    let rectangle = shape(1, &[], 3, 0, 5, 2);
+    let len = usize::from(u16::from_le_bytes([rectangle[2], rectangle[3]]));
+    let records = cat(&[&shape(5, &[], 0, 0, 2, 2), &obj(OT_OFFICE_ART), &rec(0x003C, &rectangle[4..4 + len]), &obj(OT_OFFICE_ART)]);
+    let (wb, report) = read_xls(&xls(&records)).unwrap();
+    let shapes = &wb.sheet(0).unwrap().shapes;
+    assert_eq!(shapes.len(), 2, "{:?}", report.warnings);
+    assert_eq!(shapes[0].anchor.cell, CellRef::new(0, 0));
+    assert_eq!(shapes[1].anchor.cell, CellRef::new(0, 3));
+    assert_eq!(shapes[1].kind, ShapeKind::Rectangle);
+}
+
+#[test]
+fn drawing_continuations_after_an_obj_are_joined_before_reading_the_next_shapes_text() {
+    let sp = art(2, 1, 0xF00A, &cat(&[&1026u32.to_le_bytes(), &0x0A00u32.to_le_bytes()]));
+    let anchor = art(0, 0, 0xF010, &u16s(&[0, 3, 0, 0, 0, 5, 0, 2, 0]));
+    // The first Continue holds a complete OfficeArt record; the anchor spans the next two.
+    let records = cat(&[
+        &shape(5, &[], 0, 0, 2, 2),
+        &obj(OT_OFFICE_ART),
+        &rec(0x003C, &sp),
+        &rec(0x003C, &anchor[..12]),
+        &rec(0x003C, &anchor[12..]),
+        &obj(OT_OFFICE_ART),
+        &txo("Rectangle caption"),
+    ]);
+    let (wb, report) = read_xls(&xls(&records)).unwrap();
+    let shapes = &wb.sheet(0).unwrap().shapes;
+    assert_eq!(shapes.len(), 2, "{:?}", report.warnings);
+    assert_eq!((shapes[0].kind, shapes[1].kind), (ShapeKind::Triangle, ShapeKind::Rectangle));
+    assert_eq!(shapes[1].anchor.cell, CellRef::new(0, 3));
+    assert_eq!(shapes[1].text, "Rectangle caption");
+    assert!(!report.warnings.iter().any(|w| w.contains("Shapes in .xls")), "{:?}", report.warnings);
+}

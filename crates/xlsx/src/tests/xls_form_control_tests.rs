@@ -159,3 +159,16 @@ fn a_truncated_scroll_bar_obj_opens_without_panicking() {
     let (wb, _) = read_xls(&xls(&cat(&[&shape(201, &[], 0, 0, 2, 1), &o]))).unwrap();
     assert!(wb.sheet(0).unwrap().shapes.is_empty());
 }
+
+#[test]
+fn a_genuinely_split_obj_keeps_its_control_properties() {
+    let body = cat(&[&cmo(OT_SCROLL_BAR, 3, CONTROL_FLAGS), &sbs(25, 0, 200, 5, 20, 1, 0x0008), &link(0x0E, 2, 2), &u16s(&[0, 0])]);
+    // Split within FtSbs: the Continue bytes are object data, not OfficeArt.
+    let records = cat(&[&shape(201, &[], 4, 1, 8, 2), &rec(0x005D, &body[..30]), &rec(0x003C, &body[30..])]);
+    let (wb, report) = read_xls(&xls(&records)).unwrap();
+    let control = &wb.sheet(0).unwrap().controls[0];
+    assert_eq!(control.kind, ControlKind::Slider);
+    assert_eq!((control.value, control.min, control.max, control.step, control.page), (25, 0, 200, 5, 20));
+    assert_eq!(control.link.as_deref(), Some("$C$3"));
+    assert!(no_form_control_warning(&report.warnings), "{:?}", report.warnings);
+}

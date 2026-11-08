@@ -165,6 +165,13 @@ fn u32_at(b: &[u8], at: usize) -> Option<u32> {
     Some(u32::from(u16_at(b, at)?) | (u32::from(u16_at(b, at.checked_add(2)?)?) << 16))
 }
 
+/// A complete OfficeArt header and payload distinguish drawing data after an Obj from a
+/// genuine continuation of the Obj's subrecords ([MS-XLS] 2.1.7.20, [MS-ODRAW] 2.2.1).
+fn starts_office_art(data: &[u8]) -> bool {
+    let (Some(ty), Some(len)) = (u16_at(data, 2), u32_at(data, 4)) else { return false };
+    (0xF000..=0xF122).contains(&ty) && usize::try_from(len).is_ok_and(|len| len <= data.len().saturating_sub(8))
+}
+
 /// Where a drawn object goes: a client anchor (cells under its corners), or a part of a group's
 /// rectangle (the outermost group's client anchor, and the fractions of its width and height the
 /// shape's left, top, width and height are: its child anchors mapped through each group frame).
@@ -686,6 +693,19 @@ impl Embedded {
             self.obj_biff5(&rec.parts.concat(), b5, report);
             return;
         }
+        if let Some((head, more)) = rec.parts.split_first()
+            && more.first().is_some_and(|data| starts_office_art(data))
+        {
+            // These Continue records belong to the next shape. Consume this Obj's anchor
+            // before letting the drawing walker remember the next one.
+            self.obj_biff8(&Record { id: rec.id, parts: vec![head] }, links, report);
+            self.drawing(&Record { id: 0x00EC, parts: more.to_vec() });
+        } else {
+            self.obj_biff8(rec, links, report);
+        }
+    }
+
+    fn obj_biff8(&mut self, rec: &Record<'_>, links: &Links, report: &mut ReadReport) {
         let head = rec.parts.first().copied().unwrap_or_default();
         let ot = u16_at(head, 4);
         // FtCmo: ft, cb, ot, id, then the flags.
@@ -2132,6 +2152,22 @@ pub(crate) fn add_chart_sheets(wb: &mut Workbook, sheets: Vec<ChartSheet>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn office_art_continuation_requires_a_complete_record_in_the_expected_type_range() {
+        let valid = art(0xF, SP_CONTAINER, &[0; 12]);
+        assert!(starts_office_art(&valid));
+        for end in 0..valid.len() {
+            assert!(!starts_office_art(&valid[..end]));
+        }
+        assert!(starts_office_art(&art(0, 0xF000, &[])));
+        assert!(starts_office_art(&art(0, 0xF122, &[])));
+        assert!(!starts_office_art(&art(0, 0xEFFF, &[])));
+        assert!(!starts_office_art(&art(0, 0xF123, &[])));
+        assert!(!starts_office_art(&[0x0F, 0, 4, 0xF0, 0xFF, 0xFF, 0xFF, 0xFF]));
+        // Ordinary Obj subrecords remain part of the object, even with a complete header.
+        assert!(!starts_office_art(&art(0, FT_SBS, &[0; 20])));
+    }
 
     #[test]
     fn client_anchor_is_found_inside_containers_and_bounded() {

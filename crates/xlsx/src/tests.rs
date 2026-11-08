@@ -123,6 +123,7 @@ mod xls_relative_name_tests;
 mod xls_selection_refu_tests;
 mod xls_selection_tests;
 mod xls_shape_text_tests;
+mod xls_shapes_continue_tests;
 mod xls_shapes_tests;
 mod xls_sheet_name_tests;
 mod xls_style_tests;
