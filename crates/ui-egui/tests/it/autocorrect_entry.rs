@@ -41,7 +41,7 @@ fn formulas_and_agent_commands_are_preserved() {
     let mut h = harness();
     enter(&mut h, "=teh");
     let cell = h.state().session.active().unwrap().wb.active().unwrap().cell(CellRef::new(0, 0)).unwrap();
-    assert_eq!(cell.formula.as_deref(), Some("=teh"));
+    assert_eq!(cell.formula.as_ref().map(|f| f.text.as_str()), Some("teh"));
     h.state_mut().run("cell.set", json!({"cell": "B1", "input": "COlumn"})).unwrap();
     assert_eq!(value(h.state(), "B1"), Value::text("COlumn"));
 }
@@ -57,4 +57,13 @@ fn options_persist_and_older_settings_enable_every_rule() {
     assert!(restored.auto_correct.day_names && restored.auto_correct.caps_lock);
     let old: UiState = serde_json::from_str("{}").unwrap();
     assert!(old.auto_correct.two_initial_caps && old.auto_correct.day_names && old.auto_correct.caps_lock && old.auto_correct.replace_text);
+}
+
+#[test]
+fn validation_checks_the_corrected_entry() {
+    let mut h = harness();
+    h.state_mut().session.execute("data.validation", json!({"range": "A1", "type": "list", "formula1": "\"Column,Other\""})).unwrap();
+    enter(&mut h, "COlumn");
+    assert_eq!(value(h.state(), "A1"), Value::text("Column"));
+    assert!(h.state().message.is_none());
 }
