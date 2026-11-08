@@ -513,6 +513,7 @@ fn charts_and_images_are_drawn() {
     let wb = std::sync::Arc::make_mut(&mut d.wb);
     let id = wb.next_object_id();
     wb.sheet_mut(0).unwrap().images.push(Image {
+        locks: None,
         hidden: false,
         hyperlink: None,
         name: None,

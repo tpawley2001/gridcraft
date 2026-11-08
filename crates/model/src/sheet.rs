@@ -909,6 +909,7 @@ mod tests {
                 scale: Default::default(),
             }),
             ObjKind::Image => s.images.push(Image {
+                locks: None,
                 hidden: false,
                 hyperlink: None,
                 name: None,

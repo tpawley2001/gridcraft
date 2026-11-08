@@ -386,6 +386,7 @@ fn sample() -> Workbook {
     });
     let png = b"\x89PNG\r\n\x1a\n0000IHDRfake".to_vec();
     s.images.push(Image {
+        locks: None,
         hidden: false,
         hyperlink: None,
         name: None,

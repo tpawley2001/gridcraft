@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
 use gridcraft_model::{
-    Anchor, AnchorMode, Color, DrawingHyperlink, GeometryPath, Image, PathCommand, Shape, ShapeFormat, ShapeGeometry, ShapeKind, ShapeTextAlign,
-    ShapeTextAnchor, ShapeTextVert, ShapeTextWrap, Sheet, Theme,
+    Anchor, AnchorMode, Color, DrawingHyperlink, GeometryPath, Image, PathCommand, PictureLocks, Shape, ShapeFormat, ShapeGeometry, ShapeKind,
+    ShapeTextAlign, ShapeTextAnchor, ShapeTextVert, ShapeTextWrap, Sheet, Theme,
 };
 
 use crate::IoError;
@@ -284,6 +284,23 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                     let blip_ext = blip_ext::read(cx, part, &mut lookup, exts)?;
                     let id = cx.next_object_id();
                     sheet.images.push(Image {
+                        locks: obj.path(&["nvPicPr", "cNvPicPr"]).map(|p| {
+                            p.child("picLocks")
+                                .map(|l| PictureLocks {
+                                    no_grp: l.flag("noGrp", false),
+                                    no_select: l.flag("noSelect", false),
+                                    no_rot: l.flag("noRot", false),
+                                    no_change_aspect: l.flag("noChangeAspect", false),
+                                    no_move: l.flag("noMove", false),
+                                    no_resize: l.flag("noResize", false),
+                                    no_edit_points: l.flag("noEditPoints", false),
+                                    no_adjust_handles: l.flag("noAdjustHandles", false),
+                                    no_change_arrowheads: l.flag("noChangeArrowheads", false),
+                                    no_change_shape_type: l.flag("noChangeShapeType", false),
+                                    no_crop: l.flag("noCrop", false),
+                                })
+                                .unwrap_or_default()
+                        }),
                         hidden: obj.path(&["nvPicPr", "cNvPr"]).is_some_and(|p| p.flag("hidden", false)),
                         hyperlink: read_hyperlink(obj.path(&["nvPicPr", "cNvPr"]), &rels),
                         name: obj.path(&["nvPicPr", "cNvPr"]).and_then(|p| p.attr("name")).map(str::to_string),
@@ -845,6 +862,30 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                     (true, Some(l)) => format!("r:link=\"{l}\""),
                     (true, None) => String::new(),
                 };
+                let locks = match &img.locks {
+                    None => "<xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr>".to_string(),
+                    Some(l) => {
+                        let mut attrs = String::new();
+                        for (name, enabled) in [
+                            ("noGrp", l.no_grp),
+                            ("noSelect", l.no_select),
+                            ("noRot", l.no_rot),
+                            ("noChangeAspect", l.no_change_aspect),
+                            ("noMove", l.no_move),
+                            ("noResize", l.no_resize),
+                            ("noEditPoints", l.no_edit_points),
+                            ("noAdjustHandles", l.no_adjust_handles),
+                            ("noChangeArrowheads", l.no_change_arrowheads),
+                            ("noChangeShapeType", l.no_change_shape_type),
+                            ("noCrop", l.no_crop),
+                        ] {
+                            if enabled {
+                                let _ = write!(attrs, " {name}=\"1\"");
+                            }
+                        }
+                        if attrs.is_empty() { "<xdr:cNvPicPr/>".to_string() } else { format!("<xdr:cNvPicPr><a:picLocks{attrs}/></xdr:cNvPicPr>") }
+                    }
+                };
                 let link = write_hyperlink(img.hyperlink.as_ref(), rels);
                 let name = esc_attr(&img.name.clone().unwrap_or_else(|| format!("Picture {}", id - 1)));
                 let (open, close) = anchor_open(sheet, &img.anchor);
@@ -852,7 +893,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                 s.push_str(&open);
                 let _ = write!(
                     s,
-                    "<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"{id}\" name=\"{name}\" descr=\"{}\"{hidden}>{link}</xdr:cNvPr><xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip {blip_ref}{blip_end}<a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>",
+                    "<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"{id}\" name=\"{name}\" descr=\"{}\"{hidden}>{link}</xdr:cNvPr>{locks}</xdr:nvPicPr><xdr:blipFill><a:blip {blip_ref}{blip_end}<a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>",
                     esc_attr(&img.alt),
                     xfrm(&img.anchor, "a:xfrm")
                 );
