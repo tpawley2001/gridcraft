@@ -67,10 +67,11 @@ struct Home {
     selection: Option<(String, String)>,
 }
 
-/// Whether the dialog has reference boxes: Goal Seek, Data Table, Solver, Data Analysis, and any form with a
-/// [`Field::Ref`].
+/// Whether the dialog has reference boxes: Goal Seek, Data Table, Solver, Data Analysis, Function
+/// Arguments, and any form with a [`Field::Ref`].
 fn has_reference_boxes(d: &Dialog) -> bool {
-    matches!(d.name.as_str(), "goalSeek" | "dataTable" | "solver" | "analysisToolPak") || d.fields.iter().any(|f| matches!(f, Field::Ref { .. }))
+    matches!(d.name.as_str(), "goalSeek" | "dataTable" | "solver" | "analysisToolPak" | "functionArguments")
+        || d.fields.iter().any(|f| matches!(f, Field::Ref { .. }))
 }
 
 /// Records the sheet shown as the dialog's own when a dialog with reference boxes opens, from the
@@ -151,13 +152,36 @@ fn takes_several_areas(dialog: &str, key: &str) -> bool {
     dialog == "solver" && key == "variables"
 }
 
+/// Whether the reference boxes of dialog `dialog` take relative references (`A1:A3`). Function
+/// Arguments' boxes do, since what they hold becomes part of a formula; every other dialog's boxes
+/// take absolute ones (`$A$1:$A$3`), as Excel's do.
+fn takes_relative(dialog: &str) -> bool {
+    dialog == "functionArguments"
+}
+
+/// How a reference box writes a picked selection: which areas, and with or without anchors.
+#[derive(Clone, Copy)]
+struct PickStyle {
+    /// Every area joined by commas, rather than only the area being selected (the last one).
+    several: bool,
+    /// Relative (`A1:A3`, a single cell `A2`) rather than absolute (`$A$1:$A$3`).
+    relative: bool,
+}
+
+impl PickStyle {
+    /// How the reference box `key` of dialog `dialog` writes a pick.
+    fn of(dialog: &str, key: &str) -> Self {
+        PickStyle { several: takes_several_areas(dialog, key), relative: takes_relative(dialog) }
+    }
+}
+
 /// The grid selection as a reference, with the sheet name when the selection is on another sheet
-/// than the one the dialog was opened on: every area joined by commas when `several`, otherwise
-/// only the area being selected (the last one).
-fn selection_ref(app: &SheetApp, home: Option<&Home>, several: bool) -> String {
+/// than the one the dialog was opened on, written as `style` says.
+fn selection_ref(app: &SheetApp, home: Option<&Home>, style: PickStyle) -> String {
     let Some(doc) = app.session.active() else { return String::new() };
     let current = [doc.selection.current()];
-    let areas = if several { doc.selection.ranges.as_slice() } else { &current[..] }.iter().map(abs);
+    let area = |r: &gridcraft_engine::core::RangeRef| if style.relative { r.a1() } else { abs(r) };
+    let areas = if style.several { doc.selection.ranges.as_slice() } else { &current[..] }.iter().map(area);
     match doc.wb.active() {
         // Once the dialog's own sheet is deleted, every reference carries its sheet's name.
         Some(sh) if home.is_some_and(|h| h.uid.get() != sh.uid.get()) => {
@@ -305,7 +329,7 @@ pub(super) fn begin_pick(app: &SheetApp, d: &mut Dialog, key: &str) {
     d.refs.refocus = false;
     // Focusing the box keeps its text: only a press after this one picks.
     d.refs.pressed = false;
-    d.refs.seen = selection_ref(app, d.refs.home.as_ref(), takes_several_areas(&d.name, key));
+    d.refs.seen = selection_ref(app, d.refs.home.as_ref(), PickStyle::of(&d.name, key));
     d.refs.seen_sheet = active_sheet_name(app);
 }
 
@@ -361,7 +385,7 @@ pub(super) fn ref_edit(app: &SheetApp, ui: &mut egui::Ui, d: &mut Dialog, key: &
         if r.gained_focus() {
             begin_pick(app, d, key);
         } else if d.refs.target.as_deref() == Some(key) {
-            let sel = selection_ref(app, d.refs.home.as_ref(), takes_several_areas(&d.name, key));
+            let sel = selection_ref(app, d.refs.home.as_ref(), PickStyle::of(&d.name, key));
             let sheet = active_sheet_name(app);
             let pressed = std::mem::take(&mut d.refs.pressed);
             if sheet != d.refs.seen_sheet && !pressed {
