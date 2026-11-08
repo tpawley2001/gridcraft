@@ -88,6 +88,14 @@ pub(crate) enum Mode {
     Cell,
     Shared,
     Name,
+    /// .xls NAME records: shared-formula offset tokens become #N/A, as in Excel.
+    XlsName,
+}
+
+impl Mode {
+    fn is_name(self) -> bool {
+        matches!(self, Self::Name | Self::XlsName)
+    }
 }
 
 /// A supporting link ([MS-XLS] 2.4.271): only links to this workbook (and add-in function
@@ -603,6 +611,11 @@ fn decode_in(
             // External workbook names are not resolved by this import.
             return Err(Unsupported("XLSB formula token"));
         }
+        // Offset tokens have no base cell in an .xls NAME record. Keep the name as
+        // #N/A like Excel; emitting wrapped A1 references can require repair on XLSX save.
+        if mode == Mode::XlsName && matches!(id, 0x2C | 0x2D) {
+            return Ok(Expr::Error(CellError::NA));
+        }
         match id {
             0x03..=0x11 => {
                 let op = match id {
@@ -745,7 +758,7 @@ fn decode_in(
                 let name = i.and_then(|i| links.names.get(i)).filter(|n| !n.is_empty()).ok_or(Unsupported("reference to a missing defined name"))?;
                 // A cell using a name the import drops would calculate to #NAME?: keep its
                 // saved result instead, as for references to other workbooks.
-                if mode != Mode::Name && i.and_then(|i| links.skipped.get(i)) == Some(&true) {
+                if !mode.is_name() && i.and_then(|i| links.skipped.get(i)) == Some(&true) {
                     return Err(Unsupported("defined names that were skipped"));
                 }
                 push(&mut stack, kids, Expr::Name(name.clone()))?;
@@ -796,10 +809,10 @@ fn decode_in(
                 let (first, last) = (t.u16()? as i16, t.u16()? as i16);
                 let kind = if id == 0x3A {
                     let (r, c) = grid.loc(&mut t)?;
-                    RefKind::Cell(anchor(r, c, base, mode == Mode::Name, grid)?)
+                    RefKind::Cell(anchor(r, c, base, mode.is_name(), grid)?)
                 } else {
                     let (r0, r1, c0, c1) = grid.area(&mut t)?;
-                    area(r0, r1, c0, c1, base, mode == Mode::Name, grid)?
+                    area(r0, r1, c0, c1, base, mode.is_name(), grid)?
                 };
                 push(
                     &mut stack,
@@ -818,7 +831,7 @@ fn decode_in(
             0x3A => {
                 let ixti = t.u16()?;
                 let (r, c) = grid.loc(&mut t)?;
-                let a = anchor(r, c, base, mode == Mode::Name, grid)?;
+                let a = anchor(r, c, base, mode.is_name(), grid)?;
                 push(
                     &mut stack,
                     kids,
@@ -831,7 +844,7 @@ fn decode_in(
             0x3B => {
                 let ixti = t.u16()?;
                 let (r0, r1, c0, c1) = grid.area(&mut t)?;
-                let kind = area(r0, r1, c0, c1, base, mode == Mode::Name, grid)?;
+                let kind = area(r0, r1, c0, c1, base, mode.is_name(), grid)?;
                 push(
                     &mut stack,
                     kids,
@@ -985,6 +998,28 @@ mod tests {
 
     fn text(rgce: &[u8], rgcb: &[u8]) -> Result<String, Unsupported> {
         decode(rgce, rgcb, CellRef::new(0, 0), Mode::Cell, &links()).map(|e| gridcraft_formula::print(&e))
+    }
+
+    #[test]
+    fn only_xls_names_replace_offset_tokens_with_na() {
+        for ptg in [0x2C, 0x4C, 0x6C, 0x2D, 0x4D, 0x6D] {
+            let area = ptg & 0x1F == 0x0D;
+            let mut biff8 = vec![ptg];
+            biff8.resize(if area { 9 } else { 5 }, 0);
+            let l = Links::default();
+            let base = CellRef::new(0, 0);
+            let name = decode_version(&biff8, &[], base, Mode::XlsName, &l, None).unwrap();
+            assert_eq!(name, Expr::Error(CellError::NA));
+            for mode in [Mode::Cell, Mode::Shared, Mode::Name] {
+                assert!(matches!(decode(&biff8, &[], base, mode, &l).unwrap(), Expr::Ref(_)));
+            }
+            let mut biff12 = vec![ptg];
+            biff12.resize(if area { 13 } else { 7 }, 0);
+            assert!(matches!(decode_xlsb(&biff12, &[], base, Mode::Name, &l).unwrap(), Expr::Ref(_)));
+        }
+        // Token-looking bytes inside a constant are data, not relative references.
+        let number = decode_version(&[0x1E, 0x2C, 0x6D], &[], CellRef::new(0, 0), Mode::XlsName, &Links::default(), None).unwrap();
+        assert_eq!(number, Expr::Number(f64::from(0x6D2C)));
     }
 
     #[test]
