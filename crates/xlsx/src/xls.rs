@@ -60,11 +60,7 @@ use crate::cfb::{self, Compound};
 use crate::tables::{col_width_to_px, pt_to_px};
 use crate::xls_crypto;
 use crate::{IoError, ReadReport};
-use formula::{
-    Biff5, Extern, ExternKind, Links, Mode, SupBook, Unsupported, Xti, cell_error, decode, decode_cell, decode_name, decode_version,
-    external_sheet_text,
-};
-use gridcraft_formula::Expr;
+use formula::{Biff5, Extern, ExternKind, Links, Mode, SupBook, Unsupported, Xti, cell_error, decode, decode_cell, decode_name, external_sheet_text};
 use records::{Cursor, Record, Records};
 
 const MAX_CELLS: usize = 4_000_000;
