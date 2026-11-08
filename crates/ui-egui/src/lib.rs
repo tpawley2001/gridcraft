@@ -81,12 +81,30 @@ pub struct AutoCorrectOptions {
     pub day_names: bool,
     pub caps_lock: bool,
     pub replace_text: bool,
+    #[serde(deserialize_with = "deserialize_auto_correct_entries")]
+    pub entries: Vec<(String, String)>,
 }
 
 impl Default for AutoCorrectOptions {
     fn default() -> Self {
-        Self { two_initial_caps: true, day_names: true, caps_lock: true, replace_text: true }
+        Self { two_initial_caps: true, day_names: true, caps_lock: true, replace_text: true, entries: default_auto_correct_entries() }
     }
+}
+
+fn sort_auto_correct_entries(entries: &mut [(String, String)]) {
+    entries.sort_by_cached_key(|(replace, _)| (replace.to_lowercase(), replace.clone()));
+}
+
+fn default_auto_correct_entries() -> Vec<(String, String)> {
+    let mut entries = gridcraft_engine::autocorrect::default_entries();
+    sort_auto_correct_entries(&mut entries);
+    entries
+}
+
+fn deserialize_auto_correct_entries<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<(String, String)>, D::Error> {
+    let mut entries = Vec::<(String, String)>::deserialize(deserializer)?;
+    sort_auto_correct_entries(&mut entries);
+    Ok(entries)
 }
 
 impl AutoCorrectOptions {
@@ -96,7 +114,7 @@ impl AutoCorrectOptions {
             day_names: self.day_names,
             caps_lock: self.caps_lock,
             replace_text: self.replace_text,
-            ..Default::default()
+            entries: self.entries.clone(),
         }
         .correct(text)
     }

@@ -41,6 +41,9 @@ pub(super) fn options(app: &mut SheetApp, ui: &mut Ui) {
             app.run_or_alert("options.autoCorrect", json!({(key): on}));
         }
     }
+    if ui.button(lang.tr("AutoCorrect Options...")).clicked() {
+        app.run_or_alert("ui.dialog", json!({"name": "autoCorrect"}));
+    }
     ui.add_space(18.0);
     section(ui, lang, "Options|Save");
     let mut autosave = app.ui.autosave;

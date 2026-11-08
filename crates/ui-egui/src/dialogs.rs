@@ -15,6 +15,7 @@ use crate::theme;
 
 mod about;
 mod analysis;
+mod auto_correct;
 mod charts;
 mod command_search;
 mod cond_format_rules;
@@ -1095,6 +1096,7 @@ impl Dialog {
                 d.result = app.session.run("formulas.evaluateFormula", json!({})).ok();
                 d
             }
+            "autoCorrect" => Dialog::custom("autoCorrect", "AutoCorrect", json!({"replace": "", "with": ""})),
             "spelling" => {
                 let mut d = Dialog::custom("spelling", "Spelling", json!({}));
                 d.result = Some(app.session.run("review.spelling", json!({})).unwrap_or_else(|e| json!({"error": e})));

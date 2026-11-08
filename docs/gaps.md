@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; earlier: §17: ten preset shapes draw and print their own outline; earlier: binary named-style identity; earlier: XLSX picture locks survive open + save; §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (G0201: persisted editable AutoCorrect replacement list; earlier: G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; earlier: §17: ten preset shapes draw and print their own outline; binary named-style identity; XLSX picture locks survive open + save; earlier: §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -138,8 +138,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   Special semantics: copying `A1:A2` with `A2 = =A1*3` to `C1` gives `D1 = =#REF!*3`.
   Relative formula references still shift normally instead of following cells within the transposed block.
 - AutoCorrect typed entries now supports two initial capitals, day names, accidental Caps Lock and
-  token replacements, with four persisted Proofing options. Editable replacements, sentence
-  capitalization, exceptions and AutoFormat As You Type remain.
+  token replacements, with four persisted Proofing options and an editable, persisted replacement
+  list in AutoCorrect Options (G0201). Sentence capitalization, exceptions and AutoFormat As You Type remain.
 - Next/previous sheet navigation now skips Hidden and VeryHidden worksheets without activating a
   hidden sheet at the workbook boundary. Other keyboard gaps below remain.
 - **Evidence:** #33, #49 (key tips: initial Home-tab support landed in #43 on 10-10, the rest of the ribbon not yet), #110, #28 (selection),
@@ -262,6 +262,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | minor | G0201: AutoCorrect Options edits the persisted replacement list with Replace/With and Add/Replace/Delete; commands list, set, delete and reset entries. Older settings retain the eight built-ins. |
 | 2026-11-08 | minor | G0202: XLSX Camera pictures retain `a14:cameraTool` range and shape id, their VML `Pict` shape with `FmlaPict`, and its image relationship and part across repeated saves. Snapshots are not refreshed (`camera_picture_vml_tests.rs`). |
 | 2026-11-08 | minor | §17: block arrows, chevron, pentagon, diamond, parallelogram and trapezoid presets kept from XLSX are drawn and printed with their own outline (`preset_paths`). |
 | 2026-11-08 | minor | `.xlsb` named styles keep builtinId, iLevel, hidden and customBuiltin on Save As `.xlsx`; `.xlsb` and `.xls` user styles keep their user identity even when named like built-ins. |
