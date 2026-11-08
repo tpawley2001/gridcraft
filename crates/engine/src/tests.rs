@@ -6145,6 +6145,7 @@ mod form_check_option;
 mod form_list;
 mod macros;
 mod objects;
+mod picture_aspect_lock;
 mod python_cells;
 mod python_commands;
 mod python_files;
