@@ -172,3 +172,24 @@ fn preset_without_an_outline_prints_its_box() {
     assert_eq!(p.len(), 1, "{p:?}");
     assert_eq!(p[0].len(), 4, "{p:?}");
 }
+
+#[test]
+fn octagon_preset_prints_eight_points_with_cut_corners() {
+    let mut s = shape_session(ShapeKind::Rectangle, preset("octagon"));
+    let p = red_paths(&mut s);
+    assert_eq!(p.len(), 1, "{p:?}");
+    assert_eq!(p[0].len(), 8, "{p:?}");
+    // Each side's two ends are inset from the corners: four distinct x and four distinct y.
+    assert_eq!(distinct(p[0].iter().map(|v| v.0)), 4, "{p:?}");
+    assert_eq!(distinct(p[0].iter().map(|v| v.1)), 4, "{p:?}");
+}
+
+#[test]
+fn triangle_preset_prints_three_points_with_a_centred_apex() {
+    let mut s = shape_session(ShapeKind::Rectangle, preset("triangle"));
+    let p = red_paths(&mut s);
+    assert_eq!(p.len(), 1, "{p:?}");
+    assert_eq!(p[0].len(), 3, "{p:?}");
+    assert_eq!(distinct(p[0].iter().map(|v| v.0)), 3, "{p:?}");
+    assert_eq!(distinct(p[0].iter().map(|v| v.1)), 2, "{p:?}");
+}

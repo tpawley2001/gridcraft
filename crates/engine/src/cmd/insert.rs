@@ -157,6 +157,24 @@ pub fn specs() -> Vec<CommandSpec> {
             move_object
         ),
         cmd!(
+            "image.setLockAspectRatio",
+            "Lock aspect ratio",
+            ["Picture Format", "Size"],
+            None,
+            "{id, locked: bool}",
+            has_doc,
+            image_set_lock_aspect_ratio
+        ),
+        cmd!(
+            "image.setSize",
+            "Size (Picture Format > Size)",
+            ["Picture Format", "Size"],
+            None,
+            "{id, width?, height?} (points; one dimension keeps proportions when aspect ratio is locked; both dimensions override the lock)",
+            has_doc,
+            image_set_size
+        ),
+        cmd!(
             "object.setAnchorMode",
             "Object Properties",
             [],
@@ -1338,6 +1356,73 @@ fn move_object(s: &mut Session, p: &Json) -> Result<Json> {
     })
 }
 
+/// Resolve picture ids without letting an out-of-range integer name another picture.
+fn image_param(s: &Session, p: &Json, cmd: &str) -> Result<(usize, u32)> {
+    let id = p.get("id").and_then(Json::as_u64).and_then(|id| u32::try_from(id).ok()).ok_or_else(|| bad(cmd, "invalid picture `id`"))?;
+    let d = s.doc()?;
+    let sheet = d.wb.active_sheet();
+    let sh = d.wb.sheet(sheet).ok_or_else(|| bad(cmd, "no such picture"))?;
+    if !sh.images.iter().any(|image| image.id == id) {
+        return Err(bad(cmd, "no such picture"));
+    }
+    if sh.is_protected() {
+        return Err(EngineError::Other(PROTECTED.into()));
+    }
+    Ok((sheet, id))
+}
+
+fn image_set_lock_aspect_ratio(s: &mut Session, p: &Json) -> Result<Json> {
+    const CMD: &str = "image.setLockAspectRatio";
+    let (sheet, id) = image_param(s, p, CMD)?;
+    let locked = bool_param(p, "locked").ok_or_else(|| bad(CMD, "`locked` must be a boolean"))?;
+    edit(s, |cx| {
+        let image = cx.sheet_mut(sheet)?.images.iter_mut().find(|image| image.id == id).ok_or_else(|| bad(CMD, "no such picture"))?;
+        image.locks.get_or_insert_with(Default::default).no_change_aspect = locked;
+        Ok(json!({"locked": locked}))
+    })
+}
+
+fn image_set_size(s: &mut Session, p: &Json) -> Result<Json> {
+    const CMD: &str = "image.setSize";
+    let (sheet, id) = image_param(s, p, CMD)?;
+    let dimension = |key| -> Result<Option<f64>> {
+        match p.get(key) {
+            None => Ok(None),
+            Some(value) => value.as_f64().filter(|v| v.is_finite()).map(Some).ok_or_else(|| bad(CMD, format!("`{key}` must be a finite number"))),
+        }
+    };
+    let width = dimension("width")?;
+    let height = dimension("height")?;
+    if width.is_none() && height.is_none() {
+        return Err(bad(CMD, "provide `width` or `height`"));
+    }
+    edit(s, |cx| {
+        let image = cx.sheet_mut(sheet)?.images.iter_mut().find(|image| image.id == id).ok_or_else(|| bad(CMD, "no such picture"))?;
+        let old_w = f64::from(image.anchor.width);
+        let old_h = f64::from(image.anchor.height);
+        let cap_w = size_cap(image.anchor.width);
+        let cap_h = size_cap(image.anchor.height);
+        let mut w = width.map_or(old_w, |w| w.clamp(1.0, cap_w));
+        let mut h = height.map_or(old_h, |h| h.clamp(0.0, cap_h));
+        if image.aspect_locked() {
+            match (width, height) {
+                (Some(_), None) if old_w > 0.0 => h = old_h * (w / old_w),
+                (None, Some(_)) if old_h > 0.0 => w = old_w * (h / old_h),
+                _ => {}
+            }
+            // A proportional resize must shrink both dimensions when either reaches its cap.
+            if width.is_some() != height.is_some() {
+                let scale = (cap_w / w).min(cap_h / h).min(1.0);
+                w *= scale;
+                h *= scale;
+            }
+        }
+        image.anchor.width = w.clamp(1.0, cap_w) as f32;
+        image.anchor.height = h.clamp(0.0, cap_h) as f32;
+        Ok(json!({"width": image.anchor.width, "height": image.anchor.height}))
+    })
+}
+
 /// Sets an object's anchor mode (Excel's "Move and size with cells" / "Move but don't size with
 /// cells" / "Don't move or size with cells"), so it follows — or ignores — its rows and columns
 /// when the sheet is sorted or edited structurally.
@@ -1886,6 +1971,56 @@ fn insert_icon(s: &mut Session, p: &Json) -> Result<Json> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn picture_size_limits_zero_dimensions_and_lock_undo() {
+        use gridcraft_model::AnchorMode;
+        use serde_json::json;
+
+        for (old_w, old_h, params, expected) in [
+            (80.0, 40.0, json!({"width": 9000}), (9000.0, 4500.0)),
+            (40.0, 80.0, json!({"width": 9000}), (5000.0, 10000.0)),
+            (20000.0, 10000.0, json!({"height": 20000}), (20000.0, 10000.0)),
+            (80.0, 0.0, json!({"height": 60}), (80.0, 60.0)),
+            (0.0, 40.0, json!({"width": 50}), (50.0, 40.0)),
+            (80.0, 40.0, json!({"width": -10}), (1.0, 0.5)),
+        ] {
+            let mut s = super::Session::new();
+            s.new_workbook();
+            let d = s.doc_mut().unwrap();
+            let wb = std::sync::Arc::make_mut(&mut d.wb);
+            let id = wb.next_object_id();
+            wb.sheet_mut(0).unwrap().images.push(gridcraft_model::Image {
+                locks: None,
+                hidden: false,
+                hyperlink: None,
+                name: None,
+                id,
+                anchor: gridcraft_model::Anchor {
+                    cell: gridcraft_core::CellRef::parse("A1").unwrap(),
+                    dx: 0.0,
+                    dy: 0.0,
+                    width: old_w,
+                    height: old_h,
+                    mode: AnchorMode::MoveAndSize,
+                },
+                data: Vec::new().into(),
+                mime: "image/png".into(),
+                alt: String::new(),
+                link: None,
+                blip_ext: Vec::new(),
+                camera: None,
+            });
+            let mut params = params;
+            params["id"] = json!(id);
+            let result = s.execute("image.setSize", params).unwrap();
+            assert_eq!((result["width"].as_f64().unwrap(), result["height"].as_f64().unwrap()), expected);
+            assert!(s.execute("image.setSize", json!({"id": id, "width": "bad"})).is_err());
+            s.execute("image.setLockAspectRatio", json!({"id": id, "locked": false})).unwrap();
+            s.execute("edit.undo", json!({})).unwrap();
+            assert!(s.doc().unwrap().wb.sheet(0).unwrap().images.first().unwrap().aspect_locked());
+        }
+    }
+
     use super::*;
 
     #[test]
