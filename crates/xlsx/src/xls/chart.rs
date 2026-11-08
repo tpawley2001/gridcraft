@@ -919,6 +919,7 @@ impl Embedded {
             };
             let anchor = place_at(sheet, &a);
             sheet.images.push(Image {
+                camera: None,
                 locks: None,
                 hidden: props.hidden,
                 hyperlink: None,
@@ -935,6 +936,7 @@ impl Embedded {
         // A damaged store was reported when it was read.
         for (a, name, data) in self.biff5_pictures {
             sheet.images.push(Image {
+                camera: None,
                 locks: None,
                 hidden: false,
                 hyperlink: None,

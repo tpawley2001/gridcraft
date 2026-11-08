@@ -38,6 +38,7 @@ fn notes_share_or_split_picture_relationships() {
     let mut wb = Workbook::new();
     let sheet = wb.sheet_mut(0).unwrap();
     sheet.images.push(Image {
+        camera: None,
         locks: None,
         hidden: false,
         hyperlink: None,

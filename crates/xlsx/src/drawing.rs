@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
 use gridcraft_model::{
-    Anchor, AnchorMode, Color, DrawingHyperlink, GeometryPath, Image, PathCommand, PictureLocks, Shape, ShapeFormat, ShapeGeometry, ShapeKind,
-    ShapeTextAlign, ShapeTextAnchor, ShapeTextVert, ShapeTextWrap, Sheet, Theme,
+    Anchor, AnchorMode, CameraTool, Color, DrawingHyperlink, GeometryPath, Image, PathCommand, PictureLocks, Shape, ShapeFormat, ShapeGeometry,
+    ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextVert, ShapeTextWrap, Sheet, Theme,
 };
 
 use crate::IoError;
@@ -284,6 +284,13 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                     let blip_ext = blip_ext::read(cx, part, &mut lookup, exts)?;
                     let id = cx.next_object_id();
                     sheet.images.push(Image {
+                        camera: obj.path(&["nvPicPr", "cNvPicPr", "extLst"]).and_then(|list| {
+                            let camera = list
+                                .kids("ext")
+                                .filter(|ext| ext.attr("uri") == Some("{84589F7E-364E-4C9E-8A38-B11213B215E9}"))
+                                .find_map(|ext| ext.child("cameraTool"))?;
+                            Some(CameraTool { cell_range: camera.attr("cellRange")?.to_string(), spid: camera.attr("spid")?.to_string() })
+                        }),
                         locks: obj.path(&["nvPicPr", "cNvPicPr"]).map(|p| {
                             p.child("picLocks")
                                 .map(|l| PictureLocks {
@@ -824,9 +831,9 @@ fn kept_ids(kept: &[(usize, String)]) -> HashSet<usize> {
     ids
 }
 
-fn write_picture_locks(locks: &Option<PictureLocks>) -> String {
-    match locks {
-        None => "<xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr>".to_string(),
+fn write_picture_locks(locks: &Option<PictureLocks>, camera: Option<&CameraTool>) -> String {
+    let mut inner = match locks {
+        None => "<a:picLocks noChangeAspect=\"1\"/>".to_string(),
         Some(l) => {
             let mut attrs = String::new();
             for (name, enabled) in [
@@ -846,9 +853,18 @@ fn write_picture_locks(locks: &Option<PictureLocks>) -> String {
                     let _ = write!(attrs, " {name}=\"1\"");
                 }
             }
-            if attrs.is_empty() { "<xdr:cNvPicPr/>".to_string() } else { format!("<xdr:cNvPicPr><a:picLocks{attrs}/></xdr:cNvPicPr>") }
+            if attrs.is_empty() { String::new() } else { format!("<a:picLocks{attrs}/>") }
         }
+    };
+    if let Some(camera) = camera {
+        let _ = write!(
+            inner,
+            "<a:extLst><a:ext uri=\"{{84589F7E-364E-4C9E-8A38-B11213B215E9}}\"><a14:cameraTool xmlns:a14=\"http://schemas.microsoft.com/office/drawing/2010/main\" cellRange=\"{}\" spid=\"{}\"/></a:ext></a:extLst>",
+            esc_attr(&camera.cell_range),
+            esc_attr(&camera.spid)
+        );
     }
+    if inner.is_empty() { "<xdr:cNvPicPr/>".to_string() } else { format!("<xdr:cNvPicPr>{inner}</xdr:cNvPicPr>") }
 }
 
 /// The drawing part for a sheet's objects (relationship ids already assigned), with the kept
@@ -889,7 +905,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                     (true, Some(l)) => format!("r:link=\"{l}\""),
                     (true, None) => String::new(),
                 };
-                let locks = write_picture_locks(&img.locks);
+                let locks = write_picture_locks(&img.locks, img.camera.as_ref());
                 let link = write_hyperlink(img.hyperlink.as_ref(), rels);
                 let name = esc_attr(&img.name.clone().unwrap_or_else(|| format!("Picture {}", id - 1)));
                 let (open, close) = anchor_open(sheet, &img.anchor);
