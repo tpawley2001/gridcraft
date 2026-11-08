@@ -526,7 +526,7 @@ fn sheets_share_one_record_budget() {
 
 #[test]
 fn formulas_using_a_skipped_name_keep_their_saved_results() {
-    // Lbl "ExtRange" = [Source.xlsx]Sheet1!$A$1:$A$3 (PtgArea3d through an external SupBook),
+    // Lbl "ExtRange" = a PtgArea3d through an XTI whose SupBook index the file doesn't have,
     // "Local" = Sheet1!$A$1 and "Twice" = ExtRange*2. Only the first is skipped on import; a
     // name that uses it is still read as it was.
     let ext = cat(&[&[0x3B], &1u16.to_le_bytes(), &u16s(&[0, 2, 0, 0])]);
@@ -542,7 +542,7 @@ fn formulas_using_a_skipped_name_keep_their_saved_results() {
             &boundsheet(pos),
             &rec(0x01AE, &u16s(&[1, 0x0401])),
             &rec(0x01AE, &cat(&[&u16s(&[1]), &xlstr("Source.xlsx"), &xlstr("Sheet1")])),
-            &rec(0x0017, &cat(&[&u16s(&[2]), &u16s(&[0, 0, 0]), &u16s(&[1, 0, 0])])),
+            &rec(0x0017, &cat(&[&u16s(&[2]), &u16s(&[0, 0, 0]), &u16s(&[7, 0, 0])])),
             &lbl("ExtRange", &ext),
             &lbl("Local", &local),
             &lbl("Twice", &twice),
