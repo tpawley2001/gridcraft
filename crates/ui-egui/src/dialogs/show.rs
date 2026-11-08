@@ -460,10 +460,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
     } else if confirm {
         open = false;
     }
-    if !open && !confirm && d.name == "functionArguments" {
-        // Cancel, Escape or closing Function Arguments cancels the cell edit, as in Excel.
-        app.cancel_edit();
-    }
+    super::function_arguments::after(app, &d, open, confirm);
     if !open
         && !confirm
         && let Err(e) = end_pick(app, &mut d)

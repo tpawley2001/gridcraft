@@ -169,6 +169,13 @@ pub(super) fn function_arguments(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut 
     }
 }
 
+/// Cancel, Escape or closing Function Arguments cancels the cell edit, as in Excel.
+pub(super) fn after(app: &mut SheetApp, d: &Dialog, open: bool, confirm: bool) {
+    if !open && !confirm && d.name == "functionArguments" {
+        app.cancel_edit();
+    }
+}
+
 /// OK: the call replaces the one the dialog was opened on (`span`), or the whole edit, and the
 /// cell is entered without moving the selection.
 fn enter(app: &mut SheetApp, d: &Dialog, call: &str) {
