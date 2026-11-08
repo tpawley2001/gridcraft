@@ -1558,12 +1558,18 @@
    "note": "landed in the catalog; live since T7 probe"
   },
   {
+   "seq": "MAD",
+   "kind": "command",
+   "target": "formulas.removeDependentArrows",
+   "excel": "Remove Dependent Arrows",
+   "note": ""
+  },
+  {
    "seq": "MAP",
    "kind": "command",
    "target": "formulas.removePrecedentArrows",
-   "pending": true,
    "excel": "Remove Precedent Arrows",
-   "note": "Remove Precedent Arrows; reserved until the command lands"
+   "note": ""
   },
   {
    "seq": "MB",

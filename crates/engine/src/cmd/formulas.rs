@@ -81,6 +81,8 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "formulas.selectPrecedents", "Select Precedents", ["Formulas", "Formula Auditing"], Some("Ctrl+["), "{cell?, all?: true = every level (Ctrl+Shift+[)} → selects the precedent cells", has_doc, select_precedents),
         cmd!(noundo "formulas.selectDependents", "Select Dependents", ["Formulas", "Formula Auditing"], Some("Ctrl+]"), "{cell?, all?: true = every level (Ctrl+Shift+])}", has_doc, select_dependents),
         cmd!(noundo "formulas.removeArrows", "Remove Arrows", ["Formulas", "Formula Auditing"], None, "{}", has_doc, |_, _| ok()),
+        cmd!(noundo "formulas.removePrecedentArrows", "Remove Precedent Arrows", ["Formulas", "Formula Auditing"], None, "{}", has_doc, |_, _| ok()),
+        cmd!(noundo "formulas.removeDependentArrows", "Remove Dependent Arrows", ["Formulas", "Formula Auditing"], None, "{}", has_doc, |_, _| ok()),
         cmd!("formulas.showFormulas", "Show Formulas", ["Formulas", "Formula Auditing"], Some("Ctrl+`"), "{on?}", has_doc, show_formulas),
         cmd!(
             "formulas.convertToNumber",

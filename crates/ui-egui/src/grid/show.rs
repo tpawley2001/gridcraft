@@ -1,4 +1,3 @@
-use super::Trace;
 use super::cursor::update_cursor;
 use super::editor::{in_cell_editor, list_picker, validation_arrow};
 use super::geo::Geo;
@@ -14,6 +13,7 @@ use super::{
 };
 #[cfg(test)]
 use super::{CellRef, Pos2};
+use super::{Trace, TraceKind};
 
 pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
@@ -755,7 +755,7 @@ pub(crate) fn paint_overlays(input: OverlayInput<'_>) {
         let t = Tokens::get(p.ctx());
         let clip = p.clip_rect();
         for a in trace.arrows.iter().filter(|a| a.from.0 == si && a.to.0 == si) {
-            let colour = if a.error { t.sheet_trace_error } else { t.sheet_trace_arrow };
+            let colour = if a.kind == TraceKind::Error { t.sheet_trace_error } else { t.sheet_trace_arrow };
             let (fr, tr) = (geo.range_rect(sh, a.from.1), geo.range_rect(sh, a.to.1));
             for (range, rect) in [(a.from.1, fr), (a.to.1, tr)] {
                 if !range.is_single() {
@@ -858,10 +858,13 @@ mod trace_arrow_tests {
         app.run("selection.set", json!({"cell": cell})).unwrap();
     }
 
-    /// What the ribbon's Trace Precedents / Trace Dependents buttons do.
+    /// What the ribbon's Trace Precedents / Trace Dependents buttons and Trace Error do.
     fn trace(app: &mut SheetApp, id: &str) {
-        let r = app.run(id, json!({})).unwrap();
-        app.grid.trace = Trace::new(app, r);
+        match id {
+            "formulas.tracePrecedents" => app.trace_precedents(),
+            "formulas.traceDependents" => app.trace_dependents(),
+            _ => app.trace_error(),
+        }
     }
 
     /// The lines `paint_overlays` draws on the active sheet scrolled by `scroll`, as (tail, head)
@@ -1052,7 +1055,7 @@ mod trace_arrow_tests {
         trace(&mut app, "formulas.traceError");
         assert_eq!(error_arrows(&mut app).1.len(), 2);
         // What the ribbon's Remove Arrows button does.
-        app.grid.trace = None;
+        app.remove_arrows();
         assert!(error_arrows(&mut app).1.is_empty() && arrows(&mut app).1.is_empty());
         trace(&mut app, "formulas.traceError");
         app.run("cell.set", json!({"cell": "H1", "input": "2"})).unwrap();
