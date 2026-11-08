@@ -287,7 +287,7 @@ fn group_shortcuts_are_the_windows_ones() {
 fn summary_rows_above_the_detail_take_the_collapsed_mark() {
     let mut s = nested_rows();
     let r = s.execute("data.outlineSettings", json!({"summaryBelow": false})).unwrap();
-    assert_eq!(r, json!({"summaryBelow": false, "summaryRight": true}));
+    assert_eq!(r, json!({"summaryBelow": false, "summaryRight": true, "automaticStyles": false}));
     // Row 4 (index 3) is the outer group's summary, row 5 the inner one's.
     s.execute("data.hideDetail", json!({"rows": "5:8", "level": 1})).unwrap();
     assert_eq!(row_state(&s, 3..=8), [(false, true), (true, false), (true, false), (true, false), (true, false), (false, false)]);
@@ -321,7 +321,10 @@ fn changing_the_summary_direction_moves_collapsed_marks() {
     // One undo step per change; no params leaves the settings as they are.
     s.execute("edit.undo", json!({})).unwrap();
     assert!(row_state(&s, 3..=3)[0].1);
-    assert_eq!(s.execute("data.outlineSettings", json!({})).unwrap(), json!({"summaryBelow": false, "summaryRight": false}));
+    assert_eq!(
+        s.execute("data.outlineSettings", json!({})).unwrap(),
+        json!({"summaryBelow": false, "summaryRight": false, "automaticStyles": false})
+    );
     // Nested groups that end on one row share its mark: it moves to the outer group only.
     let mut s = Session::new();
     s.new_workbook();
