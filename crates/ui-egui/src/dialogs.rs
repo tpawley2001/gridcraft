@@ -790,8 +790,11 @@ impl Dialog {
                 json!({"groupBy": "A", "function": "sum"}),
             ),
             "outlineSettings" => {
-                let (below, right) =
-                    app.session.active().and_then(|d| d.wb.active().map(|s| (s.summary_below, s.summary_right))).unwrap_or((true, true));
+                let (below, right, styles) = app
+                    .session
+                    .active()
+                    .and_then(|d| d.wb.active().map(|s| (s.summary_below, s.summary_right, s.outline_apply_styles)))
+                    .unwrap_or((true, true, false));
                 Dialog::form(
                     "outlineSettings",
                     "Settings",
@@ -799,8 +802,9 @@ impl Dialog {
                     vec![
                         Check { key: "summaryBelow", label: "Summary rows below detail" },
                         Check { key: "summaryRight", label: "Summary columns to right of detail" },
+                        Check { key: "automaticStyles", label: "Automatic styles" },
                     ],
-                    json!({"summaryBelow": below, "summaryRight": right}),
+                    json!({"summaryBelow": below, "summaryRight": right, "automaticStyles": styles}),
                 )
             }
             "zoom" => {

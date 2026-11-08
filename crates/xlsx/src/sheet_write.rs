@@ -100,7 +100,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
     let mut s = format!("{XML_DECL}<worksheet xmlns=\"{NS_MAIN}\" xmlns:r=\"{NS_REL}\">");
     // sheetPr
     let fit = sheet.print.fit_to.is_some();
-    let summary = !sheet.summary_below || !sheet.summary_right;
+    let summary = sheet.outline_apply_styles || !sheet.summary_below || !sheet.summary_right;
     if sheet.tab_color.is_some() || fit || summary || sheet.code_name.is_some() {
         s.push_str("<sheetPr");
         if let Some(name) = &sheet.code_name {
@@ -112,6 +112,9 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
         }
         if summary {
             s.push_str("<outlinePr");
+            if sheet.outline_apply_styles {
+                s.push_str(" applyStyles=\"1\"");
+            }
             for (key, on) in [("summaryBelow", sheet.summary_below), ("summaryRight", sheet.summary_right)] {
                 if !on {
                     let _ = write!(s, " {key}=\"0\"");
