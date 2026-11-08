@@ -4,6 +4,7 @@ mod app_props_manager_tests;
 mod array_export;
 mod autofilter_date_tests;
 mod axis_scale_roundtrip;
+mod binary_cell_style_identity_tests;
 mod binary_custom_props_tests;
 mod binary_doc_props;
 mod binary_workbook_view_tests;

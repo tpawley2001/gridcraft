@@ -40,7 +40,7 @@ fn brt_style(ixf: u32, builtin: Option<u8>, name: &str) -> Vec<u8> {
 }
 /// Formats (164 `#,##0.00`), fonts (0 plain, 1 bold, 2 green), fills (0 none, 1 gray125, 2 solid
 /// green), cell style XFs `style_xfs`, cell XFs [0 default, 1 bold] and the BrtStyle records.
-fn styles_part(style_xfs: &[Vec<u8>], styles: &[Vec<u8>]) -> Vec<u8> {
+pub(super) fn styles_part(style_xfs: &[Vec<u8>], styles: &[Vec<u8>]) -> Vec<u8> {
     let mut out = record(278, &[]);
     out.extend(record(615, &1u32.to_le_bytes()));
     let mut fmt = 164u16.to_le_bytes().to_vec();
