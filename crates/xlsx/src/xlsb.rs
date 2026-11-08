@@ -1762,12 +1762,13 @@ fn worksheet(
                 }
             }
             147 => {
-                // BrtWsProp ([MS-XLSB] 2.4.875): fRowSumsBelow (bit 6), fColSumsRight (bit 7),
-                // fFitToPage (bit 8) and the tab colour.
+                // BrtWsProp ([MS-XLSB] 2.4.875): fApplyStyles (bit 5), fRowSumsBelow (bit 6),
+                // fColSumsRight (bit 7), fFitToPage (bit 8) and the tab colour.
                 if let Some(flags) = page.read(report, "BrtWsProp", || Bytes::new(payload).u16()) {
                     page.fit_to_page = flags & 0x0100 != 0;
                     sheet.summary_below = flags & 0x0040 != 0;
                     sheet.summary_right = flags & 0x0080 != 0;
+                    sheet.outline_apply_styles = flags & 0x0020 != 0;
                 }
                 if tab_color(&mut sheet, payload).is_err() {
                     report.warn("Malformed XLSB sheet property records were skipped.");

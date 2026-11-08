@@ -88,6 +88,8 @@ const WSBOOL_DIALOG: u8 = 0x10;
 const WSBOOL_ROW_SUMS_BELOW: u16 = 0x0040;
 const WSBOOL_COL_SUMS_RIGHT: u16 = 0x0080;
 const WSBOOL_FIT_TO_PAGE: u16 = 0x0100;
+/// WsBool as a little-endian u16: `fApplyStyles`, Outline Settings "Automatic styles".
+const WSBOOL_APPLY_STYLES: u16 = 0x0020;
 
 pub(crate) fn invalid(msg: impl Into<String>) -> IoError {
     IoError::Format(format!("XLS: {}", msg.into()))
@@ -1228,6 +1230,7 @@ fn worksheet(
                     st.page.fit_to_page = flags & WSBOOL_FIT_TO_PAGE != 0;
                     st.sheet.summary_below = flags & WSBOOL_ROW_SUMS_BELOW != 0;
                     st.sheet.summary_right = flags & WSBOOL_COL_SUMS_RIGHT != 0;
+                    st.sheet.outline_apply_styles = flags & WSBOOL_APPLY_STYLES != 0;
                 }
             }
             _ => {}
