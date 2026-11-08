@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-08 · **Change:** minor (binary named-style identity; earlier: XLSX picture locks survive open + save; `outlinePr applyStyles` (Outline Settings › Automatic styles) is read and written back; `.xls` shapes in Continue records after Obj are imported; `.xls` links to other workbooks are read and kept on save; check boxes, option buttons, spin buttons, scroll bars, list boxes, drop-downs, group boxes and labels open as form controls; `.xlsx` form list boxes, drop-downs, group boxes and labels are read, drawn and written; `.xls` and `.xlsb` worksheet macro commands keep saved values; `.xls` names holding relative-offset references open as `#N/A`; `.xls` names defined in linked workbooks are read and kept on save; `.xls` defined names into other workbooks are kept)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-08 · **Change:** minor (`.xls` WsBool and `.xlsb` BrtWsProp `fApplyStyles` (Outline Settings › Automatic styles) are read; earlier: binary named-style identity; XLSX picture locks survive open + save; `outlinePr applyStyles` (Outline Settings › Automatic styles) is read and written back; `outlinePr applyStyles` is read and written back; `.xls` shapes in Continue records after Obj are imported; `.xls` links to other workbooks are read and kept on save; check boxes, option buttons, spin buttons, scroll bars, list boxes, drop-downs, group boxes and labels open as form controls; `.xlsx` form list boxes, drop-downs, group boxes and labels are read, drawn and written; `.xls` and `.xlsb` worksheet macro commands keep saved values; `.xls` names holding relative-offset references open as `#N/A`; `.xls` names defined in linked workbooks are read and kept on save; `.xls` defined names into other workbooks are kept)
 
 
 Every format Excel opens or saves, with GridCraft's read and write support, fidelity and tests.
@@ -190,6 +190,7 @@ Truncated packages. When an `.xlsx`, `.xlsm` or `.xlsb` file has lost its ZIP ce
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | minor | G0199: `.xls` WsBool and `.xlsb` BrtWsProp `fApplyStyles` (bit 5, Outline Settings › Automatic styles) are read into the sheet and saved as `.xlsx` `outlinePr applyStyles` instead of dropped (`legacy_outline_apply_styles.rs`) |
 | 2026-11-08 | minor | `.xlsb` named styles keep builtinId, iLevel, hidden and customBuiltin on Save As `.xlsx`; `.xlsb` and `.xls` user styles keep their user identity even when named like built-ins. |
 | 2026-11-08 | minor | G0198: XLSX pictures retain all `a:picLocks`, including an unlocked aspect ratio, through open + save. |
 | 2026-11-08 | minor | G0194: `.xlsx` `<sheetPr><outlinePr applyStyles="1"/>` (ECMA-376 Part 1 §18.3.1.61, Outline Settings › Automatic styles) is read and written back, before `summaryBelow` / `summaryRight`, instead of dropped |
