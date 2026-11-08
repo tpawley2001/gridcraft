@@ -356,3 +356,35 @@ pub(crate) fn heading_font_size(zoom: f32) -> f32 {
 
 #[cfg(test)]
 mod tests;
+
+impl SheetApp {
+    /// Formulas › Trace Precedents on the active cell; again on a traced cell, the next level.
+    pub fn trace_precedents(&mut self) {
+        todo!()
+    }
+
+    /// Formulas › Trace Dependents on the active cell; again on a traced cell, the next level.
+    pub fn trace_dependents(&mut self) {
+        todo!()
+    }
+
+    /// Formulas › Remove Arrows: every tracer arrow.
+    pub fn remove_arrows(&mut self) {
+        todo!()
+    }
+
+    /// Remove Arrows › Remove Precedent Arrows: the deepest level of precedent arrows.
+    pub fn remove_precedent_arrows(&mut self) {
+        todo!()
+    }
+
+    /// Remove Arrows › Remove Dependent Arrows: the deepest level of dependent arrows.
+    pub fn remove_dependent_arrows(&mut self) {
+        todo!()
+    }
+
+    /// The tracer arrows on the active sheet as `"{from}->{to} {kind} {level}"`, sorted.
+    pub fn trace_arrows(&self) -> Vec<String> {
+        todo!()
+    }
+}
