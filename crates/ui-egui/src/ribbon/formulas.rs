@@ -150,19 +150,29 @@ pub(super) fn formulas(app: &mut SheetApp, ui: &mut Ui) {
     });
     sep(ui);
     ui.vertical(|ui| {
-        if small_button(ui, Icon::Trace, "Trace Precedents", "Trace Precedents", false).clicked()
-            && let Ok(r) = app.run("formulas.tracePrecedents", json!({}))
-        {
-            app.grid.trace = crate::grid::Trace::new(app, r);
+        if small_button(ui, Icon::Trace, "Trace Precedents", "Trace Precedents", false).clicked() {
+            app.trace_precedents();
         }
-        if small_button(ui, Icon::Trace, "Trace Dependents", "Trace Dependents", false).clicked()
-            && let Ok(r) = app.run("formulas.traceDependents", json!({}))
-        {
-            app.grid.trace = crate::grid::Trace::new(app, r);
+        if small_button(ui, Icon::Trace, "Trace Dependents", "Trace Dependents", false).clicked() {
+            app.trace_dependents();
         }
-        if small_button(ui, Icon::Close, "Remove Arrows", "Remove Arrows", false).clicked() {
-            app.grid.trace = None;
+        // Each Remove Precedent / Dependent Arrows takes away one level, the deepest shown.
+        let (remove, remove_arrow) = small_split_button(ui, Icon::Close, "Remove Arrows", "Remove Arrows");
+        if remove.clicked() {
+            app.remove_arrows();
         }
+        egui::Popup::menu(&remove_arrow).show(|ui| {
+            let lang = app.ui.language;
+            if ui.button(lang.tr("Remove Arrows")).clicked() {
+                app.remove_arrows();
+            }
+            if ui.button(lang.tr("Remove Precedent Arrows")).clicked() {
+                app.remove_precedent_arrows();
+            }
+            if ui.button(lang.tr("Remove Dependent Arrows")).clicked() {
+                app.remove_dependent_arrows();
+            }
+        });
     });
     ui.vertical(|ui| {
         let __k = small_button(ui, Icon::Fx, "Show Formulas", "Show Formulas", false);
@@ -180,13 +190,8 @@ pub(super) fn formulas(app: &mut SheetApp, ui: &mut Ui) {
             if ui.button(format!("{}…", lang.tr("Error Checking"))).clicked() {
                 app.open_dialog("errorChecking", json!({}));
             }
-            // A cell without an error, or one its error starts in without references, has no
-            // arrows: the ones shown stay.
-            if ui.button(lang.tr("Trace Error")).clicked()
-                && let Ok(r) = app.run("formulas.traceError", json!({}))
-                && r["arrows"].as_array().is_some_and(|a| !a.is_empty())
-            {
-                app.grid.trace = crate::grid::Trace::new(app, r);
+            if ui.button(lang.tr("Trace Error")).clicked() {
+                app.trace_error();
             }
             let circular = circular_references(app);
             ui.add_enabled_ui(!circular.is_empty(), |ui| {

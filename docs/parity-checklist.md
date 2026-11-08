@@ -4,7 +4,7 @@
 
 Each entry is an Excel ribbon or menu command (feature names only). It counts as implemented when GridCraft registers a command with the same id. This measures breadth only; the overall assessment (depth, fidelity, effort) is in [target-app-parity.md](target-app-parity.md).
 
-**Overall: 283 / 298 commands implemented (95.0%).**
+**Overall: 285 / 300 commands implemented (95.0%).**
 
 | Tab | Implemented | Total | Parity |
 |---|---|---|---|
@@ -13,7 +13,7 @@ Each entry is an Excel ribbon or menu command (feature names only). It counts as
 | Insert | 18 | 25 | 72% |
 | Draw | 4 | 4 | 100% |
 | Page Layout | 23 | 23 | 100% |
-| Formulas | 23 | 23 | 100% |
+| Formulas | 25 | 25 | 100% |
 | Data | 23 | 28 | 82% |
 | Review | 15 | 18 | 83% |
 | View | 21 | 21 | 100% |
@@ -210,7 +210,7 @@ Implemented:
 - `arrange.group` Group (Arrange)
 - `arrange.rotate` Rotate (Arrange)
 
-## Formulas (23 / 23, 100%)
+## Formulas (25 / 25, 100%)
 
 Implemented:
 
@@ -230,6 +230,8 @@ Implemented:
 - `formulas.tracePrecedents` Trace Precedents (Formula Auditing)
 - `formulas.traceDependents` Trace Dependents (Formula Auditing)
 - `formulas.removeArrows` Remove Arrows (Formula Auditing)
+- `formulas.removePrecedentArrows` Remove Precedent Arrows (Formula Auditing)
+- `formulas.removeDependentArrows` Remove Dependent Arrows (Formula Auditing)
 - `formulas.showFormulas` Show Formulas (Formula Auditing)
 - `formulas.errorChecking` Error Checking (Formula Auditing)
 - `formulas.evaluateFormula` Evaluate Formula (Formula Auditing)

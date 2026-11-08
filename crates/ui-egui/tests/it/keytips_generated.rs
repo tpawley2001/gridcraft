@@ -1648,13 +1648,23 @@ fn keytip_maa_() {
 }
 
 #[test]
+fn keytip_mad_() {
+    let mut h = harness(blank());
+    sequence(&mut h, "MAD", false);
+    assert!(
+        h.state().session.journal.iter().any(|(id, _)| id == "formulas.removeDependentArrows"),
+        "MAD must journal formulas.removeDependentArrows"
+    );
+}
+
+#[test]
 fn keytip_map_() {
     let mut h = harness(blank());
     sequence(&mut h, "MAP", false);
-    assert!(h.state().dialog.is_none(), "MAP must not open a dialog");
-    assert!(h.state().message.is_none(), "MAP must not open a message box");
-    assert!(h.state().toast.is_none(), "MAP must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "MAP must not journal");
+    assert!(
+        h.state().session.journal.iter().any(|(id, _)| id == "formulas.removePrecedentArrows"),
+        "MAP must journal formulas.removePrecedentArrows"
+    );
 }
 
 #[test]
@@ -3089,7 +3099,7 @@ fn keytip_q_() {
 
 #[test]
 fn generated_test_count_matches_the_table() {
-    const EXPECTED: usize = 413;
+    const EXPECTED: usize = 414;
     assert_eq!(gridcraft_ui_egui::keytips::keytip_table::SEQUENCES.len(), EXPECTED);
 }
 

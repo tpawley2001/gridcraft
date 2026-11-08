@@ -227,46 +227,47 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("PVH", Entry::Finish(Action::Command("view.headings"))),   // Excel: View Headings
     ("MA", Entry::Continue),                                    // Excel: Remove Arrows Menu; group level: containment(Remove Arrows)
     ("MAA", Entry::Finish(Action::Command("formulas.removeArrows"))), // Excel: Remove All Arrows; landed in the catalog; live since T7 probe
-    ("MAP", Entry::Finish(Action::Pending("formulas.removePrecedentArrows"))), // pending; Excel: Remove Precedent Arrows; Remove Precedent Arrows; reserved until the command lands
-    ("MB", Entry::Finish(Action::Command("formulas.calculateNow"))),           // Excel: Calculate Now
-    ("MC", Entry::Finish(Action::Command("formulas.createFromSelection"))),    // Excel: Create From Selection
-    ("MD", Entry::Finish(Action::Command("formulas.traceDependents"))),        // Excel: Trace Dependents
-    ("ME", Entry::Finish(Action::Control("formulas.dateTime"))),               // Excel: Date & Time Menu; group level: containment(Date & Time)
-    ("MF", Entry::Finish(Action::Dialog("insertFunction"))),                   // Excel: Insert Function
-    ("MG", Entry::Finish(Action::Control("formulas.mathTrig"))),               // Excel: Math & Trig Menu; group level: containment(Math & Trig)
-    ("MH", Entry::Finish(Action::Command("formulas.showFormulas"))),           // Excel: Show Formulas
-    ("MI", Entry::Continue),                                                   // Excel: Financial Menu; group level: containment(Financial)
-    ("MI1", Entry::Finish(Action::Control("formulas.financial"))),             // Excel: Excel: Financial; first item of the dropdown
-    ("MJ", Entry::Finish(Action::Command("formulas.calculateSheet"))),         // Excel: Calculate Sheet
-    ("MK", Entry::Continue),                                                   // Excel: Error Checking Menu; group level: containment(Error Checking)
-    ("MKK", Entry::Finish(Action::Dialog("errorChecking"))),                   // Excel: Error Checking
-    ("ML", Entry::Finish(Action::Control("formulas.logical"))),                // Excel: Logical Menu; group level: containment(Logical)
-    ("MM", Entry::Finish(Action::Dialog("defineName"))),                       // Excel: Define Name
-    ("MN", Entry::Finish(Action::Dialog("nameManager"))),                      // Excel: Name Manager
-    ("MO", Entry::Finish(Action::Control("formulas.lookup"))), // Excel: Lookup & Reference Menu; group level: containment(Lookup & Reference)
+    ("MAD", Entry::Finish(Action::Command("formulas.removeDependentArrows"))), // Excel: Remove Dependent Arrows
+    ("MAP", Entry::Finish(Action::Command("formulas.removePrecedentArrows"))), // Excel: Remove Precedent Arrows
+    ("MB", Entry::Finish(Action::Command("formulas.calculateNow"))), // Excel: Calculate Now
+    ("MC", Entry::Finish(Action::Command("formulas.createFromSelection"))), // Excel: Create From Selection
+    ("MD", Entry::Finish(Action::Command("formulas.traceDependents"))), // Excel: Trace Dependents
+    ("ME", Entry::Finish(Action::Control("formulas.dateTime"))), // Excel: Date & Time Menu; group level: containment(Date & Time)
+    ("MF", Entry::Finish(Action::Dialog("insertFunction"))),    // Excel: Insert Function
+    ("MG", Entry::Finish(Action::Control("formulas.mathTrig"))), // Excel: Math & Trig Menu; group level: containment(Math & Trig)
+    ("MH", Entry::Finish(Action::Command("formulas.showFormulas"))), // Excel: Show Formulas
+    ("MI", Entry::Continue),                                    // Excel: Financial Menu; group level: containment(Financial)
+    ("MI1", Entry::Finish(Action::Control("formulas.financial"))), // Excel: Excel: Financial; first item of the dropdown
+    ("MJ", Entry::Finish(Action::Command("formulas.calculateSheet"))), // Excel: Calculate Sheet
+    ("MK", Entry::Continue),                                    // Excel: Error Checking Menu; group level: containment(Error Checking)
+    ("MKK", Entry::Finish(Action::Dialog("errorChecking"))),    // Excel: Error Checking
+    ("ML", Entry::Finish(Action::Control("formulas.logical"))), // Excel: Logical Menu; group level: containment(Logical)
+    ("MM", Entry::Finish(Action::Dialog("defineName"))),        // Excel: Define Name
+    ("MN", Entry::Finish(Action::Dialog("nameManager"))),       // Excel: Name Manager
+    ("MO", Entry::Finish(Action::Control("formulas.lookup"))),  // Excel: Lookup & Reference Menu; group level: containment(Lookup & Reference)
     ("MP", Entry::Finish(Action::Command("formulas.tracePrecedents"))), // Excel: Trace Precedents
     ("MQ", Entry::Finish(Action::Control("formulas.moreFunctions"))), // Excel: More Functions Menu; group level: containment(More Functions)
     ("MR", Entry::Finish(Action::Control("formulas.recentlyUsed"))), // Excel: Recently Used Menu; opens the Recently Used menu
-    ("MS", Entry::Continue),                                   // Excel: Use in Formula Menu; group level: containment(Use in Formula)
-    ("MSP", Entry::Finish(Action::Dialog("pasteName"))),       // Excel: Paste Names
-    ("MT", Entry::Finish(Action::Control("formulas.text"))),   // Excel: Text Menu; group level: containment(Text)
-    ("MU", Entry::Continue),                                   // Excel: AutoSum Menu; group level:
+    ("MS", Entry::Continue),                                    // Excel: Use in Formula Menu; group level: containment(Use in Formula)
+    ("MSP", Entry::Finish(Action::Dialog("pasteName"))),        // Excel: Paste Names
+    ("MT", Entry::Finish(Action::Control("formulas.text"))),    // Excel: Text Menu; group level: containment(Text)
+    ("MU", Entry::Continue),                                    // Excel: AutoSum Menu; group level:
     ("MUA", Entry::Finish(Action::Command("formulas.autoSum"))), // Excel: Average; AutoSum: Average (variant TBD)
     ("MUC", Entry::Finish(Action::Command("formulas.autoSum"))), // Excel: Count Numbers; AutoSum: Count (variant TBD)
     ("MUF", Entry::Finish(Action::Command("formulas.moreFunctions"))), // Excel: More Functions (AutoSum); containment(More Functions)
     ("MUI", Entry::Finish(Action::Command("formulas.autoSum"))), // Excel: Min; AutoSum: Min (variant TBD)
     ("MUM", Entry::Finish(Action::Command("formulas.autoSum"))), // Excel: Max; AutoSum: Max (variant TBD)
     ("MUS", Entry::Finish(Action::Command("formulas.autoSum"))), // Excel: Sum
-    ("MV", Entry::Finish(Action::Dialog("evaluateFormula"))),  // Excel: Evaluate Formula
+    ("MV", Entry::Finish(Action::Dialog("evaluateFormula"))),   // Excel: Evaluate Formula
     ("MW", Entry::Finish(Action::Command("formulas.watchWindow"))), // Excel: Watch Window
-    ("MX", Entry::Continue),                                   // Excel: Calculation Options Menu; group level: containment(Calculation Options)
+    ("MX", Entry::Continue),                                    // Excel: Calculation Options Menu; group level: containment(Calculation Options)
     ("MXA", Entry::Finish(Action::Command("formulas.calculationOptions"))), // Excel: Automatic Calculation; Calculation options: Automatic
     ("MXM", Entry::Finish(Action::Command("formulas.calculationOptions"))), // Excel: Manual Calculation; Calculation options: Manual
     ("MXP", Entry::Finish(Action::Command("formulas.calculationOptions"))), // Excel: Partial Calculation; Calculation options: Partial
-    ("AB", Entry::Finish(Action::Dialog("subtotal"))),         // Excel: Subtotal
+    ("AB", Entry::Finish(Action::Dialog("subtotal"))),          // Excel: Subtotal
     ("AC", Entry::Finish(Action::Command("data.clearFilter"))), // Excel: Clear Filter
     ("AD", Entry::Finish(Action::Command("data.consolidate"))), // Excel: Consolidate
-    ("AE", Entry::Finish(Action::Dialog("textToColumns"))),    // Excel: Text to Columns
+    ("AE", Entry::Finish(Action::Dialog("textToColumns"))),     // Excel: Text to Columns
     ("AF1", Entry::Continue), // Excel: Data from Picture Menu; group level: feature gap; reserved until the command lands
     ("AF1C", Entry::Finish(Action::Command("insert.picture"))), // Excel: Picture from Clipboard (source TBD)
     ("AF1P", Entry::Finish(Action::Command("insert.picture"))), // Excel: Picture from File (source TBD)

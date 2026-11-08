@@ -119,6 +119,7 @@ mod table_headings;
 mod text_box_editing;
 mod text_overflow_scroll;
 mod touch_pan;
+mod trace_levels;
 mod trace_navigation;
 mod translated_form_fields;
 mod ui_clock;

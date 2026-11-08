@@ -7,6 +7,7 @@ use egui::{Event, Shape, pos2, vec2};
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use gridcraft_engine::Session;
 use gridcraft_ui_egui::SheetApp;
+use gridcraft_ui_egui::grid::TraceKind;
 use gridcraft_ui_egui::i18n::Language;
 use gridcraft_ui_egui::theme::Tokens;
 use serde_json::json;
@@ -214,7 +215,7 @@ fn open_menu_labelled(h: &mut Harness, text: &str) {
 /// The trace arrows the app keeps, as (from, to, drawn in the error colour).
 fn traced(h: &Harness) -> Vec<(String, String, bool)> {
     let trace = h.state().grid.trace.as_ref();
-    trace.map(|t| t.arrows.iter().map(|a| (a.from.1.a1(), a.to.1.a1(), a.error)).collect()).unwrap_or_default()
+    trace.map(|t| t.arrows.iter().map(|a| (a.from.1.a1(), a.to.1.a1(), a.kind == TraceKind::Error)).collect()).unwrap_or_default()
 }
 
 /// Line segments painted in `colour`.
@@ -242,15 +243,16 @@ fn trace_error_draws_the_arrows_to_the_source_and_remove_arrows_clears_them() {
     assert_eq!(painted(&h, red), 2, "two red arrows on the sheet");
     assert!(h.state().dialog.is_none() && h.state().message.is_none(), "no dialog, no message");
     assert_eq!(h.state().session.active().unwrap().undo.len(), undo, "no undo step");
-    // H4: the source H2's own reference H1 gets a blue arrow; the selection moving leaves them.
+    // H4: the source H2's own reference H1 gets a blue arrow, added to the arrows shown; the
+    // selection moving leaves them.
     h.state_mut().run("selection.set", json!({"range": "H4"})).unwrap();
     open_menu_labelled(&mut h, "Error Checking");
     h.get_by_label("Trace Error").click();
     h.run_steps(4);
     h.state_mut().run("selection.set", json!({"range": "A20"})).unwrap();
     h.run_steps(4);
-    assert_eq!(traced(&h), [link("H1", "H2", false), link("H2", "H3", true), link("H3", "H4", true)]);
-    assert_eq!((painted(&h, red), painted(&h, Tokens::light().sheet_trace_arrow)), (2, 1));
+    assert_eq!(traced(&h), [link("A1", "B1", true), link("B1", "C1", true), link("H1", "H2", false), link("H2", "H3", true), link("H3", "H4", true)]);
+    assert_eq!((painted(&h, red), painted(&h, Tokens::light().sheet_trace_arrow)), (4, 1));
     h.get_by_label("Remove Arrows").click();
     h.run_steps(4);
     assert!(h.state().grid.trace.is_none());

@@ -183,6 +183,8 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
     ("formulas.tracePrecedents", "Formulas", "Formula Auditing", "Trace Precedents"),
     ("formulas.traceDependents", "Formulas", "Formula Auditing", "Trace Dependents"),
     ("formulas.removeArrows", "Formulas", "Formula Auditing", "Remove Arrows"),
+    ("formulas.removePrecedentArrows", "Formulas", "Formula Auditing", "Remove Precedent Arrows"),
+    ("formulas.removeDependentArrows", "Formulas", "Formula Auditing", "Remove Dependent Arrows"),
     ("formulas.showFormulas", "Formulas", "Formula Auditing", "Show Formulas"),
     ("formulas.errorChecking", "Formulas", "Formula Auditing", "Error Checking"),
     ("formulas.evaluateFormula", "Formulas", "Formula Auditing", "Evaluate Formula"),

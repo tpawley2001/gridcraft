@@ -178,8 +178,28 @@ pub struct Trace {
 pub struct TraceArrow {
     pub from: (usize, RangeRef),
     pub to: (usize, RangeRef),
+    pub kind: TraceKind,
+    /// 1 for the arrows touching the traced cell, 2 for the next level a repeated trace adds, …
+    pub level: u32,
+}
+
+/// What drew a trace arrow: Remove Precedent / Dependent Arrows take away only their own kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TraceKind {
+    Precedent,
+    Dependent,
     /// A link between two cells showing the error Trace Error follows, drawn in the error colour.
-    pub error: bool,
+    Error,
+}
+
+impl TraceKind {
+    fn name(self) -> &'static str {
+        match self {
+            TraceKind::Precedent => "precedent",
+            TraceKind::Dependent => "dependent",
+            TraceKind::Error => "error",
+        }
+    }
 }
 
 impl Trace {
@@ -189,7 +209,15 @@ impl Trace {
     /// longer has are left out.
     pub fn new(app: &SheetApp, result: serde_json::Value) -> Option<Trace> {
         let d = app.session.active()?;
-        let traced = (d.wb.active_sheet(), RangeRef::new(d.selection.active, d.selection.active));
+        let arrows = Trace::arrows_of(app, d.selection.active, &result, 1);
+        Some(Trace { uid: d.uid, revision: d.revision, arrows })
+    }
+
+    /// The arrows of a trace of `cell` on the active sheet (see [`Trace::new`]), at `level`.
+    /// Trace Error's arrows that aren't error links are precedent arrows.
+    fn arrows_of(app: &SheetApp, cell: CellRef, result: &serde_json::Value, level: u32) -> Vec<TraceArrow> {
+        let Some(d) = app.session.active() else { return Vec::new() };
+        let traced = (d.wb.active_sheet(), RangeRef::new(cell, cell));
         let end = |v: &serde_json::Value| {
             let sheet = match v["sheet"].as_str() {
                 Some(name) => d.wb.sheet_index(name)?,
@@ -197,21 +225,40 @@ impl Trace {
             };
             Some((sheet, RangeRef::parse(v["range"].as_str().or(v["cell"].as_str())?)?))
         };
-        let arrows = match result.get("arrows").and_then(|a| a.as_array()) {
-            Some(list) => {
-                list.iter().filter_map(|a| Some(TraceArrow { from: end(&a["from"])?, to: end(&a["to"])?, error: a["kind"] == "error" })).collect()
-            }
+        match result.get("arrows").and_then(|a| a.as_array()) {
+            Some(list) => list
+                .iter()
+                .filter_map(|a| {
+                    let kind = if a["kind"] == "error" { TraceKind::Error } else { TraceKind::Precedent };
+                    Some(TraceArrow { from: end(&a["from"])?, to: end(&a["to"])?, kind, level })
+                })
+                .collect(),
             None => result
                 .as_array()
                 .into_iter()
                 .flatten()
                 .filter_map(|it| {
-                    let (from, to) = if it.get("range").is_some() { (end(it)?, traced) } else { (traced, end(it)?) };
-                    Some(TraceArrow { from, to, error: false })
+                    let (from, to, kind) =
+                        if it.get("range").is_some() { (end(it)?, traced, TraceKind::Precedent) } else { (traced, end(it)?, TraceKind::Dependent) };
+                    Some(TraceArrow { from, to, kind, level })
                 })
                 .collect(),
-        };
-        Some(Trace { uid: d.uid, revision: d.revision, arrows })
+        }
+    }
+
+    /// Whether this trace belongs to the active document as it is now (the arrows are drawn).
+    fn is_current(&self, app: &SheetApp) -> bool {
+        app.session.active().is_some_and(|d| d.uid == self.uid && d.revision == self.revision)
+    }
+
+    /// Adds `arrows`, leaving out those already shown (the same ends and kind).
+    fn add(&mut self, arrows: Vec<TraceArrow>) {
+        for a in arrows {
+            match self.arrows.iter_mut().find(|b| b.from == a.from && b.to == a.to && b.kind == a.kind) {
+                Some(b) => b.level = b.level.min(a.level),
+                None => self.arrows.push(a),
+            }
+        }
     }
 
     /// The active document's uid and revision, to hand [`Trace::keep_through_zoom`] after a zoom.
@@ -356,3 +403,134 @@ pub(crate) fn heading_font_size(zoom: f32) -> f32 {
 
 #[cfg(test)]
 mod tests;
+
+impl SheetApp {
+    /// Formulas › Trace Precedents on the active cell; again on a traced cell, the next level.
+    pub fn trace_precedents(&mut self) {
+        self.trace_level(TraceKind::Precedent);
+    }
+
+    /// Formulas › Trace Dependents on the active cell; again on a traced cell, the next level.
+    pub fn trace_dependents(&mut self) {
+        self.trace_level(TraceKind::Dependent);
+    }
+
+    /// Error Checking › Trace Error on the active cell: its arrows join the ones shown. A cell
+    /// without an error, or one its error starts in without references, has none.
+    pub fn trace_error(&mut self) {
+        let Some(active) = self.session.active().map(|d| d.selection.active) else { return };
+        if let Ok(r) = self.run("formulas.traceError", json!({})) {
+            let arrows = Trace::arrows_of(self, active, &r, 1);
+            self.add_trace_arrows(arrows);
+        }
+    }
+
+    /// Formulas › Remove Arrows: every tracer arrow.
+    pub fn remove_arrows(&mut self) {
+        self.grid.trace = None;
+    }
+
+    /// Remove Arrows › Remove Precedent Arrows: the deepest level of precedent arrows.
+    pub fn remove_precedent_arrows(&mut self) {
+        self.remove_trace_level(TraceKind::Precedent);
+    }
+
+    /// Remove Arrows › Remove Dependent Arrows: the deepest level of dependent arrows.
+    pub fn remove_dependent_arrows(&mut self) {
+        self.remove_trace_level(TraceKind::Dependent);
+    }
+
+    /// The tracer arrows on the active sheet as `"{from}->{to} {kind} {level}"`, sorted.
+    pub fn trace_arrows(&self) -> Vec<String> {
+        let (Some(t), Some(d)) = (&self.grid.trace, self.session.active()) else { return Vec::new() };
+        if !t.is_current(self) {
+            return Vec::new();
+        }
+        let si = d.wb.active_sheet();
+        let mut v: Vec<String> = t
+            .arrows
+            .iter()
+            .filter(|a| a.from.0 == si && a.to.0 == si)
+            .map(|a| format!("{}->{} {} {}", a.from.1.a1(), a.to.1.a1(), a.kind.name(), a.level))
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// Adds `arrows` to the trace shown, or starts one (a stale trace's arrows go first).
+    fn add_trace_arrows(&mut self, arrows: Vec<TraceArrow>) {
+        if arrows.is_empty() {
+            return;
+        }
+        if !self.grid.trace.as_ref().is_some_and(|t| t.is_current(self)) {
+            let Some(d) = self.session.active() else { return };
+            self.grid.trace = Some(Trace { uid: d.uid, revision: d.revision, arrows: Vec::new() });
+        }
+        if let Some(t) = self.grid.trace.as_mut() {
+            t.add(arrows);
+        }
+    }
+
+    /// Trace Precedents (`kind` Precedent) or Trace Dependents (Dependent) of the active cell: the
+    /// first level, or when arrows of that kind already lead into (out of) it, the level after
+    /// the deepest one in that chain. A boxed range is not traced further.
+    fn trace_level(&mut self, kind: TraceKind) {
+        let Some(d) = self.session.active() else { return };
+        let (sheet, active) = (d.wb.active_sheet(), d.selection.active);
+        let command = if kind == TraceKind::Precedent { "formulas.tracePrecedents" } else { "formulas.traceDependents" };
+        let shown: Vec<TraceArrow> = match &self.grid.trace {
+            Some(t) if t.is_current(self) => t.arrows.iter().filter(|a| a.kind == kind).copied().collect(),
+            _ => Vec::new(),
+        };
+        // The traced end of an arrow (`to` for precedents) and the end the next level starts at.
+        let ends = |a: &TraceArrow| if kind == TraceKind::Precedent { (a.to, a.from) } else { (a.from, a.to) };
+        let cell = |(si, r): (usize, RangeRef)| (si == sheet && r.is_single()).then_some(r.start);
+        // Walk the chain from the active cell outwards a level at a time, each cell once: the
+        // deepest level and the cells its arrows start the next one at.
+        let mut seen = std::collections::HashSet::from([active]);
+        let mut frontier = seen.clone();
+        let (mut depth, mut deepest) = (0u32, Vec::new());
+        while !frontier.is_empty() {
+            let next: Vec<Option<CellRef>> =
+                shown.iter().filter(|a| cell(ends(a).0).is_some_and(|c| frontier.contains(&c))).map(|a| cell(ends(a).1)).collect();
+            if next.is_empty() {
+                break;
+            }
+            depth = depth.saturating_add(1);
+            deepest = next.into_iter().flatten().collect();
+            frontier = deepest.iter().copied().filter(|c| seen.insert(*c)).collect();
+        }
+        let mut found = Vec::new();
+        if depth == 0 {
+            if let Ok(r) = self.run(command, json!({"cell": active.a1()})) {
+                found = Trace::arrows_of(self, active, &r, 1);
+            }
+        } else {
+            deepest.sort();
+            deepest.dedup();
+            for c in deepest {
+                // A cell already traced has its arrows shown.
+                if shown.iter().any(|a| cell(ends(a).0) == Some(c)) {
+                    continue;
+                }
+                if let Ok(r) = self.run(command, json!({"cell": c.a1()})) {
+                    found.extend(Trace::arrows_of(self, c, &r, depth.saturating_add(1)));
+                }
+            }
+        }
+        self.add_trace_arrows(found);
+    }
+
+    /// Removes the arrows of `kind` at the deepest level shown.
+    fn remove_trace_level(&mut self, kind: TraceKind) {
+        let current = self.grid.trace.as_ref().is_some_and(|t| t.is_current(self));
+        if let Some(t) = self.grid.trace.as_mut().filter(|_| current)
+            && let Some(top) = t.arrows.iter().filter(|a| a.kind == kind).map(|a| a.level).max()
+        {
+            t.arrows.retain(|a| a.kind != kind || a.level != top);
+        }
+        if !current || self.grid.trace.as_ref().is_some_and(|t| t.arrows.is_empty()) {
+            self.grid.trace = None;
+        }
+    }
+}
