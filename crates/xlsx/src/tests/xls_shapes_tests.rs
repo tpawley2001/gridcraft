@@ -62,6 +62,7 @@ const OT_RECTANGLE: u16 = 0x0002;
 const OT_OVAL: u16 = 0x0003;
 const OT_BUTTON: u16 = 0x0007;
 const OT_DROP_DOWN: u16 = 0x0014;
+const OT_EDIT_BOX: u16 = 0x000D;
 pub(super) const OT_OFFICE_ART: u16 = 0x001E;
 
 /// Values measured on real files: an outline-only oval (fUsefFilled set, fFilled clear) with
@@ -143,8 +144,9 @@ fn office_art_objects_take_their_kind_from_the_shape_type() {
 #[test]
 fn form_controls_are_reported_as_form_controls_not_shapes() {
     let button = cat(&[&shape(201, &[], 0, 0, 2, 1), &obj(OT_BUTTON)]);
-    let drop_down = cat(&[&shape(201, &[], 3, 0, 4, 1), &obj(OT_DROP_DOWN)]);
-    let (wb, report) = read_xls(&xls(&cat(&[&button, &drop_down]))).unwrap();
+    // Edit boxes aren't imported; they are reported.
+    let edit_box = cat(&[&shape(201, &[], 3, 0, 4, 1), &obj(OT_EDIT_BOX)]);
+    let (wb, report) = read_xls(&xls(&cat(&[&button, &edit_box]))).unwrap();
     assert!(wb.sheet(0).unwrap().shapes.is_empty());
     assert!(report.warnings.iter().any(|w| w.contains("Form controls in .xls files are not imported yet.")), "{:?}", report.warnings);
     assert!(!report.warnings.iter().any(|w| w.contains("Shapes in .xls")), "{:?}", report.warnings);
@@ -182,10 +184,11 @@ fn autofilter_and_validation_arrows_are_not_reported_as_form_controls() {
 }
 
 #[test]
-fn a_user_drop_down_without_fuiobj_is_still_reported() {
+fn a_user_drop_down_without_fuiobj_is_not_skipped() {
     let drop_down = cat(&[&shape(201, &[], 3, 0, 4, 1), &obj_flags(OT_DROP_DOWN, USER_DROP_DOWN_FLAGS)]);
-    let (_, report) = read_xls(&xls(&drop_down)).unwrap();
-    assert!(report.warnings.iter().any(|w| w.contains("Form controls in .xls files are not imported yet.")), "{:?}", report.warnings);
+    let (wb, report) = read_xls(&xls(&drop_down)).unwrap();
+    let kinds: Vec<_> = wb.sheet(0).unwrap().controls.iter().map(|c| c.kind).collect();
+    assert_eq!(kinds, [gridcraft_model::ControlKind::DropDown], "{:?}", report.warnings);
 }
 
 #[test]
