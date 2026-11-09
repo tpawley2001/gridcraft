@@ -15,7 +15,6 @@ Sources: `crates/model/src/features.rs` (`ChartKind`, `Chart`, `Series`), `crate
 
 | Excel type | Excel subtypes | GridCraft | Notes |
 |---|---|---|---|
-| 2026-11-09 | minor | Analysis ToolPak Regression adds Residual, Line Fit and Normal Probability plots as XY scatter charts stacked right of the report. No readiness score change. |
 | Column | clustered, stacked, 100% stacked, 3-D clustered/stacked/100%, 3-D column | 3 of 7 | no 3-D |
 | Bar | clustered, stacked, 100%, 3-D ×3 | 3 of 6 | no 3-D |
 | Line | line, stacked, 100% stacked, with markers ×3, 3-D line | 3 of 7 (line, with markers, stacked) | no 100% stacked; smoothed lines landed (#62) |
@@ -110,6 +109,7 @@ are (#1686). Such series get no `numCache`/`strCache` on save (#1690).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-09 | minor | Analysis ToolPak Regression adds Residual, Line Fit and Normal Probability plots as XY scatter charts stacked right of the report. No readiness score change. |
 | 2026-11-07 | minor | Chart-data-table keys use the shared plot-kind helper with their series index after #1150. A focused regression checks the first combo series uses a column key and later series use line keys. No readiness score change. |
 | 2026-11-06 | minor | G0131: Histogram, Moving Average and Exponential Smoothing offer Chart Output; report and chart share one Undo step. Regression plots remain. |
 | 2026-11-02 | minor | Charts move and resize from eight handles, each moving only its own edges (#190); resizing leaves the work list (1–2 h, within the 40–60 h rounding) |
