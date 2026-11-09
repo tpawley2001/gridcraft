@@ -47,7 +47,7 @@ fn red_paths(s: &mut Session) -> Vec<Vec<(f32, f32)>> {
 }
 
 fn path(fill: bool, commands: Vec<PathCommand>) -> GeometryPath {
-    GeometryPath { w: 100, h: 100, fill, stroke: true, commands }
+    GeometryPath { w: 100, h: 100, fill, stroke: true, shade: Default::default(), commands }
 }
 
 fn freeform(paths: Vec<GeometryPath>) -> Option<ShapeGeometry> {

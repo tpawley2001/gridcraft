@@ -435,6 +435,7 @@ fn read_custom_paths(geom: &El) -> Option<Vec<GeometryPath>> {
             h: size("h")?,
             fill: path.attr("fill") != Some("none"),
             stroke: path.attr_bool("stroke").unwrap_or(true),
+            shade: Default::default(),
             commands,
         });
     }

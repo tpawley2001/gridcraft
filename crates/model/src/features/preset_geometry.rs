@@ -1,6 +1,6 @@
 //! DrawingML preset geometries (`a:prstGeom`, ECMA-376 Part 1 §20.1.9.18) as outline paths, so a
 //! preset kept in [`ShapeGeometry`] can be drawn and printed like a freeform.
-use super::{GeometryPath, PathCommand, ShapeGeometry};
+use super::{GeometryPath, PathCommand, PathShade, ShapeGeometry};
 
 /// The preset's outline in a `w` × `h` box, or `None` for a preset this doesn't know, a custom
 /// geometry, or an empty box.
@@ -178,7 +178,7 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
         commands.push(if i == 0 { PathCommand::MoveTo(x, y) } else { PathCommand::LineTo(x, y) });
     }
     commands.push(PathCommand::Close);
-    Some(vec![GeometryPath { w, h, fill: true, stroke: true, commands }])
+    Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }])
 }
 
 /// The adjust value `name` (`a:gd fmla="val N"`), or `default` when missing or not a plain value.

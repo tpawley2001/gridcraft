@@ -917,7 +917,22 @@ pub struct GeometryPath {
     pub fill: bool,
     /// `stroke` is not false.
     pub stroke: bool,
+    /// How the fill is shaded (`fill` = `lighten`, `darken`, ...); `Norm` for a plain fill.
+    #[serde(default)]
+    pub shade: PathShade,
     pub commands: Vec<PathCommand>,
+}
+
+/// The shading of a path's fill (ST_PathFillMode, ECMA-376 Part 1 §20.1.10.37), apart from `none`,
+/// which is [`GeometryPath::fill`] false.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PathShade {
+    #[default]
+    Norm,
+    Lighten,
+    LightenLess,
+    Darken,
+    DarkenLess,
 }
 
 /// A custom geometry path command (`a:moveTo`, `a:lnTo`, `a:cubicBezTo`, `a:quadBezTo`, `a:arcTo`,

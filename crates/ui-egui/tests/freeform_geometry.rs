@@ -6,7 +6,7 @@ use gridcraft_engine::model::{GeometryPath, PathCommand};
 use gridcraft_ui_egui::freeform::{outlines, triangulate};
 
 fn path(w: i64, h: i64, commands: Vec<PathCommand>) -> GeometryPath {
-    GeometryPath { w, h, fill: true, stroke: true, commands }
+    GeometryPath { w, h, fill: true, stroke: true, shade: Default::default(), commands }
 }
 
 fn square() -> Rect {
