@@ -1801,6 +1801,7 @@ fn report_chart(s: &Session, p: &Json, tool: &str, sheet_name: &str, rect: Range
         data.push(series("Forecast", reference(sheet_name, forecast), None, false));
     }
     Ok(Some(Chart {
+        alt: String::new(),
         id: s.doc()?.wb.next_object_id(),
         theme_override: None,
         hidden: false,

@@ -438,6 +438,7 @@ fn forecast_sheet(s: &mut Session, p: &Json) -> Result<Json> {
             })
             .collect();
         sheet.charts.push(Chart {
+            alt: String::new(),
             theme_override: None,
             hidden: false,
             id: chart_id,

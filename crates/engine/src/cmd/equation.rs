@@ -87,6 +87,7 @@ fn insert_equation(s: &mut Session, p: &Json) -> Result<Json> {
     let id = d.wb.next_object_id();
     let (width, height) = frame_for(&list, (size * PX_PER_PT) as f32);
     let mut shape = Shape {
+        alt: String::new(),
         hidden: false,
         hyperlink: None,
         name: None,

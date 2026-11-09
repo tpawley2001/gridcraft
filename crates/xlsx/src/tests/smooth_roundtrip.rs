@@ -22,6 +22,7 @@ fn smooth_line_setting_round_trips() {
         trendlines: Vec::new(),
     };
     s.charts.push(Chart {
+        alt: String::new(),
         theme_override: None,
         hidden: false,
         id: 1,
@@ -46,6 +47,7 @@ fn smooth_line_setting_round_trips() {
     let mut smooth_series = base_series.clone();
     smooth_series.smooth = true;
     s.charts.push(Chart {
+        alt: String::new(),
         theme_override: None,
         hidden: false,
         id: 2,

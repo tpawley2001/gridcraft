@@ -887,6 +887,7 @@ mod tests {
     fn push_object(s: &mut Sheet, kind: ObjKind, id: u32, anchor: Anchor) {
         match kind {
             ObjKind::Chart => s.charts.push(Chart {
+                alt: String::new(),
                 theme_override: None,
                 id,
                 kind: ChartKind::default(),
@@ -923,6 +924,7 @@ mod tests {
                 link: None,
             }),
             ObjKind::Shape | ObjKind::Equation => s.shapes.push(Shape {
+                alt: String::new(),
                 hidden: false,
                 hyperlink: None,
                 name: None,

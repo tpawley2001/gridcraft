@@ -339,6 +339,7 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                                     ch.id = cx.next_object_id();
                                     ch.anchor = anchor;
                                     ch.hidden = obj.path(&["nvGraphicFramePr", "cNvPr"]).is_some_and(|p| p.flag("hidden", false));
+                                    ch.alt = obj.path(&["nvGraphicFramePr", "cNvPr"]).and_then(|p| p.attr("descr")).unwrap_or("").to_string();
                                     sheet.charts.push(ch);
                                 }
                                 None => cx.warn(format!("chart {target} has no supported plot and was skipped")),
@@ -364,6 +365,12 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                             .or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"]))
                             .and_then(|p| p.attr("name"))
                             .map(str::to_string);
+                        // An equation's description is its LaTeX marker, not alternative text.
+                        let descr =
+                            obj.path(&["nvSpPr", "cNvPr"]).or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"])).and_then(|p| p.attr("descr")).unwrap_or("");
+                        if s.kind != ShapeKind::Equation && !descr.starts_with(LATEX_DESCR) {
+                            s.alt = descr.to_string();
+                        }
                         let id = cx.next_object_id();
                         sheet.shapes.push(Shape { id, ..s });
                     }
@@ -575,6 +582,7 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
             hidden: false,
             hyperlink: None,
             name: None,
+            alt: String::new(),
             id: 0,
             kind: ShapeKind::Equation,
             geometry: None,
@@ -592,7 +600,21 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
     let mut format = read_text_format(obj.child("txBody"));
     format.no_line = ln.is_some_and(|l| l.child("noFill").is_some());
     format.no_fill = sp.child("noFill").is_some();
-    Some(Shape { hidden: false, hyperlink: None, name: None, id: 0, kind, geometry, anchor, fill, line, text, format, math: Default::default() })
+    Some(Shape {
+        hidden: false,
+        hyperlink: None,
+        name: None,
+        alt: String::new(),
+        id: 0,
+        kind,
+        geometry,
+        anchor,
+        fill,
+        line,
+        text,
+        format,
+        math: Default::default(),
+    })
 }
 
 /// A shape's text formatting: vertical anchor (`a:bodyPr anchor`), the first paragraph's
@@ -911,6 +933,13 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
             Obj::Shape(s) => s.hidden,
         };
         let hidden = if hidden { " hidden=\"1\"" } else { "" };
+        // Alternative text, in schema order after `name`; pictures write their own.
+        let descr = match o {
+            Obj::Image(..) => "",
+            Obj::Chart(c, _) => c.alt.as_str(),
+            Obj::Shape(s) => s.alt.as_str(),
+        };
+        let descr = if descr.is_empty() { String::new() } else { format!(" descr=\"{}\"", esc_attr(descr)) };
         let close_tag;
         match o {
             Obj::Image(img, rid, ext_list, link_rid) => {
@@ -942,7 +971,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                 let (prefix, ns) = crate::chartex::requires(ch.kind);
                 let _ = write!(
                     s,
-                    "<mc:AlternateContent xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\"><mc:Choice xmlns:{prefix}=\"{ns}\" Requires=\"{prefix}\"><xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"{id}\" name=\"Chart {}\"{hidden}/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>{}<a:graphic><a:graphicData uri=\"http://schemas.microsoft.com/office/drawing/2014/chartex\"><cx:chart xmlns:cx=\"http://schemas.microsoft.com/office/drawing/2014/chartex\" r:id=\"{rid}\"/></a:graphicData></a:graphic></xdr:graphicFrame></mc:Choice><mc:Fallback><xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"0\" name=\"\"{hidden}/><xdr:cNvSpPr><a:spLocks noTextEdit=\"1\"/></xdr:cNvSpPr></xdr:nvSpPr><xdr:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr><xdr:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang=\"en-US\"/><a:t>This chart type can't be shown by this application.</a:t></a:r></a:p></xdr:txBody></xdr:sp></mc:Fallback></mc:AlternateContent>",
+                    "<mc:AlternateContent xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\"><mc:Choice xmlns:{prefix}=\"{ns}\" Requires=\"{prefix}\"><xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"{id}\" name=\"Chart {}\"{descr}{hidden}/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>{}<a:graphic><a:graphicData uri=\"http://schemas.microsoft.com/office/drawing/2014/chartex\"><cx:chart xmlns:cx=\"http://schemas.microsoft.com/office/drawing/2014/chartex\" r:id=\"{rid}\"/></a:graphicData></a:graphic></xdr:graphicFrame></mc:Choice><mc:Fallback><xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"0\" name=\"\"{hidden}/><xdr:cNvSpPr><a:spLocks noTextEdit=\"1\"/></xdr:cNvSpPr></xdr:nvSpPr><xdr:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr><xdr:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang=\"en-US\"/><a:t>This chart type can't be shown by this application.</a:t></a:r></a:p></xdr:txBody></xdr:sp></mc:Fallback></mc:AlternateContent>",
                     id - 1,
                     xfrm(&ch.anchor, "xdr:xfrm"),
                     xfrm(&ch.anchor, "a:xfrm")
@@ -954,7 +983,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                 s.push_str(&open);
                 let _ = write!(
                     s,
-                    "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"{id}\" name=\"Chart {}\"{hidden}/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>{}<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart r:id=\"{rid}\"/></a:graphicData></a:graphic></xdr:graphicFrame>",
+                    "<xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"{id}\" name=\"Chart {}\"{descr}{hidden}/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>{}<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart r:id=\"{rid}\"/></a:graphicData></a:graphic></xdr:graphicFrame>",
                     id - 1,
                     xfrm(&ch.anchor, "xdr:xfrm")
                 );
@@ -971,7 +1000,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                 let (open, close) = anchor_open(sheet, &sh.anchor);
                 close_tag = close;
                 s.push_str(&open);
-                if let Some(xml) = ink::write(sh, theme, id, &link) {
+                if let Some(xml) = ink::write(sh, theme, id, &link, &descr) {
                     s.push_str(&xml);
                     s.push_str("<xdr:clientData/>");
                     s.push_str(close_tag);
@@ -989,7 +1018,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                 };
                 let _ = write!(
                     s,
-                    "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"{name}\"{hidden}>{link}</xdr:cNvPr><xdr:cNvSpPr{}/></xdr:nvSpPr><xdr:spPr>{}",
+                    "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"{name}\"{descr}{hidden}>{link}</xdr:cNvPr><xdr:cNvSpPr{}/></xdr:nvSpPr><xdr:spPr>{}",
                     if tx { " txBox=\"1\"" } else { "" },
                     xfrm(&sh.anchor, "a:xfrm")
                 );

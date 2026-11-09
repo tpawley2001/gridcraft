@@ -26,6 +26,7 @@ mod custom_views_tests;
 mod data_table_formula_tests;
 mod data_table_text_results_tests;
 mod dif_tests;
+mod drawing_alt_text;
 mod drawing_hyperlinks;
 mod dxf_font_charset;
 mod encrypted_tests;

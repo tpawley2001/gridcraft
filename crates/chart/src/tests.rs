@@ -39,6 +39,7 @@ const ALL_KINDS: [ChartKind; 26] = [
 
 fn chart(kind: ChartKind) -> Chart {
     Chart {
+        alt: String::new(),
         theme_override: None,
         hidden: false,
         id: 1,

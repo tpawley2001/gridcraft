@@ -965,6 +965,7 @@ impl Embedded {
                 rotated = true;
             }
             sheet.shapes.push(Shape {
+                alt: String::new(),
                 hidden: props.hidden,
                 hyperlink: None,
                 name: props.name,
@@ -994,6 +995,7 @@ impl Embedded {
                 rotated = true;
             }
             sheet.shapes.push(Shape {
+                alt: String::new(),
                 hidden: props.hidden,
                 hyperlink: None,
                 name: props.name,
@@ -1224,6 +1226,7 @@ fn biff5_polygon(data: &[u8], table: &[u32; 64]) -> Option<PendingPolygon> {
     let fill = if *fls == 0 { Color::Auto } else { color(*icv_fore) };
     let line = if auto_line & 1 != 0 { Color::Auto } else { color(*icv) };
     let shape = Shape {
+        alt: String::new(),
         hidden: false,
         hyperlink: None,
         name: None,
@@ -1891,6 +1894,7 @@ impl Parser {
             self.scale.x = AxisScale::default();
         }
         Ok(Chart {
+            alt: String::new(),
             theme_override: None,
             hidden: false,
             id: 0,

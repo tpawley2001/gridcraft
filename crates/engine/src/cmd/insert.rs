@@ -872,6 +872,7 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
         }
     });
     let chart = Chart {
+        alt: String::new(),
         theme_override: None,
         hidden: false,
         id,
@@ -1234,6 +1235,7 @@ fn insert_shape(s: &mut Session, p: &Json) -> Result<Json> {
         Color::Theme(4, -250)
     });
     let shape = Shape {
+        alt: String::new(),
         hidden: false,
         hyperlink: None,
         name: None,
@@ -1949,6 +1951,7 @@ fn insert_icon(s: &mut Session, p: &Json) -> Result<Json> {
     let at = cell_param(s, p, "at")?.unwrap_or(d.selection.active);
     let color = super::format::color_param(p.get("color")).unwrap_or(Color::Theme(1, 0));
     let shape = Shape {
+        alt: String::new(),
         hidden: false,
         hyperlink: None,
         name: None,
