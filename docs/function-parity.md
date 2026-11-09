@@ -1,6 +1,6 @@
 # Function parity: worksheet functions and formulas
 
-> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-06 · **Change:** minor (INDIRECT unquoted digit-leading sheet names; INDIRECT unquoted digit-leading sheet names; IF's omitted result argument is an empty value; earlier: GROUPBY/PIVOTBY automatic headers are hidden (G0099); INDIRECT of an array of texts in the criteria functions; earlier: GROUPBY total depth 2 or more adds subtotals; earlier: Python cells are edited in the formula bar; earlier: the Python errors `#PYTHON!`, `#BUSY!`, `#TIMEOUT!` and `#BLOCKED!`, and a Python in cells row; earlier: YEARFRAC basis 0 February-end rule, MOD quotient limit, PERCENTRANK significance; earlier: edge cases matched to Excel: base conversions, BITLSHIFT/BITRSHIFT, UNICHAR noncharacters, UPPER/LOWER/PROPER casing, FIXED/DOLLAR output, F/T/GAMMA/WEIBULL/BETA distributions, BINOM trial cap, HARMEAN; earlier: ECMA.CEILING listed with USDOLLAR as not on Microsoft's list; earlier: IMSQRT reproduces the stray real part Excel gives for negative reals) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-08 · **Change:** minor (G0210: corrected parity documentation; earlier: INDIRECT unquoted digit-leading sheet names; INDIRECT unquoted digit-leading sheet names; IF's omitted result argument is an empty value; earlier: GROUPBY/PIVOTBY automatic headers are hidden (G0099); INDIRECT of an array of texts in the criteria functions; earlier: GROUPBY total depth 2 or more adds subtotals; earlier: Python cells are edited in the formula bar; earlier: the Python errors `#PYTHON!`, `#BUSY!`, `#TIMEOUT!` and `#BLOCKED!`, and a Python in cells row; earlier: YEARFRAC basis 0 February-end rule, MOD quotient limit, PERCENTRANK significance; earlier: edge cases matched to Excel: base conversions, BITLSHIFT/BITRSHIFT, UNICHAR noncharacters, UPPER/LOWER/PROPER casing, FIXED/DOLLAR output, F/T/GAMMA/WEIBULL/BETA distributions, BINOM trial cap, HARMEAN; earlier: ECMA.CEILING listed with USDOLLAR as not on Microsoft's list; earlier: IMSQRT reproduces the stray real part Excel gives for negative reals) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's worksheet functions, category by category, against GridCraft's function library. Part of
 [target-app-parity.md](target-app-parity.md); gaps feed [gaps.md](gaps.md).
@@ -12,11 +12,8 @@ Excel's worksheet functions, category by category, against GridCraft's function 
   them), plus 14 text functions the page lists under combined entries (FIND/FINDB, LEFT/LEFTB,
   LEN/LENB, MID/MIDB, REPLACE/REPLACEB, RIGHT/RIGHTB, SEARCH/SEARCHB), BETA.INV, and COPILOT and
   PY (Microsoft 365 functions not on that page when fetched).
-- **Ours (505):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
-- **Ours (503):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
-- **Ours (502):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
-- **Ours (502):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
-- **Ours (505):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
+- **Ours (513):** names from `gridcraft-cli functions --json`: the function specs in
+  `crates/functions/src/*.rs` plus the
   evaluator's special forms in `crates/calc/src/eval.rs` (`SPECIAL_FUNCTIONS`: IF, IFS, CHOOSE,
   OFFSET, INDIRECT, INDEX, SUBTOTAL, AGGREGATE, TEXT, LET, LAMBDA, MAP, REDUCE, SCAN, BYROW, BYCOL,
   MAKEARRAY…), excluding the test-only `ADD2`. Every one is an Excel name.
@@ -34,11 +31,11 @@ Excel's worksheet functions, category by category, against GridCraft's function 
 | Category | Excel | Ours | Working | % working | Missing |
 |---|---|---|---|---|---|
 | Statistical | 111 | 111 | 111 | 100% | — |
-| Math and trigonometry | 80 | 79 | 79 | 99% | PERCENTOF |
+| Math and trigonometry | 80 | 80 | 80 | 100% | — |
 | Financial | 55 | 55 | 55 | 100% | — |
 | Engineering | 54 | 54 | 54 | 100% | — |
 | Text | 50 | 48 | 48 | 96% | DETECTLANGUAGE, TRANSLATE |
-| Lookup and reference | 40 | 36 | 36 | 90% | GETPIVOTDATA, IMAGE, RTD, TRIMRANGE |
+| Lookup and reference | 40 | 37 | 37 | 93% | GETPIVOTDATA, IMAGE, RTD |
 | Compatibility | 40 | 40 | 40 | 100% | — |
 | Date and time | 25 | 25 | 25 | 100% | — |
 | Information | 22 | 21 | 21 | 95% | STOCKHISTORY |
@@ -48,7 +45,7 @@ Excel's worksheet functions, category by category, against GridCraft's function 
 | Web | 3 | 3 | 1 | 33% | (WEBSERVICE, FILTERXML are stubs; ENCODEURL works) |
 | Add-in and Automation | 3 | 1 | 1 | 33% | CALL, REGISTER.ID |
 | AI and Python | 2 | 0 | 0 | 0% | COPILOT, PY |
-| **Total** | **523** | **505** | **496** | **94.8%** | 18 missing, 9 stubs |
+| **Total** | **523** | **513** | **504** | **96.4%** | 10 missing, 9 stubs |
 
 By the Excel version that introduced them (working / total): before 2010 346 / 360, 2010
 56 / 56, 2013 49 / 51, 2016 1 / 5, 2019 6 / 6, 2021 11 / 11, 2024 22 / 23, Microsoft 365 5 / 11.
@@ -63,6 +60,11 @@ endpoint handling, zero-fill mode and the existing 30% missing-point limit are u
 This improves series preparation; it does not change the model-fitting or seasonality algorithms.
 
 ### Scope of what's missing
+
+PERCENTOF and TRIMRANGE are implemented. The CLI lists 513 Excel names (excluding
+USDOLLAR and ECMA.CEILING); excluding the 9 stubs leaves 504 working functions.
+Category counts use Excel's categories: HYPERLINK is Lookup and reference, and
+FORECAST is Statistical.
 
 | Function(s) | In scope? | Estimate | Note |
 |---|---|---|---|
@@ -147,6 +149,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | minor | G0210: Recounted function coverage from the CLI; PERCENTOF and TRIMRANGE are implemented, with 10 missing and 9 stubs remaining. |
 | 2026-11-06 | minor | INDIRECT resolves unquoted existing sheet names starting with a digit, including A1 and converted R1C1 text. |
 | 2026-11-05 | minor | INDIRECT resolves unquoted existing sheet names starting with a digit, including A1 and converted R1C1 text. |
 | 2026-11-05 | minor | IF returns an empty value for an omitted value_if_true / value_if_false, so CONCATENATE joins it as ""; a cell showing the IF result still shows 0 |
