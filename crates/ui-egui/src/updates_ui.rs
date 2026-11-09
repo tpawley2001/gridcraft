@@ -17,6 +17,9 @@ pub(crate) fn start(app: &mut SheetApp, manual: bool) {
 
 pub(crate) fn tick(_app: &mut SheetApp, _ctx: &egui::Context) {}
 
+/// No update is ever downloaded, so there is nothing to install at exit.
+pub(crate) fn start_pending_update(_app: &mut SheetApp) {}
+
 pub(crate) fn show(_app: &mut SheetApp, _ctx: &egui::Context) {}
 
 #[cfg(test)]
