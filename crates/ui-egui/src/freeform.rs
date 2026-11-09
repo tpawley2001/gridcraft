@@ -206,3 +206,14 @@ pub fn triangulate(points: &[Pos2]) -> Option<Vec<[usize; 3]>> {
     }
     if tris.is_empty() { None } else { Some(tris) }
 }
+
+/// Fill triangles for one path: its closed subpaths filled together with the even-odd rule, so a
+/// subpath inside another is a hole (and one inside that hole is filled again).
+pub fn fill_triangles(path: &GeometryPath, r: Rect) -> Vec<[Pos2; 3]> {
+    let _ = (path, r);
+    Vec::new() // stub: implemented by the task
+}
+
+#[cfg(test)]
+#[path = "freeform_hole_tests.rs"]
+mod freeform_hole_tests;

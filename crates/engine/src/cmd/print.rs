@@ -447,6 +447,8 @@ fn page_setup(s: &mut Session, p: &Json) -> Result<Json> {
 }
 
 #[cfg(test)]
+mod shape_hole_tests;
+#[cfg(test)]
 #[allow(clippy::collapsible_if)] // the acceptance tests' PDF path parser nests its checks
 mod shape_outline_tests;
 #[cfg(test)]
