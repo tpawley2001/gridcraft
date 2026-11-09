@@ -18,7 +18,7 @@ fn square(x0: i64, y0: i64, x1: i64, y1: i64, clockwise: bool) -> Vec<PathComman
 }
 
 fn path(commands: Vec<PathCommand>) -> GeometryPath {
-    GeometryPath { w: 100, h: 100, fill: true, stroke: true, commands }
+    GeometryPath { w: 100, h: 100, fill: true, stroke: true, shade: Default::default(), commands }
 }
 
 fn tri_area(t: &[Pos2; 3]) -> f32 {

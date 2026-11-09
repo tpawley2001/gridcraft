@@ -75,7 +75,7 @@ fn freeform_subpath_inside_another_prints_as_a_hole() {
     let g = ShapeGeometry {
         preset: String::new(),
         adjust: Vec::new(),
-        paths: vec![GeometryPath { w: 100, h: 100, fill: true, stroke: true, commands: cmds }],
+        paths: vec![GeometryPath { w: 100, h: 100, fill: true, stroke: true, shade: Default::default(), commands: cmds }],
     };
     one_fill_with_hole(&mut shape_session(g));
 }
@@ -83,8 +83,8 @@ fn freeform_subpath_inside_another_prints_as_a_hole() {
 #[test]
 fn separate_filled_paths_still_print_separately() {
     // Two `a:path` elements are two fills: the second paints over the first, no hole.
-    let a = GeometryPath { w: 100, h: 100, fill: true, stroke: true, commands: square(0, 0, 100, 100, true) };
-    let b = GeometryPath { w: 100, h: 100, fill: true, stroke: true, commands: square(25, 25, 75, 75, false) };
+    let a = GeometryPath { w: 100, h: 100, fill: true, stroke: true, shade: Default::default(), commands: square(0, 0, 100, 100, true) };
+    let b = GeometryPath { w: 100, h: 100, fill: true, stroke: true, shade: Default::default(), commands: square(25, 25, 75, 75, false) };
     let g = ShapeGeometry { preset: String::new(), adjust: Vec::new(), paths: vec![a, b] };
     let f = red_fills(&mut shape_session(g));
     assert_eq!(f.len(), 2, "{f:?}");
