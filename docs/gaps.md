@@ -195,18 +195,18 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   [function-parity.md](function-parity.md)
 
 ### 16. Collaboration and review (F)
-- No co-authoring, Show Changes, comment navigation, notes ↔ comments
-  conversion; cloud storage requested (#86). **Estimate:** 35–55 h (co-authoring scope needs the owner).
+- No co-authoring and no Show Changes; cloud storage requested (#86).
+  **Estimate:** 35–55 h (co-authoring scope needs the owner).
 
 ### 17. Insert objects (F)
 - Picture aspect locking and proportional Height/Width edits are available as undoable commands; picture size fields and a Format Picture pane remain missing.
 - Ink strokes now survive XLSX save/reopen as editable polylines. Inserted icons still lose their
   identity/artwork on save (#551); native Office InkML import is not implemented.
-- SmartArt, WordArt, signature line, objects, 3-D models, screenshot; 8 shape kinds vs ~170;
-  pictures in cells (#61, PR #105). Equations exist (LaTeX source with a live preview, Office Math in xlsx); there is
-  no structured (WYSIWYG) equation editing and no ink equations. **Estimate:** 25–40 h.
-- SmartArt and grouped drawing objects are kept through XLSX open + save but not shown, printed or editable; WordArt, equations, signature line, objects, 3-D models, screenshot; 8 shape kinds vs
-  ~170; pictures in cells (#61, PR #105). **Estimate:** 25–40 h.
+- SmartArt and grouped drawing objects are kept through XLSX open + save but not shown, printed or editable;
+  WordArt, signature line, objects, 3-D models, screenshot; most of Excel's ~170 preset shapes still show as a
+  rectangle (see the presets bullet); pictures in cells (#61, PR #105). Equations exist (LaTeX source with a live
+  preview, Office Math in xlsx); there is no structured (WYSIWYG) equation editing and no ink equations.
+  **Estimate:** 25–40 h.
 - Twenty-three presets kept from XLSX (right/left/up/down/left-right and notched right arrows, chevron, home plate, diamond, parallelogram, trapezoid, octagon, plus, triangle, right triangle, hexagon, pentagon, 4-point star, 5-point star, single-snipped-corner rectangle, cube, Explosion 1 and Explosion 2) draw and print their own outline; other presets still show as a rectangle. The cube's side and top faces are shaded from the fill colour (`a:path/@fill` darkenLess/lightenLess), and a freeform's `a:custGeom` path shading (`lighten`, `lightenLess`, `darken`, `darkenLess`) is kept through open + save and drawn. The shading factors are an approximation, not measured from Excel.
 
 ### 18. Accessibility (U)
@@ -261,6 +261,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-09 | minor | §16: previous/next comment, Show Comments, Show All Notes and Convert to Comments are implemented, so they leave the missing list; §17: merged the two duplicate Insert objects bullets into one and replaced the stale shape-kind count with the presets bullet's status. |
 | 2026-11-09 | minor | §13: Analysis ToolPak Regression adds Residual Plots, Line Fit Plots (one XY chart per X variable) and the Normal Probability Plot beside the report, in the same Undo step. |
 | 2026-11-09 | minor | G0213: §19: XLSB AutoFilter date, colour and icon criteria moved from Left to imported; XML Spreadsheet 2003 no longer listed as missing. |
 | 2026-11-08 | minor | G0210: §15: consolidated stale function counts into one current line (10 missing, 9 stubs), counted from the CLI. |

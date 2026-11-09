@@ -68,8 +68,6 @@ FORECAST is Statistical.
 
 | Function(s) | In scope? | Estimate | Note |
 |---|---|---|---|
-| FORECAST.ETS family (4) | yes | 4–6 h | AAA exponential smoothing with seasonality detection; needed for Forecast Sheet too |
-| ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD | yes | 2–4 h | Odd first/last period bond maths |
 | GETPIVOTDATA | yes | 2–3 h | Needs the pivot engine's result cache; also the "Generate GetPivotData" option |
 | IMAGE | yes | 3–5 h | Pictures in cells (see PR #105); fetching URLs needs a privacy decision |
 | CUBE* (7), WEBSERVICE, FILTERXML | partly | 4–8 h | FILTERXML can work offline; CUBE needs an OLAP/data-model source |
@@ -149,6 +147,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-09 | minor | Dropped the stale "Scope of what's missing" rows for the exponential-smoothing forecast functions and the odd-period bond functions (ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD), which are implemented. |
 | 2026-11-08 | minor | G0210: Recounted function coverage from the CLI; PERCENTOF and TRIMRANGE are implemented, with 10 missing and 9 stubs remaining. |
 | 2026-11-06 | minor | INDIRECT resolves unquoted existing sheet names starting with a digit, including A1 and converted R1C1 text. |
 | 2026-11-05 | minor | INDIRECT resolves unquoted existing sheet names starting with a digit, including A1 and converted R1C1 text. |
