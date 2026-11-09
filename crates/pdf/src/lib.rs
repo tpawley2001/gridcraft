@@ -545,6 +545,36 @@ impl Page {
         self.op(&s);
     }
 
+    /// Closed rings painted by one path with the even-odd rule (`f*`, or `B*` when stroked too), so
+    /// a ring inside another is a hole. Rings with fewer than 2 points or a non-finite point are
+    /// skipped.
+    pub fn polygons_even_odd(&mut self, rings: &[Vec<[f32; 2]>], fill: Option<Rgb>, stroke: Option<(Rgb, f32)>) {
+        let rings: Vec<&Vec<[f32; 2]>> = rings.iter().filter(|r| r.len() >= 2 && r.iter().all(|p| finite(p))).collect();
+        if rings.is_empty() || (fill.is_none() && stroke.is_none()) {
+            return;
+        }
+        let mut s = String::new();
+        if let Some(f) = fill {
+            s.push_str(&rgb_op(f, false));
+            s.push('\n');
+        }
+        if let Some((c, w)) = stroke {
+            let _ = writeln!(s, "{}\n{} w [] 0 d 1 j", rgb_op(c, true), n(stroke_width(w)));
+        }
+        for (i, ring) in rings.iter().enumerate() {
+            if i > 0 {
+                s.push(' ');
+            }
+            self.path(&mut s, ring, true);
+        }
+        s.push_str(match (fill.is_some(), stroke.is_some()) {
+            (true, true) => " B*",
+            (true, false) => " f*",
+            _ => " S",
+        });
+        self.op(&s);
+    }
+
     /// A circle approximated by four cubic Béziers.
     pub fn circle(&mut self, cx: f32, cy: f32, r: f32, fill: Option<Rgb>, stroke: Option<(Rgb, f32)>) {
         if !extent(r) || !finite(&[cx, cy]) || (fill.is_none() && stroke.is_none()) {

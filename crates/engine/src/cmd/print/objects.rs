@@ -277,7 +277,23 @@ fn draw_paths(
     let mut drew = false;
     for path in paths {
         let line = line.filter(|_| path.stroke);
-        for sub in flatten_path(path, rect, b.k, &mut budget) {
+        let subs = flatten_path(path, rect, b.k, &mut budget);
+        // Several closed subpaths of one filled path are filled together, even-odd, so one inside
+        // another is a hole (donut, frame). A single subpath prints as before.
+        if path.fill && subs.iter().filter(|s| s.closed && s.points.len() >= 2).count() >= 2 {
+            let mut rings = Vec::new();
+            for sub in subs.into_iter().filter(|s| s.points.len() >= 2) {
+                drew = true;
+                if sub.closed {
+                    rings.push(sub.points);
+                } else if let Some((c, lw)) = line {
+                    pg.polyline(&sub.points, lw, c, &[]);
+                }
+            }
+            pg.polygons_even_odd(&rings, fill.map(|c| path.shade.apply(c)), line);
+            continue;
+        }
+        for sub in subs {
             if sub.points.len() < 2 {
                 continue;
             }

@@ -39,6 +39,41 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             ),
         ]);
     }
+    // Donut and frame: one filled path of two subpaths, the inner one wound the other way, so it
+    // is a hole.
+    if g.preset == "donut" {
+        let a = adj("adj", 25000, 50000);
+        let dr = md(ss, a, 100000);
+        let (wd2, hd2) = (hc, vc);
+        let (iwd2, ihd2) = ((wd2 - dr).max(0), (hd2 - dr).max(0));
+        let (cd4, cd2, cd34) = (5_400_000, 10_800_000, 16_200_000);
+        let arc = |w_r: i128, h_r: i128, st_ang: i64, sw_ang: i64| PathCommand::ArcTo { w_r: to_i64(w_r), h_r: to_i64(h_r), st_ang, sw_ang };
+        let commands = vec![
+            PathCommand::MoveTo(to_i64(l), to_i64(vc)),
+            arc(wd2, hd2, cd2, cd4),
+            arc(wd2, hd2, cd34, cd4),
+            arc(wd2, hd2, 0, cd4),
+            arc(wd2, hd2, cd4, cd4),
+            PathCommand::Close,
+            PathCommand::MoveTo(to_i64(dr), to_i64(vc)),
+            arc(iwd2, ihd2, cd2, -cd4),
+            arc(iwd2, ihd2, cd4, -cd4),
+            arc(iwd2, ihd2, 0, -cd4),
+            arc(iwd2, ihd2, cd34, -cd4),
+            PathCommand::Close,
+        ];
+        return Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }]);
+    }
+    if g.preset == "frame" {
+        let a1 = adj("adj1", 12500, 50000);
+        let x1 = md(ss, a1, 100000);
+        let (x4, y4) = (r - x1, b - x1);
+        let m = |x: i128, y: i128| PathCommand::MoveTo(to_i64(x), to_i64(y));
+        let ln = |x: i128, y: i128| PathCommand::LineTo(to_i64(x), to_i64(y));
+        let commands =
+            vec![m(l, t), ln(r, t), ln(r, b), ln(l, b), PathCommand::Close, m(x1, x1), ln(x1, y4), ln(x4, y4), ln(x4, x1), PathCommand::Close];
+        return Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }]);
+    }
     let pts: Vec<(i128, i128)> = match g.preset.as_str() {
         "rightArrow" => {
             let a1 = adj("adj1", 50000, 100000);
