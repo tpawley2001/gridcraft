@@ -38,6 +38,7 @@ mod pivotchart_link;
 mod print_long_text;
 mod range_fill_formats;
 mod recently_used;
+mod regression_plots;
 mod row_autofit;
 mod sheet_copy_spill;
 mod sheet_name_quoting;

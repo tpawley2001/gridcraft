@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-09 · **Change:** minor (G0213: §19: XLSB AutoFilter date, colour and icon criteria and XML Spreadsheet 2003 listed as imported; earlier: §17: Explosion 1 and 2 presets draw and print their own outline; earlier: §17: cube preset draws and prints with shaded faces; custom-geometry path shading kept through XLSX; earlier: G0210: corrected parity documentation; earlier: §17: 5-point star and single-snipped-corner rectangle presets draw and print their own outline; earlier: §17: hexagon, pentagon and 4-point star presets draw and print their own outline; earlier: VML captions with HTML-style `br` tags are read; earlier: §17: octagon, plus, triangle, right triangle and notched right arrow presets draw and print their own outline; earlier: G0204: picture aspect-lock and proportional size commands; G0201: persisted editable AutoCorrect replacement list; G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; binary named-style identity; XLSX picture locks survive open + save; earlier: §17: ten preset shapes draw and print their own outline; earlier: §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-09 · **Change:** minor (§13: Regression Residual, Line Fit and Normal Probability plots; earlier: G0213: §19: XLSB AutoFilter date, colour and icon criteria and XML Spreadsheet 2003 listed as imported; earlier: §17: Explosion 1 and 2 presets draw and print their own outline; earlier: §17: cube preset draws and prints with shaded faces; custom-geometry path shading kept through XLSX; earlier: G0210: corrected parity documentation; earlier: §17: 5-point star and single-snipped-corner rectangle presets draw and print their own outline; earlier: §17: hexagon, pentagon and 4-point star presets draw and print their own outline; earlier: VML captions with HTML-style `br` tags are read; earlier: §17: octagon, plus, triangle, right triangle and notched right arrow presets draw and print their own outline; earlier: G0204: picture aspect-lock and proportional size commands; G0201: persisted editable AutoCorrect replacement list; G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; binary named-style identity; XLSX picture locks survive open + save; earlier: §17: ten preset shapes draw and print their own outline; earlier: §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -182,7 +182,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   model. AllDifferent (`dif`) constraints enforce permutations of 1..N with Simplex LP,
   GRG integer branch and bound, and Evolutionary permutation search (64 constraint cells maximum);
   the dialog and saved models support them.
-- The Analysis ToolPak (`data.analysisToolPak`) has all 19 of Excel's tools; Histogram/Moving Average/Exponential Smoothing chart output is in; Regression plots remain. **Estimate:** 12–20 h.
+- The Analysis ToolPak (`data.analysisToolPak`) has all 19 of Excel's tools; Histogram/Moving Average/Exponential Smoothing chart output and the Regression Residual, Line Fit and Normal Probability plots are in. **Estimate:** 12–20 h.
 
 ### 14. Page Layout view and print polish (U, F)
 - XLSX `pageSetup scale="0"` uses the default 100% and is omitted on save.
@@ -261,6 +261,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-09 | minor | §13: Analysis ToolPak Regression adds Residual Plots, Line Fit Plots (one XY chart per X variable) and the Normal Probability Plot beside the report, in the same Undo step. |
 | 2026-11-09 | minor | G0213: §19: XLSB AutoFilter date, colour and icon criteria moved from Left to imported; XML Spreadsheet 2003 no longer listed as missing. |
 | 2026-11-08 | minor | G0210: §15: consolidated stale function counts into one current line (10 missing, 9 stubs), counted from the CLI. |
 | 2026-11-09 | minor | G0216: §17: Explosion 1 and Explosion 2 (`irregularSeal1`, `irregularSeal2`) presets kept from XLSX draw and print their own fixed outline. |
