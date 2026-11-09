@@ -905,6 +905,19 @@ fn write_picture_locks(locks: &Option<PictureLocks>, camera: Option<&CameraTool>
     if inner.is_empty() { "<xdr:cNvPicPr/>".to_string() } else { format!("<xdr:cNvPicPr>{inner}</xdr:cNvPicPr>") }
 }
 
+/// The `hidden` and `descr` attributes of an object's `cNvPr`, in schema order after `name`.
+/// Pictures write their own `descr`; an empty alternative text writes none.
+fn cnvpr_flags(o: &Obj<'_>) -> (&'static str, String) {
+    let (hidden, descr) = match o {
+        Obj::Image(i, ..) => (i.hidden, ""),
+        Obj::Chart(c, _) => (c.hidden, c.alt.as_str()),
+        Obj::Shape(s) => (s.hidden, s.alt.as_str()),
+    };
+    let hidden = if hidden { " hidden=\"1\"" } else { "" };
+    let descr = if descr.is_empty() { String::new() } else { format!(" descr=\"{}\"", esc_attr(descr)) };
+    (hidden, descr)
+}
+
 /// The drawing part for a sheet's objects (relationship ids already assigned), with the kept
 /// anchors GridCraft doesn't model (`(position, XML)`, relationship ids rewritten) back at their
 /// positions. Object ids skip the ids the kept anchors use; adds click hyperlink relationships.
@@ -927,19 +940,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
             next_id = next_id.saturating_add(1);
         }
         let id = next_id;
-        let hidden = match o {
-            Obj::Image(i, ..) => i.hidden,
-            Obj::Chart(c, _) => c.hidden,
-            Obj::Shape(s) => s.hidden,
-        };
-        let hidden = if hidden { " hidden=\"1\"" } else { "" };
-        // Alternative text, in schema order after `name`; pictures write their own.
-        let descr = match o {
-            Obj::Image(..) => "",
-            Obj::Chart(c, _) => c.alt.as_str(),
-            Obj::Shape(s) => s.alt.as_str(),
-        };
-        let descr = if descr.is_empty() { String::new() } else { format!(" descr=\"{}\"", esc_attr(descr)) };
+        let (hidden, descr) = cnvpr_flags(o);
         let close_tag;
         match o {
             Obj::Image(img, rid, ext_list, link_rid) => {
