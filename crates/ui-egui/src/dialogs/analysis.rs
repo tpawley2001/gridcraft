@@ -146,7 +146,9 @@ fn toolpak_fields(tool: &str, values: &Map<String, Json>) -> Vec<Field> {
             Text { key: "confidence", label: "Confidence Level (%):" },
             Check { key: "residuals", label: "Residuals" },
             Check { key: "standardizedResiduals", label: "Standardized Residuals" },
-            Check { key: "normalProbability", label: "Normal Probability" },
+            Check { key: "residualPlots", label: "Residual Plots" },
+            Check { key: "lineFitPlots", label: "Line Fit Plots" },
+            Check { key: "normalProbability", label: "Normal Probability Plots" },
         ],
         "movingAverage" => {
             vec![

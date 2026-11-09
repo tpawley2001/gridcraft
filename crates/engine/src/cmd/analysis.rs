@@ -69,7 +69,7 @@ pub fn specs() -> Vec<CommandSpec> {
         "Data Analysis…",
         ["Data", "Analysis"],
         None,
-        "{tool: anovaSingle|anovaTwoFactorWith|anovaTwoFactorWithout|correlation|covariance|descriptive|exponentialSmoothing|fTest|fourierAnalysis|histogram|movingAverage|randomNumberGeneration|rankPercentile|regression|sampling|tTestPaired|tTestEqual|tTestUnequal|zTest (or the tool's label), output?: \"E1\" (top-left of the report; default a new sheet), newSheet?: name, outputTo?: range|newSheet (picks between the two), overwrite?: bool (else non-empty output cells are refused), labels?: bool (first row/column holds names), groupedBy?: columns|rows, …tool params} — range tools take `range`; descriptive: summary? (default true), confidence?: 95, kthLargest?, kthSmallest?; histogram: bins?: range (default evenly spaced), pareto?, cumulative?, chartOutput?: bool (default false); regression: inputY, inputX, constantZero?, confidence?: 95, residuals?, standardizedResiduals?, normalProbability?; movingAverage: interval? (3), standardErrors?, chartOutput?: bool (default false); exponentialSmoothing: damping? (0.3), standardErrors?, chartOutput?: bool (default false); t-tests and fTest: range1, range2, alpha? (0.05), hypothesizedDifference? (0); anovaSingle: alpha?; anovaTwoFactorWithout: range, labels? (the first row holds column names and the first column row names), alpha?; anovaTwoFactorWith: range (first row and column hold labels), rowsPerSample, alpha?; zTest: range1, range2, variance1, variance2 (known variances), alpha?, hypothesizedDifference?; fourierAnalysis: range (one row or column of 2^k numbers or complex text, at most 4096), inverse?; randomNumberGeneration: variables? (1), count (per variable; not for patterned), distribution: uniform{from, to} | normal{mean, standardDeviation} | bernoulli{p} | binomial{p, trials} | poisson{lambda} | patterned{from, to, step, repeatEach, repeatSequence} | discrete{valueRange: two columns of value and probability}, seed? (whole number, not for patterned; the same seed repeats the numbers; the result reports the seed used), at most 1,000,000 numbers; sampling: range, method?: periodic|random, period (periodic), samples (random, with replacement), seed?. Writes static values. No `tool` → {tools} (the menu opens the dialog).",
+        "{tool: anovaSingle|anovaTwoFactorWith|anovaTwoFactorWithout|correlation|covariance|descriptive|exponentialSmoothing|fTest|fourierAnalysis|histogram|movingAverage|randomNumberGeneration|rankPercentile|regression|sampling|tTestPaired|tTestEqual|tTestUnequal|zTest (or the tool's label), output?: \"E1\" (top-left of the report; default a new sheet), newSheet?: name, outputTo?: range|newSheet (picks between the two), overwrite?: bool (else non-empty output cells are refused), labels?: bool (first row/column holds names), groupedBy?: columns|rows, …tool params} — range tools take `range`; descriptive: summary? (default true), confidence?: 95, kthLargest?, kthSmallest?; histogram: bins?: range (default evenly spaced), pareto?, cumulative?, chartOutput?: bool (default false); regression: inputY, inputX, constantZero?, confidence?: 95, residuals?, standardizedResiduals?, residualPlots? (an XY chart of residuals per X variable), lineFitPlots? (Y and predicted Y per X variable; both write the residual table), normalProbability? (the probability table and its chart); movingAverage: interval? (3), standardErrors?, chartOutput?: bool (default false); exponentialSmoothing: damping? (0.3), standardErrors?, chartOutput?: bool (default false); t-tests and fTest: range1, range2, alpha? (0.05), hypothesizedDifference? (0); anovaSingle: alpha?; anovaTwoFactorWithout: range, labels? (the first row holds column names and the first column row names), alpha?; anovaTwoFactorWith: range (first row and column hold labels), rowsPerSample, alpha?; zTest: range1, range2, variance1, variance2 (known variances), alpha?, hypothesizedDifference?; fourierAnalysis: range (one row or column of 2^k numbers or complex text, at most 4096), inverse?; randomNumberGeneration: variables? (1), count (per variable; not for patterned), distribution: uniform{from, to} | normal{mean, standardDeviation} | bernoulli{p} | binomial{p, trials} | poisson{lambda} | patterned{from, to, step, repeatEach, repeatSequence} | discrete{valueRange: two columns of value and probability}, seed? (whole number, not for patterned; the same seed repeats the numbers; the result reports the seed used), at most 1,000,000 numbers; sampling: range, method?: periodic|random, period (periodic), samples (random, with replacement), seed?. Writes static values. No `tool` → {tools} (the menu opens the dialog).",
         has_doc,
         run
     )]
@@ -651,6 +651,27 @@ fn ols(y: &[f64], xs: &[Vec<f64>], zero: bool) -> Option<Fit> {
     Some(Fit { coef, se, predicted, sse, ssr, dfr, dfe, dft })
 }
 
+/// The report row of the RESIDUAL OUTPUT and PROBABILITY OUTPUT titles for `k` X variables.
+fn residual_row(k: usize) -> u32 {
+    16 + idx(k + 1) + 3
+}
+
+/// Whether the regression report holds the RESIDUAL OUTPUT table (the plots chart its columns).
+fn residual_table(p: &Json) -> bool {
+    ["residuals", "standardizedResiduals", "residualPlots", "lineFitPlots"].iter().any(|k| flag(p, k))
+}
+
+/// The report column of the PROBABILITY OUTPUT table, beside the RESIDUAL OUTPUT one if any.
+fn probability_col(p: &Json) -> u32 {
+    if !residual_table(p) {
+        0
+    } else if flag(p, "standardizedResiduals") {
+        5
+    } else {
+        4
+    }
+}
+
 fn regression(s: &Session, p: &Json) -> Result<Grid> {
     let labels = flag(p, "labels");
     let (ysi, yr) = input_range(s, p, &["inputY", "y"])?;
@@ -735,8 +756,8 @@ fn regression(s: &Session, p: &Json) -> Result<Grid> {
         g.num(row, 7, b - tc * se);
         g.num(row, 8, b + tc * se);
     }
-    let mut row = 16 + idx(fit.coef.len()) + 3;
-    let residuals = flag(p, "residuals");
+    let mut row = residual_row(k);
+    let residuals = flag(p, "residuals") || flag(p, "residualPlots") || flag(p, "lineFitPlots");
     let standardized = flag(p, "standardizedResiduals");
     if residuals || standardized {
         g.txt(row, 0, "RESIDUAL OUTPUT");
@@ -759,9 +780,9 @@ fn regression(s: &Session, p: &Json) -> Result<Grid> {
         }
     }
     if flag(p, "normalProbability") {
-        let c = if residuals || standardized { if standardized { 5 } else { 4 } } else { 0 };
+        let c = probability_col(p);
         if !(residuals || standardized) {
-            row = 16 + idx(fit.coef.len()) + 3;
+            row = residual_row(k);
         }
         g.txt(row, c, "PROBABILITY OUTPUT");
         g.labels(row + 2, c, &["Percentile", &yvar.name]);
@@ -1744,18 +1765,20 @@ fn sampling(s: &Session, p: &Json, seed: Option<u64>) -> Result<Grid> {
 
 // ---------------------------------------------------------------- output
 
-/// Builds references only after the report rectangle has been checked to fit the sheet.
-fn report_chart(s: &Session, p: &Json, tool: &str, sheet_name: &str, rect: RangeRef) -> Result<Option<Chart>> {
-    if !flag(p, "chartOutput") || !matches!(tool, "histogram" | "movingAverage" | "exponentialSmoothing") {
-        return Ok(None);
-    }
-    let chart_col =
-        rect.end.col.checked_add(1).filter(|c| *c < MAX_COLS).ok_or_else(|| bad(CMD, "the chart doesn't fit to the right of the report"))?;
-    let reference = |name: &str, range: RangeRef| {
-        let cell = |c: CellRef| format!("${}${}", gridcraft_core::col_to_letters(c.col), u64::from(c.row) + 1);
-        format!("{}!{}:{}", gridcraft_formula::quote_sheet(name), cell(range.start), cell(range.end))
-    };
-    let series = |name: &str, values: String, categories: Option<String>, cumulative: bool| Series {
+/// Rows between stacked report charts: a 288 pt chart over 15 pt default rows.
+const CHART_ROWS: u32 = 20;
+
+/// A chart of a report before it is given an id and a place.
+struct ChartPlan {
+    kind: ChartKind,
+    title: String,
+    x_title: String,
+    y_title: String,
+    series: Vec<Series>,
+}
+
+fn chart_series(name: &str, values: String, categories: Option<String>, cumulative: bool) -> Series {
+    Series {
         name: Some(name.into()),
         values,
         categories,
@@ -1766,7 +1789,25 @@ fn report_chart(s: &Session, p: &Json, tool: &str, sheet_name: &str, rect: Range
         smooth: false,
         quartiles: Default::default(),
         trendlines: Vec::new(),
-    };
+    }
+}
+
+/// An absolute reference such as `Sheet1!$F$25:$F$29`.
+fn reference(name: &str, range: RangeRef) -> String {
+    let cell = |c: CellRef| format!("${}${}", gridcraft_core::col_to_letters(c.col), u64::from(c.row) + 1);
+    format!("{}!{}:{}", gridcraft_formula::quote_sheet(name), cell(range.start), cell(range.end))
+}
+
+/// One column of `rows` cells starting at `top`.
+fn column_range(top: CellRef, rows: u32) -> RangeRef {
+    RangeRef::new(top, CellRef::new(top.row + rows.saturating_sub(1), top.col))
+}
+
+/// Histogram, Moving Average and Exponential Smoothing chart output.
+fn chart_output_plan(s: &Session, p: &Json, tool: &str, sheet_name: &str, rect: RangeRef) -> Result<Option<ChartPlan>> {
+    if !flag(p, "chartOutput") || !matches!(tool, "histogram" | "movingAverage" | "exponentialSmoothing") {
+        return Ok(None);
+    }
     let histogram = tool == "histogram";
     let title = match tool {
         "histogram" => "Histogram",
@@ -1779,9 +1820,9 @@ fn report_chart(s: &Session, p: &Json, tool: &str, sheet_name: &str, rect: Range
         let col = rect.start.col + if flag(p, "pareto") { if cumulative { 3 } else { 2 } } else { 0 };
         let column = |c| reference(sheet_name, RangeRef::new(CellRef::new(rect.start.row + 1, c), CellRef::new(rect.end.row, c)));
         let categories = Some(column(col));
-        data.push(series("Frequency", column(col + 1), categories.clone(), false));
+        data.push(chart_series("Frequency", column(col + 1), categories.clone(), false));
         if cumulative {
-            data.push(series("Cumulative %", column(col + 2), categories, true));
+            data.push(chart_series("Cumulative %", column(col + 2), categories, true));
         }
     } else {
         let (si, mut input) = input_range(s, p, &["range", "input"])?;
@@ -1796,33 +1837,132 @@ fn report_chart(s: &Session, p: &Json, tool: &str, sheet_name: &str, rect: Range
             }
         }
         let input_sheet = s.doc()?.wb.sheet(si).ok_or(EngineError::NoDocument)?;
-        data.push(series("Actual", reference(&input_sheet.name, input), None, false));
+        data.push(chart_series("Actual", reference(&input_sheet.name, input), None, false));
         let forecast = RangeRef::new(rect.start, CellRef::new(rect.end.row, rect.start.col));
-        data.push(series("Forecast", reference(sheet_name, forecast), None, false));
+        data.push(chart_series("Forecast", reference(sheet_name, forecast), None, false));
     }
-    Ok(Some(Chart {
-        alt: String::new(),
-        id: s.doc()?.wb.next_object_id(),
-        theme_override: None,
-        hidden: false,
+    Ok(Some(ChartPlan {
         kind: if histogram { ChartKind::ColumnClustered } else { ChartKind::Line },
-        anchor: Anchor { cell: CellRef::new(rect.start.row, chart_col), dx: 0.0, dy: 0.0, width: 480.0, height: 288.0, mode: Default::default() },
-        title: Some(title.into()),
+        title: title.into(),
+        x_title: if histogram { "Bin" } else { "Data Point" }.into(),
+        y_title: if histogram { "Frequency" } else { "Value" }.into(),
         series: data,
-        legend: LegendPos::Right,
-        x_title: Some(if histogram { "Bin" } else { "Data Point" }.into()),
-        y_title: Some(if histogram { "Frequency" } else { "Value" }.into()),
-        data_labels: false,
-        data_table: None,
-        gridlines: true,
-        style: 1,
-        hole_size: 75,
-        first_slice_angle: 0,
-        source: None,
-        by_rows: false,
-        pivot: None,
-        scale: Default::default(),
     }))
+}
+
+/// Regression's Residual Plots and Line Fit Plots (one per X variable) and Normal Probability
+/// Plot, charting the input and the report's RESIDUAL OUTPUT and PROBABILITY OUTPUT tables.
+fn regression_plans(s: &Session, p: &Json, sheet_name: &str, rect: RangeRef) -> Result<Vec<ChartPlan>> {
+    let (residual_plots, line_fit, normal) = (flag(p, "residualPlots"), flag(p, "lineFitPlots"), flag(p, "normalProbability"));
+    if !(residual_plots || line_fit || normal) {
+        return Ok(Vec::new());
+    }
+    let labels = flag(p, "labels");
+    let (ysi, yr) = input_range(s, p, &["inputY", "y"])?;
+    let (xsi, xr) = input_range(s, p, &["inputX", "x"])?;
+    let skip = u32::from(labels);
+    let n = yr.height().checked_sub(skip).filter(|n| *n > 0).ok_or_else(|| bad(CMD, "the input range holds no data points"))?;
+    let yv = variables(s, ysi, yr, false, labels, &|_| "Y".into())?;
+    let xv = variables(s, xsi, xr, false, labels, &|i| format!("X Variable {}", i + 1))?;
+    let y_name = yv.first().map_or("Y", |v| v.name.as_str());
+    let (y_sheet, x_sheet) = {
+        let wb = &s.doc()?.wb;
+        let name = |i: usize| wb.sheet(i).map(|sh| sh.name.clone()).ok_or(EngineError::NoDocument);
+        (name(ysi)?, name(xsi)?)
+    };
+    let x_ref = |i: usize| reference(&x_sheet, column_range(CellRef::new(xr.start.row + skip, xr.start.col + idx(i)), n));
+    let table_top = rect.start.row + residual_row(xv.len()) + 3;
+    let report_col = |c: u32| reference(sheet_name, column_range(CellRef::new(table_top, rect.start.col + c), n));
+    let mut plans = Vec::new();
+    if residual_plots {
+        for (i, x) in xv.iter().enumerate() {
+            plans.push(ChartPlan {
+                kind: ChartKind::Scatter,
+                title: format!("{} Residual Plot", x.name),
+                x_title: x.name.clone(),
+                y_title: "Residuals".into(),
+                series: vec![chart_series("Residuals", report_col(2), Some(x_ref(i)), false)],
+            });
+        }
+    }
+    if line_fit {
+        let y_ref = reference(&y_sheet, column_range(CellRef::new(yr.start.row + skip, yr.start.col), n));
+        for (i, x) in xv.iter().enumerate() {
+            plans.push(ChartPlan {
+                kind: ChartKind::Scatter,
+                title: format!("{} Line Fit Plot", x.name),
+                x_title: x.name.clone(),
+                y_title: y_name.into(),
+                series: vec![
+                    chart_series(y_name, y_ref.clone(), Some(x_ref(i)), false),
+                    chart_series(&format!("Predicted {y_name}"), report_col(1), Some(x_ref(i)), false),
+                ],
+            });
+        }
+    }
+    if normal {
+        let c = probability_col(p);
+        plans.push(ChartPlan {
+            kind: ChartKind::Scatter,
+            title: "Normal Probability Plot".into(),
+            x_title: "Sample Percentile".into(),
+            y_title: y_name.into(),
+            series: vec![chart_series(y_name, report_col(c + 1), Some(report_col(c)), false)],
+        });
+    }
+    Ok(plans)
+}
+
+/// The report's charts, stacked down the column right of the report. Builds references only
+/// after the report rectangle has been checked to fit the sheet.
+fn report_charts(s: &Session, p: &Json, tool: &str, sheet_name: &str, rect: RangeRef) -> Result<Vec<Chart>> {
+    let plans = if tool == "regression" {
+        regression_plans(s, p, sheet_name, rect)?
+    } else {
+        chart_output_plan(s, p, tool, sheet_name, rect)?.into_iter().collect()
+    };
+    if plans.is_empty() {
+        return Ok(Vec::new());
+    }
+    let chart_col =
+        rect.end.col.checked_add(1).filter(|c| *c < MAX_COLS).ok_or_else(|| bad(CMD, "the chart doesn't fit to the right of the report"))?;
+    let ids = s.doc()?.wb.free_object_ids(plans.len());
+    if ids.len() < plans.len() {
+        return Err(bad(CMD, "the workbook has no free object ids for the charts"));
+    }
+    let mut out = Vec::with_capacity(plans.len());
+    for (i, (plan, id)) in plans.into_iter().zip(ids).enumerate() {
+        let row = u32::try_from(i)
+            .ok()
+            .and_then(|i| i.checked_mul(CHART_ROWS))
+            .and_then(|d| rect.start.row.checked_add(d))
+            .filter(|r| *r < MAX_ROWS)
+            .ok_or_else(|| bad(CMD, "the charts don't fit below the report's top row"))?;
+        out.push(Chart {
+            alt: String::new(),
+            id,
+            theme_override: None,
+            hidden: false,
+            kind: plan.kind,
+            anchor: Anchor { cell: CellRef::new(row, chart_col), dx: 0.0, dy: 0.0, width: 480.0, height: 288.0, mode: Default::default() },
+            title: Some(plan.title),
+            series: plan.series,
+            legend: LegendPos::Right,
+            x_title: Some(plan.x_title),
+            y_title: Some(plan.y_title),
+            data_labels: false,
+            data_table: None,
+            gridlines: true,
+            style: 1,
+            hole_size: 75,
+            first_slice_angle: 0,
+            source: None,
+            by_rows: false,
+            pivot: None,
+            scale: Default::default(),
+        });
+    }
+    Ok(out)
 }
 
 /// Writes the report at `output` (refusing to overwrite data unless `overwrite`) or on a new
@@ -1882,7 +2022,7 @@ fn write_report(s: &mut Session, p: &Json, tool: &str, g: Grid) -> Result<Json> 
         return Err(EngineError::Other(format!("The output range {} {OVERWRITE_ERROR}; pass overwrite: true to replace it.", rect.a1())));
     }
     let sheet_name = new_sheet.clone().or_else(|| d.wb.sheet(si).map(|sh| sh.name.clone())).unwrap_or_default();
-    let chart = report_chart(s, p, tool, &sheet_name, rect)?;
+    let charts = report_charts(s, p, tool, &sheet_name, rect)?;
     let new_index = edit(s, |cx| {
         let pct_fmt = NumFmt::new("0.00%");
         if let Some(name) = &new_sheet {
@@ -1907,9 +2047,7 @@ fn write_report(s: &mut Session, p: &Json, tool: &str, g: Grid) -> Result<Json> 
             sh.set_cell(cell, Cell { value: v.clone(), formula: None, style, py: None });
             touched.push(cell);
         }
-        if let Some(chart) = chart {
-            sh.charts.push(chart);
-        }
+        sh.charts.extend(charts);
         for c in touched {
             cx.touch(si, c);
         }
@@ -1971,7 +2109,7 @@ mod tests {
     use gridcraft_core::{CellRef, Value};
     use serde_json::{Value as Json, json};
 
-    use super::{CMD, MAX_OUTCOMES, call, f64_of, pmf_table};
+    use super::{CHART_ROWS, CMD, MAX_OUTCOMES, call, f64_of, pmf_table};
     use crate::Session;
 
     fn s() -> Session {
@@ -2668,6 +2806,29 @@ mod tests {
         }
         s.execute(CMD, json!({"tool": "descriptive", "range": "A1:A3", "output": "C1", "chartOutput": true})).unwrap();
         assert!(s.doc().unwrap().wb.sheet(0).unwrap().charts.is_empty());
+    }
+
+    #[test]
+    fn regression_plots_without_labels_and_beside_standardized_residuals() {
+        let mut s = s();
+        s.execute("range.setValues", json!({"range": "A1", "values": [[2, 1], [4, 2], [5, 3], [4, 4], [5, 5]]})).unwrap();
+        let p = json!({"tool": "regression", "inputY": "A1:A5", "inputX": "B1:B5", "output": "D1",
+                       "standardizedResiduals": true, "lineFitPlots": true, "normalProbability": true});
+        s.execute(CMD, p).unwrap();
+        let charts = &s.doc().unwrap().wb.sheet(0).unwrap().charts;
+        assert_eq!(charts.len(), 2);
+        let fit = &charts[0];
+        assert_eq!(fit.title.as_deref(), Some("X Variable 1 Line Fit Plot"));
+        assert_eq!(fit.y_title.as_deref(), Some("Y"));
+        assert_eq!(fit.series[1].name.as_deref(), Some("Predicted Y"));
+        assert_eq!(fit.series[0].values, "Sheet1!$A$1:$A$5");
+        assert_eq!(fit.series[0].categories.as_deref(), Some("Sheet1!$B$1:$B$5"));
+        // PROBABILITY OUTPUT sits right of the four-column residual table: I22, data I25:J29.
+        assert_eq!(v(&s, "I22"), Value::text("PROBABILITY OUTPUT"));
+        let normal = &charts[1];
+        assert_eq!(normal.series[0].categories.as_deref(), Some("Sheet1!$I$25:$I$29"));
+        assert_eq!(normal.series[0].values, "Sheet1!$J$25:$J$29");
+        assert_eq!(normal.anchor.cell.row, fit.anchor.cell.row + CHART_ROWS);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Chart parity
 
-> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-11-07 · **Change:** minor (chart-data-table keys pass the series index to the shared combo plot-kind rule, restoring compilation after #1150; earlier: Analysis ToolPak chart output for Histogram, Moving Average and Exponential Smoothing; doughnut charts: every series is a concentric ring, the first series innermost; hole size and first slice angle kept; rotated slices cover their own sweep; legend names categories; earlier: charts resize from eight handles, chart data tables, legend keys and borders, native XLSX round-trip and print/PDF; earlier: selected chart source outlines stay beneath floating objects) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-11-09 · **Change:** minor (Analysis ToolPak Regression Residual, Line Fit and Normal Probability plots; earlier: chart-data-table keys pass the series index to the shared combo plot-kind rule, restoring compilation after #1150; earlier: Analysis ToolPak chart output for Histogram, Moving Average and Exponential Smoothing; doughnut charts: every series is a concentric ring, the first series innermost; hole size and first slice angle kept; rotated slices cover their own sweep; legend names categories; earlier: charts resize from eight handles, chart data tables, legend keys and borders, native XLSX round-trip and print/PDF; earlier: selected chart source outlines stay beneath floating objects) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's chart types and chart elements against GridCraft. Part of
 [target-app-parity.md](target-app-parity.md). **Breadth ~50%, ready ~30%, 40–60 h** (estimated).
@@ -15,6 +15,7 @@ Sources: `crates/model/src/features.rs` (`ChartKind`, `Chart`, `Series`), `crate
 
 | Excel type | Excel subtypes | GridCraft | Notes |
 |---|---|---|---|
+| 2026-11-09 | minor | Analysis ToolPak Regression adds Residual, Line Fit and Normal Probability plots as XY scatter charts stacked right of the report. No readiness score change. |
 | Column | clustered, stacked, 100% stacked, 3-D clustered/stacked/100%, 3-D column | 3 of 7 | no 3-D |
 | Bar | clustered, stacked, 100%, 3-D ×3 | 3 of 6 | no 3-D |
 | Line | line, stacked, 100% stacked, with markers ×3, 3-D line | 3 of 7 (line, with markers, stacked) | no 100% stacked; smoothed lines landed (#62) |
@@ -79,7 +80,7 @@ has not been performed.
 
 Format reference: [Microsoft's DrawingML data table documentation](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.charts.datatable?view=openxml-3.0.1).
 
-Analysis ToolPak Chart Output creates embedded charts for Histogram (including Pareto and cumulative percentage), Moving Average and Exponential Smoothing; report and chart share one Undo step. Regression plots remain.
+Analysis ToolPak Chart Output creates embedded charts for Histogram (including Pareto and cumulative percentage), Moving Average and Exponential Smoothing, and Regression Residual Plots and Line Fit Plots (one XY scatter per X variable) and the Normal Probability Plot; report and charts share one Undo step.
 
 ## XLSX round-trip
 
