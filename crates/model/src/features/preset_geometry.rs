@@ -112,6 +112,40 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             let x1 = md(dy1, dx2, vc);
             vec![(l, y1), (x2, y1), (x2, t), (r, vc), (x2, b), (x2, y2), (l, y2), (x1, vc)]
         }
+        "hexagon" => {
+            let a = adj("adj", 25000, md(50000, wi, ss));
+            let x1 = md(ss, a, 100000);
+            let x2 = r - x1;
+            vec![(l, vc), (x1, t), (x2, t), (r, vc), (x2, b), (x1, b)]
+        }
+        "pentagon" => {
+            let hf = adjust(g, "hf", 105146);
+            let vf = adjust(g, "vf", 110557);
+            let swd2 = md(hc, hf, 100000);
+            let shd2 = md(vc, vf, 100000);
+            let svc = md(vc, vf, 100000);
+            let angle1 = 18_f64.to_radians();
+            let angle2 = 306_f64.to_radians();
+            let dx1 = (swd2 as f64 * angle1.cos()) as i128;
+            let dx2 = (swd2 as f64 * angle2.cos()) as i128;
+            let dy1 = (shd2 as f64 * angle1.sin()) as i128;
+            let dy2 = (shd2 as f64 * angle2.sin()) as i128;
+            let (x1, x2, x3, x4) = (hc - dx1, hc - dx2, hc + dx2, hc + dx1);
+            let (y1, y2) = (svc - dy1, svc - dy2);
+            // Scale guides can extend vertices beyond the box, even with the default rounding.
+            [(x1, y1), (hc, t), (x4, y1), (x3, y2), (x2, y2)].into_iter().map(|(x, y)| (x.clamp(l, r), y.clamp(t, b))).collect()
+        }
+        "star4" => {
+            let a = adj("adj", 12500, 50000);
+            let iwd2 = md(hc, a, 50000);
+            let ihd2 = md(vc, a, 50000);
+            let angle = 45_f64.to_radians();
+            let sdx = (iwd2 as f64 * angle.cos()) as i128;
+            let sdy = (ihd2 as f64 * angle.sin()) as i128;
+            let (sx1, sx2) = (hc - sdx, hc + sdx);
+            let (sy1, sy2) = (vc - sdy, vc + sdy);
+            vec![(l, vc), (sx1, sy1), (hc, t), (sx2, sy1), (r, vc), (sx2, sy2), (hc, b), (sx1, sy2)]
+        }
         _ => return None,
     };
     // Every vertex lies in 0..=w × 0..=h because the adjusts are pinned, so this never clamps.
