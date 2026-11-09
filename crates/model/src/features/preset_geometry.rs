@@ -118,7 +118,7 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             let x2 = r - x1;
             vec![(l, vc), (x1, t), (x2, t), (r, vc), (x2, b), (x1, b)]
         }
-        "pentagon" => {
+        "pentagon" | "star5" => {
             let hf = adjust(g, "hf", 105146);
             let vf = adjust(g, "vf", 110557);
             let swd2 = md(hc, hf, 100000);
@@ -132,8 +132,30 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             let dy2 = (shd2 as f64 * angle2.sin()) as i128;
             let (x1, x2, x3, x4) = (hc - dx1, hc - dx2, hc + dx2, hc + dx1);
             let (y1, y2) = (svc - dy1, svc - dy2);
+            let points = if g.preset == "star5" {
+                let a = adj("adj", 19098, 50000);
+                let iwd2 = md(swd2, a, 50000);
+                let ihd2 = md(shd2, a, 50000);
+                let angle3 = 342_f64.to_radians();
+                let angle4 = 54_f64.to_radians();
+                let sdx1 = (iwd2 as f64 * angle3.cos()) as i128;
+                let sdx2 = (iwd2 as f64 * angle4.cos()) as i128;
+                let sdy1 = (ihd2 as f64 * angle4.sin()) as i128;
+                let sdy2 = (ihd2 as f64 * angle3.sin()) as i128;
+                let (sx1, sx2, sx3, sx4) = (hc - sdx1, hc - sdx2, hc + sdx2, hc + sdx1);
+                let (sy1, sy2, sy3) = (svc - sdy1, svc - sdy2, svc + ihd2);
+                vec![(x1, y1), (sx2, sy1), (hc, t), (sx3, sy1), (x4, y1), (sx4, sy2), (x3, y2), (hc, sy3), (x2, y2), (sx1, sy2)]
+            } else {
+                vec![(x1, y1), (hc, t), (x4, y1), (x3, y2), (x2, y2)]
+            };
             // Scale guides can extend vertices beyond the box, even with the default rounding.
-            [(x1, y1), (hc, t), (x4, y1), (x3, y2), (x2, y2)].into_iter().map(|(x, y)| (x.clamp(l, r), y.clamp(t, b))).collect()
+            points.into_iter().map(|(x, y)| (x.clamp(l, r), y.clamp(t, b))).collect()
+        }
+        "snip1Rect" => {
+            let a = adj("adj", 16667, 50000);
+            let dx1 = md(ss, a, 100000);
+            let x1 = r - dx1;
+            vec![(l, t), (x1, t), (r, dx1), (r, b), (l, b)]
         }
         "star4" => {
             let a = adj("adj", 12500, 50000);

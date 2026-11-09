@@ -92,7 +92,7 @@ fn one_unit_high_box_does_not_panic() {
 }
 
 #[test]
-fn star_and_other_curved_presets_still_have_no_outline() {
-    assert!(preset_paths(&geom("star5", &[]), 200, 100).is_none());
+fn unsupported_curved_presets_still_have_no_outline() {
+    assert!(preset_paths(&geom("cloud", &[]), 200, 100).is_none());
     assert!(preset_paths(&geom("ellipse", &[]), 200, 100).is_none());
 }
