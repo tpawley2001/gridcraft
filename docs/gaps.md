@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (§17: octagon, plus, triangle, right triangle and notched right arrow presets draw and print their own outline; earlier: G0204: picture aspect-lock and proportional size commands; G0201: persisted editable AutoCorrect replacement list; G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; binary named-style identity; XLSX picture locks survive open + save; earlier: §17: ten preset shapes draw and print their own outline; earlier: §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (VML captions with HTML-style `br` tags are read; earlier: §17: octagon, plus, triangle, right triangle and notched right arrow presets draw and print their own outline; earlier: G0204: picture aspect-lock and proportional size commands; G0201: persisted editable AutoCorrect replacement list; G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; earlier: §17: ten preset shapes draw and print their own outline; earlier: binary named-style identity; XLSX picture locks survive open + save; earlier: §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -50,6 +50,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   prompts unknown).
 - XLSX right block arrows keep their preset, adjust guides, fill, outline and text through Save; they render as rectangles.
 - Workbook image, link-update, display and compatibility options now survive XLSX saves, including explicit false/default values and the saved theme version (G0108). Links are not refreshed.
+- VML captions accept HTML-style `br` line breaks, so buttons, macro assignments and shown notes survive open + save (G0205).
 - **Evidence:** `crates/xlsx/src/passthrough.rs` (what is kept, and why the rest isn't).
 - **Impact:** open-edit-save still simplifies workbooks with slicers, timelines or Power Pivot.
 - **Estimate:** 6–10 h. [file-format-parity.md](file-format-parity.md)
@@ -263,6 +264,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | minor | G0205: XLSX VML captions accept HTML-style `br` tags as line breaks, keeping buttons, macro assignments and shown notes through open + save. |
 | 2026-11-08 | minor | §17: octagon, plus, triangle, right triangle and notched right arrow presets kept from XLSX are drawn and printed with their own outline (`preset_paths`). |
 | 2026-11-08 | minor | G0204: `image.setLockAspectRatio` toggles picture aspect locking; `image.setSize` preserves proportions for a single dimension while locked, including size caps. Picture size fields and a Format Picture pane remain missing. |
 | 2026-11-08 | minor | G0201: AutoCorrect Options edits the persisted replacement list with Replace/With and Add/Replace/Delete; commands list, set, delete and reset entries. Older settings retain the eight built-ins. |

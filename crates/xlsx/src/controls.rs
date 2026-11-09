@@ -628,7 +628,7 @@ pub(crate) fn is_note_data(data: &El) -> bool {
 pub fn read(cx: &mut Ctx<'_>, controls: Option<&El>, vml_rid: Option<&str>, rels: &[Rel], sheet: &mut Sheet) -> ReadControls {
     let mut read = HashSet::new();
     let vml = match vml_rid.and_then(|id| rels.iter().find(|r| r.id == id && r.kind == "vmlDrawing")) {
-        Some(r) => cx.pkg.read_xml(&r.target).ok().flatten(),
+        Some(r) => cx.pkg.read_vml(&r.target).ok().flatten(),
         None => None,
     };
     let shapes: Vec<&El> = vml.as_ref().map(|v| v.kids("shape").collect()).unwrap_or_default();

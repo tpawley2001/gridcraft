@@ -201,6 +201,14 @@ impl<'a> Package<'a> {
         }
     }
 
+    /// Reads a legacy VML drawing with HTML-style caption line breaks.
+    pub fn read_vml(&mut self, part: &str) -> Result<Option<El>, IoError> {
+        match self.read(part)? {
+            Some(b) => xml::parse_vml(&b).map(Some).map_err(|e| prefix(part, e)),
+            None => Ok(None),
+        }
+    }
+
     /// Relationships of a part (`xl/workbook.xml` → `xl/_rels/workbook.xml.rels`). Missing or
     /// broken rels parts give an empty list.
     pub fn rels(&mut self, part: &str) -> Result<Vec<Rel>, IoError> {

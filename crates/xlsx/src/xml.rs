@@ -213,6 +213,12 @@ pub fn parse(xml: &[u8]) -> Result<El, IoError> {
     parse_streaming(xml, &[], &mut |_| Ok(()))
 }
 
+/// Parses a legacy VML drawing part, where text boxes may hold HTML-style `<br>` tags with no
+/// closing tag. Line breaks become direct text so caption text stays in order.
+pub fn parse_vml(xml: &[u8]) -> Result<El, IoError> {
+    parse_inner(xml, &[], &mut |_| Ok(()), true)
+}
+
 /// The first element named `local_name` (namespace prefix dropped) in `xml`, read from its start tag
 /// alone: no children, and nothing after the tag is read, so unbalanced markup around it (a VML
 /// caption's unclosed `<br>`) neither hides nor moves it. `None` when there is none, or when the
@@ -241,6 +247,10 @@ pub fn first_start(xml: &[u8], local_name: &str) -> Option<El> {
 /// tree. Deeper elements of the same name (the `xdr:row` of a form control's anchor) stay in the
 /// tree.
 pub fn parse_streaming(xml: &[u8], split: &[&str], cb: &mut dyn FnMut(El) -> Result<(), IoError>) -> Result<El, IoError> {
+    parse_inner(xml, split, cb, false)
+}
+
+fn parse_inner(xml: &[u8], split: &[&str], cb: &mut dyn FnMut(El) -> Result<(), IoError>, vml: bool) -> Result<El, IoError> {
     let data = to_utf8(xml);
     let mut reader = Reader::from_reader(data.as_ref());
     {
@@ -298,6 +308,14 @@ pub fn parse_streaming(xml: &[u8], split: &[&str], cb: &mut dyn FnMut(El) -> Res
     loop {
         let ev = reader.read_event_into(&mut buf).map_err(|e| IoError::Xml(format!("{e} at byte {}", reader.buffer_position())))?;
         match ev {
+            // Legacy VML captions use HTML line breaks, including unclosed start tags.
+            // Keep them out of the stack so later ends still close the right elements.
+            Event::Start(e) | Event::Empty(e) if vml && e.local_name().as_ref().eq_ignore_ascii_case(b"br") => {
+                if let Some(parent) = stack.last_mut() {
+                    parent.text.push('\n');
+                }
+            }
+            Event::End(e) if vml && e.local_name().as_ref().eq_ignore_ascii_case(b"br") => {}
             Event::Start(e) => {
                 if stack.len() >= MAX_DEPTH {
                     return Err(IoError::Xml("XML nested too deeply".into()));
@@ -588,6 +606,14 @@ pub fn push_num(o: &mut String, n: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vml_breaks_with_attributes_and_prefixes_stay_in_text() {
+        let root = parse_vml(b"<a>A<br class='line'>B<BR clear='all'/>C<v:Br />D</v:BR><hr/></a>").unwrap();
+        assert_eq!(root.text, "A\nB\nC\nD");
+        assert_eq!(root.children.len(), 1);
+        assert_eq!(root.children[0].name, "hr");
+    }
 
     #[test]
     fn si_without_phonetics_is_written_exactly_as_before() {
