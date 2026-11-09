@@ -39,6 +39,23 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             ),
         ]);
     }
+    // Predefined process and internal storage: a filled rectangle, two open inner lines, and the
+    // rectangle's outline.
+    if g.preset == "flowChartPredefinedProcess" || g.preset == "flowChartInternalStorage" {
+        let m = |x: i128, y: i128| PathCommand::MoveTo(to_i64(x), to_i64(y));
+        let ln = |x: i128, y: i128| PathCommand::LineTo(to_i64(x), to_i64(y));
+        let path = |fill: bool, stroke: bool, commands: Vec<PathCommand>| GeometryPath { w, h, fill, stroke, shade: PathShade::Norm, commands };
+        let rect = || vec![m(l, t), ln(r, t), ln(r, b), ln(l, b), PathCommand::Close];
+        let x1 = md(wi, 1, 8);
+        let lines = if g.preset == "flowChartPredefinedProcess" {
+            let x2 = md(wi, 7, 8);
+            vec![m(x1, t), ln(x1, b), m(x2, t), ln(x2, b)]
+        } else {
+            let y1 = md(hi, 1, 8);
+            vec![m(x1, t), ln(x1, b), m(l, y1), ln(r, y1)]
+        };
+        return Some(vec![path(true, false, rect()), path(false, true, lines), path(false, true, rect())]);
+    }
     // Donut and frame: one filled path of two subpaths, the inner one wound the other way, so it
     // is a hole.
     if g.preset == "donut" {
@@ -229,7 +246,10 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             let table: &[(i128, i128)] = if g.preset == "irregularSeal1" { &EXPLOSION1 } else { &EXPLOSION2 };
             table.iter().map(|&(x, y)| (md(wi, x, 21600), md(hi, y, 21600))).collect()
         }
-        _ => return None,
+        preset => {
+            let (pw, ph, table) = flowchart_polygon(preset)?;
+            table.iter().map(|&(x, y)| (md(wi, x, pw), md(hi, y, ph))).collect()
+        }
     };
     let mut commands = Vec::with_capacity(pts.len() + 1);
     for (i, &(x, y)) in pts.iter().enumerate() {
@@ -238,6 +258,22 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
     }
     commands.push(PathCommand::Close);
     Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }])
+}
+
+/// Straight-edged flowchart presets: the path box (`w`, `h`) and the fixed polygon in it.
+fn flowchart_polygon(preset: &str) -> Option<(i128, i128, &'static [(i128, i128)])> {
+    Some(match preset {
+        "flowChartDecision" => (2, 2, &[(0, 1), (1, 0), (2, 1), (1, 2)]),
+        "flowChartInputOutput" => (5, 5, &[(0, 5), (1, 0), (5, 0), (4, 5)]),
+        "flowChartPreparation" => (10, 10, &[(0, 5), (2, 0), (8, 0), (10, 5), (8, 10), (2, 10)]),
+        "flowChartManualInput" => (5, 5, &[(0, 1), (5, 0), (5, 5), (0, 5)]),
+        "flowChartManualOperation" => (5, 5, &[(0, 0), (5, 0), (4, 5), (1, 5)]),
+        "flowChartMerge" => (2, 2, &[(0, 0), (2, 0), (1, 2)]),
+        "flowChartExtract" => (2, 2, &[(0, 2), (1, 0), (2, 2)]),
+        "flowChartPunchedCard" => (5, 5, &[(0, 1), (1, 0), (5, 0), (5, 5), (0, 5)]),
+        "flowChartOffpageConnector" => (10, 10, &[(0, 0), (10, 0), (10, 8), (5, 10), (0, 8)]),
+        _ => return None,
+    })
 }
 
 /// Explosion 1 (`irregularSeal1`): a fixed 24-point polygon in a 21600 × 21600 path box.
