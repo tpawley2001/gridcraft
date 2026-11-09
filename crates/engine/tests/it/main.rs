@@ -5,6 +5,7 @@ mod auto_outline;
 mod auto_row_height_on_open;
 mod autocorrect;
 mod autocorrect_boundaries;
+mod autocorrect_exceptions;
 mod autofit_filter_buttons;
 mod cf_formula_validate;
 mod chart_area_stacked100;

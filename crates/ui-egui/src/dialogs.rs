@@ -1097,6 +1097,7 @@ impl Dialog {
                 d
             }
             "autoCorrect" => Dialog::custom("autoCorrect", "AutoCorrect", json!({"replace": "", "with": ""})),
+            "autoCorrectExceptions" => Dialog::custom("autoCorrectExceptions", "AutoCorrect Exceptions", json!({"word": ""})),
             "spelling" => {
                 let mut d = Dialog::custom("spelling", "Spelling", json!({}));
                 d.result = Some(app.session.run("review.spelling", json!({})).unwrap_or_else(|e| json!({"error": e})));

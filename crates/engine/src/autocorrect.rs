@@ -10,11 +10,20 @@ pub struct AutoCorrect {
     pub caps_lock: bool,
     pub replace_text: bool,
     pub entries: Vec<(String, String)>,
+    /// Words the TWo INitial CApitals rule leaves as typed (Exceptions > INitial CAps).
+    pub two_caps_exceptions: Vec<String>,
 }
 
 impl Default for AutoCorrect {
     fn default() -> Self {
-        Self { two_initial_caps: true, day_names: true, caps_lock: true, replace_text: true, entries: default_entries() }
+        Self {
+            two_initial_caps: true,
+            day_names: true,
+            caps_lock: true,
+            replace_text: true,
+            entries: default_entries(),
+            two_caps_exceptions: Vec::new(),
+        }
     }
 }
 
@@ -62,6 +71,7 @@ impl AutoCorrect {
             && second.is_uppercase()
             && letters.clone().next().is_some()
             && letters.clone().all(char::is_lowercase)
+            && !self.two_caps_exceptions.iter().any(|exception| exception == word)
         {
             return std::iter::once(first).chain(second.to_lowercase()).chain(letters).collect();
         }
