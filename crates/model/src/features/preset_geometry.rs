@@ -1,6 +1,6 @@
 //! DrawingML preset geometries (`a:prstGeom`, ECMA-376 Part 1 §20.1.9.18) as outline paths, so a
 //! preset kept in [`ShapeGeometry`] can be drawn and printed like a freeform.
-use super::{GeometryPath, PathCommand, ShapeGeometry};
+use super::{GeometryPath, PathCommand, PathShade, ShapeGeometry};
 
 /// The preset's outline in a `w` × `h` box, or `None` for a preset this doesn't know, a custom
 /// geometry, or an empty box.
@@ -17,6 +17,28 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
     // `x * y / z`, truncating; 0 when `z` is zero.
     let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
     let adj = |name: &str, default: i128, max: i128| adjust(g, name, default).clamp(0, max.max(0));
+    // Every vertex lies in 0..=w × 0..=h because the adjusts are pinned, so this never clamps.
+    let to_i64 = |v: i128| i64::try_from(v).unwrap_or(if v < 0 { 0 } else { i64::MAX });
+    if g.preset == "cube" {
+        let a = adj("adj", 25000, 100000);
+        let y1 = md(ss, a, 100000);
+        let (y4, x4) = (b - y1, r - y1);
+        let m = |x: i128, y: i128| PathCommand::MoveTo(to_i64(x), to_i64(y));
+        let ln = |x: i128, y: i128| PathCommand::LineTo(to_i64(x), to_i64(y));
+        let path = |fill: bool, stroke: bool, shade: PathShade, commands: Vec<PathCommand>| GeometryPath { w, h, fill, stroke, shade, commands };
+        let close = PathCommand::Close;
+        return Some(vec![
+            path(true, false, PathShade::Norm, vec![m(l, y1), ln(x4, y1), ln(x4, b), ln(l, b), close.clone()]),
+            path(true, false, PathShade::DarkenLess, vec![m(x4, y1), ln(r, t), ln(r, y4), ln(x4, b), close.clone()]),
+            path(true, false, PathShade::LightenLess, vec![m(l, y1), ln(y1, t), ln(r, t), ln(x4, y1), close.clone()]),
+            path(
+                false,
+                true,
+                PathShade::Norm,
+                vec![m(l, y1), ln(y1, t), ln(r, t), ln(r, y4), ln(x4, b), ln(l, b), close, m(l, y1), ln(x4, y1), ln(r, t), m(x4, y1), ln(x4, b)],
+            ),
+        ]);
+    }
     let pts: Vec<(i128, i128)> = match g.preset.as_str() {
         "rightArrow" => {
             let a1 = adj("adj1", 50000, 100000);
@@ -170,15 +192,13 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
         }
         _ => return None,
     };
-    // Every vertex lies in 0..=w × 0..=h because the adjusts are pinned, so this never clamps.
-    let to_i64 = |v: i128| i64::try_from(v).unwrap_or(if v < 0 { 0 } else { i64::MAX });
     let mut commands = Vec::with_capacity(pts.len() + 1);
     for (i, &(x, y)) in pts.iter().enumerate() {
         let (x, y) = (to_i64(x), to_i64(y));
         commands.push(if i == 0 { PathCommand::MoveTo(x, y) } else { PathCommand::LineTo(x, y) });
     }
     commands.push(PathCommand::Close);
-    Some(vec![GeometryPath { w, h, fill: true, stroke: true, commands }])
+    Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }])
 }
 
 /// The adjust value `name` (`a:gd fmla="val N"`), or `default` when missing or not a plain value.

@@ -668,7 +668,7 @@ impl Embedded {
         if closed {
             commands.push(PathCommand::Close);
         }
-        let path = GeometryPath { w: POLY_UNIT, h: POLY_UNIT, fill: true, stroke: true, commands };
+        let path = GeometryPath { w: POLY_UNIT, h: POLY_UNIT, fill: true, stroke: true, shade: Default::default(), commands };
         shape.geometry = Some(ShapeGeometry { paths: vec![path], ..ShapeGeometry::default() });
         self.freeforms.push((Place::Cells(anchor), shape));
     }

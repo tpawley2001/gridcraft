@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
 use gridcraft_model::{
-    Anchor, AnchorMode, CameraTool, Color, DrawingHyperlink, GeometryPath, Image, PathCommand, PictureLocks, Shape, ShapeFormat, ShapeGeometry,
-    ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextVert, ShapeTextWrap, Sheet, Theme,
+    Anchor, AnchorMode, CameraTool, Color, DrawingHyperlink, GeometryPath, Image, PathCommand, PathShade, PictureLocks, Shape, ShapeFormat,
+    ShapeGeometry, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextVert, ShapeTextWrap, Sheet, Theme,
 };
 
 use crate::IoError;
@@ -435,6 +435,13 @@ fn read_custom_paths(geom: &El) -> Option<Vec<GeometryPath>> {
             h: size("h")?,
             fill: path.attr("fill") != Some("none"),
             stroke: path.attr_bool("stroke").unwrap_or(true),
+            shade: match path.attr("fill") {
+                Some("lighten") => PathShade::Lighten,
+                Some("lightenLess") => PathShade::LightenLess,
+                Some("darken") => PathShade::Darken,
+                Some("darkenLess") => PathShade::DarkenLess,
+                _ => PathShade::Norm,
+            },
             commands,
         });
     }
@@ -454,8 +461,17 @@ fn write_custom_geometry(s: &mut String, paths: &[GeometryPath]) {
     s.push_str("<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l=\"l\" t=\"t\" r=\"r\" b=\"b\"/><a:pathLst>");
     for p in paths {
         let _ = write!(s, "<a:path w=\"{}\" h=\"{}\"", p.w, p.h);
+        let shade = match p.shade {
+            PathShade::Norm => None,
+            PathShade::Lighten => Some("lighten"),
+            PathShade::LightenLess => Some("lightenLess"),
+            PathShade::Darken => Some("darken"),
+            PathShade::DarkenLess => Some("darkenLess"),
+        };
         if !p.fill {
             s.push_str(" fill=\"none\"");
+        } else if let Some(mode) = shade {
+            let _ = write!(s, " fill=\"{mode}\"");
         }
         if !p.stroke {
             s.push_str(" stroke=\"0\"");
@@ -1183,5 +1199,14 @@ mod custom_geometry_tests {
         let guided = GEOM.replace(r#"<a:pt x="10" y="0"/>"#, r#"<a:pt x="x1" y="0"/>"#);
         assert!(read_custom_paths(&crate::xml::parse(guided.as_bytes()).unwrap()).is_none());
         assert!(read_custom_paths(&crate::xml::parse(b"<a:custGeom><a:pathLst/></a:custGeom>").unwrap()).is_none());
+    }
+
+    #[test]
+    fn path_fill_modes_read_as_fill_and_shade() {
+        use gridcraft_model::PathShade;
+        let xml = r#"<a:custGeom><a:pathLst><a:path fill="norm"/><a:path fill="darken"/><a:path fill="bogus"/><a:path fill="none"/></a:pathLst></a:custGeom>"#;
+        let paths = read_custom_paths(&crate::xml::parse(xml.as_bytes()).unwrap()).unwrap();
+        let got: Vec<_> = paths.iter().map(|p| (p.fill, p.shade)).collect();
+        assert_eq!(got, [(true, PathShade::Norm), (true, PathShade::Darken), (true, PathShade::Norm), (false, PathShade::Norm)]);
     }
 }

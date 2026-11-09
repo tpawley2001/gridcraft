@@ -95,6 +95,13 @@ fn unknown_presets_custom_geometry_and_empty_boxes_have_no_outline() {
     assert!(preset_paths(&geom("", &[]), 200, 100).is_none());
     assert!(preset_paths(&geom("rightArrow", &[]), 0, 100).is_none());
     let mut custom = geom("rightArrow", &[]);
-    custom.paths.push(GeometryPath { w: 10, h: 10, fill: true, stroke: true, commands: vec![PathCommand::MoveTo(0, 0), PathCommand::Close] });
+    custom.paths.push(GeometryPath {
+        w: 10,
+        h: 10,
+        fill: true,
+        stroke: true,
+        shade: Default::default(),
+        commands: vec![PathCommand::MoveTo(0, 0), PathCommand::Close],
+    });
     assert!(preset_paths(&custom, 200, 100).is_none());
 }

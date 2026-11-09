@@ -276,9 +276,12 @@ fn paint_geometry_paths(
             && has_fill
             && let Some(tris) = crate::freeform::triangulate(&o.points)
         {
+            let [fr, fg, fb, fa] = fill.to_srgba_unmultiplied();
+            let [cr, cg, cb] = o.shade.apply([fr, fg, fb]);
+            let shaded = Color32::from_rgba_unmultiplied(cr, cg, cb, fa);
             let mut mesh = egui::epaint::Mesh::default();
             for q in &o.points {
-                mesh.colored_vertex(*q, fill);
+                mesh.colored_vertex(*q, shaded);
             }
             for [a, b, c] in tris {
                 mesh.add_triangle(a as u32, b as u32, c as u32);

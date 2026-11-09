@@ -917,7 +917,42 @@ pub struct GeometryPath {
     pub fill: bool,
     /// `stroke` is not false.
     pub stroke: bool,
+    /// How the fill is shaded (`fill` = `lighten`, `darken`, ...); `Norm` for a plain fill.
+    #[serde(default)]
+    pub shade: PathShade,
     pub commands: Vec<PathCommand>,
+}
+
+/// The shading of a path's fill (ST_PathFillMode, ECMA-376 Part 1 §20.1.10.37), apart from `none`,
+/// which is [`GeometryPath::fill`] false.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PathShade {
+    #[default]
+    Norm,
+    Lighten,
+    LightenLess,
+    Darken,
+    DarkenLess,
+}
+
+impl PathShade {
+    /// `rgb` shaded for this mode. ECMA-376 gives no factors; these are an approximation, not
+    /// measured from Excel: darken ×0.60, darkenLess ×0.80, lighten 40% and lightenLess 20% of the
+    /// way to white, per channel, rounded.
+    pub fn apply(self, rgb: [u8; 3]) -> [u8; 3] {
+        let f = |c: u8| -> u8 {
+            let c = f64::from(c);
+            let v = match self {
+                PathShade::Norm => c,
+                PathShade::Darken => c * 0.60,
+                PathShade::DarkenLess => c * 0.80,
+                PathShade::Lighten => c + (255.0 - c) * 0.40,
+                PathShade::LightenLess => c + (255.0 - c) * 0.20,
+            };
+            v.round().clamp(0.0, 255.0) as u8
+        };
+        [f(rgb[0]), f(rgb[1]), f(rgb[2])]
+    }
 }
 
 /// A custom geometry path command (`a:moveTo`, `a:lnTo`, `a:cubicBezTo`, `a:quadBezTo`, `a:arcTo`,

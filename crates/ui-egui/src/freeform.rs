@@ -2,7 +2,7 @@
 //! flattened to screen points, and closed outlines triangulated for filling.
 
 use egui::{Pos2, Rect, pos2};
-use gridcraft_engine::model::{GeometryPath, PathCommand};
+use gridcraft_engine::model::{GeometryPath, PathCommand, PathShade};
 
 /// One subpath of a freeform in screen coordinates.
 #[derive(Clone, Debug, PartialEq)]
@@ -11,6 +11,8 @@ pub struct FreeformOutline {
     pub closed: bool,
     pub fill: bool,
     pub stroke: bool,
+    /// The path's fill shading, applied to the shape fill colour.
+    pub shade: PathShade,
 }
 
 /// Segments per Bézier curve.
@@ -32,7 +34,7 @@ pub fn outlines(paths: &[GeometryPath], r: Rect) -> Vec<FreeformOutline> {
         let f = |(x, y): (i64, i64)| (x as f64, y as f64);
         let mut push = |pts: &mut Vec<Pos2>, closed: bool| {
             if !pts.is_empty() {
-                out.push(FreeformOutline { points: std::mem::take(pts), closed, fill: path.fill, stroke: path.stroke });
+                out.push(FreeformOutline { points: std::mem::take(pts), closed, fill: path.fill, stroke: path.stroke, shade: path.shade });
             }
         };
         let mut cur: Vec<Pos2> = Vec::new();

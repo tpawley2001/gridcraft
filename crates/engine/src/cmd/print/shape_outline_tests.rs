@@ -47,7 +47,7 @@ fn red_paths(s: &mut Session) -> Vec<Vec<(f32, f32)>> {
 }
 
 fn path(fill: bool, commands: Vec<PathCommand>) -> GeometryPath {
-    GeometryPath { w: 100, h: 100, fill, stroke: true, commands }
+    GeometryPath { w: 100, h: 100, fill, stroke: true, shade: Default::default(), commands }
 }
 
 fn freeform(paths: Vec<GeometryPath>) -> Option<ShapeGeometry> {
@@ -192,4 +192,41 @@ fn triangle_preset_prints_three_points_with_a_centred_apex() {
     assert_eq!(p[0].len(), 3, "{p:?}");
     assert_eq!(distinct(p[0].iter().map(|v| v.0)), 3, "{p:?}");
     assert_eq!(distinct(p[0].iter().map(|v| v.1)), 2, "{p:?}");
+}
+
+/// Each painted path's colour operator line and its path line (`… m … l … h f`), in order.
+fn painted(text: &str, op: &str) -> Vec<(String, String)> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut out = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        if l.ends_with(op) {
+            if let Some(p) = lines[i + 1..].iter().take(2).find(|p| p.contains(" m ")) {
+                out.push((l.to_string(), p.to_string()));
+            }
+        }
+    }
+    out
+}
+
+fn rgb(op: &str) -> [f32; 3] {
+    let v: Vec<f32> = op.split_whitespace().take(3).map(|t| t.parse().unwrap()).collect();
+    [v[0], v[1], v[2]]
+}
+
+#[test]
+fn cube_preset_prints_three_shaded_faces_and_its_outline() {
+    let mut s = shape_session(ShapeKind::Rectangle, preset("cube"));
+    let text = page_stream(&mut s);
+    // The faces are filled without a stroke (`stroke="false"` in the preset): ` h f`.
+    let faces: Vec<[f32; 3]> = painted(&text, " rg").into_iter().filter(|(_, p)| p.ends_with(" h f")).map(|(c, _)| rgb(&c)).collect();
+    assert_eq!(faces.len(), 3, "{faces:?}\n{text}");
+    let (front, side, top) = (faces[0], faces[1], faces[2]);
+    assert_eq!(front, [1.0, 0.0, 0.0]);
+    assert!(front != side && side != top && front != top, "{faces:?}");
+    assert!(side[0] < front[0] && side[1] <= front[1] && side[2] <= front[2], "side darker: {faces:?}");
+    assert!(top[0] >= front[0] && top[1] > front[1] && top[2] > front[2], "top lighter: {faces:?}");
+    // The outline: the closed silhouette and the two open inner edges, stroked blue.
+    let strokes: Vec<String> = painted(&text, " RG").into_iter().filter(|(c, _)| c.starts_with("0 0 1 RG")).map(|(_, p)| p).collect();
+    assert_eq!(strokes.iter().filter(|p| p.ends_with(" h S")).count(), 1, "{strokes:?}");
+    assert_eq!(strokes.iter().filter(|p| p.ends_with(" S") && !p.ends_with(" h S")).count(), 2, "{strokes:?}");
 }
