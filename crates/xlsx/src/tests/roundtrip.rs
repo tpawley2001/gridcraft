@@ -401,6 +401,7 @@ fn sample() -> Workbook {
         link: None,
     });
     s.shapes.push(Shape {
+        alt: String::new(),
         hidden: false,
         hyperlink: None,
         name: None,
@@ -415,6 +416,7 @@ fn sample() -> Workbook {
         format: Default::default(),
     });
     s.shapes.push(Shape {
+        alt: String::new(),
         hidden: false,
         hyperlink: None,
         name: None,
@@ -429,6 +431,7 @@ fn sample() -> Workbook {
         format: Default::default(),
     });
     s.shapes.push(Shape {
+        alt: String::new(),
         hidden: false,
         hyperlink: None,
         name: None,
@@ -456,6 +459,7 @@ fn sample() -> Workbook {
         },
     });
     let base_chart = Chart {
+        alt: String::new(),
         theme_override: None,
         hidden: false,
         id: 20,

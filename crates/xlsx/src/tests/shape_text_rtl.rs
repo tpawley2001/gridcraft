@@ -38,6 +38,7 @@ fn written_drawing(wb: &Workbook) -> String {
 fn text_box(text: &str, format: ShapeFormat) -> Workbook {
     let mut sheet = Sheet::new("Sheet1");
     sheet.shapes.push(Shape {
+        alt: String::new(),
         hidden: false,
         hyperlink: None,
         name: None,

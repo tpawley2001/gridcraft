@@ -12,6 +12,7 @@ use crate::{read_xlsx, write_xlsx};
 
 fn equation(id: u32, cell: &str, latex: &str, ink: Color) -> Shape {
     Shape {
+        alt: String::new(),
         hidden: false,
         hyperlink: None,
         name: None,
@@ -157,6 +158,7 @@ fn a_text_box_stays_a_text_box_and_hostile_sources_survive() {
     let mut wb = book(vec![equation(1, "B2", &"{".repeat(40), Color::Auto), equation(2, "B6", "\u{0}\u{1F600} & ]]> <!-- -->", Color::Auto)]);
     let mut sh = (*wb.sheets[0]).clone();
     sh.shapes.push(Shape {
+        alt: String::new(),
         hidden: false,
         hyperlink: None,
         name: None,

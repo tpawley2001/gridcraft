@@ -2,7 +2,7 @@
 //! Comments pane, Show All Notes and Convert to Comments.
 
 use gridcraft_core::CellRef;
-use gridcraft_model::{EditRange, PasswordHash, SheetProtection, Visibility, password_hash};
+use gridcraft_model::{EditRange, PasswordHash, ShapeKind, SheetProtection, Visibility, password_hash};
 use serde_json::{Value as Json, json};
 
 use super::{CommandSpec, DocState, EngineError, Result, Session, bad, bool_param, cmd, edit, has_doc, str_param, target_ranges, target_sheet};
@@ -348,10 +348,19 @@ fn accessibility(s: &mut Session, _: &Json) -> Result<Json> {
                 issues.push(json!({"sheet": sh.name, "issue": "Missing alternative text", "object": format!("Picture {}", im.id)}));
             }
         }
+        // Equations carry their source, not a description; hidden objects are not read out.
+        for shape in sh.shapes.iter().filter(|x| x.alt.is_empty() && !x.hidden && x.kind != ShapeKind::Equation) {
+            let object = shape.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Shape {}", shape.id));
+            issues.push(json!({"sheet": sh.name, "issue": "Missing alternative text", "object": object}));
+        }
+        for chart in sh.charts.iter().filter(|x| x.alt.is_empty() && !x.hidden) {
+            issues.push(json!({"sheet": sh.name, "issue": "Missing alternative text", "object": format!("Chart {}", chart.id)}));
+        }
         if !sh.merges.is_empty() {
             issues.push(json!({"sheet": sh.name, "issue": "Merged cells", "count": sh.merges.len()}));
         }
-        if sh.name.starts_with("Sheet") {
+        // Only the names new sheets get ("Sheet1"), not "Sheet totals" or "Sheets".
+        if sh.name.strip_prefix("Sheet").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) {
             issues.push(json!({"sheet": sh.name, "issue": "Default sheet name"}));
         }
     }

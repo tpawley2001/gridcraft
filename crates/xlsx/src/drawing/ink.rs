@@ -183,6 +183,7 @@ pub(super) fn read(obj: &El, anchor: Anchor) -> Option<Shape> {
         hidden: false,
         hyperlink: None,
         name: None,
+        alt: String::new(),
         id: 0,
         kind: ShapeKind::Ink,
         geometry: None,
@@ -197,7 +198,8 @@ pub(super) fn read(obj: &El, anchor: Anchor) -> Option<Shape> {
 
 /// Invalid/native out-of-range data uses the existing rectangle fallback. A successful
 /// result is complete before it is appended, so malformed points never yield half a stroke.
-pub(super) fn write(shape: &Shape, theme: &Theme, id: usize, link: &str) -> Option<String> {
+/// `descr` is the `cNvPr` alternative text attribute, already escaped (empty for none).
+pub(super) fn write(shape: &Shape, theme: &Theme, id: usize, link: &str, descr: &str) -> Option<String> {
     if shape.kind != ShapeKind::Ink || shape.format.no_line {
         return None;
     }
@@ -233,7 +235,7 @@ pub(super) fn write(shape: &Shape, theme: &Theme, id: usize, link: &str) -> Opti
     let name = crate::xml::esc_attr(&shape.name.clone().unwrap_or_else(|| format!("Ink {id}")));
     let hidden = if shape.hidden { " hidden=\"1\"" } else { "" };
     let mut xml = format!(
-        "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"{name}\"{hidden}>{link}</xdr:cNvPr><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr>{}<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:pathLst><a:path w=\"{w}\" h=\"{h}\" fill=\"none\">",
+        "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"{name}\"{descr}{hidden}>{link}</xdr:cNvPr><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr>{}<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:pathLst><a:path w=\"{w}\" h=\"{h}\" fill=\"none\">",
         xfrm(a, "a:xfrm")
     );
     for (i, (x, y)) in points.iter().enumerate() {

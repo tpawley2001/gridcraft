@@ -31,6 +31,7 @@ fn freeform() -> Shape {
         hidden: false,
         hyperlink: None,
         name: None,
+        alt: String::new(),
         id: 1,
         kind: ShapeKind::Freeform,
         geometry: Some(ShapeGeometry { preset: String::new(), adjust: vec![], paths }),

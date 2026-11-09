@@ -20,6 +20,7 @@ mod custom_view_freeze;
 mod data_table_dirty;
 mod data_table_recalc;
 mod data_table_shift;
+mod drawing_alt_text;
 mod dynamicmetadata;
 mod extreme_selection_moves;
 mod font_scheme_minor;

@@ -61,6 +61,7 @@ fn chart_names_are_written_qualified() {
     let mut wb = Workbook::default();
     let mut s = Sheet::new("Data");
     s.charts.push(Chart {
+        alt: String::new(),
         theme_override: None,
         hidden: false,
         id: 1,
@@ -152,6 +153,7 @@ fn chart_names_keep_spaces_around_a_quoted_sheet_name() {
     let mut wb = Workbook::default();
     let mut s = Sheet::new("Sales");
     s.charts.push(Chart {
+        alt: String::new(),
         theme_override: None,
         id: 1,
         kind: ChartKind::BarStacked,

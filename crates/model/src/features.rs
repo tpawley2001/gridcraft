@@ -676,6 +676,9 @@ pub struct Chart {
     /// Hidden drawing objects stay in the workbook but are not displayed or printed.
     #[serde(default)]
     pub hidden: bool,
+    /// Alternative text (`xdr:cNvPr descr`); empty when the chart has none.
+    #[serde(default)]
+    pub alt: String,
     pub id: u32,
     pub kind: ChartKind,
     pub anchor: Anchor,
@@ -977,6 +980,9 @@ pub struct Shape {
     /// Imported drawing object name (`xdr:cNvPr name`).
     #[serde(default)]
     pub name: Option<String>,
+    /// Alternative text (`xdr:cNvPr descr`); empty when the shape has none.
+    #[serde(default)]
+    pub alt: String,
     pub id: u32,
     pub kind: ShapeKind,
     /// The DrawingML preset geometry the shape was read with, when `kind` alone doesn't say it (a
@@ -1647,6 +1653,7 @@ mod tests {
     #[test]
     fn chart_without_hole_size_keeps_the_legacy_hole() {
         let chart = Chart {
+            alt: String::new(),
             theme_override: None,
             hidden: false,
             id: 1,
