@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-09 · **Change:** minor (§17: Explosion 1 and 2 presets draw and print their own outline; earlier: §17: cube preset draws and prints with shaded faces; custom-geometry path shading kept through XLSX; earlier: G0210: corrected parity documentation; earlier: §17: 5-point star and single-snipped-corner rectangle presets draw and print their own outline; earlier: §17: hexagon, pentagon and 4-point star presets draw and print their own outline; earlier: VML captions with HTML-style `br` tags are read; earlier: §17: octagon, plus, triangle, right triangle and notched right arrow presets draw and print their own outline; earlier: G0204: picture aspect-lock and proportional size commands; G0201: persisted editable AutoCorrect replacement list; G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; binary named-style identity; XLSX picture locks survive open + save; earlier: §17: ten preset shapes draw and print their own outline; earlier: §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-09 · **Change:** minor (G0213: §19: XLSB AutoFilter date, colour and icon criteria and XML Spreadsheet 2003 listed as imported; earlier: §17: Explosion 1 and 2 presets draw and print their own outline; earlier: §17: cube preset draws and prints with shaded faces; custom-geometry path shading kept through XLSX; earlier: G0210: corrected parity documentation; earlier: §17: 5-point star and single-snipped-corner rectangle presets draw and print their own outline; earlier: §17: hexagon, pentagon and 4-point star presets draw and print their own outline; earlier: VML captions with HTML-style `br` tags are read; earlier: §17: octagon, plus, triangle, right triangle and notched right arrow presets draw and print their own outline; earlier: G0204: picture aspect-lock and proportional size commands; G0201: persisted editable AutoCorrect replacement list; G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; binary named-style identity; XLSX picture locks survive open + save; earlier: §17: ten preset shapes draw and print their own outline; earlier: §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -221,13 +221,13 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   pattern fills, borders, alignment and protection; sheet layout (column widths, row heights, hidden
   and outlined rows/columns, frozen panes, view options, tab colours); workbook theme colours and
   fonts; hyperlinks and notes; tables (with calculated column and custom totals formulas) and
-  AutoFilters; data validation and conditional formatting with their differential formats;
+  AutoFilters (including AutoFilter date, colour and icon criteria); data validation and conditional formatting with their differential formats;
   PivotTables; print setup; pictures, shapes, text boxes and charts from each sheet's drawing part; sheet and workbook structure protection, Allow Edit Ranges (legacy and
   iterated passwords), and calculation settings; data connections and sheet query tables are kept on save as .xlsx,
   including cell-bound query parameters (no OLAP or data-model connections). Windows range permissions warn once per workbook. Left:
   links to other workbooks (kept as saved results), cell style (ixfeParent) inheritance (gradient
-  fills open as their first stop's colour, as in .xlsx), date/colour/icon filters; no XLSB write.
-- ODS values only, no write; valued rows repeated past the worksheet height read once with one warning per file; SYLK reads and writes active-sheet values, R1C1 formulas, number formats and column widths (other formatting and objects omitted); DIF reads typed values and saves active-sheet values; no `.prn`, XML Spreadsheet 2003; CSV writes raw
+  fills open as their first stop's colour, as in .xlsx); no XLSB write.
+- ODS values only, no write; valued rows repeated past the worksheet height read once with one warning per file; SYLK reads and writes active-sheet values, R1C1 formulas, number formats and column widths (other formatting and objects omitted); DIF reads typed values and saves active-sheet values; XML Spreadsheet 2003 imports; no `.prn`; CSV writes raw
   instead of displayed values; templates saved with the workbook content type.
   **Estimate:** 14–22 h.
 
@@ -261,6 +261,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-09 | minor | G0213: §19: XLSB AutoFilter date, colour and icon criteria moved from Left to imported; XML Spreadsheet 2003 no longer listed as missing. |
 | 2026-11-08 | minor | G0210: §15: consolidated stale function counts into one current line (10 missing, 9 stubs), counted from the CLI. |
 | 2026-11-09 | minor | G0216: §17: Explosion 1 and Explosion 2 (`irregularSeal1`, `irregularSeal2`) presets kept from XLSX draw and print their own fixed outline. |
 | 2026-11-09 | minor | G0211: §17: the cube preset kept from XLSX draws and prints with its three faces shaded (front plain, side darker, top lighter) and its edges; custom-geometry path shading (`a:path/@fill`, ST_PathFillMode) is kept through open + save. Shading factors are an approximation, not measured from Excel. |
