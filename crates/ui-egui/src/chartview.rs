@@ -270,27 +270,28 @@ fn paint_geometry_paths(
     line: Color32,
 ) {
     let has_fill = !sp.format.no_fill && fill != Color32::TRANSPARENT;
-    for o in crate::freeform::outlines(paths, r) {
-        if o.closed
-            && o.fill
-            && has_fill
-            && let Some(tris) = crate::freeform::triangulate(&o.points)
-        {
+    for path in paths {
+        // All closed subpaths of one path fill together (even-odd), so an inner one is a hole.
+        let tris = if has_fill { crate::freeform::fill_triangles(path, r) } else { Vec::new() };
+        if !tris.is_empty() {
             let [fr, fg, fb, fa] = fill.to_srgba_unmultiplied();
-            let [cr, cg, cb] = o.shade.apply([fr, fg, fb]);
+            let [cr, cg, cb] = path.shade.apply([fr, fg, fb]);
             let shaded = Color32::from_rgba_unmultiplied(cr, cg, cb, fa);
             let mut mesh = egui::epaint::Mesh::default();
-            for q in &o.points {
-                mesh.colored_vertex(*q, shaded);
-            }
-            for [a, b, c] in tris {
-                mesh.add_triangle(a as u32, b as u32, c as u32);
+            for (i, tri) in tris.iter().enumerate() {
+                let base = (i * 3) as u32;
+                for q in tri {
+                    mesh.colored_vertex(*q, shaded);
+                }
+                mesh.add_triangle(base, base + 1, base + 2);
             }
             p.add(egui::Shape::mesh(mesh));
         }
-        if o.stroke && !sp.format.no_line && o.points.len() >= 2 {
-            let stroke = PathStroke::new(1.0, line);
-            p.add(if o.closed { PathShape::closed_line(o.points, stroke) } else { PathShape::line(o.points, stroke) });
+        for o in crate::freeform::outlines(std::slice::from_ref(path), r) {
+            if o.stroke && !sp.format.no_line && o.points.len() >= 2 {
+                let stroke = PathStroke::new(1.0, line);
+                p.add(if o.closed { PathShape::closed_line(o.points, stroke) } else { PathShape::line(o.points, stroke) });
+            }
         }
     }
 }

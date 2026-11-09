@@ -209,9 +209,146 @@ pub fn triangulate(points: &[Pos2]) -> Option<Vec<[usize; 3]>> {
 
 /// Fill triangles for one path: its closed subpaths filled together with the even-odd rule, so a
 /// subpath inside another is a hole (and one inside that hole is filled again).
+/// A ring that fails to join with its holes falls back to filling each outline on its own.
 pub fn fill_triangles(path: &GeometryPath, r: Rect) -> Vec<[Pos2; 3]> {
-    let _ = (path, r);
-    Vec::new() // stub: implemented by the task
+    if !path.fill {
+        return Vec::new();
+    }
+    // Closed rings without repeated closing points; degenerate ones (no area) are dropped.
+    let rings: Vec<Vec<Pos2>> = outlines(std::slice::from_ref(path), r)
+        .into_iter()
+        .filter(|o| o.closed)
+        .map(|o| clean_ring(o.points))
+        .filter(|p| p.len() >= 3 && signed_area2(p).abs() > 1e-9)
+        .collect();
+    let mut out = Vec::new();
+    if rings.len() == 1 {
+        if let Some(ring) = rings.first() {
+            push_triangles(&mut out, ring, triangulate(ring));
+        }
+        return out;
+    }
+    // Nesting depth: how many other rings contain each ring. Even depth fills, odd is a hole of
+    // the deepest ring around it.
+    let contains = |outer: usize, inner: usize| match (rings.get(outer), rings.get(inner).and_then(|p| p.first())) {
+        (Some(o), Some(&q)) => outer != inner && inside(o, q),
+        _ => false,
+    };
+    let depth: Vec<usize> = (0..rings.len()).map(|i| (0..rings.len()).filter(|&j| contains(j, i)).count()).collect();
+    let parent = |i: usize| {
+        let d = depth.get(i).copied().unwrap_or(0);
+        (0..rings.len()).find(|&j| depth.get(j).copied() == Some(d.wrapping_sub(1)) && contains(j, i))
+    };
+    for (oi, outer) in rings.iter().enumerate() {
+        if depth.get(oi).is_none_or(|d| d % 2 == 1) {
+            continue;
+        }
+        let holes: Vec<&Vec<Pos2>> =
+            (0..rings.len()).filter(|&h| depth.get(h).is_some_and(|d| d % 2 == 1) && parent(h) == Some(oi)).filter_map(|h| rings.get(h)).collect();
+        let joined = if holes.is_empty() { Some(outer.clone()) } else { join_holes(outer, &holes) };
+        match joined.as_ref().and_then(|ring| triangulate(ring).map(|t| (ring, t))) {
+            Some((ring, tris)) => push_triangles(&mut out, ring, Some(tris)),
+            None => {
+                // Fill each outline on its own, as when holes were not cut.
+                push_triangles(&mut out, outer, triangulate(outer));
+                for h in holes {
+                    push_triangles(&mut out, h, triangulate(h));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn push_triangles(out: &mut Vec<[Pos2; 3]>, points: &[Pos2], tris: Option<Vec<[usize; 3]>>) {
+    for [a, b, c] in tris.unwrap_or_default() {
+        if let (Some(&a), Some(&b), Some(&c)) = (points.get(a), points.get(b), points.get(c)) {
+            out.push([a, b, c]);
+        }
+    }
+}
+
+/// The ring without consecutive repeats or a final point equal to the first.
+fn clean_ring(mut points: Vec<Pos2>) -> Vec<Pos2> {
+    points.dedup();
+    while points.len() > 1 && points.first() == points.last() {
+        points.pop();
+    }
+    points
+}
+
+/// Twice the ring's signed area (positive when clockwise on screen).
+fn signed_area2(ring: &[Pos2]) -> f64 {
+    ring.iter().zip(ring.iter().cycle().skip(1)).map(|(&a, &b)| cross(Pos2::ZERO, a, b)).sum()
+}
+
+/// Whether `q` lies inside `ring` (crossing number).
+fn inside(ring: &[Pos2], q: Pos2) -> bool {
+    let mut odd = false;
+    for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
+        if (a.y > q.y) != (b.y > q.y) {
+            let x = a.x as f64 + (q.y as f64 - a.y as f64) * (b.x as f64 - a.x as f64) / (b.y as f64 - a.y as f64);
+            if (q.x as f64) < x {
+                odd = !odd;
+            }
+        }
+    }
+    odd
+}
+
+/// Joins `holes` into `outer` with bridges, giving one ring for ear clipping: each hole, wound
+/// against the outer ring, is entered from a visible outer vertex and left back to it, the two
+/// bridge vertices repeated. Holes are joined rightmost first. `None` when a hole has no visible
+/// vertex or the combined ring exceeds the fill cap.
+fn join_holes(outer: &[Pos2], holes: &[&Vec<Pos2>]) -> Option<Vec<Pos2>> {
+    let total = outer.len() + holes.iter().map(|h| h.len() + 2).sum::<usize>();
+    if total > MAX_FILL_POINTS {
+        return None;
+    }
+    let orient = signed_area2(outer).signum();
+    let rightmost = |h: &[Pos2]| h.iter().enumerate().max_by(|a, b| a.1.x.total_cmp(&b.1.x)).map(|(i, _)| i);
+    let mut holes: Vec<Vec<Pos2>> = holes
+        .iter()
+        .map(|h| {
+            let mut h = h.to_vec();
+            if signed_area2(&h).signum() == orient {
+                h.reverse();
+            }
+            h
+        })
+        .collect();
+    holes.sort_by(|a, b| {
+        let x = |h: &Vec<Pos2>| rightmost(h).and_then(|i| h.get(i)).map_or(f32::MIN, |p| p.x);
+        x(b).total_cmp(&x(a))
+    });
+    let mut ring = outer.to_vec();
+    for (k, hole) in holes.iter().enumerate() {
+        let hi = rightmost(hole)?;
+        let hp = *hole.get(hi)?;
+        let edges = |pts: &[Pos2]| pts.iter().copied().zip(pts.iter().copied().cycle().skip(1)).collect::<Vec<_>>();
+        let mut blockers = edges(&ring);
+        for h in holes.iter().skip(k) {
+            blockers.extend(edges(h));
+        }
+        // Outer vertices nearest first; the first whose bridge crosses no edge and stays inside.
+        let mut order: Vec<usize> = (0..ring.len()).collect();
+        let dist = |i: usize| ring.get(i).map_or(f32::MAX, |p| p.distance_sq(hp));
+        order.sort_by(|&a, &b| dist(a).total_cmp(&dist(b)));
+        let mi = order.into_iter().find(|&i| {
+            let Some(&m) = ring.get(i) else { return false };
+            let mid = pos2((m.x + hp.x) / 2.0, (m.y + hp.y) / 2.0);
+            m != hp && !blockers.iter().any(|&(a, b)| segments_cross(m, hp, a, b)) && inside(outer, mid) && !holes.iter().any(|h| inside(h, mid))
+        })?;
+        let m = *ring.get(mi)?;
+        let mut joined = Vec::with_capacity(ring.len() + hole.len() + 2);
+        joined.extend(ring.iter().take(mi + 1).copied());
+        joined.extend(hole.iter().cycle().skip(hi).take(hole.len()).copied());
+        joined.push(hp);
+        joined.push(m);
+        joined.extend(ring.iter().skip(mi + 1).copied());
+        ring = joined;
+    }
+    Some(ring)
 }
 
 #[cfg(test)]
