@@ -41,7 +41,7 @@ fn preset(name: &str) -> ShapeGeometry {
 }
 
 fn square(x0: i64, y0: i64, x1: i64, y1: i64, clockwise: bool) -> Vec<PathCommand> {
-    let mut pts = vec![(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
+    let mut pts = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
     if !clockwise {
         pts.reverse();
     }
