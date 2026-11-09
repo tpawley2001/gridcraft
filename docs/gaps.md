@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (§17: 5-point star and single-snipped-corner rectangle presets draw and print their own outline; earlier: §17: hexagon, pentagon and 4-point star presets draw and print their own outline; earlier: VML captions with HTML-style `br` tags are read; earlier: §17: octagon, plus, triangle, right triangle and notched right arrow presets draw and print their own outline; earlier: G0204: picture aspect-lock and proportional size commands; G0201: persisted editable AutoCorrect replacement list; G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; binary named-style identity; XLSX picture locks survive open + save; earlier: §17: ten preset shapes draw and print their own outline; earlier: §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-08 · **Change:** minor (G0210: corrected parity documentation; earlier: §17: 5-point star and single-snipped-corner rectangle presets draw and print their own outline; earlier: §17: hexagon, pentagon and 4-point star presets draw and print their own outline; earlier: VML captions with HTML-style `br` tags are read; earlier: §17: octagon, plus, triangle, right triangle and notched right arrow presets draw and print their own outline; earlier: G0204: picture aspect-lock and proportional size commands; G0201: persisted editable AutoCorrect replacement list; G0202: Camera pictures retain DrawingML metadata and legacy VML shapes with images; binary named-style identity; XLSX picture locks survive open + save; earlier: §17: ten preset shapes draw and print their own outline; earlier: §20: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0188: copied-cell Paste Options replaces the paste in one undo step; G0189: four AutoCorrect typing options in Proofing; earlier: `.xls` shapes in Continue records after Obj are imported; §7: `.xls` names holding relative-offset references open as `#N/A`)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -191,10 +191,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 ### 15. Remaining functions and an oracle suite (F)
 - **Progress (2026-11-05):** INDIRECT accepts unquoted existing sheet names starting with a digit (for example `1月!A:A`), including monthly-sheet SUMIF totals.
-- 18 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 16–26 h.
-- 20 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 17–29 h.
-- 21 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 18–30 h.
-- 18 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 18–30 h.
+- 10 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 16–26 h.
   [function-parity.md](function-parity.md)
 
 ### 16. Collaboration and review (F)
@@ -264,6 +261,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | minor | G0210: §15: consolidated stale function counts into one current line (10 missing, 9 stubs), counted from the CLI. |
 | 2026-11-08 | minor | G0209: §17: 5-point star and single-snipped-corner rectangle presets kept from XLSX draw and print their own outline using the DrawingML guides. |
 | 2026-11-08 | minor | G0208: §17: hexagon, pentagon and 4-point star presets kept from XLSX draw and print their own outline using the DrawingML guides. |
 | 2026-11-08 | minor | G0205: XLSX VML captions accept HTML-style `br` tags as line breaks, keeping buttons, macro assignments and shown notes through open + save. |
