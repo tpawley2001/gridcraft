@@ -12,6 +12,7 @@ mod advanced_filter;
 mod argument_names;
 mod autocorrect_entries;
 mod autocorrect_entry;
+mod autocorrect_exceptions;
 mod autosave_persist;
 mod borders;
 mod cell_editor_caret;

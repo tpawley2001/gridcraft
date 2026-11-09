@@ -83,12 +83,34 @@ pub struct AutoCorrectOptions {
     pub replace_text: bool,
     #[serde(deserialize_with = "deserialize_auto_correct_entries")]
     pub entries: Vec<(String, String)>,
+    /// Words the TWo INitial CApitals rule leaves as typed (Exceptions > INitial CAps).
+    #[serde(deserialize_with = "deserialize_auto_correct_exceptions")]
+    pub two_caps_exceptions: Vec<String>,
 }
 
 impl Default for AutoCorrectOptions {
     fn default() -> Self {
-        Self { two_initial_caps: true, day_names: true, caps_lock: true, replace_text: true, entries: default_auto_correct_entries() }
+        Self {
+            two_initial_caps: true,
+            day_names: true,
+            caps_lock: true,
+            replace_text: true,
+            entries: default_auto_correct_entries(),
+            two_caps_exceptions: Vec::new(),
+        }
     }
+}
+
+/// Sorts case-insensitively, then by exact text, and drops duplicates.
+fn sort_auto_correct_exceptions(words: &mut Vec<String>) {
+    words.sort_by_cached_key(|word| (word.to_lowercase(), word.clone()));
+    words.dedup();
+}
+
+fn deserialize_auto_correct_exceptions<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    let mut words = Vec::<String>::deserialize(deserializer)?;
+    sort_auto_correct_exceptions(&mut words);
+    Ok(words)
 }
 
 fn sort_auto_correct_entries(entries: &mut [(String, String)]) {
@@ -115,6 +137,7 @@ impl AutoCorrectOptions {
             caps_lock: self.caps_lock,
             replace_text: self.replace_text,
             entries: self.entries.clone(),
+            two_caps_exceptions: self.two_caps_exceptions.clone(),
         }
         .correct(text)
     }
