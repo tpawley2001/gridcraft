@@ -604,9 +604,12 @@ pub struct ReadControls {
 /// Whether a VML shape the sheet doesn't list is a control that only pass-through can keep: it
 /// has client data other than a note (GridCraft writes notes) or an embedded object's picture.
 /// A `Pict` with `FmlaPict` is a Camera picture: its DrawingML snapshot needs this VML shape.
+/// A `Pict` with `o:signatureline` is a signature line, which lives only in the VML drawing.
 fn unlisted_kept(shape: &El) -> bool {
-    object_type_of(shape)
-        .is_some_and(|t| !t.eq_ignore_ascii_case("note") && (!t.eq_ignore_ascii_case("pict") || shape.path(&["ClientData", "FmlaPict"]).is_some()))
+    object_type_of(shape).is_some_and(|t| {
+        !t.eq_ignore_ascii_case("note")
+            && (!t.eq_ignore_ascii_case("pict") || shape.path(&["ClientData", "FmlaPict"]).is_some() || shape.child("signatureline").is_some())
+    })
 }
 
 /// A VML shape's client data `ObjectType`, trimmed (`Note`, `Button`, `Checkbox`).
