@@ -242,6 +242,7 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             let (sy1, sy2) = (vc - sdy, vc + sdy);
             vec![(l, vc), (sx1, sy1), (hc, t), (sx2, sy1), (r, vc), (sx2, sy2), (hc, b), (sx1, sy2)]
         }
+        "star6" | "star7" | "star8" | "star10" | "star12" | "star16" | "star24" | "star32" => star_points(g, wi, hi)?,
         "irregularSeal1" | "irregularSeal2" => {
             let table: &[(i128, i128)] = if g.preset == "irregularSeal1" { &EXPLOSION1 } else { &EXPLOSION2 };
             table.iter().map(|&(x, y)| (md(wi, x, 21600), md(hi, y, 21600))).collect()
@@ -277,6 +278,153 @@ fn flowchart_polygon(preset: &str) -> Option<FixedPolygon> {
         "flowChartOffpageConnector" => (10, 10, &[(0, 0), (10, 0), (10, 8), (5, 10), (0, 8)]),
         _ => return None,
     })
+}
+
+/// A guide factor: `*/ r n 100000` for `F(n)`, `cos r a` for `T(a)` with `a` in degrees.
+#[derive(Clone, Copy)]
+enum K {
+    F(i128),
+    T(f64),
+}
+
+/// The vertices of the 6- to 32-point star presets (`star6` … `star32`), pinned into the box, or
+/// `None` for another preset.
+fn star_points(g: &ShapeGeometry, wi: i128, hi: i128) -> Option<Vec<(i128, i128)>> {
+    let (t, b, hc, vc) = (0, hi, wi / 2, hi / 2);
+    let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
+    let cos = |r: i128, deg: f64| (r as f64 * deg.to_radians().cos()) as i128;
+    let sin = |r: i128, deg: f64| (r as f64 * deg.to_radians().sin()) as i128;
+    let k = |r: i128, f: K| match f {
+        K::F(n) => md(r, n, 100000),
+        K::T(deg) => cos(r, deg),
+    };
+    let a = |default: i128| adjust(g, "adj", default).clamp(0, 50000);
+    // Upper-left quadrant from the left vertex up to (not including) the top one, as
+    // (left x, right x, upper y, lower y); the other quadrants mirror it.
+    let quad = |q: &[(i128, i128, i128, i128)]| -> Vec<(i128, i128)> {
+        let mut pts: Vec<(i128, i128)> = q.iter().map(|p| (p.0, p.2)).collect();
+        pts.push((hc, t));
+        pts.extend(q.iter().rev().map(|p| (p.1, p.2)));
+        pts.extend(q.iter().skip(1).map(|p| (p.1, p.3)));
+        pts.push((hc, b));
+        pts.extend(q.iter().skip(1).rev().map(|p| (p.0, p.3)));
+        pts
+    };
+    // Outer offsets `outer` on `wd2`/`hd2` and inner ones `inner` on `iwd2`/`ihd2`, alternating; each
+    // list is read forwards for x and backwards for y.
+    let radial = |adj: i128, outer: &[K], inner: &[K]| -> Vec<(i128, i128)> {
+        let (iwd2, ihd2) = (md(hc, adj, 50000), md(vc, adj, 50000));
+        let mut q = vec![(0, wi, vc, vc)];
+        let off = |rx: i128, ry: i128, list: &[K], i: usize| {
+            let kx = list.get(i).map_or(0, |&f| k(rx, f));
+            let ky = list.get(list.len().saturating_sub(i + 1)).map_or(0, |&f| k(ry, f));
+            (hc - kx, hc + kx, vc - ky, vc + ky)
+        };
+        for i in 0..inner.len() {
+            q.push(off(iwd2, ihd2, inner, i));
+            if i < outer.len() {
+                q.push(off(hc, vc, outer, i));
+            }
+        }
+        quad(&q)
+    };
+    let pts = match g.preset.as_str() {
+        "star6" => {
+            let a = a(28868);
+            let swd2 = md(hc, adjust(g, "hf", 115470), 100000);
+            let dx1 = cos(swd2, 30.0);
+            let (x1, x2) = (hc - dx1, hc + dx1);
+            let (hd4, y2) = (hi / 4, vc + hi / 4);
+            let iwd2 = md(swd2, a, 50000);
+            let ihd2 = md(vc, a, 50000);
+            let sdx2 = md(iwd2, 1, 2);
+            let sdy1 = sin(ihd2, 60.0);
+            quad(&[(hc - iwd2, hc + iwd2, vc, vc), (x1, x2, hd4, y2), (hc - sdx2, hc + sdx2, vc - sdy1, vc + sdy1)])
+        }
+        "star7" => {
+            let a = a(34601);
+            let swd2 = md(hc, adjust(g, "hf", 102572), 100000);
+            let shd2 = md(vc, adjust(g, "vf", 105210), 100000);
+            let svc = shd2;
+            let (dx1, dx2, dx3) = (md(swd2, 97493, 100000), md(swd2, 78183, 100000), md(swd2, 43388, 100000));
+            let (dy1, dy2, dy3) = (md(shd2, 62349, 100000), md(shd2, 22252, 100000), md(shd2, 90097, 100000));
+            let (x1, x2, x3, x4, x5, x6) = (hc - dx1, hc - dx2, hc - dx3, hc + dx3, hc + dx2, hc + dx1);
+            let (y1, y2, y3) = (svc - dy1, svc + dy2, svc + dy3);
+            let iwd2 = md(swd2, a, 50000);
+            let ihd2 = md(shd2, a, 50000);
+            let (sdx1, sdx2, sdx3) = (md(iwd2, 97493, 100000), md(iwd2, 78183, 100000), md(iwd2, 43388, 100000));
+            let (sx1, sx2, sx3, sx4, sx5, sx6) = (hc - sdx1, hc - sdx2, hc - sdx3, hc + sdx3, hc + sdx2, hc + sdx1);
+            let (sdy1, sdy2, sdy3) = (md(ihd2, 90097, 100000), md(ihd2, 22252, 100000), md(ihd2, 62349, 100000));
+            let (sy1, sy2, sy3, sy4) = (svc - sdy1, svc - sdy2, svc + sdy3, svc + ihd2);
+            vec![
+                (x1, y2),
+                (sx1, sy2),
+                (x2, y1),
+                (sx3, sy1),
+                (hc, t),
+                (sx4, sy1),
+                (x5, y1),
+                (sx6, sy2),
+                (x6, y2),
+                (sx5, sy3),
+                (x4, y3),
+                (hc, sy4),
+                (x3, y3),
+                (sx2, sy3),
+            ]
+        }
+        "star8" => radial(a(37500), &[K::T(45.0)], &[K::F(92388), K::F(38268)]),
+        "star10" => {
+            let a = a(42533);
+            let swd2 = md(hc, adjust(g, "hf", 105146), 100000);
+            let (dx1, dx2) = (md(swd2, 95106, 100000), md(swd2, 58779, 100000));
+            let (dy1, dy2) = (md(vc, 80902, 100000), md(vc, 30902, 100000));
+            let iwd2 = md(swd2, a, 50000);
+            let ihd2 = md(vc, a, 50000);
+            let (sdx1, sdx2) = (md(iwd2, 80902, 100000), md(iwd2, 30902, 100000));
+            let (sdy1, sdy2) = (md(ihd2, 95106, 100000), md(ihd2, 58779, 100000));
+            quad(&[
+                (hc - iwd2, hc + iwd2, vc, vc),
+                (hc - dx1, hc + dx1, vc - dy2, vc + dy2),
+                (hc - sdx1, hc + sdx1, vc - sdy2, vc + sdy2),
+                (hc - dx2, hc + dx2, vc - dy1, vc + dy1),
+                (hc - sdx2, hc + sdx2, vc - sdy1, vc + sdy1),
+            ])
+        }
+        "star12" => {
+            let a = a(37500);
+            let dx1 = cos(hc, 30.0);
+            let dy1 = sin(vc, 60.0);
+            let iwd2 = md(hc, a, 50000);
+            let ihd2 = md(vc, a, 50000);
+            let inner = |deg: f64| {
+                let (sdx, sdy) = (cos(iwd2, deg), sin(ihd2, deg));
+                (hc - sdx, hc + sdx, vc - sdy, vc + sdy)
+            };
+            quad(&[
+                (0, wi, vc, vc),
+                inner(15.0),
+                (hc - dx1, hc + dx1, hi / 4, md(hi, 3, 4)),
+                inner(45.0),
+                (wi / 4, md(wi, 3, 4), vc - dy1, vc + dy1),
+                inner(75.0),
+            ])
+        }
+        "star16" => radial(a(37500), &[K::F(92388), K::F(70711), K::F(38268)], &[K::F(98079), K::F(83147), K::F(55557), K::F(19509)]),
+        "star24" => radial(
+            a(37500),
+            &[K::T(15.0), K::T(30.0), K::T(45.0), K::F(50000), K::T(75.0)],
+            &[K::F(99144), K::F(92388), K::F(79335), K::F(60876), K::F(38268), K::F(13053)],
+        ),
+        "star32" => radial(
+            a(37500),
+            &[K::F(98079), K::F(92388), K::F(83147), K::T(45.0), K::F(55557), K::F(38268), K::F(19509)],
+            &[K::F(99518), K::F(95694), K::F(88192), K::F(77301), K::F(63439), K::F(47140), K::F(29028), K::F(9802)],
+        ),
+        _ => return None,
+    };
+    // Scale guides (`hf`, `vf`) can extend vertices beyond the box.
+    Some(pts.into_iter().map(|(x, y)| (x.clamp(0, wi), y.clamp(t, b))).collect())
 }
 
 /// Explosion 1 (`irregularSeal1`): a fixed 24-point polygon in a 21600 × 21600 path box.
