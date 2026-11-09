@@ -260,8 +260,11 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
     Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }])
 }
 
-/// Straight-edged flowchart presets: the path box (`w`, `h`) and the fixed polygon in it.
-fn flowchart_polygon(preset: &str) -> Option<(i128, i128, &'static [(i128, i128)])> {
+/// A fixed polygon in its own path box: path box `w`, `h`, then the vertices.
+type FixedPolygon = (i128, i128, &'static [(i128, i128)]);
+
+/// Straight-edged flowchart presets: the path box and the fixed polygon in it.
+fn flowchart_polygon(preset: &str) -> Option<FixedPolygon> {
     Some(match preset {
         "flowChartDecision" => (2, 2, &[(0, 1), (1, 0), (2, 1), (1, 2)]),
         "flowChartInputOutput" => (5, 5, &[(0, 5), (1, 0), (5, 0), (4, 5)]),
