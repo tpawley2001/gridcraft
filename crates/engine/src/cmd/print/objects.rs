@@ -283,7 +283,7 @@ fn draw_paths(
             }
             drew = true;
             if path.fill {
-                pg.polygon(&sub.points, fill, line);
+                pg.polygon(&sub.points, fill.map(|c| path.shade.apply(c)), line);
             } else if let Some((c, lw)) = line {
                 if sub.closed {
                     pg.polygon(&sub.points, None, Some((c, lw)));
