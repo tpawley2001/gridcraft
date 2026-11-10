@@ -4,8 +4,9 @@
 //! front of a back wall and a side wall with gridlines; series in depth stand one behind the other
 //! and draw back to front. Lines are ribbons, areas extruded slabs, and a pie is a tilted ellipse
 //! with a side band. The X rotation tilts the view, the Y rotation turns the depth sideways; the
-//! depth comes from `depthPercent` and `gapDepth`. Perspective, `hPercent` and bar shapes other
-//! than boxes are not modelled (cylinders, cones and pyramids draw as boxes).
+//! depth comes from `depthPercent` and `gapDepth`. The bar shape (`c:shape`) draws cylinders,
+//! cones and pyramids over the box's footprint (the `ToMax` kinds as slices of one solid whose apex
+//! is at the value axis end). Perspective and `hPercent` are not modelled.
 
 use std::f32::consts::{PI, TAU};
 
@@ -28,6 +29,32 @@ const DEFAULT_PIE_ROT_X: f32 = 30.0;
 const TOP_SHADE: f32 = 0.85;
 const SIDE_SHADE: f32 = 0.7;
 const WALL: Rgba = [0xF7, 0xF7, 0xF7, 0xFF];
+/// Points on each end ellipse of a cylinder or cone.
+const RIM: usize = 32;
+
+/// A 3-D column or bar's shape (`c:shape`, ST_Shape); anything unknown is a box.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum BarShape {
+    Box,
+    Cylinder,
+    Cone,
+    ConeToMax,
+    Pyramid,
+    PyramidToMax,
+}
+
+impl BarShape {
+    fn parse(s: Option<&str>) -> Self {
+        match s {
+            Some("cylinder") => Self::Cylinder,
+            Some("cone") => Self::Cone,
+            Some("coneToMax") => Self::ConeToMax,
+            Some("pyramid") => Self::Pyramid,
+            Some("pyramidToMax") => Self::PyramidToMax,
+            _ => Self::Box,
+        }
+    }
+}
 
 /// Whether `chart` draws in 3-D here.
 pub(super) fn is_3d(chart: &Chart) -> bool {
@@ -103,7 +130,125 @@ struct Cuboid {
     v1: f32,
     w0: f32,
     w1: f32,
+    /// The footprint's scale at `v0` and at `v1` (1 = the whole footprint, 0 = an apex).
+    k0: f32,
+    k1: f32,
     color: Rgba,
+}
+
+type P3 = [f32; 3];
+
+fn sub3(a: P3, b: P3) -> P3 {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn dot3(a: P3, b: P3) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+/// A face's normal by Newell's method (fine with repeated points where a side meets an apex).
+fn normal(pts: &[P3]) -> P3 {
+    let mut n = [0.0; 3];
+    for (i, a) in pts.iter().enumerate() {
+        let Some(b) = pts.get((i + 1) % pts.len()) else { continue };
+        n[0] += (a[1] - b[1]) * (a[2] + b[2]);
+        n[1] += (a[2] - b[2]) * (a[0] + b[0]);
+        n[2] += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    n
+}
+
+/// The convex hull of `pts`, counter-clockwise on screen (monotone chain).
+fn hull(mut pts: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
+    pts.sort_by(|a, b| a[0].total_cmp(&b[0]).then_with(|| a[1].total_cmp(&b[1])));
+    pts.dedup_by(|a, b| (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3);
+    if pts.len() < 3 {
+        return pts;
+    }
+    let cross = |o: [f32; 2], a: [f32; 2], b: [f32; 2]| (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    let chain = |it: &mut dyn Iterator<Item = [f32; 2]>| {
+        let mut out: Vec<[f32; 2]> = Vec::new();
+        for q in it {
+            while let [.., a, b] = out.as_slice() {
+                if cross(*a, *b, q) > 0.0 {
+                    break;
+                }
+                out.pop();
+            }
+            out.push(q);
+        }
+        out.pop();
+        out
+    };
+    let mut out = chain(&mut pts.iter().copied());
+    out.extend(chain(&mut pts.iter().rev().copied()));
+    out
+}
+
+/// A column or bar drawn as `shape`.
+fn solid(ctx: &mut Ctx, p: &Proj, b: &Cuboid, shape: BarShape) {
+    match shape {
+        BarShape::Box => cuboid(ctx, p, b),
+        BarShape::Cylinder | BarShape::Cone | BarShape::ConeToMax => round(ctx, p, b),
+        BarShape::Pyramid | BarShape::PyramidToMax => pyramid(ctx, p, b),
+    }
+}
+
+/// A cylinder, cone or cut cone on the box's elliptical footprint: the side band is the outline
+/// around both end ellipses, then the visible end ellipse.
+fn round(ctx: &mut Ctx, p: &Proj, b: &Cuboid) {
+    let (uc, wc, hu, hw) = ((b.u0 + b.u1) / 2.0, (b.w0 + b.w1) / 2.0, (b.u1 - b.u0) / 2.0, (b.w1 - b.w0) / 2.0);
+    let ring = |v: f32, k: f32| {
+        (0..RIM).map(move |i| {
+            let t = TAU * i as f32 / RIM as f32;
+            p.at(uc + k * hu * t.cos(), v, wc + k * hw * t.sin())
+        })
+    };
+    poly(ctx, hull(ring(b.v0, b.k0).chain(ring(b.v1, b.k1)).collect()), b.color, None);
+    if p.sv().abs() > 1e-3 {
+        let (v, k) = if p.sv() > 0.0 { (b.v1, b.k1) } else { (b.v0, b.k0) };
+        if k > 1e-3 {
+            poly(ctx, ring(v, k).collect(), shade(b.color, p.shades().0), None);
+        }
+    }
+}
+
+/// A pyramid or cut pyramid on the box's footprint: the faces turned toward the viewer, shaded
+/// like the box's faces.
+fn pyramid(ctx: &mut Ctx, p: &Proj, b: &Cuboid) {
+    let (uc, wc, hu, hw) = ((b.u0 + b.u1) / 2.0, (b.w0 + b.w1) / 2.0, (b.u1 - b.u0) / 2.0, (b.w1 - b.w0) / 2.0);
+    let lo = |su: f32, sw: f32| [uc + su * b.k0 * hu, b.v0, wc + sw * b.k0 * hw];
+    let hi = |su: f32, sw: f32| [uc + su * b.k1 * hu, b.v1, wc + sw * b.k1 * hw];
+    let (vs, us) = p.shades();
+    let faces: [([P3; 4], Rgba); 6] = [
+        ([lo(-1.0, -1.0), lo(1.0, -1.0), hi(1.0, -1.0), hi(-1.0, -1.0)], b.color),
+        ([lo(-1.0, 1.0), lo(1.0, 1.0), hi(1.0, 1.0), hi(-1.0, 1.0)], b.color),
+        ([lo(-1.0, -1.0), lo(-1.0, 1.0), hi(-1.0, 1.0), hi(-1.0, -1.0)], shade(b.color, us)),
+        ([lo(1.0, -1.0), lo(1.0, 1.0), hi(1.0, 1.0), hi(1.0, -1.0)], shade(b.color, us)),
+        ([lo(-1.0, -1.0), lo(1.0, -1.0), lo(1.0, 1.0), lo(-1.0, 1.0)], shade(b.color, vs)),
+        ([hi(-1.0, -1.0), hi(1.0, -1.0), hi(1.0, 1.0), hi(-1.0, 1.0)], shade(b.color, vs)),
+    ];
+    let centre = [uc, (b.v0 + b.v1) / 2.0, wc];
+    // Points along the view direction land on the same screen point.
+    let view = [-p.su(), -p.sv(), 1.0];
+    for (pts, fill) in faces {
+        let mut pts = pts.to_vec();
+        pts.dedup();
+        if pts.len() > 2 && pts.first() == pts.last() {
+            pts.pop();
+        }
+        if pts.len() < 3 {
+            continue;
+        }
+        let mid = pts.iter().fold([0.0; 3], |m, q| [m[0] + q[0], m[1] + q[1], m[2] + q[2]]).map(|x| x / pts.len() as f32);
+        let mut n = normal(&pts);
+        if dot3(n, sub3(mid, centre)) < 0.0 {
+            n = n.map(|x| -x);
+        }
+        if dot3(n, view) < -1e-6 {
+            poly(ctx, pts.iter().map(|q| p.at(q[0], q[1], q[2])).collect(), fill, None);
+        }
+    }
 }
 
 /// A box: the visible value-end face, the visible category-side face, then the front face.
@@ -134,6 +279,7 @@ struct Layout {
     fill_frac: f32,
     in_depth: bool,
     scale: Scale,
+    shape: BarShape,
 }
 
 impl Layout {
@@ -212,6 +358,7 @@ fn layout(
         fill_frac: depth_frac / (depth_frac + gap_frac),
         in_depth,
         scale,
+        shape: BarShape::parse(v.shape.as_deref()),
     })
 }
 
@@ -362,6 +509,23 @@ fn surfaces(ctx: &mut Ctx, data: &ChartData, lay: &Layout, spans: &[Vec<Option<(
     }
 }
 
+/// The footprint's scale at a segment's start `a` and end `z`: a cone or pyramid narrows to its
+/// apex at the segment's end; the `ToMax` kinds are slices of one solid from zero to the value
+/// axis end the segment points at.
+fn taper(lay: &Layout, a: f32, z: f32) -> (f32, f32) {
+    match lay.shape {
+        BarShape::Box | BarShape::Cylinder => (1.0, 1.0),
+        BarShape::Cone | BarShape::Pyramid => (1.0, 0.0),
+        BarShape::ConeToMax | BarShape::PyramidToMax => {
+            let base = lay.vpos(0.0);
+            let apex = if z >= a { lay.val_len } else { 0.0 };
+            let span = apex - base;
+            let k = |x: f32| if span.abs() < 1e-3 { 0.0 } else { ((apex - x) / span).clamp(0.0, 1.0) };
+            (k(a), k(z))
+        }
+    }
+}
+
 /// 3-D columns and bars: one box per value, drawn back to front.
 fn boxes(ctx: &mut Ctx, data: &ChartData, lay: &Layout, spans: &[Vec<Option<(f64, f64)>>], fam: Fam, nslots: usize, labels_on: bool) {
     let p = &lay.p;
@@ -375,7 +539,9 @@ fn boxes(ctx: &mut Ctx, data: &ChartData, lay: &Layout, spans: &[Vec<Option<(f64
             let Some((lo, hi)) = sp else { continue };
             let u0 = j as f32 * lay.cw + (lay.cw - nslots as f32 * bw) / 2.0 + k * bw;
             let (a, z) = (lay.vpos(*lo), lay.vpos(*hi));
-            let cub = Cuboid { u0, u1: u0 + bw, v0: a.min(z), v1: a.max(z), w0, w1, color: s.color };
+            let (ka, kz) = taper(lay, a, z);
+            let (k0, k1) = if a <= z { (ka, kz) } else { (kz, ka) };
+            let cub = Cuboid { u0, u1: u0 + bw, v0: a.min(z), v1: a.max(z), w0, w1, k0, k1, color: s.color };
             all.push((cub, i, s.values.get(j).copied().flatten().unwrap_or(0.0)));
         }
     }
@@ -388,7 +554,7 @@ fn boxes(ctx: &mut Ctx, data: &ChartData, lay: &Layout, spans: &[Vec<Option<(f64
             .then_with(|| if sv >= 0.0 { a.v0.total_cmp(&b.v0) } else { b.v0.total_cmp(&a.v0) })
     });
     for (cub, ..) in &all {
-        cuboid(ctx, p, cub);
+        solid(ctx, p, cub, lay.shape);
     }
     if !labels_on {
         return;
