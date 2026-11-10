@@ -580,3 +580,22 @@ fn find_and_replace_within_the_selection() {
     let all = s.execute("edit.find", json!({"what": "pear", "all": true})).unwrap();
     assert_eq!(all["count"], 3, "A1, A3 and A4 on the whole sheet");
 }
+
+#[test]
+fn tab_on_a_protected_sheet_skips_hidden_rows_and_lands_on_merged_cells() {
+    let mut s = Session::new();
+    s.new_workbook();
+    for r in ["B2", "B3", "C5:D6"] {
+        s.execute("home.lockCell", json!({"range": r, "on": false})).unwrap();
+    }
+    s.execute("home.mergeCells", json!({"range": "C5:D6"})).unwrap();
+    s.execute("home.hideRows", json!({"rows": "3:3"})).unwrap();
+    s.execute("review.protectSheet", json!({})).unwrap();
+    s.execute("selection.set", json!({"cell": "B2"})).unwrap();
+    let r = s.execute("selection.move", json!({"dr": 0, "dc": 1, "tab": true})).unwrap();
+    assert_eq!(r["selection"], "C5:D6");
+    assert_eq!(s.doc().unwrap().selection.active.a1(), "C5");
+    // The merged cell counts once: the next Tab wraps back to B2.
+    s.execute("selection.move", json!({"dr": 0, "dc": 1, "tab": true})).unwrap();
+    assert_eq!(s.doc().unwrap().selection.active.a1(), "B2");
+}
