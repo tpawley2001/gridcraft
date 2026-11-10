@@ -58,7 +58,12 @@ pub(super) fn find(s: &mut Session, p: &Json) -> Result<Json> {
     }
     let case = bool_param(p, "matchCase").unwrap_or(false);
     let whole = bool_param(p, "wholeCell").unwrap_or(false);
-    let values = str_param(p, "lookIn") == Some("values");
+    let look_in = str_param(p, "lookIn");
+    let values = look_in == Some("values");
+    // Notes search the text of classic cell notes, Comments the threaded comments with their
+    // replies; neither looks at what the cells hold.
+    let notes = look_in == Some("notes");
+    let comments = look_in == Some("comments");
     let by_cols = bool_param(p, "byColumns").unwrap_or(false);
     let all = bool_param(p, "all").unwrap_or(false);
     let workbook = str_param(p, "within") == Some("workbook");
@@ -70,19 +75,32 @@ pub(super) fn find(s: &mut Session, p: &Json) -> Result<Json> {
     let mut hits: Vec<(usize, CellRef, String)> = Vec::new();
     for si in sheets {
         let Some(sh) = d.wb.sheet(si) else { continue };
-        let mut cells: Vec<(CellRef, String)> = sh
-            .cells
-            .iter()
-            .filter(|(c, _)| !in_selection || d.selection.contains(*c))
-            .filter_map(|(c, cell)| {
-                let text = if values || cell.formula.is_none() || crate::display::formula_hidden(&d.wb, sh, c) {
-                    crate::display::cell_text(&d.wb, sh, c)
-                } else {
-                    cell.input_text()
-                };
-                matches(&text, &what, case, whole).then_some((c, text))
-            })
-            .collect();
+        let mut cells: Vec<(CellRef, String)> = if notes || comments {
+            // A note or comment can sit on a cell with nothing in it, so the candidates are the
+            // annotated cells, not the stored ones.
+            sh.comments
+                .iter()
+                .filter(|(c, _)| !in_selection || d.selection.contains(**c))
+                .filter(|(_, cm)| cm.threaded == comments)
+                .filter_map(|(c, cm)| {
+                    let replies = if comments { cm.replies.as_slice() } else { &[] };
+                    std::iter::once(&cm.text).chain(replies.iter().map(|(_, t)| t)).find(|t| matches(t, &what, case, whole)).map(|t| (*c, t.clone()))
+                })
+                .collect()
+        } else {
+            sh.cells
+                .iter()
+                .filter(|(c, _)| !in_selection || d.selection.contains(*c))
+                .filter_map(|(c, cell)| {
+                    let text = if values || cell.formula.is_none() || crate::display::formula_hidden(&d.wb, sh, c) {
+                        crate::display::cell_text(&d.wb, sh, c)
+                    } else {
+                        cell.input_text()
+                    };
+                    matches(&text, &what, case, whole).then_some((c, text))
+                })
+                .collect()
+        };
         if by_cols {
             cells.sort_by_key(|(c, _)| (c.col, c.row));
         }
