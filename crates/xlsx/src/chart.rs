@@ -6,8 +6,8 @@ use std::fmt::Write as _;
 use gridcraft_core::{RangeRef, Value, category_levels};
 use gridcraft_formula::{Expr, SheetSel};
 use gridcraft_model::{
-    AxisScale, Chart, Chart3d, ChartKind, ChartScale, Color, DefinedName, LegendPos, LineDash, OfPie, OfPieSplit, Series, Trendline, TrendlineKind,
-    Workbook,
+    AxisCrosses, AxisScale, Chart, Chart3d, ChartKind, ChartScale, Color, DefinedName, DisplayUnit, DisplayUnits, LegendPos, LineDash, OfPie, OfPieSplit,
+    Series, Trendline, TrendlineKind, Workbook,
 };
 
 use crate::drawing::{dml_color, srgb};
@@ -362,6 +362,7 @@ pub fn read_chart(root: &El) -> Option<Chart> {
         scale: ChartScale {
             x: if scatter { x_ax.map(read_scale).unwrap_or_default() } else { AxisScale::default() },
             y: y_ax.map(read_scale).unwrap_or_default(),
+            cat_crosses: if scatter { AxisCrosses::AutoZero } else { cat_ax.map(read_crosses).unwrap_or_default() },
         },
         view_3d: if groups.len() == 1 { read_3d(chart, plot, first) } else { None },
     })
@@ -407,6 +408,8 @@ fn read_scale(ax: &El) -> AxisScale {
         minor_unit: num(ax.child("minorUnit")).filter(|u| *u > 0.0),
         log_base: num(scaling.and_then(|x| x.child("logBase"))).filter(|b| (2.0..=1000.0).contains(b)),
         reverse: scaling.and_then(|x| x.child_val("orientation")) == Some("maxMin"),
+        display_units: ax.child("dispUnits").and_then(read_display_units),
+        crosses: read_crosses(ax),
     };
     if let (Some(lo), Some(hi)) = (s.min, s.max)
         && lo >= hi
@@ -415,6 +418,32 @@ fn read_scale(ax: &El) -> AxisScale {
         s.max = None;
     }
     s
+}
+
+/// Where an axis element crosses its `c:crossAx` (§21.2.2 `crosses` / `crossesAt`), in that
+/// axis's units. A crossing that isn't a finite number is automatic.
+fn read_crosses(ax: &El) -> AxisCrosses {
+    if let Some(v) = ax.child("crossesAt").and_then(|e| e.attr("val")) {
+        return v.trim().parse::<f64>().ok().filter(|v| v.is_finite()).map_or(AxisCrosses::AutoZero, AxisCrosses::At);
+    }
+    match ax.child_val("crosses") {
+        Some("min") => AxisCrosses::Min,
+        Some("max") => AxisCrosses::Max,
+        _ => AxisCrosses::AutoZero,
+    }
+}
+
+/// `c:dispUnits` (CT_DispUnits): a built-in unit (attribute default `thousands`) or a custom one
+/// (dropped unless finite and positive); `c:dispUnitsLbl` shows the label.
+fn read_display_units(d: &El) -> Option<DisplayUnits> {
+    let unit = if let Some(b) = d.child("builtInUnit") {
+        let name = b.attr("val").unwrap_or("thousands");
+        DisplayUnit::BUILT_IN.iter().find(|(_, n)| *n == name).map(|(u, _)| *u)?
+    } else {
+        let f = d.child_val("custUnit")?.trim().parse::<f64>().ok().filter(|f| f.is_finite() && *f > 0.0)?;
+        DisplayUnit::Custom(f)
+    };
+    Some(DisplayUnits { unit, show_label: d.child("dispUnitsLbl").is_some() })
 }
 
 // ---------------------------------------------------------------- writing
@@ -1018,6 +1047,8 @@ struct Ax<'a> {
     grid: bool,
     title: Option<&'a str>,
     crosses_max: bool,
+    /// Where this axis crosses `cross` (a category axis's; a value axis uses `scale.crosses`).
+    crosses: AxisCrosses,
     scale: AxisScale,
     /// `c:crossBetween val="midCat"` (surface charts) instead of `between`.
     mid_cat: bool,
@@ -1040,10 +1071,20 @@ fn axis_xml(a: &Ax<'_>) -> String {
     }
     let _ = write!(
         s,
-        "<c:numFmt formatCode=\"General\" sourceLinked=\"1\"/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"{}\"/><c:crosses val=\"{}\"/>",
+        "<c:numFmt formatCode=\"General\" sourceLinked=\"1\"/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"{}\"/>",
         a.cross,
-        if a.crosses_max { "max" } else { "autoZero" }
     );
+    // Exactly one of crosses / crossesAt; a secondary axis always crosses at the maximum.
+    let crosses = if a.cat { a.crosses } else { a.scale.crosses };
+    match crosses {
+        _ if a.crosses_max => s.push_str("<c:crosses val=\"max\"/>"),
+        AxisCrosses::At(v) if v.is_finite() => {
+            let _ = write!(s, "<c:crossesAt val=\"{}\"/>", crate::xml::num(v));
+        }
+        AxisCrosses::Min => s.push_str("<c:crosses val=\"min\"/>"),
+        AxisCrosses::Max => s.push_str("<c:crosses val=\"max\"/>"),
+        AxisCrosses::AutoZero | AxisCrosses::At(_) => s.push_str("<c:crosses val=\"autoZero\"/>"),
+    }
     if a.cat {
         s.push_str("<c:auto val=\"1\"/><c:lblAlgn val=\"ctr\"/><c:lblOffset val=\"100\"/><c:noMultiLvlLbl val=\"0\"/></c:catAx>");
     } else {
@@ -1054,9 +1095,25 @@ fn axis_xml(a: &Ax<'_>) -> String {
                 let _ = write!(s, "<c:{tag} val=\"{}\"/>", crate::xml::num(v));
             }
         }
+        if let Some(d) = &a.scale.display_units {
+            s.push_str(&display_units_xml(d));
+        }
         s.push_str("</c:valAx>");
     }
     s
+}
+
+/// `c:dispUnits` (after `c:minorUnit` in CT_ValAx); empty for an unusable custom unit.
+fn display_units_xml(d: &DisplayUnits) -> String {
+    let unit = match d.unit {
+        DisplayUnit::Custom(f) if f.is_finite() && f > 0.0 => format!("<c:custUnit val=\"{}\"/>", crate::xml::num(f)),
+        DisplayUnit::Custom(_) => return String::new(),
+        u => match DisplayUnit::BUILT_IN.iter().find(|(b, _)| *b == u) {
+            Some((_, name)) => format!("<c:builtInUnit val=\"{name}\"/>"),
+            None => return String::new(),
+        },
+    };
+    format!("<c:dispUnits>{unit}{}</c:dispUnits>", if d.show_label { "<c:dispUnitsLbl/>" } else { "" })
 }
 
 /// `c:scaling`'s children in schema order: logBase, orientation, max, min. A category axis
@@ -1190,6 +1247,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: false,
                 title: ch.x_title.as_deref(),
                 crosses_max: false,
+                crosses: AxisCrosses::AutoZero,
                 scale: ch.scale.x,
                 mid_cat: false,
             }));
@@ -1202,6 +1260,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: ch.gridlines,
                 title: ch.y_title.as_deref(),
                 crosses_max: false,
+                crosses: AxisCrosses::AutoZero,
                 scale: ch.scale.y,
                 mid_cat: false,
             }));
@@ -1216,6 +1275,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: false,
                 title: ch.x_title.as_deref(),
                 crosses_max: false,
+                crosses: ch.scale.cat_crosses,
                 scale: AxisScale::default(),
                 mid_cat: false,
             }));
@@ -1228,6 +1288,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: ch.gridlines,
                 title: ch.y_title.as_deref(),
                 crosses_max: false,
+                crosses: AxisCrosses::AutoZero,
                 scale: ch.scale.y,
                 mid_cat: false,
             }));
@@ -1242,6 +1303,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: false,
                 title: ch.x_title.as_deref(),
                 crosses_max: false,
+                crosses: ch.scale.cat_crosses,
                 scale: AxisScale::default(),
                 mid_cat: false,
             }));
@@ -1254,6 +1316,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 grid: ch.gridlines,
                 title: ch.y_title.as_deref(),
                 crosses_max: false,
+                crosses: AxisCrosses::AutoZero,
                 scale: ch.scale.y,
                 mid_cat: surface.is_some(),
             }));
@@ -1275,6 +1338,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
             grid: false,
             title: None,
             crosses_max: false,
+            crosses: AxisCrosses::AutoZero,
             scale: AxisScale::default(),
             mid_cat: false,
         }));
@@ -1287,6 +1351,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
             grid: false,
             title: None,
             crosses_max: true,
+            crosses: AxisCrosses::AutoZero,
             scale: AxisScale::default(),
             mid_cat: false,
         }));

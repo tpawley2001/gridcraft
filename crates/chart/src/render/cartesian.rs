@@ -1,4 +1,4 @@
-use super::frame::{Bx, CatAxis, ValAxis, frame, on, value_range};
+use super::frame::{Bx, CatAxis, ValAxis, cross_value, frame, on, value_range};
 use super::legend::{cat_label, plot_kind};
 use super::lines::{decimate_area, draw_markers, draw_runs};
 use super::trend::{draw_trend_labels, draw_trendlines, max_backward, max_forward, max_forward_slots, supports_trendline};
@@ -303,8 +303,10 @@ pub(super) fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx
 
     let axes = axis_scales(chart, data, &fams, &sec, &spans);
     let Some((s1, f1)) = axes.first() else { return };
-    let y1 = ValAxis { scale: *s1, fmt: f1 };
-    let y2 = axes.get(1).map(|(s, f)| ValAxis { scale: *s, fmt: f });
+    let y1 = ValAxis { units: chart.scale.y.display_units, cross: chart.scale.cat_crosses, at: chart.scale.y.crosses, ..ValAxis::new(*s1, f1) };
+    let y2 = axes.get(1).map(|(s, f)| ValAxis::new(*s, f));
+    // Clustered columns and bars on the primary axis grow from where the category axis crosses it.
+    let col_base = cross_value(chart.scale.cat_crosses, s1);
     // A forward forecast on a category axis adds empty category slots after the data.
     let fwd = data
         .series
@@ -392,12 +394,17 @@ pub(super) fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx
                     let cull = merge_hairlines(bw, labels_on);
                     let mut sink = BarSink::new(bw, horizontal, s.color, nslots, k);
                     for (j, sp) in row.iter().enumerate() {
-                        let Some((b, t)) = sp else { continue };
-                        let (pb, pt) = (vpos(inside(*b, &sc), &sc), vpos(inside(*t, &sc), &sc));
+                        let Some((b, t)) = *sp else { continue };
+                        let b = match col_base {
+                            Some(base) if fam == Fam::Col && !sec.get(i).copied().unwrap_or(false) => base,
+                            _ => b,
+                        };
+                        let (pb, pt) = (vpos(inside(b, &sc), &sc), vpos(inside(t, &sc), &sc));
                         let c = center(j);
                         let lo = pb.min(pt);
                         let len = (pb - pt).abs();
                         sink.bar(ctx, cull, c, lo, len);
+                        let up = t >= b;
                         if labels_on && let Some(v) = s.values.get(j).copied().flatten() {
                             let t = fmt.format(v, None);
                             let stacked = fam != Fam::Col;
@@ -406,7 +413,7 @@ pub(super) fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx
                                 let y = c + nslots * bw / 2.0 - (k + 0.5) * bw;
                                 if stacked {
                                     ctx.text(mid, y, &t, LABEL_SIZE, on(s.color), (HAlign::Center, VAlign::Middle));
-                                } else if v >= 0.0 {
+                                } else if up {
                                     ctx.text(pb.max(pt) + 3.0, y, &t, LABEL_SIZE, TEXT, (HAlign::Left, VAlign::Middle));
                                 } else {
                                     ctx.text(lo - 3.0, y, &t, LABEL_SIZE, TEXT, (HAlign::Right, VAlign::Middle));
@@ -415,7 +422,7 @@ pub(super) fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx
                                 let x = c - nslots * bw / 2.0 + (k + 0.5) * bw;
                                 if stacked {
                                     ctx.text(x, mid, &t, LABEL_SIZE, on(s.color), (HAlign::Center, VAlign::Middle));
-                                } else if v >= 0.0 {
+                                } else if up {
                                     ctx.text(x, lo - 2.0, &t, LABEL_SIZE, TEXT, (HAlign::Center, VAlign::Bottom));
                                 } else {
                                     ctx.text(x, lo + len + 2.0, &t, LABEL_SIZE, TEXT, (HAlign::Center, VAlign::Top));
@@ -501,7 +508,9 @@ pub(super) fn scatter(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) 
     let ys = with_fixed(nice_scale(ylo, yhi, false), &chart.scale.y);
     let fx = Fmt::new("General");
     let fy = Fmt::new(data.series.first().map(|s| s.number_format.as_str()).unwrap_or("General"));
-    let plot = frame(ctx, area, CatAxis::Numeric(xs, &fx), &ValAxis { scale: ys, fmt: &fy }, None, false, chart.gridlines);
+    // The X axis crosses the Y axis at `x.crosses` (a Y value), the Y axis the X axis at `y.crosses`.
+    let y_axis = ValAxis { units: chart.scale.y.display_units, cross: chart.scale.x.crosses, at: chart.scale.y.crosses, ..ValAxis::new(ys, &fy) };
+    let plot = frame(ctx, area, CatAxis::Numeric(xs, &fx), &y_axis, None, false, chart.gridlines);
     if !plot.ok() {
         return;
     }

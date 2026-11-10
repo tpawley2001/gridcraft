@@ -1,3 +1,6 @@
+use gridcraft_core::number_to_text;
+use gridcraft_model::{AxisCrosses, DisplayUnit, DisplayUnits};
+
 use super::{AXIS, AXIS_TITLE_SIZE, Chart, ChartData, Ctx, DARK_TEXT, Fmt, GRID, HAlign, LABEL_SIZE, PI, Prim, Rgba, Scale, TEXT, VAlign, WHITE};
 
 #[derive(Clone, Copy, Debug)]
@@ -90,11 +93,75 @@ pub(super) fn level_groups(level: &[String], n: usize) -> Vec<(usize, usize)> {
 pub(super) struct ValAxis<'a> {
     pub(super) scale: Scale,
     pub(super) fmt: &'a Fmt,
+    /// Display units: labels show values divided by the unit.
+    pub(super) units: Option<DisplayUnits>,
+    /// Where the category (or X) axis crosses this axis, in this axis's values.
+    pub(super) cross: AxisCrosses,
+    /// Where this axis crosses the category axis (a category number) or the X axis (an X value).
+    pub(super) at: AxisCrosses,
 }
 
-impl ValAxis<'_> {
+impl<'a> ValAxis<'a> {
+    pub(super) fn new(scale: Scale, fmt: &'a Fmt) -> Self {
+        ValAxis { scale, fmt, units: None, cross: AxisCrosses::AutoZero, at: AxisCrosses::AutoZero }
+    }
+    fn factor(&self) -> f64 {
+        self.units.map_or(1.0, |u| u.unit.factor())
+    }
     fn labels(&self) -> Vec<(f64, String)> {
-        self.scale.ticks().into_iter().map(|v| (v, self.fmt.format(v, Some(self.scale.step)))).collect()
+        let f = self.factor();
+        self.scale.ticks().into_iter().map(|v| (v, self.fmt.format(v / f, Some(self.scale.step / f)))).collect()
+    }
+    /// The display units label, when shown.
+    fn unit_label(&self) -> Option<String> {
+        self.units.filter(|u| u.show_label).map(|u| display_unit_label(u.unit))
+    }
+}
+
+/// The value at which the perpendicular axis crosses an axis with scale `s`; `None` is automatic
+/// (zero, or the minimum when zero is outside the axis).
+pub(super) fn cross_value(c: AxisCrosses, s: &Scale) -> Option<f64> {
+    let (lo, hi) = (s.min.min(s.max), s.max.max(s.min));
+    match c {
+        AxisCrosses::AutoZero => None,
+        AxisCrosses::Min => Some(s.min),
+        AxisCrosses::Max => Some(s.max),
+        AxisCrosses::At(v) if v.is_finite() => Some(v.clamp(lo, hi)),
+        AxisCrosses::At(_) => None,
+    }
+}
+
+/// Offset in category slots (0 = the first category's leading edge) where a value axis crossing
+/// the category axis at `c` sits, for `n` categories (`crossBetween between`); `None` is automatic.
+pub(super) fn cross_slot(c: AxisCrosses, n: usize) -> Option<f32> {
+    match c {
+        AxisCrosses::AutoZero | AxisCrosses::Min => None,
+        AxisCrosses::Max => Some(n as f32),
+        AxisCrosses::At(k) if k.is_finite() => Some((k - 1.0).clamp(0.0, n as f64) as f32),
+        AxisCrosses::At(_) => None,
+    }
+}
+
+/// Fraction along the category (or X) axis where the value axis sits; `None` is automatic.
+fn at_frac(cat: &CatAxis, at: AxisCrosses) -> Option<f32> {
+    match cat {
+        CatAxis::Numeric(s, _) => cross_value(at, s).map(|v| s.frac(v)),
+        CatAxis::Labels(l, _) | CatAxis::Table(l, _) => {
+            let n = l.len().max(1);
+            cross_slot(at, n).map(|k| k / n as f32)
+        }
+    }
+}
+
+/// The text of a display units label.
+fn display_unit_label(u: DisplayUnit) -> String {
+    match u {
+        DisplayUnit::Hundreds => "Hundreds".into(),
+        DisplayUnit::Thousands => "Thousands".into(),
+        DisplayUnit::Millions => "Millions".into(),
+        DisplayUnit::Billions => "Billions".into(),
+        DisplayUnit::Trillions => "Trillions".into(),
+        u => format!("x {}", number_to_text(u.factor())),
     }
 }
 
@@ -103,33 +170,67 @@ pub(super) fn frame(ctx: &mut Ctx, area: Bx, cat: CatAxis, y: &ValAxis, y2: Opti
     let ls = LABEL_SIZE;
     let lh = ls * 1.4;
     let ylabels = y.labels();
+    let unit_label = y.unit_label();
+    let unit_w = if unit_label.is_some() { lh } else { 0.0 };
+    // An axis crossing its perpendicular one at the far end has its labels on the far side.
+    let cat_far = y.cross == AxisCrosses::Max;
+    let val_far = y.at == AxisCrosses::Max;
     let stub = match &cat {
         CatAxis::Table(_, width) => *width,
         _ => 0.0,
     };
     let maxw = |ctx: &Ctx, l: &[(f64, String)]| l.iter().map(|(_, t)| ctx.tw(t, ls)).fold(0.0f32, f32::max);
     if !horizontal {
-        let left = (maxw(ctx, &ylabels) + 6.0).min(area.w * 0.4).max(stub);
+        let vw = maxw(ctx, &ylabels);
+        let mut left = (vw + 6.0 + unit_w).min(area.w * 0.4).max(stub);
         let y2labels = y2.map(ValAxis::labels);
-        let right = match (&y2labels, &cat) {
+        let mut right = match (&y2labels, &cat) {
             (Some(l), _) => (maxw(ctx, l) + 6.0).min(area.w * 0.3),
             (None, CatAxis::Numeric(s, f)) => (ctx.tw(&f.format(s.max, Some(s.step)), ls) / 2.0).min(area.w * 0.2),
             _ => 4.0,
         };
+        if val_far && y2.is_none() {
+            std::mem::swap(&mut left, &mut right);
+        }
         let levels = match &cat {
             CatAxis::Labels(_, o) => o.len() as f32,
             CatAxis::Numeric(..) | CatAxis::Table(..) => 0.0,
         };
-        let plot = Bx { x: area.x + left, y: area.y + lh * 0.5, w: area.w - left - right, h: area.h - lh * 1.5 - 4.0 - lh * levels };
+        let below = lh + 4.0 + lh * levels;
+        let top = if cat_far { below } else { lh * 0.5 };
+        let plot = Bx { x: area.x + left, y: area.y + top, w: area.w - left - right, h: area.h - lh * 1.5 - 4.0 - lh * levels };
         if !plot.ok() {
             return plot;
         }
+        // The value axis line: its labels sit beside it (left of it, right when it is at the far end).
+        let vx = at_frac(&cat, y.at).map(|f| plot.x + f * plot.w);
+        let (lx, lalign) = match vx {
+            Some(x) if val_far => (x + 4.0, HAlign::Left),
+            Some(x) => (x - 4.0, HAlign::Right),
+            None => (plot.x - 4.0, HAlign::Right),
+        };
         for (v, t) in &ylabels {
             let yy = plot.bottom() - y.scale.frac(*v) * plot.h;
             if grid {
                 ctx.hline(plot.x, plot.right(), yy, GRID, 0.75);
             }
-            ctx.text(plot.x - 4.0, yy, t, ls, TEXT, (HAlign::Right, VAlign::Middle));
+            ctx.text(lx, yy, t, ls, TEXT, (lalign, VAlign::Middle));
+        }
+        if let Some(t) = &unit_label {
+            let t = ctx.fit(t, ls, plot.h);
+            let x = if lalign == HAlign::Left { lx + vw + 2.0 } else { lx - vw - 2.0 - lh };
+            let yy = plot.y + ctx.tw(&t, ls) / 2.0;
+            ctx.out.push(Prim::Text {
+                x,
+                y: yy,
+                text: t,
+                size: ls,
+                color: TEXT,
+                bold: false,
+                align: HAlign::Center,
+                valign: VAlign::Top,
+                rotation: -PI / 2.0,
+            });
         }
         if let (Some(a), Some(l)) = (y2, &y2labels) {
             for (v, t) in l {
@@ -137,9 +238,14 @@ pub(super) fn frame(ctx: &mut Ctx, area: Bx, cat: CatAxis, y: &ValAxis, y2: Opti
                 ctx.text(plot.right() + 4.0, yy, t, ls, TEXT, (HAlign::Left, VAlign::Middle));
             }
         }
+        let crossing = cross_value(y.cross, &y.scale);
         let zero = if y.scale.min <= 0.0 && y.scale.max >= 0.0 { 0.0 } else { y.scale.min };
-        let y0 = plot.bottom() - y.scale.frac(zero) * plot.h;
+        let y0 = plot.bottom() - y.scale.frac(crossing.unwrap_or(zero)) * plot.h;
         ctx.hline(plot.x, plot.right(), y0, AXIS, 0.75);
+        // Category labels stay beside the category axis line when it is moved (below it, above it
+        // at the far end); an automatic axis keeps them under the plot.
+        let base = if crossing.is_some() { y0 } else { plot.bottom() };
+        let (dir, cvalign) = if cat_far { (-1.0, VAlign::Bottom) } else { (1.0, VAlign::Top) };
         match cat {
             CatAxis::Table(..) => {}
             CatAxis::Labels(l, outer) => {
@@ -149,23 +255,24 @@ pub(super) fn frame(ctx: &mut Ctx, area: Bx, cat: CatAxis, y: &ValAxis, y2: Opti
                 let k = (((lw + 6.0) / cw.max(1e-3)).ceil() as usize).clamp(1, n);
                 for (j, t) in l.iter().enumerate().step_by(k) {
                     let t = ctx.fit(t, ls, cw * k as f32 - 2.0);
-                    ctx.text(plot.x + (j as f32 + 0.5) * cw, plot.bottom() + 3.0, &t, ls, TEXT, (HAlign::Center, VAlign::Top));
+                    ctx.text(plot.x + (j as f32 + 0.5) * cw, base + dir * 3.0, &t, ls, TEXT, (HAlign::Center, cvalign));
                 }
-                // Outer levels, one row each below the labels: a group's name centred under its
+                // Outer levels, one row each beyond the labels: a group's name centred under its
                 // categories, and a separator at each group boundary down through the rows.
                 for (i, level) in outer.iter().enumerate() {
-                    let top = plot.bottom() + 3.0 + lh * (i as f32 + 1.0);
-                    for (first, end) in level_groups(level, n) {
-                        let (x0, x1) = (plot.x + first as f32 * cw, plot.x + end as f32 * cw);
+                    let row = base + dir * (3.0 + lh * (i as f32 + 1.0));
+                    let end = row + dir * (lh - 2.0);
+                    for (first, last) in level_groups(level, n) {
+                        let (x0, x1) = (plot.x + first as f32 * cw, plot.x + last as f32 * cw);
                         if let Some(t) = level.get(first).filter(|t| !t.is_empty()) {
                             let t = ctx.fit(t, ls, x1 - x0 - 2.0);
-                            ctx.text((x0 + x1) / 2.0, top, &t, ls, TEXT, (HAlign::Center, VAlign::Top));
+                            ctx.text((x0 + x1) / 2.0, row, &t, ls, TEXT, (HAlign::Center, cvalign));
                         }
                         if first > 0 {
-                            ctx.vline(x0, plot.bottom(), top + lh - 2.0, AXIS, 0.75);
+                            ctx.vline(x0, base, end, AXIS, 0.75);
                         }
                     }
-                    ctx.vline(plot.right(), plot.bottom(), top + lh - 2.0, AXIS, 0.75);
+                    ctx.vline(plot.right(), base, end, AXIS, 0.75);
                 }
             }
             CatAxis::Numeric(s, f) => {
@@ -176,9 +283,11 @@ pub(super) fn frame(ctx: &mut Ctx, area: Bx, cat: CatAxis, y: &ValAxis, y2: Opti
                 let k = (((lw + 6.0) / slot.max(1e-3)).ceil() as usize).max(1);
                 for (v, t) in ticks.iter().zip(&labels).step_by(k) {
                     let xx = plot.x + s.frac(*v) * plot.w;
-                    ctx.text(xx, plot.bottom() + 3.0, t, ls, TEXT, (HAlign::Center, VAlign::Top));
+                    ctx.text(xx, base + dir * 3.0, t, ls, TEXT, (HAlign::Center, cvalign));
                 }
-                if s.min <= 0.0 && s.max >= 0.0 {
+                if let Some(x) = vx {
+                    ctx.vline(x, plot.y, plot.bottom(), AXIS, 0.75);
+                } else if s.min <= 0.0 && s.max >= 0.0 {
                     let xx = plot.x + s.frac(0.0) * plot.w;
                     ctx.vline(xx, plot.y, plot.bottom(), AXIS, 0.75);
                 }
@@ -192,16 +301,30 @@ pub(super) fn frame(ctx: &mut Ctx, area: Bx, cat: CatAxis, y: &ValAxis, y2: Opti
             CatAxis::Numeric(..) => (vec![], &[]),
         };
         let lw = (labels.iter().take(2000).map(|t| ctx.tw(t, ls)).fold(0.0f32, f32::max) + 6.0).min(area.w * 0.35);
-        // Outer levels stand in columns left of the labels, each as wide as its longest name.
+        // Outer levels stand in columns beside the labels, each as wide as its longest name.
         let level_w: Vec<f32> =
             outer.iter().map(|l| (l.iter().take(2000).map(|t| ctx.tw(t, ls)).fold(0.0f32, f32::max) + 6.0).min(area.w * 0.15)).collect();
         let levels_w: f32 = level_w.iter().sum();
-        let right = ylabels.last().map(|(_, t)| ctx.tw(t, ls) / 2.0).unwrap_or(0.0).min(area.w * 0.2) + 2.0;
-        let left = (lw + levels_w).max(stub);
-        let plot = Bx { x: area.x + left, y: area.y + 2.0, w: area.w - left - right, h: area.h - lh - 6.0 };
+        let mut right = ylabels.last().map(|(_, t)| ctx.tw(t, ls) / 2.0).unwrap_or(0.0).min(area.w * 0.2) + 2.0;
+        let mut left = (lw + levels_w).max(stub);
+        if cat_far {
+            std::mem::swap(&mut left, &mut right);
+        }
+        let vh = lh + 6.0 + unit_w;
+        let top = if val_far { vh - 2.0 } else { 2.0 };
+        let plot = Bx { x: area.x + left, y: area.y + top, w: area.w - left - right, h: area.h - vh };
         if !plot.ok() {
             return plot;
         }
+        let n = labels.len().max(1);
+        let ch = plot.h / n as f32;
+        // The value axis: at the bottom, or beside the category it crosses (above it at the far end).
+        let vy = cross_slot(y.at, n).map(|k| plot.bottom() - k * ch);
+        let (ly, lvalign) = match vy {
+            Some(yy) if val_far => (yy - 3.0, VAlign::Bottom),
+            Some(yy) => (yy + 3.0, VAlign::Top),
+            None => (plot.bottom() + 3.0, VAlign::Top),
+        };
         let vw = maxw(ctx, &ylabels);
         let slot = plot.w / ylabels.len().max(1) as f32;
         let k = (((vw + 6.0) / slot.max(1e-3)).ceil() as usize).max(1);
@@ -211,35 +334,42 @@ pub(super) fn frame(ctx: &mut Ctx, area: Bx, cat: CatAxis, y: &ValAxis, y2: Opti
                 ctx.vline(xx, plot.y, plot.bottom(), GRID, 0.75);
             }
             if i % k == 0 {
-                ctx.text(xx, plot.bottom() + 3.0, t, ls, TEXT, (HAlign::Center, VAlign::Top));
+                ctx.text(xx, ly, t, ls, TEXT, (HAlign::Center, lvalign));
             }
         }
+        if let Some(t) = &unit_label {
+            let t = ctx.fit(t, ls, plot.w);
+            let yy = if lvalign == VAlign::Top { ly + lh } else { ly - lh };
+            ctx.text(plot.right(), yy, &t, ls, TEXT, (HAlign::Right, lvalign));
+        }
+        let crossing = cross_value(y.cross, &y.scale);
         let zero = if y.scale.min <= 0.0 && y.scale.max >= 0.0 { 0.0 } else { y.scale.min };
-        let x0 = plot.x + y.scale.frac(zero) * plot.w;
+        let x0 = plot.x + y.scale.frac(crossing.unwrap_or(zero)) * plot.w;
         ctx.vline(x0, plot.y, plot.bottom(), AXIS, 0.75);
-        let n = labels.len().max(1);
-        let ch = plot.h / n as f32;
+        // Category labels beside the moved category axis (left of it, right at the far end).
+        let base = if crossing.is_some() { x0 } else { plot.x };
+        let (dir, calign) = if cat_far { (1.0, HAlign::Left) } else { (-1.0, HAlign::Right) };
         let k = ((lh / ch.max(1e-3)).ceil() as usize).clamp(1, n);
         for (j, t) in labels.iter().enumerate().step_by(k) {
             let t = ctx.fit(t, ls, lw - 6.0);
-            ctx.text(plot.x - 4.0, plot.bottom() - (j as f32 + 0.5) * ch, &t, ls, TEXT, (HAlign::Right, VAlign::Middle));
+            ctx.text(base + dir * 4.0, plot.bottom() - (j as f32 + 0.5) * ch, &t, ls, TEXT, (calign, VAlign::Middle));
         }
         // Outer levels: a group's name centred beside its categories, separators at the
-        // boundaries running right to the axis.
-        let mut x1 = plot.x - lw;
+        // boundaries running to the axis.
+        let mut x1 = base + dir * lw;
         for (level, w) in outer.iter().zip(&level_w) {
-            let x0 = x1 - w;
-            for (first, end) in level_groups(level, n) {
-                let (y0, y1) = (plot.bottom() - end as f32 * ch, plot.bottom() - first as f32 * ch);
+            let x0 = x1 + dir * w;
+            for (first, last) in level_groups(level, n) {
+                let (y0, y1) = (plot.bottom() - last as f32 * ch, plot.bottom() - first as f32 * ch);
                 if let Some(t) = level.get(first).filter(|t| !t.is_empty()) {
                     let t = ctx.fit(t, ls, w - 4.0);
                     ctx.text((x0 + x1) / 2.0, (y0 + y1) / 2.0, &t, ls, TEXT, (HAlign::Center, VAlign::Middle));
                 }
                 if first > 0 {
-                    ctx.hline(x0, plot.x, y1, AXIS, 0.75);
+                    ctx.hline(x0.min(base), x0.max(base), y1, AXIS, 0.75);
                 }
             }
-            ctx.hline(x0, plot.x, plot.y, AXIS, 0.75);
+            ctx.hline(x0.min(base), x0.max(base), plot.y, AXIS, 0.75);
             x1 = x0;
         }
         plot
