@@ -1,39 +1,60 @@
-use super::{CellRef, EngineError, Json, RangeRef, Result, Session, bad, edit, f64_param, json, str_param, target_range, target_sheet};
+use super::{
+    CellRef, EngineError, Json, RangeRef, Result, Session, bad, edit, f64_param, json, str_param, target_range, target_ranges, target_sheet,
+};
 
 // ---------------------------------------------------------------- fill
 
 pub(super) fn fill_dir(s: &mut Session, p: &Json, dr: i64, dc: i64) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
-    let mut r = target_range(s, p)?;
-    // Whole rows or columns fill only where the sheet has content (nothing on an empty sheet).
-    if r.is_full_cols() || r.is_full_rows() {
-        match s.doc()?.wb.sheet(sheet).and_then(|sh| sh.used_range()).and_then(|u| r.intersection(&u)) {
-            Some(u) => r = u,
-            None => return Ok(Json::Null),
+    let mut areas = target_ranges(s, p)?;
+    if areas.is_empty() {
+        areas.push(RangeRef::default());
+    }
+    // Every area of a multi-area selection fills on its own, as if it were the whole selection.
+    let mut clipped = Vec::with_capacity(areas.len());
+    let mut total = 0u64;
+    for mut r in areas {
+        // Whole rows or columns fill only where the sheet has content (nothing on an empty sheet).
+        if r.is_full_cols() || r.is_full_rows() {
+            match s.doc()?.wb.sheet(sheet).and_then(|sh| sh.used_range()).and_then(|u| r.intersection(&u)) {
+                Some(u) => r = u,
+                None => continue,
+            }
         }
+        total = total.saturating_add(r.count());
+        if total > crate::fill::MAX_FILL_CELLS {
+            return Err(bad("edit.fill", "range too large"));
+        }
+        clipped.push(r);
     }
-    if r.count() > crate::fill::MAX_FILL_CELLS {
-        return Err(bad("edit.fill", "range too large"));
+    let mut jobs = Vec::with_capacity(clipped.len());
+    for mut r in clipped {
+        // With one row selected, Fill Down copies from the row above (Excel behaviour).
+        if dr == 1 && r.height() == 1 {
+            r.start.row = r.start.row.saturating_sub(1);
+        }
+        if dc == 1 && r.width() == 1 {
+            r.start.col = r.start.col.saturating_sub(1);
+        }
+        let src = if dr == 1 {
+            RangeRef::new(r.start, CellRef::new(r.start.row, r.end.col))
+        } else if dr == -1 {
+            RangeRef::new(CellRef::new(r.end.row, r.start.col), r.end)
+        } else if dc == 1 {
+            RangeRef::new(r.start, CellRef::new(r.end.row, r.start.col))
+        } else {
+            RangeRef::new(CellRef::new(r.start.row, r.end.col), r.end)
+        };
+        let skip = s.doc()?.wb.sheet(sheet).map(|sh| super::filtered_rows(sh, r)).unwrap_or_default();
+        jobs.push((src, r, skip));
     }
-    // With one row selected, Fill Down copies from the row above (Excel behaviour).
-    if dr == 1 && r.height() == 1 {
-        r.start.row = r.start.row.saturating_sub(1);
+    if jobs.is_empty() {
+        return Ok(Json::Null);
     }
-    if dc == 1 && r.width() == 1 {
-        r.start.col = r.start.col.saturating_sub(1);
-    }
-    let src = if dr == 1 {
-        RangeRef::new(r.start, CellRef::new(r.start.row, r.end.col))
-    } else if dr == -1 {
-        RangeRef::new(CellRef::new(r.end.row, r.start.col), r.end)
-    } else if dc == 1 {
-        RangeRef::new(r.start, CellRef::new(r.end.row, r.start.col))
-    } else {
-        RangeRef::new(CellRef::new(r.start.row, r.end.col), r.end)
-    };
-    let skip = s.doc()?.wb.sheet(sheet).map(|sh| super::filtered_rows(sh, r)).unwrap_or_default();
     edit(s, |cx| {
-        crate::fill::fill_except(cx, sheet, src, r, crate::fill::FillMode::Copy, &skip)?;
+        for (src, r, skip) in &jobs {
+            crate::fill::fill_except(cx, sheet, *src, *r, crate::fill::FillMode::Copy, skip)?;
+        }
         Ok(Json::Null)
     })
 }

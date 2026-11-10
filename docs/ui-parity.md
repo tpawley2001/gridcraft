@@ -280,6 +280,7 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-10 | minor | G0254: Fill Down/Right/Up/Left fill every area of a multi-area selection, as in Excel. |
 | 2026-11-10 | minor | G0248: imported line callouts (with and without border and accent bar, 1-3 segments) draw and print their box and their leader outside it, and join Insert › Shapes › Callouts. |
 | 2026-11-10 | minor | G0239: imported curved right, left, up and down arrows draw and print with their own outline and shaded back face. |
 | 2026-11-10 | minor | G0242: imported help, information, return, document, sound and movie action buttons draw and print with their own outline and shaded glyph faces. |
