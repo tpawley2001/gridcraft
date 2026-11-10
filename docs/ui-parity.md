@@ -279,6 +279,7 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-10 | minor | G0252: Flash Fill learns parts of words: characters by position from a word's start or end and letter/digit runs inside a word, and prefers the source's text over literal text (`(425) 555-0123` from `4255550123`). |
 | 2026-11-10 | minor | G0239: imported curved right, left, up and down arrows draw and print with their own outline and shaded back face. |
 | 2026-11-10 | minor | G0242: imported help, information, return, document, sound and movie action buttons draw and print with their own outline and shaded glyph faces. |
 | 2026-11-10 | minor | G0237: imported plaque tabs, funnel and 6- and 9-tooth gear shapes draw and print with their own outline of lines and arcs. |
