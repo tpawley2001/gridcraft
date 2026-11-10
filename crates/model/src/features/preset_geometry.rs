@@ -251,6 +251,7 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             table.iter().map(|&(x, y)| (md(wi, x, 21600), md(hi, y, 21600))).collect()
         }
         "mathPlus" | "mathMinus" | "mathMultiply" | "mathEqual" | "mathNotEqual" => return math_paths(g, w, h),
+        "upDownArrow" | "quadArrow" | "leftRightUpArrow" | "leftUpArrow" | "bentUpArrow" | "stripedRightArrow" => return block_arrow_paths(g, w, h),
         preset => {
             let (pw, ph, table) = flowchart_polygon(preset)?;
             table.iter().map(|&(x, y)| (md(wi, x, pw), md(hi, y, ph))).collect()
@@ -706,5 +707,195 @@ fn math_not_equal(g: &ShapeGeometry, w: f64, h: f64) -> Vec<(f64, f64)> {
         (x4, y3),
         (x5, y2),
         (x1, y2),
+    ]
+}
+
+/// Block arrows whose guides are evaluated in `f64`: one path of closed sub-paths, every vertex
+/// rounded and pinned into the `w` × `h` box.
+fn block_arrow_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    if !g.paths.is_empty() || w <= 0 || h <= 0 {
+        return None;
+    }
+    let (wf, hf) = (w as f64, h as f64);
+    let b = ArrowBox { w: wf, h: hf, ss: wf.min(hf), hc: wf / 2.0, vc: hf / 2.0 };
+    let adj = |name: &str, default: f64| adjust(g, name, default as i128) as f64;
+    let polygons = match g.preset.as_str() {
+        "upDownArrow" => up_down_arrow(&b, adj("adj1", 50000.0), adj("adj2", 50000.0)),
+        "quadArrow" => quad_arrow(&b, adj("adj1", 22500.0), adj("adj2", 22500.0), adj("adj3", 22500.0)),
+        "leftRightUpArrow" => left_right_up_arrow(&b, adj("adj1", 25000.0), adj("adj2", 25000.0), adj("adj3", 25000.0)),
+        "leftUpArrow" => left_up_arrow(&b, adj("adj1", 25000.0), adj("adj2", 25000.0), adj("adj3", 25000.0)),
+        "bentUpArrow" => bent_up_arrow(&b, adj("adj1", 25000.0), adj("adj2", 25000.0), adj("adj3", 25000.0)),
+        "stripedRightArrow" => striped_right_arrow(&b, adj("adj1", 50000.0), adj("adj2", 50000.0)),
+        _ => return None,
+    };
+    // Round, then pin into the box: scale factors and float error can land a unit outside.
+    let fix = |v: f64, max: i64| if v.is_finite() { (v.round() as i64).clamp(0, max) } else { 0 };
+    let mut commands = Vec::new();
+    for polygon in &polygons {
+        for (i, &(x, y)) in polygon.iter().enumerate() {
+            let (x, y) = (fix(x, w), fix(y, h));
+            commands.push(if i == 0 { PathCommand::MoveTo(x, y) } else { PathCommand::LineTo(x, y) });
+        }
+        commands.push(PathCommand::Close);
+    }
+    Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }])
+}
+
+/// The shape box for the `f64` block-arrow guides (`l` = `t` = 0).
+struct ArrowBox {
+    w: f64,
+    h: f64,
+    ss: f64,
+    hc: f64,
+    vc: f64,
+}
+
+/// DrawingML `pin lo v hi`: `v` held in `lo..=hi` (`lo` wins when the range is empty).
+fn pin(lo: f64, v: f64, hi: f64) -> f64 {
+    v.min(hi).max(lo)
+}
+
+/// `x * y / z`, or 0 when `z` is zero.
+fn muldiv(x: f64, y: f64, z: f64) -> f64 {
+    if z == 0.0 { 0.0 } else { x * y / z }
+}
+
+fn up_down_arrow(b: &ArrowBox, adj1: f64, adj2: f64) -> Vec<Vec<(f64, f64)>> {
+    let (r, bt, hc) = (b.w, b.h, b.hc);
+    let max_adj2 = muldiv(50000.0, b.h, b.ss);
+    let a1 = pin(0.0, adj1, 100000.0);
+    let a2 = pin(0.0, adj2, max_adj2);
+    let y2 = b.ss * a2 / 100000.0;
+    let y3 = bt - y2;
+    let dx1 = b.w * a1 / 200000.0;
+    let (x1, x2) = (hc - dx1, hc + dx1);
+    vec![vec![(0.0, y2), (hc, 0.0), (r, y2), (x2, y2), (x2, y3), (r, y3), (hc, bt), (0.0, y3), (x1, y3), (x1, y2)]]
+}
+
+fn quad_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<Vec<(f64, f64)>> {
+    let (r, bt, hc, vc, ss) = (b.w, b.h, b.hc, b.vc, b.ss);
+    let a2 = pin(0.0, adj2, 50000.0);
+    let max_adj1 = a2 * 2.0;
+    let a1 = pin(0.0, adj1, max_adj1);
+    let max_adj3 = (100000.0 - max_adj1) / 2.0;
+    let a3 = pin(0.0, adj3, max_adj3);
+    let x1 = ss * a3 / 100000.0;
+    let dx2 = ss * a2 / 100000.0;
+    let (x2, x5) = (hc - dx2, hc + dx2);
+    let dx3 = ss * a1 / 200000.0;
+    let (x3, x4) = (hc - dx3, hc + dx3);
+    let x6 = r - x1;
+    let (y2, y5, y3, y4) = (vc - dx2, vc + dx2, vc - dx3, vc + dx3);
+    let y6 = bt - x1;
+    vec![vec![
+        (0.0, vc),
+        (x1, y2),
+        (x1, y3),
+        (x3, y3),
+        (x3, x1),
+        (x2, x1),
+        (hc, 0.0),
+        (x5, x1),
+        (x4, x1),
+        (x4, y3),
+        (x6, y3),
+        (x6, y2),
+        (r, vc),
+        (x6, y5),
+        (x6, y4),
+        (x4, y4),
+        (x4, y6),
+        (x5, y6),
+        (hc, bt),
+        (x2, y6),
+        (x3, y6),
+        (x3, y4),
+        (x1, y4),
+        (x1, y5),
+    ]]
+}
+
+fn left_right_up_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<Vec<(f64, f64)>> {
+    let (r, bt, hc, ss) = (b.w, b.h, b.hc, b.ss);
+    let a2 = pin(0.0, adj2, 50000.0);
+    let max_adj1 = a2 * 2.0;
+    let a1 = pin(0.0, adj1, max_adj1);
+    let max_adj3 = (100000.0 - max_adj1) / 2.0;
+    let a3 = pin(0.0, adj3, max_adj3);
+    let x1 = ss * a3 / 100000.0;
+    let dx2 = ss * a2 / 100000.0;
+    let (x2, x5) = (hc - dx2, hc + dx2);
+    let dx3 = ss * a1 / 200000.0;
+    let (x3, x4) = (hc - dx3, hc + dx3);
+    let x6 = r - x1;
+    let y2 = bt - ss * a2 / 50000.0;
+    let y4 = bt - dx2;
+    let (y3, y5) = (y4 - dx3, y4 + dx3);
+    vec![vec![
+        (0.0, y4),
+        (x1, y2),
+        (x1, y3),
+        (x3, y3),
+        (x3, x1),
+        (x2, x1),
+        (hc, 0.0),
+        (x5, x1),
+        (x4, x1),
+        (x4, y3),
+        (x6, y3),
+        (x6, y2),
+        (r, y4),
+        (x6, bt),
+        (x6, y5),
+        (x1, y5),
+        (x1, bt),
+    ]]
+}
+
+fn left_up_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<Vec<(f64, f64)>> {
+    let (r, bt, ss) = (b.w, b.h, b.ss);
+    let a2 = pin(0.0, adj2, 50000.0);
+    let max_adj1 = a2 * 2.0;
+    let a1 = pin(0.0, adj1, max_adj1);
+    let a3 = pin(0.0, adj3, 100000.0 - max_adj1);
+    let x1 = ss * a3 / 100000.0;
+    let dx2 = ss * a2 / 50000.0;
+    let (x2, y2) = (r - dx2, bt - dx2);
+    let dx4 = ss * a2 / 100000.0;
+    let (x4, y4) = (r - dx4, bt - dx4);
+    let dx3 = ss * a1 / 200000.0;
+    let (x3, x5) = (x4 - dx3, x4 + dx3);
+    let (y3, y5) = (y4 - dx3, y4 + dx3);
+    vec![vec![(0.0, y4), (x1, y2), (x1, y3), (x3, y3), (x3, x1), (x2, x1), (x4, 0.0), (r, x1), (x5, x1), (x5, y5), (x1, y5), (x1, bt)]]
+}
+
+fn bent_up_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<Vec<(f64, f64)>> {
+    let (r, bt, ss) = (b.w, b.h, b.ss);
+    let a1 = pin(0.0, adj1, 50000.0);
+    let a2 = pin(0.0, adj2, 50000.0);
+    let a3 = pin(0.0, adj3, 50000.0);
+    let y1 = ss * a3 / 100000.0;
+    let x1 = r - ss * a2 / 50000.0;
+    let x3 = r - ss * a2 / 100000.0;
+    let dx2 = ss * a1 / 200000.0;
+    let (x2, x4) = (x3 - dx2, x3 + dx2);
+    let y2 = bt - ss * a1 / 100000.0;
+    vec![vec![(0.0, y2), (x2, y2), (x2, y1), (x1, y1), (x3, 0.0), (r, y1), (x4, y1), (x4, bt), (0.0, bt)]]
+}
+
+fn striped_right_arrow(b: &ArrowBox, adj1: f64, adj2: f64) -> Vec<Vec<(f64, f64)>> {
+    let (r, bt, vc, ss) = (b.w, b.h, b.vc, b.ss);
+    let max_adj2 = muldiv(84375.0, b.w, ss);
+    let a1 = pin(0.0, adj1, 100000.0);
+    let a2 = pin(0.0, adj2, max_adj2);
+    let x4 = ss * 5.0 / 32.0;
+    let x5 = r - ss * a2 / 100000.0;
+    let dy1 = b.h * a1 / 200000.0;
+    let (y1, y2) = (vc - dy1, vc + dy1);
+    let (ssd32, ssd16, ssd8) = (ss / 32.0, ss / 16.0, ss / 8.0);
+    vec![
+        vec![(0.0, y1), (ssd32, y1), (ssd32, y2), (0.0, y2)],
+        vec![(ssd16, y1), (ssd8, y1), (ssd8, y2), (ssd16, y2)],
+        vec![(x4, y1), (x5, y1), (x5, 0.0), (r, vc), (x5, bt), (x5, y2), (x4, y2)],
     ]
 }
