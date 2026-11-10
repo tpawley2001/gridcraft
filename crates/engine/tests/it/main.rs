@@ -24,6 +24,7 @@ mod data_table_shift;
 mod drawing_alt_text;
 mod dynamicmetadata;
 mod extreme_selection_moves;
+mod fill_multi_area;
 mod font_scheme_minor;
 mod format_as_table_restyle;
 mod hidden_drawing_print;
