@@ -25,6 +25,8 @@ mod indirect_sheet_name_tests;
 #[cfg(test)]
 mod lookup_database_parity_tests;
 #[cfg(test)]
+mod lookup_not_found_before_index_tests;
+#[cfg(test)]
 mod subtotal_counta_error_tests;
 #[cfg(test)]
 mod tests;
