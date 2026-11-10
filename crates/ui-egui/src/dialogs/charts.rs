@@ -2,7 +2,7 @@ use super::show::ok_cancel;
 use super::{Color32, Dialog, Icon, Json, Sense, SheetApp, Stroke, StrokeKind, icons, json, vec2};
 
 /// Every chart type the All Charts tab offers: `(type, subtype, label)` for `insert.chart`.
-const ALL_CHARTS: [(&str, &str, &str); 21] = [
+const ALL_CHARTS: [(&str, &str, &str); 25] = [
     ("column", "", "Clustered Column"),
     ("column", "stacked", "Stacked Column"),
     ("column", "stacked100", "100% Stacked Column"),
@@ -23,6 +23,10 @@ const ALL_CHARTS: [(&str, &str, &str); 21] = [
     ("histogram", "", "Histogram"),
     ("waterfall", "", "Waterfall"),
     ("funnel", "", "Funnel"),
+    ("surface", "", "3-D Surface"),
+    ("surfaceWireframe", "", "Wireframe 3-D Surface"),
+    ("contour", "", "Contour"),
+    ("contourWireframe", "", "Wireframe Contour"),
     ("combo", "", "Combo"),
 ];
 

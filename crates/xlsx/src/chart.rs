@@ -59,6 +59,11 @@ fn group_kind(g: &El) -> Option<ChartKind> {
         "bubbleChart" => ChartKind::Bubble,
         "radarChart" => ChartKind::Radar,
         "stockChart" => ChartKind::Stock,
+        // A missing `c:wireframe` means filled (CT_SurfaceChart, CT_Surface3DChart).
+        "surface3DChart" if bool_val(g, "wireframe") => ChartKind::SurfaceWireframe,
+        "surface3DChart" => ChartKind::Surface,
+        "surfaceChart" if bool_val(g, "wireframe") => ChartKind::ContourWireframe,
+        "surfaceChart" => ChartKind::Contour,
         _ => return None,
     })
 }
@@ -323,15 +328,30 @@ fn read_scale(ax: &El) -> AxisScale {
 
 #[derive(Clone, Copy, PartialEq)]
 enum G {
-    Bar { bar: bool, grouping: &'static str },
-    Line { stacked: bool, markers: bool },
+    Bar {
+        bar: bool,
+        grouping: &'static str,
+    },
+    Line {
+        stacked: bool,
+        markers: bool,
+    },
     Pie,
     Doughnut,
-    Area { grouping: &'static str },
-    Scatter { lines: bool },
+    Area {
+        grouping: &'static str,
+    },
+    Scatter {
+        lines: bool,
+    },
     Bubble,
     Radar,
     Stock,
+    /// `c:surface3DChart` (`three_d`) or `c:surfaceChart` (contour).
+    Surface {
+        three_d: bool,
+        wireframe: bool,
+    },
 }
 
 fn group_for(k: ChartKind) -> G {
@@ -354,6 +374,10 @@ fn group_for(k: ChartKind) -> G {
         ChartKind::Bubble => G::Bubble,
         ChartKind::Radar => G::Radar,
         ChartKind::Stock => G::Stock,
+        ChartKind::Surface => G::Surface { three_d: true, wireframe: false },
+        ChartKind::SurfaceWireframe => G::Surface { three_d: true, wireframe: true },
+        ChartKind::Contour => G::Surface { three_d: false, wireframe: false },
+        ChartKind::ContourWireframe => G::Surface { three_d: false, wireframe: true },
         // Combo charts start from clustered columns; chartex kinds have their own part.
         _ => G::Bar { bar: false, grouping: "clustered" },
     }
@@ -600,8 +624,8 @@ fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String 
         _ => {}
     }
     // Trendlines sit between dLbls and the data in CT_LineSer, CT_BarSer, CT_AreaSer,
-    // CT_ScatterSer and CT_BubbleSer; pie and radar series have none.
-    if !matches!(g, G::Pie | G::Doughnut | G::Radar) {
+    // CT_ScatterSer and CT_BubbleSer; pie, radar and surface series have none.
+    if !matches!(g, G::Pie | G::Doughnut | G::Radar | G::Surface { .. }) {
         for t in &s.trendlines {
             x.push_str(&trendline_xml(t, wb));
         }
@@ -726,7 +750,29 @@ fn group_xml(g: G, series: &[(usize, &Series)], ch: &Chart, axes: (u32, u32), wb
         }
         G::Radar => format!("<c:radarChart><c:radarStyle val=\"marker\"/><c:varyColors val=\"0\"/>{sers}{dl}{ax}</c:radarChart>"),
         G::Stock => format!("<c:stockChart>{sers}{dl}<c:hiLowLines/>{ax}</c:stockChart>"),
+        // CT_SurfaceChart / CT_Surface3DChart: wireframe, ser*, bandFmts?, then the category,
+        // value and series axis ids; no varyColors and no data labels.
+        G::Surface { three_d, wireframe } => {
+            let tag = if three_d { "surface3DChart" } else { "surfaceChart" };
+            format!("<c:{tag}><c:wireframe val=\"{}\"/>{sers}{ax}<c:axId val=\"{SER_AX}\"/></c:{tag}>", wireframe as u8)
+        }
     }
+}
+
+/// The series (depth) axis id of a surface chart; the category and value axes are 1 and 2.
+const SER_AX: u32 = 5;
+
+/// `c:view3D` as Excel writes it for each surface type: rotX, rotY, rAngAx, perspective.
+fn surface_view_xml(three_d: bool) -> String {
+    let (rx, ry, persp) = if three_d { (15, 20, 30) } else { (90, 0, 0) };
+    format!("<c:view3D><c:rotX val=\"{rx}\"/><c:rotY val=\"{ry}\"/><c:rAngAx val=\"0\"/><c:perspective val=\"{persp}\"/></c:view3D>")
+}
+
+/// CT_SerAx: the depth axis of a surface chart, one tick per series.
+fn ser_axis_xml() -> String {
+    format!(
+        "<c:serAx><c:axId val=\"{SER_AX}\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"b\"/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"2\"/><c:crosses val=\"autoZero\"/></c:serAx>"
+    )
 }
 
 fn title_xml(t: &str) -> String {
@@ -748,6 +794,8 @@ struct Ax<'a> {
     title: Option<&'a str>,
     crosses_max: bool,
     scale: AxisScale,
+    /// `c:crossBetween val="midCat"` (surface charts) instead of `between`.
+    mid_cat: bool,
 }
 
 fn axis_xml(a: &Ax<'_>) -> String {
@@ -774,7 +822,7 @@ fn axis_xml(a: &Ax<'_>) -> String {
     if a.cat {
         s.push_str("<c:auto val=\"1\"/><c:lblAlgn val=\"ctr\"/><c:lblOffset val=\"100\"/><c:noMultiLvlLbl val=\"0\"/></c:catAx>");
     } else {
-        s.push_str("<c:crossBetween val=\"between\"/>");
+        let _ = write!(s, "<c:crossBetween val=\"{}\"/>", if a.mid_cat { "midCat" } else { "between" });
         // Schema order: crossBetween, majorUnit, minorUnit.
         for (tag, v) in [("majorUnit", a.scale.major_unit), ("minorUnit", a.scale.minor_unit)] {
             if let Some(v) = v.filter(|v| v.is_finite() && *v > 0.0) {
@@ -831,6 +879,14 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
             s.push_str("<c:autoTitleDeleted val=\"0\"/>");
         }
         _ => s.push_str("<c:autoTitleDeleted val=\"1\"/>"),
+    }
+    // `c:view3D` sits in `c:chart` before `c:plotArea` (CT_Chart).
+    let surface = match group_for(ch.kind) {
+        G::Surface { three_d, .. } if ch.kind != ChartKind::Combo => Some(three_d),
+        _ => None,
+    };
+    if let Some(three_d) = surface {
+        s.push_str(&surface_view_xml(three_d));
     }
     s.push_str("<c:plotArea><c:layout/>");
     let all: Vec<(usize, &Series)> = ch.series.iter().enumerate().collect();
@@ -898,6 +954,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 title: ch.x_title.as_deref(),
                 crosses_max: false,
                 scale: ch.scale.x,
+                mid_cat: false,
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
@@ -909,6 +966,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 title: ch.y_title.as_deref(),
                 crosses_max: false,
                 scale: ch.scale.y,
+                mid_cat: false,
             }));
         }
         G::Bar { bar: true, .. } => {
@@ -922,6 +980,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 title: ch.x_title.as_deref(),
                 crosses_max: false,
                 scale: AxisScale::default(),
+                mid_cat: false,
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
@@ -933,6 +992,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 title: ch.y_title.as_deref(),
                 crosses_max: false,
                 scale: ch.scale.y,
+                mid_cat: false,
             }));
         }
         _ => {
@@ -946,6 +1006,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 title: ch.x_title.as_deref(),
                 crosses_max: false,
                 scale: AxisScale::default(),
+                mid_cat: false,
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
@@ -957,7 +1018,11 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 title: ch.y_title.as_deref(),
                 crosses_max: false,
                 scale: ch.scale.y,
+                mid_cat: surface.is_some(),
             }));
+            if surface.is_some() {
+                s.push_str(&ser_axis_xml());
+            }
         }
     }
     if secondary.is_some() {
@@ -971,6 +1036,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
             title: None,
             crosses_max: false,
             scale: AxisScale::default(),
+            mid_cat: false,
         }));
         s.push_str(&axis_xml(&Ax {
             cat: false,
@@ -982,6 +1048,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
             title: None,
             crosses_max: true,
             scale: AxisScale::default(),
+            mid_cat: false,
         }));
     }
     if let Some(t) = &ch.data_table {
