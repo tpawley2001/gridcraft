@@ -2461,15 +2461,15 @@ fn curved_arrow_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryP
     };
     let fix = |v: f64, max: i64| if v.is_finite() { (v.round() as i64).clamp(0, max) } else { 0 };
     let fix_angle = |v: f64| if v.is_finite() { v.round() as i64 } else { 0 };
-    let commands = |segs: &[ArcSeg]| -> Vec<PathCommand> {
+    let commands = |segs: &[CurveSeg]| -> Vec<PathCommand> {
         segs.iter()
             .map(|s| match *s {
-                ArcSeg::M(x, y) => PathCommand::MoveTo(fix(x, w), fix(y, h)),
-                ArcSeg::L(x, y) => PathCommand::LineTo(fix(x, w), fix(y, h)),
-                ArcSeg::A(w_r, h_r, st_ang, sw_ang) => {
+                CurveSeg::M(x, y) => PathCommand::MoveTo(fix(x, w), fix(y, h)),
+                CurveSeg::L(x, y) => PathCommand::LineTo(fix(x, w), fix(y, h)),
+                CurveSeg::A(w_r, h_r, st_ang, sw_ang) => {
                     PathCommand::ArcTo { w_r: fix(w_r, w), h_r: fix(h_r, h), st_ang: fix_angle(st_ang), sw_ang: fix_angle(sw_ang) }
                 }
-                ArcSeg::Z => PathCommand::Close,
+                CurveSeg::Z => PathCommand::Close,
             })
             .collect()
     };
@@ -2483,7 +2483,7 @@ fn curved_arrow_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryP
 
 /// One command of a curved arrow path, in `f64` until the end.
 #[derive(Clone, Copy)]
-enum ArcSeg {
+enum CurveSeg {
     M(f64, f64),
     L(f64, f64),
     A(f64, f64, f64, f64),
@@ -3518,7 +3518,7 @@ fn curved_arrow_guides(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64, horizontal
 }
 
 /// `curvedRightArrow`: a band curving up from the left edge into an arrow head at the right.
-fn curved_right_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool, bool, PathShade, Vec<ArcSeg>)> {
+fn curved_right_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool, bool, PathShade, Vec<CurveSeg>)> {
     let (r, bt) = (b.w, b.h);
     let g = curved_arrow_guides(b, adj1, adj2, adj3, true);
     let (th, aw, h_r, ah, idx) = (g.th, g.aw, g.band, b.ss * g.a3 / 100000.0, g.inner);
@@ -3536,36 +3536,36 @@ fn curved_right_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(boo
     let sw_ang2 = dang2 - 5400000.0;
     let sw_ang3 = 5400000.0 + dang2;
     let st_ang3 = 10800000.0 - dang2;
-    let arc = |st: f64, sw: f64| ArcSeg::A(r, h_r, st, sw);
+    let arc = |st: f64, sw: f64| CurveSeg::A(r, h_r, st, sw);
     let body = vec![
-        ArcSeg::M(0.0, h_r),
+        CurveSeg::M(0.0, h_r),
         arc(10800000.0, msw_ang),
-        ArcSeg::L(x1, y4),
-        ArcSeg::L(r, y6),
-        ArcSeg::L(x1, y8),
-        ArcSeg::L(x1, y7),
+        CurveSeg::L(x1, y4),
+        CurveSeg::L(r, y6),
+        CurveSeg::L(x1, y8),
+        CurveSeg::L(x1, y7),
         arc(st_ang, sw_ang),
-        ArcSeg::Z,
+        CurveSeg::Z,
     ];
-    let back = vec![ArcSeg::M(r, th), arc(16200000.0, sw_ang2), arc(st_ang3, sw_ang3), ArcSeg::Z];
+    let back = vec![CurveSeg::M(r, th), arc(16200000.0, sw_ang2), arc(st_ang3, sw_ang3), CurveSeg::Z];
     let outline = vec![
-        ArcSeg::M(0.0, h_r),
+        CurveSeg::M(0.0, h_r),
         arc(10800000.0, msw_ang),
-        ArcSeg::L(x1, y4),
-        ArcSeg::L(r, y6),
-        ArcSeg::L(x1, y8),
-        ArcSeg::L(x1, y7),
+        CurveSeg::L(x1, y4),
+        CurveSeg::L(r, y6),
+        CurveSeg::L(x1, y8),
+        CurveSeg::L(x1, y7),
         arc(st_ang, sw_ang),
-        ArcSeg::L(0.0, h_r),
+        CurveSeg::L(0.0, h_r),
         arc(10800000.0, 5400000.0),
-        ArcSeg::L(r, th),
+        CurveSeg::L(r, th),
         arc(16200000.0, sw_ang2),
     ];
     vec![(true, false, PathShade::Norm, body), (true, false, PathShade::DarkenLess, back), (false, true, PathShade::Norm, outline)]
 }
 
 /// `curvedLeftArrow`: a band curving up from the right edge into an arrow head at the left.
-fn curved_left_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool, bool, PathShade, Vec<ArcSeg>)> {
+fn curved_left_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool, bool, PathShade, Vec<CurveSeg>)> {
     let (r, bt) = (b.w, b.h);
     let g = curved_arrow_guides(b, adj1, adj2, adj3, true);
     let (th, aw, h_r, ah, idx) = (g.th, g.aw, g.band, b.ss * g.a3 / 100000.0, g.inner);
@@ -3581,28 +3581,28 @@ fn curved_left_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool
     let sw_ang2 = dang2 - sw_ang;
     let sw_ang3 = sw_ang + dang2;
     let st_ang3 = -dang2;
-    let arc = |st: f64, sw: f64| ArcSeg::A(r, h_r, st, sw);
+    let arc = |st: f64, sw: f64| CurveSeg::A(r, h_r, st, sw);
     let body =
-        vec![ArcSeg::M(0.0, y6), ArcSeg::L(x1, y4), ArcSeg::L(x1, y5), arc(sw_ang, sw_ang2), arc(st_ang3, sw_ang3), ArcSeg::L(x1, y8), ArcSeg::Z];
-    let back = vec![ArcSeg::M(r, y3), arc(0.0, -5400000.0), ArcSeg::L(0.0, 0.0), arc(16200000.0, 5400000.0), ArcSeg::Z];
+        vec![CurveSeg::M(0.0, y6), CurveSeg::L(x1, y4), CurveSeg::L(x1, y5), arc(sw_ang, sw_ang2), arc(st_ang3, sw_ang3), CurveSeg::L(x1, y8), CurveSeg::Z];
+    let back = vec![CurveSeg::M(r, y3), arc(0.0, -5400000.0), CurveSeg::L(0.0, 0.0), arc(16200000.0, 5400000.0), CurveSeg::Z];
     let outline = vec![
-        ArcSeg::M(r, y3),
+        CurveSeg::M(r, y3),
         arc(0.0, -5400000.0),
-        ArcSeg::L(0.0, 0.0),
+        CurveSeg::L(0.0, 0.0),
         arc(16200000.0, 5400000.0),
-        ArcSeg::L(r, y3),
+        CurveSeg::L(r, y3),
         arc(0.0, sw_ang),
-        ArcSeg::L(x1, y8),
-        ArcSeg::L(0.0, y6),
-        ArcSeg::L(x1, y4),
-        ArcSeg::L(x1, y5),
+        CurveSeg::L(x1, y8),
+        CurveSeg::L(0.0, y6),
+        CurveSeg::L(x1, y4),
+        CurveSeg::L(x1, y5),
         arc(sw_ang, sw_ang2),
     ];
     vec![(true, false, PathShade::Norm, body), (true, false, PathShade::DarkenLess, back), (false, true, PathShade::Norm, outline)]
 }
 
 /// `curvedUpArrow`: a band curving left from the bottom edge into an arrow head at the top.
-fn curved_up_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool, bool, PathShade, Vec<ArcSeg>)> {
+fn curved_up_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool, bool, PathShade, Vec<CurveSeg>)> {
     let (r, bt) = (b.w, b.h);
     let g = curved_arrow_guides(b, adj1, adj2, adj3, false);
     let (th, aw, w_r, idy) = (g.th, g.aw, g.band, g.inner);
@@ -3621,28 +3621,28 @@ fn curved_up_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool, 
     let st_ang3 = 5400000.0 - sw_ang;
     let sw_ang3 = sw_ang + dang2;
     let st_ang2 = 5400000.0 - dang2;
-    let arc = |st: f64, sw: f64| ArcSeg::A(w_r, bt, st, sw);
+    let arc = |st: f64, sw: f64| CurveSeg::A(w_r, bt, st, sw);
     let body =
-        vec![ArcSeg::M(x6, 0.0), ArcSeg::L(x8, y1), ArcSeg::L(x7, y1), arc(st_ang3, sw_ang3), arc(st_ang2, sw_ang2), ArcSeg::L(x4, y1), ArcSeg::Z];
-    let back = vec![ArcSeg::M(w_r, bt), arc(5400000.0, 5400000.0), ArcSeg::L(th, 0.0), arc(10800000.0, -5400000.0), ArcSeg::Z];
+        vec![CurveSeg::M(x6, 0.0), CurveSeg::L(x8, y1), CurveSeg::L(x7, y1), arc(st_ang3, sw_ang3), arc(st_ang2, sw_ang2), CurveSeg::L(x4, y1), CurveSeg::Z];
+    let back = vec![CurveSeg::M(w_r, bt), arc(5400000.0, 5400000.0), CurveSeg::L(th, 0.0), arc(10800000.0, -5400000.0), CurveSeg::Z];
     let outline = vec![
-        ArcSeg::M((w_r + x3) / 2.0, idy),
+        CurveSeg::M((w_r + x3) / 2.0, idy),
         arc(st_ang2, sw_ang2),
-        ArcSeg::L(x4, y1),
-        ArcSeg::L(x6, 0.0),
-        ArcSeg::L(x8, y1),
-        ArcSeg::L(x7, y1),
+        CurveSeg::L(x4, y1),
+        CurveSeg::L(x6, 0.0),
+        CurveSeg::L(x8, y1),
+        CurveSeg::L(x7, y1),
         arc(st_ang3, sw_ang),
-        ArcSeg::L(w_r, bt),
+        CurveSeg::L(w_r, bt),
         arc(5400000.0, 5400000.0),
-        ArcSeg::L(th, 0.0),
+        CurveSeg::L(th, 0.0),
         arc(10800000.0, -5400000.0),
     ];
     vec![(true, false, PathShade::Norm, body), (true, false, PathShade::DarkenLess, back), (false, true, PathShade::Norm, outline)]
 }
 
 /// `curvedDownArrow`: a band curving left from the top edge into an arrow head at the bottom.
-fn curved_down_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool, bool, PathShade, Vec<ArcSeg>)> {
+fn curved_down_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool, bool, PathShade, Vec<CurveSeg>)> {
     let (r, bt) = (b.w, b.h);
     let g = curved_arrow_guides(b, adj1, adj2, adj3, false);
     let (th, aw, w_r, idy) = (g.th, g.aw, g.band, g.inner);
@@ -3662,29 +3662,29 @@ fn curved_down_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool
     let st_ang2 = 16200000.0 - dang2;
     let sw_ang2 = dang2 - 5400000.0;
     let sw_ang3 = 5400000.0 + dang2;
-    let arc = |st: f64, sw: f64| ArcSeg::A(w_r, bt, st, sw);
+    let arc = |st: f64, sw: f64| CurveSeg::A(w_r, bt, st, sw);
     let body = vec![
-        ArcSeg::M(x6, bt),
-        ArcSeg::L(x4, y1),
-        ArcSeg::L(x5, y1),
+        CurveSeg::M(x6, bt),
+        CurveSeg::L(x4, y1),
+        CurveSeg::L(x5, y1),
         arc(st_ang, msw_ang),
-        ArcSeg::L(x3, 0.0),
+        CurveSeg::L(x3, 0.0),
         arc(16200000.0, sw_ang),
-        ArcSeg::L(x8, y1),
-        ArcSeg::Z,
+        CurveSeg::L(x8, y1),
+        CurveSeg::Z,
     ];
-    let back = vec![ArcSeg::M((w_r + x3) / 2.0, bt - idy), arc(st_ang2, sw_ang2), ArcSeg::L(0.0, bt), arc(10800000.0, sw_ang3), ArcSeg::Z];
+    let back = vec![CurveSeg::M((w_r + x3) / 2.0, bt - idy), arc(st_ang2, sw_ang2), CurveSeg::L(0.0, bt), arc(10800000.0, sw_ang3), CurveSeg::Z];
     let outline = vec![
-        ArcSeg::M((w_r + x3) / 2.0, bt - idy),
+        CurveSeg::M((w_r + x3) / 2.0, bt - idy),
         arc(st_ang2, sw_ang2),
-        ArcSeg::L(0.0, bt),
+        CurveSeg::L(0.0, bt),
         arc(10800000.0, 5400000.0),
-        ArcSeg::L(x3, 0.0),
+        CurveSeg::L(x3, 0.0),
         arc(16200000.0, sw_ang),
-        ArcSeg::L(x8, y1),
-        ArcSeg::L(x6, bt),
-        ArcSeg::L(x4, y1),
-        ArcSeg::L(x5, y1),
+        CurveSeg::L(x8, y1),
+        CurveSeg::L(x6, bt),
+        CurveSeg::L(x4, y1),
+        CurveSeg::L(x5, y1),
         arc(st_ang, msw_ang),
     ];
     vec![(true, false, PathShade::Norm, body), (true, false, PathShade::DarkenLess, back), (false, true, PathShade::Norm, outline)]
