@@ -263,6 +263,10 @@ pub(super) fn go_to_special(s: &mut Session, p: &Json) -> Result<Json> {
         // Excel looks at the whole sheet for "Same": the rule that holds the active cell.
         let rule = sheet.validations.iter().find(|dv| dv.ranges.iter().any(|r| r.contains(active)));
         if let Some(dv) = rule {
+            // A rule over whole columns would list millions of cells: refuse it like a huge scope.
+            if dv.ranges.iter().fold(0u64, |n, r| n.saturating_add(r.count())) > 4_000_000 {
+                return Err(bad("edit.goToSpecial", "range too large"));
+            }
             for r in &dv.ranges {
                 hits.extend(r.iter());
             }
