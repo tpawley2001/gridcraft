@@ -1290,6 +1290,7 @@ fn spill_dynamic(sheet: &mut Sheet, anchors: &HashSet<CellRef>) {
         let Some(f) = sheet.cells.get_mut(pos).and_then(|c| c.formula.as_mut()) else { continue };
         let f = Arc::make_mut(f);
         f.dynamic = true;
+        f.legacy = false;
         let Some(range) = f.array.take() else { continue };
         let stale: Vec<CellRef> = sheet
             .cells
@@ -1325,6 +1326,9 @@ impl FormulaGroups for Target<'_> {
         // Shared formulas use PtgRefN / PtgAreaN, which the decoder resolves against `pos`.
         let Ok(Some(mut f)) = formula(&p.rgce, &p.rgcb, pos, self.links, &self.sheet.name, self.commands) else { return };
         f.array = array.filter(|r| !r.is_single());
+        // A shared formula is a legacy formula until its cell metadata marks it dynamic
+        // (`spill_dynamic`); an array formula, even of one cell, is evaluated as an array.
+        f.legacy = array.is_none();
         if let Some(cell) = self.sheet.cells.get_mut(pos) {
             cell.formula = Some(Arc::new(f));
         } else {
@@ -1711,7 +1715,9 @@ fn worksheet(
                         None
                     })
                 });
-                let formula = formula.map(|f| Formula { dynamic, ..f });
+                // Without that metadata it is a legacy formula, calculated with implicit
+                // intersection as Excel does.
+                let formula = formula.map(|f| Formula { dynamic, legacy: !dynamic, ..f });
                 if !value.is_empty() || formula.is_some() || style != StyleId::DEFAULT {
                     budget.cell()?;
                     let mut cell = Cell::value(value);

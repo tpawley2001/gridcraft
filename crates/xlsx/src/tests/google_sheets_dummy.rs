@@ -95,7 +95,7 @@ fn google_sheets_wrapper_saves_the_real_formula() {
     let saved = write_xlsx(&wb).unwrap();
     let mut pkg = Package::open(&saved).unwrap();
     let xml = String::from_utf8(pkg.read("xl/worksheets/sheet1.xml").unwrap().unwrap()).unwrap();
-    assert!(xml.contains("MAX(IFERROR(MAX(_xlfn._xlws.FILTER(ROW(C:C),C:C=\"שולם\")),0)"), "{xml}");
+    assert!(xml.contains("MAX(IFERROR(MAX(_xlfn._xlws.FILTER(ROW(C:C),C:C=&quot;שולם&quot;)),0)"), "{xml}");
     assert!(xml.contains("_xlfn._xlws.FILTER(B1:B3,B1:B3&gt;1)"), "{xml}");
     // Only the formula whose inner text doesn't parse and the Google-only one keep their wrapper.
     assert_eq!(xml.matches("DUMMYFUNCTION").count(), 2, "{xml}");

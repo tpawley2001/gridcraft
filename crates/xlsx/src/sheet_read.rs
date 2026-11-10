@@ -672,7 +672,9 @@ fn read_data_table(sheet: &mut Sheet, f: &El, pos: CellRef) {
 
 fn read_formula(cx: &mut Ctx<'_>, st: &mut RowState, f: &El, pos: CellRef, dynamic: bool) -> Option<Formula> {
     // Keep the file's dynamic-array mark, so saving never turns the formula into a legacy one.
-    read_formula_text(cx, st, f, pos, dynamic).map(|fm| Formula { dynamic, ..fm })
+    // Without it, a formula that isn't an array formula is a legacy formula (ECMA-376 Part 1
+    // §18.3.1.4 `cm`), calculated with implicit intersection.
+    read_formula_text(cx, st, f, pos, dynamic).map(|fm| Formula { dynamic, legacy: !dynamic && fm.array.is_none(), ..fm })
 }
 
 fn read_formula_text(cx: &mut Ctx<'_>, st: &mut RowState, f: &El, pos: CellRef, dynamic: bool) -> Option<Formula> {

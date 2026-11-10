@@ -487,7 +487,10 @@ impl Calc {
             dirty.sort_by_key(|(s, c)| (*s, c.row, c.col));
             let mut exprs: HashMap<Key, std::sync::Arc<Expr>> = HashMap::with_capacity_and_hasher(dirty.len(), Default::default());
             for k in &dirty {
-                if let Some(e) = wb.sheet(k.0).and_then(|s| s.cell(k.1)).and_then(|c| c.formula.as_ref()).and_then(|f| f.expr_arc()) {
+                let Some(f) = wb.sheet(k.0).and_then(|s| s.cell(k.1)).and_then(|c| c.formula.as_ref()) else { continue };
+                // A legacy formula from a file is calculated with implicit intersection.
+                let e = if f.legacy { f.with_expr(|e| std::sync::Arc::new(crate::legacy::legacy_expr(e))) } else { f.expr_arc() };
+                if let Some(e) = e {
                     exprs.insert(*k, e);
                 }
             }
