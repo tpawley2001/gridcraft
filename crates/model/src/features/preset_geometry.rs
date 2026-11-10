@@ -42,6 +42,9 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
     if let Some(paths) = flowchart_curved(&g.preset, w, h) {
         return Some(paths);
     }
+    if let Some(paths) = ribbon_or_scroll_paths(g, w, h) {
+        return Some(paths);
+    }
     // Predefined process and internal storage: a filled rectangle, two open inner lines, and the
     // rectangle's outline.
     if g.preset == "flowChartPredefinedProcess" || g.preset == "flowChartInternalStorage" {
@@ -2532,4 +2535,316 @@ fn left_right_circular_arrow(b: &ArrowBox, adj: [f64; 5]) -> Vec<ArcCmd> {
         L(jp.0, jp.1),
         Z,
     ]
+}
+
+/// A path command of a ribbon or scroll preset, with its points and radii as `f64` guides.
+#[derive(Clone)]
+enum RibbonCmd {
+    M(f64, f64),
+    L(f64, f64),
+    A(f64, f64, i64, i64),
+    Z,
+}
+
+/// The ribbons (`ribbon`, `ribbon2`) and the scrolls (`verticalScroll`, `horizontalScroll`): a
+/// filled body, shaded folds and an outline, each path with its own fill and stroke.
+///
+/// The guides are evaluated in `f64`; every point and radius is rounded and pinned into the box at
+/// the end.
+fn ribbon_or_scroll_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    use RibbonCmd::{A, L, M, Z};
+    if !g.paths.is_empty() || w <= 0 || h <= 0 {
+        return None;
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let (wf, hf) = (w as f64, h as f64);
+    let (ss, hc) = (wf.min(hf), wf / 2.0);
+    let (wd8, wd32) = (wf / 8.0, wf / 32.0);
+    let (cd4, cd2, cd34) = (5_400_000, 10_800_000, 16_200_000);
+    let adj = |name: &str, default: i128| adjust(g, name, default) as f64;
+    let paths: Vec<(bool, bool, PathShade, Vec<RibbonCmd>)> = match g.preset.as_str() {
+        "ribbon" | "ribbon2" => {
+            let a1 = pin(0.0, adj("adj1", 16667), 33333.0);
+            let a2 = pin(25000.0, adj("adj2", 50000), 75000.0);
+            let x10 = wf - wd8;
+            let dx2 = wf * a2 / 200000.0;
+            let (x2, x9) = (hc - dx2, hc + dx2);
+            let (x3, x8) = (x2 + wd32, x9 - wd32);
+            let (x5, x6) = (x2 + wd8, x9 - wd8);
+            let (x4, x7) = (x5 - wd32, x6 + wd32);
+            let h_r = hf * a1 / 400000.0;
+            let arc = |st_ang: i64, sw_ang: i64| A(wd32, h_r, st_ang, sw_ang);
+            if g.preset == "ribbon" {
+                let y1 = hf * a1 / 200000.0;
+                let y2 = hf * a1 / 100000.0;
+                let y4 = hf - y2;
+                let y3 = y4 / 2.0;
+                let y5 = hf - h_r;
+                let y6 = y2 - h_r;
+                let body = vec![
+                    M(0.0, 0.0),
+                    L(x4, 0.0),
+                    arc(cd34, cd2),
+                    L(x3, y1),
+                    arc(cd34, -cd2),
+                    L(x8, y2),
+                    arc(cd4, -cd2),
+                    L(x7, y1),
+                    arc(cd4, cd2),
+                    L(wf, 0.0),
+                    L(x10, y3),
+                    L(wf, y4),
+                    L(x9, y4),
+                    L(x9, y5),
+                    arc(0, cd4),
+                    L(x3, hf),
+                    arc(cd4, cd4),
+                    L(x2, y4),
+                    L(0.0, y4),
+                    L(wd8, y3),
+                    Z,
+                ];
+                let folds = vec![
+                    M(x5, h_r),
+                    arc(0, cd4),
+                    L(x3, y1),
+                    arc(cd34, -cd2),
+                    L(x5, y2),
+                    Z,
+                    M(x6, h_r),
+                    arc(cd2, -cd4),
+                    L(x8, y1),
+                    arc(cd34, cd2),
+                    L(x6, y2),
+                    Z,
+                ];
+                let mut outline = body.clone();
+                outline.extend([M(x5, h_r), L(x5, y2), M(x6, y2), L(x6, h_r), M(x2, y4), L(x2, y6), M(x9, y6), L(x9, y4)]);
+                vec![(true, false, PathShade::Norm, body), (true, false, PathShade::DarkenLess, folds), (false, true, PathShade::Norm, outline)]
+            } else {
+                let dy1 = hf * a1 / 200000.0;
+                let y1 = hf - dy1;
+                let dy2 = hf * a1 / 100000.0;
+                let y2 = hf - dy2;
+                let y4 = dy2;
+                let y3 = (y4 + hf) / 2.0;
+                let y6 = hf - h_r;
+                let y7 = y1 - h_r;
+                let body = vec![
+                    M(0.0, hf),
+                    L(x4, hf),
+                    arc(cd4, -cd2),
+                    L(x3, y1),
+                    arc(cd4, cd2),
+                    L(x8, y2),
+                    arc(cd34, cd2),
+                    L(x7, y1),
+                    arc(cd34, -cd2),
+                    L(wf, hf),
+                    L(x10, y3),
+                    L(wf, y4),
+                    L(x9, y4),
+                    L(x9, h_r),
+                    arc(0, -cd4),
+                    L(x3, 0.0),
+                    arc(cd34, -cd4),
+                    L(x2, y4),
+                    L(0.0, y4),
+                    L(wd8, y3),
+                    Z,
+                ];
+                let folds = vec![
+                    M(x5, y6),
+                    arc(0, -cd4),
+                    L(x3, y1),
+                    arc(cd4, cd2),
+                    L(x5, y2),
+                    Z,
+                    M(x6, y6),
+                    arc(cd2, cd4),
+                    L(x8, y1),
+                    arc(cd4, -cd2),
+                    L(x6, y2),
+                    Z,
+                ];
+                let mut outline = vec![
+                    M(0.0, hf),
+                    L(wd8, y3),
+                    L(0.0, y4),
+                    L(x2, y4),
+                    L(x2, h_r),
+                    arc(cd2, cd4),
+                    L(x8, 0.0),
+                    arc(cd34, cd4),
+                    L(x9, y4),
+                    L(x9, y4),
+                    L(wf, y4),
+                    L(x10, y3),
+                    L(wf, hf),
+                    L(x7, hf),
+                    arc(cd4, cd2),
+                    L(x8, y1),
+                    arc(cd4, -cd2),
+                    L(x3, y2),
+                    arc(cd34, -cd2),
+                    L(x4, y1),
+                    arc(cd34, cd2),
+                    Z,
+                ];
+                outline.extend([M(x5, y2), L(x5, y6), M(x6, y6), L(x6, y2), M(x2, y7), L(x2, y4), M(x9, y4), L(x9, y7)]);
+                vec![(true, false, PathShade::Norm, body), (true, false, PathShade::DarkenLess, folds), (false, true, PathShade::Norm, outline)]
+            }
+        }
+        "verticalScroll" | "horizontalScroll" => {
+            let a = pin(0.0, adj("adj", 12500), 25000.0);
+            let ch = ss * a / 100000.0;
+            let (ch2, ch4) = (ch / 2.0, ch / 4.0);
+            let arc = |w_r: f64, h_r: f64, st_ang: i64, sw_ang: i64| A(w_r, h_r, st_ang, sw_ang);
+            if g.preset == "verticalScroll" {
+                let x3 = ch + ch2;
+                let x4 = ch + ch;
+                let x6 = wf - ch;
+                let x7 = wf - ch2;
+                let y3 = hf - ch;
+                let y4 = hf - ch2;
+                let body = vec![
+                    M(ch2, hf),
+                    arc(ch2, ch2, cd4, -cd4),
+                    L(ch2, y4),
+                    arc(ch4, ch4, cd4, -cd2),
+                    L(ch, y3),
+                    L(ch, ch2),
+                    arc(ch2, ch2, cd2, cd4),
+                    L(x7, 0.0),
+                    arc(ch2, ch2, cd34, cd2),
+                    L(x6, ch),
+                    L(x6, y4),
+                    arc(ch2, ch2, 0, cd4),
+                    Z,
+                    M(x4, ch2),
+                    arc(ch2, ch2, 0, cd4),
+                    arc(ch4, ch4, cd4, cd2),
+                    Z,
+                ];
+                let folds = vec![
+                    M(x4, ch2),
+                    arc(ch2, ch2, 0, cd4),
+                    arc(ch4, ch4, cd4, cd2),
+                    Z,
+                    M(ch, y4),
+                    arc(ch2, ch2, 0, cd34),
+                    arc(ch4, ch4, cd34, cd2),
+                    Z,
+                ];
+                let outline = vec![
+                    M(ch, y3),
+                    L(ch, ch2),
+                    arc(ch2, ch2, cd2, cd4),
+                    L(x7, 0.0),
+                    arc(ch2, ch2, cd34, cd2),
+                    L(x6, ch),
+                    L(x6, y4),
+                    arc(ch2, ch2, 0, cd4),
+                    L(ch2, hf),
+                    arc(ch2, ch2, cd4, cd2),
+                    Z,
+                    M(x3, 0.0),
+                    arc(ch2, ch2, cd34, cd2),
+                    arc(ch4, ch4, cd4, cd2),
+                    L(x4, ch2),
+                    M(x6, ch),
+                    L(x3, ch),
+                    M(ch2, y3),
+                    arc(ch4, ch4, cd34, cd2),
+                    L(ch, y4),
+                    M(ch2, hf),
+                    arc(ch2, ch2, cd4, -cd4),
+                    L(ch, y3),
+                ];
+                vec![(true, false, PathShade::Norm, body), (true, false, PathShade::DarkenLess, folds), (false, true, PathShade::Norm, outline)]
+            } else {
+                let y3 = ch + ch2;
+                let y4 = ch + ch;
+                let y6 = hf - ch;
+                let y7 = hf - ch2;
+                let y5 = y6 - ch2;
+                let x3 = wf - ch;
+                let x4 = wf - ch2;
+                let body = vec![
+                    M(wf, ch2),
+                    arc(ch2, ch2, 0, cd4),
+                    L(x4, ch2),
+                    arc(ch4, ch4, 0, cd2),
+                    L(x3, ch),
+                    L(ch2, ch),
+                    arc(ch2, ch2, cd34, -cd4),
+                    L(0.0, y7),
+                    arc(ch2, ch2, cd2, -cd2),
+                    L(ch, y6),
+                    L(x4, y6),
+                    arc(ch2, ch2, cd4, -cd4),
+                    Z,
+                    M(ch2, y4),
+                    arc(ch2, ch2, cd4, -cd4),
+                    arc(ch4, ch4, 0, -cd2),
+                    Z,
+                ];
+                let folds = vec![
+                    M(ch2, y4),
+                    arc(ch2, ch2, cd4, -cd4),
+                    arc(ch4, ch4, 0, -cd2),
+                    Z,
+                    M(x4, ch),
+                    arc(ch2, ch2, cd4, -cd34),
+                    arc(ch4, ch4, cd2, -cd2),
+                    Z,
+                ];
+                let outline = vec![
+                    M(0.0, y3),
+                    arc(ch2, ch2, cd2, cd4),
+                    L(x3, ch),
+                    L(x3, ch2),
+                    arc(ch2, ch2, cd2, cd2),
+                    L(wf, y5),
+                    arc(ch2, ch2, 0, cd4),
+                    L(ch, y6),
+                    L(ch, y7),
+                    arc(ch2, ch2, 0, cd2),
+                    Z,
+                    M(x3, ch),
+                    L(x4, ch),
+                    arc(ch2, ch2, cd4, -cd4),
+                    M(x4, ch),
+                    L(x4, ch2),
+                    arc(ch4, ch4, 0, cd2),
+                    M(ch2, y4),
+                    L(ch2, y3),
+                    arc(ch4, ch4, cd2, cd2),
+                    arc(ch2, ch2, 0, cd2),
+                    M(ch, y3),
+                    L(ch, y6),
+                ];
+                vec![(true, false, PathShade::Norm, body), (true, false, PathShade::DarkenLess, folds), (false, true, PathShade::Norm, outline)]
+            }
+        }
+        _ => return None,
+    };
+    // Round, then pin into the box: float error can land a unit outside.
+    let fix = |v: f64, max: i64| if v.is_finite() { (v.round() as i64).clamp(0, max) } else { 0 };
+    let paths = paths
+        .into_iter()
+        .map(|(fill, stroke, shade, cmds)| {
+            let commands = cmds
+                .into_iter()
+                .map(|c| match c {
+                    M(x, y) => PathCommand::MoveTo(fix(x, w), fix(y, h)),
+                    L(x, y) => PathCommand::LineTo(fix(x, w), fix(y, h)),
+                    A(w_r, h_r, st_ang, sw_ang) => PathCommand::ArcTo { w_r: fix(w_r, w), h_r: fix(h_r, h), st_ang, sw_ang },
+                    Z => PathCommand::Close,
+                })
+                .collect();
+            GeometryPath { w, h, fill, stroke, shade, commands }
+        })
+        .collect();
+    Some(paths)
 }
