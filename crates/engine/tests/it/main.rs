@@ -40,6 +40,7 @@ mod range_fill_formats;
 mod recently_used;
 mod regression_plots;
 mod row_autofit;
+mod shape_gallery;
 mod sheet_copy_spill;
 mod sheet_name_quoting;
 mod side_by_side;
