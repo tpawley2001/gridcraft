@@ -3582,8 +3582,15 @@ fn curved_left_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool
     let sw_ang3 = sw_ang + dang2;
     let st_ang3 = -dang2;
     let arc = |st: f64, sw: f64| CurveSeg::A(r, h_r, st, sw);
-    let body =
-        vec![CurveSeg::M(0.0, y6), CurveSeg::L(x1, y4), CurveSeg::L(x1, y5), arc(sw_ang, sw_ang2), arc(st_ang3, sw_ang3), CurveSeg::L(x1, y8), CurveSeg::Z];
+    let body = vec![
+        CurveSeg::M(0.0, y6),
+        CurveSeg::L(x1, y4),
+        CurveSeg::L(x1, y5),
+        arc(sw_ang, sw_ang2),
+        arc(st_ang3, sw_ang3),
+        CurveSeg::L(x1, y8),
+        CurveSeg::Z,
+    ];
     let back = vec![CurveSeg::M(r, y3), arc(0.0, -5400000.0), CurveSeg::L(0.0, 0.0), arc(16200000.0, 5400000.0), CurveSeg::Z];
     let outline = vec![
         CurveSeg::M(r, y3),
@@ -3622,8 +3629,15 @@ fn curved_up_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool, 
     let sw_ang3 = sw_ang + dang2;
     let st_ang2 = 5400000.0 - dang2;
     let arc = |st: f64, sw: f64| CurveSeg::A(w_r, bt, st, sw);
-    let body =
-        vec![CurveSeg::M(x6, 0.0), CurveSeg::L(x8, y1), CurveSeg::L(x7, y1), arc(st_ang3, sw_ang3), arc(st_ang2, sw_ang2), CurveSeg::L(x4, y1), CurveSeg::Z];
+    let body = vec![
+        CurveSeg::M(x6, 0.0),
+        CurveSeg::L(x8, y1),
+        CurveSeg::L(x7, y1),
+        arc(st_ang3, sw_ang3),
+        arc(st_ang2, sw_ang2),
+        CurveSeg::L(x4, y1),
+        CurveSeg::Z,
+    ];
     let back = vec![CurveSeg::M(w_r, bt), arc(5400000.0, 5400000.0), CurveSeg::L(th, 0.0), arc(10800000.0, -5400000.0), CurveSeg::Z];
     let outline = vec![
         CurveSeg::M((w_r + x3) / 2.0, idy),
