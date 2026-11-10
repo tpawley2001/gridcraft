@@ -46,7 +46,16 @@ fn sample() -> Workbook {
         s.fill = Fill::solid(Color::Rgb(0xFFEE00));
         s.borders.bottom = BorderLine { style: BorderStyle::Double, color: Color::Rgb(0xFF0000) };
         s.borders.diag_down = BorderLine::thin();
-        s.align = Alignment { h: HAlign::Center, v: VAlign::Top, wrap: true, shrink: false, indent: 1, rotation: -30, ..Alignment::default() };
+        s.align = Alignment {
+            h: HAlign::Center,
+            v: VAlign::Top,
+            wrap: true,
+            shrink: false,
+            indent: 1,
+            rotation: -30,
+            reading_order: Some(ReadingOrder::RightToLeft),
+            ..Alignment::default()
+        };
         s.protection.locked = false;
     });
     let money = wb.styles.derive(StyleId::DEFAULT, |s| s.num_fmt = NumFmt::new("#,##0.00 \"€\""));

@@ -283,6 +283,14 @@ impl Trace {
 
 #[derive(Default)]
 pub struct GridState {
+    /// The active sheet's line positions and outlines, kept with a weak reference to the sheet
+    /// they were built from: while it still upgrades to the very sheet shown, the sheet hasn't
+    /// changed (every change goes through `Arc::make_mut`, which moves or copies a sheet that
+    /// has a weak reference to it), so they still hold.
+    pub(crate) lines: Option<(std::sync::Weak<Sheet>, geo::SheetLines)>,
+    /// The conditional formatting statistics (minimum, maximum, percentiles, duplicates) of the
+    /// active sheet's rules, kept the same way: they are read from that sheet's cells alone.
+    pub(crate) cf: Option<(std::sync::Weak<Sheet>, CfCache)>,
     pub drag: Drag,
     /// The modifier keys held during the last frame's object drag (Shift, Ctrl/Cmd, Alt).
     pub drag_mods: crate::objects::DragMods,

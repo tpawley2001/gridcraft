@@ -29,6 +29,8 @@ and password metadata), and per-sheet validation prompt settings (`disablePrompt
 `xWindow`/`yWindow`). Validation counts are recomputed; absent prompt positions stay absent
 (`codex_day_worksheet_settings.rs`, `worksheet_settings.rs`).
 
+Cell text now uses shared Unicode bidi layout while retaining logical source indexes for editing, copy and XLSX. Format Cells exposes Context, Left to right and Right to left reading direction, independent of sheet geometry. OOXML Context uses the first non-whitespace character. Optional direction preserves absent versus explicit Context in differential styles. The renderer is pinned to a reviewed egui 0.36.2 backport with real-font, editing, accessibility and WASM checks. Physical screen-reader behavior remains unverified.
+
 ## Workbook window settings
 
 GridCraft keeps one modelled workbook window. On XLSX import it selects the first visible
@@ -370,6 +372,7 @@ Truncated packages. When an `.xlsx`, `.xlsm` or `.xlsb` file has lost its ZIP ce
 | 2026-10-31 | minor | XLSX shapes, text boxes and pictures retain click hyperlink targets and optional tooltips through open + save, including workbook locations and XML escaping (`drawing_hyperlinks.rs`) |
 | 2026-10-31 | trivial | XLSX: drawing anchors wrapped in `mc:AlternateContent` that the model doesn't read (form and ActiveX control shapes linked to their VML by `a14:compatExt spid`) are kept verbatim with the parts they refer to and written back at their position in the sheet's drawing, which is now written even when it holds nothing else; new pictures, shapes and charts get `cNvPr` ids the kept anchors don't use. Before, the drawing and the sheet's `<drawing>` were dropped and the controls lost their DrawingML anchor (`alternate_content_anchors.rs`) |
 | 2026-10-31 | trivial | PDF export and print lay out at most a cell's first 1,024 characters, the most Excel displays, and break over-long words in one pass; a sheet of thousands of very long strings no longer hangs export. Automatic row heights measure the same prefix (`print_long_text.rs`) |
+| 2026-10-26 | minor | Alignment readingOrder 0/1/2 survives cell, named-style and differential-style round-trips; Format Cells exposes reading direction and CF priority preserves unspecified inheritance |
 | 2026-10-21 | minor | HTML (Save as Web Page) writes pictures (`data:` URI `<img>`) and charts (inline SVG from the chart crate's drawing primitives, text included) at their anchors; the table uses the sheet's column widths and row heights when the sheet has either, and output for sheets without pictures or charts is unchanged |
 | 2026-10-20 | trivial | XLSX shared strings: Japanese phonetic runs (ふりがな, `<rPh sb="…" eb="…">` with `<phoneticPr>`) are read into the workbook and written back next to the string with the same text, so an open + save no longer deletes them; bad offsets and readings are dropped with a warning, a `<phoneticPr>` without runs is kept on its own, and when duplicate `<si>` items share a text but not a reading only the first reading is written (reported on open) (`phonetic_tests.rs`) |
 | 2026-10-20 | minor | A workbook theme's major/minor per-script typefaces (`<a:font script="Arab" typeface="…"/>`, also Hebr, Jpan and the rest) are read and written back in file order after `<a:cs>`; they were dropped before. A hostile file is held to 64 entries of 256 characters |
