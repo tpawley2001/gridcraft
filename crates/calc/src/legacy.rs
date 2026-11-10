@@ -92,6 +92,8 @@ fn value_param(name: &str, i: usize) -> bool {
         // The reference parameter keeps the reference; the positions and sizes are values.
         "INDEX" | "OFFSET" => i != 0,
         "CELL" | "SUBTOTAL" => i == 0,
+        // T reads a multi-cell reference at its top-left cell, not by implicit intersection.
+        "T" => false,
         "AGGREGATE" => i < 2,
         "ROW" | "COLUMN" | "ROWS" | "COLUMNS" | "AREAS" | "ISREF" | "ISFORMULA" | "FORMULATEXT" | "SHEET" | "SHEETS" | "TRIMRANGE" | "LET"
         | "LAMBDA" | "ISOMITTED" | "MAP" | "REDUCE" | "SCAN" | "BYROW" | "BYCOL" | "MAKEARRAY" => false,
@@ -117,6 +119,8 @@ mod tests {
         assert_eq!(rewritten("SUMPRODUCT(A1:A5*B1:B5)"), "@SUMPRODUCT(A1:A5*B1:B5)");
         assert_eq!(rewritten("COUNTIF(A1:A5,A1:A5>25)"), "@COUNTIF(A1:A5,@A1:A5>25)");
         assert_eq!(rewritten("INDEX(A1:B5,0,2)"), "@INDEX(A1:B5,0,2)");
+        // T reads a multi-cell reference at its top-left cell, so its argument keeps the reference.
+        assert_eq!(rewritten("T(A1:C1)"), "@T(A1:C1)");
         // The intersection operator builds a reference, which is then intersected as a whole.
         let e = gridcraft_formula::parse("A:A B:B").map(|e| legacy_expr(&e));
         assert!(matches!(e, Ok(Expr::Unary(UnOp::At, x)) if matches!(*x, Expr::Binary(BinOp::Intersect, _, _))));

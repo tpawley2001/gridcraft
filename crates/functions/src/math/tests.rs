@@ -47,14 +47,16 @@ fn sums() {
 }
 
 /// SUMPRODUCT cases observed in Excel (FormulaEvalTestData, row "Sumproduct"): scalars and
-/// single-cell references multiply in, text in a scalar argument is `#VALUE!`, sizes must match.
+/// single-cell references multiply in, text in a literal scalar argument is `#VALUE!` (in a
+/// reference it counts as zero), sizes must match.
 #[test]
 fn sumproduct_scalar_arguments() {
     let cases: Vec<(Vec<crate::Arg>, Result<f64, CellError>)> = vec![
         (vec![n(3.0), rf(nv(534.0)), rf(nv(1.1))], Ok(1762.2)),
         (vec![rf(nv(1.1)), n(3.0), rf(nv(534.0)), rf(nv(1.1))], Ok(1938.42)),
         (vec![n(2.0), rf(col(&[1.00001, 2.99999]))], Err(CellError::Value)),
-        (vec![rf(tv("4")), rf(nv(2.0))], Err(CellError::Value)),
+        // A one-cell reference is an array: its text counts as zero.
+        (vec![rf(tv("4")), rf(nv(2.0))], Ok(0.0)),
         (vec![t("4"), n(2.0)], Err(CellError::Value)),
         (vec![rf(nv(3.0)), rf(Value::Error(CellError::Ref))], Err(CellError::Ref)),
         (vec![av(arr(vec![vec![tv("4")]])), n(2.0)], Ok(0.0)),

@@ -28,6 +28,7 @@ impl<'h> Evaluator<'h> {
             "CHOOSE" => self.choose_call(args),
             "SWITCH" => self.switch_call(args),
             "ROW" | "COLUMN" => self.row_column_call(name, args),
+            "T" => self.t_call(args),
             "ROWS" | "COLUMNS" => {
                 if args.len() != 1 {
                     return err(CellError::Value);
@@ -241,6 +242,27 @@ impl<'h> Evaluator<'h> {
             self.eval(default)
         } else {
             err(CellError::NA)
+        }
+    }
+
+    /// `T(value)`: text as it is, anything else empty text. A reference to more than one cell is
+    /// read at its top-left cell, not by implicit intersection (`T(A1:C1)` in row 5 is `""` when
+    /// A1 is a number, where `@A1:C1` would be `#VALUE!`).
+    fn t_call(&mut self, args: &[Expr]) -> Ev {
+        if args.len() != 1 {
+            return err(CellError::Value);
+        }
+        let value = match self.eval(&args[0]) {
+            Ev::R(areas) => match areas.as_slice() {
+                [area] if !area.range.is_single() => self.host.cell_value(area.sheet, area.range.start),
+                _ => self.deref(Ev::R(areas)).scalar(),
+            },
+            ev => self.deref(ev).scalar(),
+        };
+        match value {
+            Value::Text(t) => Ev::V(Value::Text(t)),
+            Value::Error(e) => err(e),
+            _ => Ev::V(Value::text("")),
         }
     }
 
