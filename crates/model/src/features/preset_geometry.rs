@@ -316,6 +316,7 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
         "diagStripe" => diag_stripe_points(wi, hi, g),
         "lightningBolt" => lightning_bolt_points(wi, hi),
         "pie" | "chord" | "arc" | "blockArc" | "plaque" => return arc_shape_paths(g, w, h),
+        "bentArrow" | "uturnArrow" | "circularArrow" | "leftCircularArrow" | "leftRightCircularArrow" => return arc_arrow_paths(g, w, h),
         preset => {
             let (pw, ph, table) = flowchart_polygon(preset)?;
             table.iter().map(|&(x, y)| (md(wi, x, pw), md(hi, y, ph))).collect()
@@ -2183,4 +2184,352 @@ fn wedge_callout(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>>
         ln(l, y1),
         PathCommand::Close,
     ]))
+}
+
+/// One command of an arc-arrow outline before rounding: `A` is `a:arcTo` (`wR`, `hR`, `stAng`, `swAng`).
+enum ArcCmd {
+    M(f64, f64),
+    L(f64, f64),
+    A(f64, f64, f64, f64),
+    Z,
+}
+
+const CD2: f64 = 10_800_000.0;
+const CD4: f64 = 5_400_000.0;
+const CD34: f64 = 16_200_000.0;
+const C360: f64 = 21_600_000.0;
+
+/// Arrows built from lines and `a:arcTo` (bent, U-turn and the circular arrows): one filled and
+/// stroked path. The guides chain trigonometry, so they are evaluated in `f64`; points and radii
+/// are rounded and pinned into the box at the end, and NaN or infinite values become 0.
+fn arc_arrow_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    if !g.paths.is_empty() || w <= 0 || h <= 0 {
+        return None;
+    }
+    let (wf, hf) = (w as f64, h as f64);
+    let b = ArrowBox { w: wf, h: hf, ss: wf.min(hf), hc: wf / 2.0, vc: hf / 2.0 };
+    let adj = |name: &str, default: f64| adjust(g, name, default as i128) as f64;
+    let adjs = |d: [f64; 5]| [adj("adj1", d[0]), adj("adj2", d[1]), adj("adj3", d[2]), adj("adj4", d[3]), adj("adj5", d[4])];
+    let cmds = match g.preset.as_str() {
+        "bentArrow" => bent_arrow(&b, adjs([25000.0, 25000.0, 25000.0, 43750.0, 0.0])),
+        "uturnArrow" => uturn_arrow(&b, adjs([25000.0, 25000.0, 25000.0, 43750.0, 75000.0])),
+        "circularArrow" => circular_arrow(&b, adjs([12500.0, 1142319.0, 20457681.0, 10800000.0, 12500.0])),
+        "leftCircularArrow" => left_circular_arrow(&b, adjs([12500.0, -1142319.0, 1142319.0, 10800000.0, 12500.0])),
+        "leftRightCircularArrow" => left_right_circular_arrow(&b, adjs([12500.0, 1142319.0, 20457681.0, 11942319.0, 12500.0])),
+        _ => return None,
+    };
+    let fix = |v: f64, max: i64| if v.is_finite() { (v.round() as i64).clamp(0, max) } else { 0 };
+    let ang = |v: f64| if v.is_finite() { (v.round() as i64).clamp(-3 * 21_600_000, 3 * 21_600_000) } else { 0 };
+    let commands = cmds
+        .into_iter()
+        .map(|c| match c {
+            ArcCmd::M(x, y) => PathCommand::MoveTo(fix(x, w), fix(y, h)),
+            ArcCmd::L(x, y) => PathCommand::LineTo(fix(x, w), fix(y, h)),
+            ArcCmd::A(w_r, h_r, st, sw) => PathCommand::ArcTo { w_r: fix(w_r, w), h_r: fix(h_r, h), st_ang: ang(st), sw_ang: ang(sw) },
+            ArcCmd::Z => PathCommand::Close,
+        })
+        .collect();
+    Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }])
+}
+
+fn bent_arrow(b: &ArrowBox, adj: [f64; 5]) -> Vec<ArcCmd> {
+    use ArcCmd::{A, L, M, Z};
+    let (r, bt, ss) = (b.w, b.h, b.ss);
+    let a2 = pin(0.0, adj[1], 50000.0);
+    let a1 = pin(0.0, adj[0], a2 * 2.0);
+    let a3 = pin(0.0, adj[2], 50000.0);
+    let th = ss * a1 / 100000.0;
+    let aw2 = ss * a2 / 100000.0;
+    let dh2 = aw2 - th / 2.0;
+    let ah = ss * a3 / 100000.0;
+    let bs = (r - ah).min(bt - dh2);
+    let a4 = pin(0.0, adj[3], muldiv(100000.0, bs, ss));
+    let bd = ss * a4 / 100000.0;
+    let bd2 = (bd - th).max(0.0);
+    let (x3, x4) = (th + bd2, r - ah);
+    let y3 = dh2 + th;
+    let (y4, y5) = (y3 + dh2, dh2 + bd);
+    vec![
+        M(0.0, bt),
+        L(0.0, y5),
+        A(bd, bd, CD2, CD4),
+        L(x4, dh2),
+        L(x4, 0.0),
+        L(r, aw2),
+        L(x4, y4),
+        L(x4, y3),
+        L(x3, y3),
+        A(bd2, bd2, CD34, -CD4),
+        L(th, bt),
+        Z,
+    ]
+}
+
+fn uturn_arrow(b: &ArrowBox, adj: [f64; 5]) -> Vec<ArcCmd> {
+    use ArcCmd::{A, L, M, Z};
+    let (r, bt, ss) = (b.w, b.h, b.ss);
+    let a2 = pin(0.0, adj[1], 25000.0);
+    let a1 = pin(0.0, adj[0], a2 * 2.0);
+    let q2 = muldiv(a1, ss, b.h);
+    let a3 = pin(0.0, adj[2], muldiv(100000.0 - q2, b.h, ss));
+    let min_adj5 = muldiv(a3 + a1, ss, b.h);
+    let a5 = pin(min_adj5, adj[4], 100000.0);
+    let th = ss * a1 / 100000.0;
+    let aw2 = ss * a2 / 100000.0;
+    let dh2 = aw2 - th / 2.0;
+    let y5 = b.h * a5 / 100000.0;
+    let ah = ss * a3 / 100000.0;
+    let y4 = y5 - ah;
+    let x9 = r - dh2;
+    let bs = (x9 / 2.0).min(y4);
+    let a4 = pin(0.0, adj[3], muldiv(bs, 100000.0, ss));
+    let bd = ss * a4 / 100000.0;
+    let bd2 = (bd - th).max(0.0);
+    let x3 = th + bd2;
+    let x8 = r - aw2;
+    let x6 = x8 - aw2;
+    let x7 = x6 + dh2;
+    let x4 = x9 - bd;
+    vec![
+        M(0.0, bt),
+        L(0.0, bd),
+        A(bd, bd, CD2, CD4),
+        L(x4, 0.0),
+        A(bd, bd, CD34, CD4),
+        L(x9, y4),
+        L(r, y4),
+        L(x8, y5),
+        L(x6, y4),
+        L(x7, y4),
+        L(x7, x3),
+        A(bd2, bd2, 0.0, -CD4),
+        L(x3, th),
+        A(bd2, bd2, CD34, -CD4),
+        L(th, bt),
+        Z,
+    ]
+}
+
+/// DrawingML angle (60000ths of a degree) in radians.
+fn rad(a: f64) -> f64 {
+    (a / 60000.0).to_radians()
+}
+
+/// `at2 x y`: atan2(y, x) in 60000ths of a degree.
+fn at2(x: f64, y: f64) -> f64 {
+    y.atan2(x).to_degrees() * 60000.0
+}
+
+/// `sqrt x`, 0 for a negative or NaN `x`.
+fn sqrt0(x: f64) -> f64 {
+    if x > 0.0 { x.sqrt() } else { 0.0 }
+}
+
+/// `?: x y z`.
+fn ifpos(x: f64, y: f64, z: f64) -> f64 {
+    if x > 0.0 { y } else { z }
+}
+
+/// The point at angle `a` on the ellipse of radii `rw` × `rh` about the box centre, as the
+/// definitions compute it (`sin`/`cos`, then `cat2`/`sat2`).
+fn ellipse_at(b: &ArrowBox, rw: f64, rh: f64, a: f64) -> (f64, f64) {
+    let (wt, ht) = (rw * rad(a).sin(), rh * rad(a).cos());
+    let t = wt.atan2(ht);
+    (b.hc + rw * t.cos(), b.vc + rh * t.sin())
+}
+
+/// Where the line through (x1, y1)–(x2, y2) meets the circle of radius `r` about the origin:
+/// of the two hits, the one nearer (`nx`, `ny`) (the `dxF`/`dxC` guide chains).
+#[allow(clippy::too_many_arguments)]
+fn circle_hit(x1: f64, y1: f64, x2: f64, y2: f64, r: f64, sdy: f64, nx: f64, ny: f64) -> (f64, f64) {
+    let (dx, dy) = (x2 - x1, y2 - y1);
+    let d2 = dx * dx + dy * dy;
+    let dd = x1 * y2 - x2 * y1;
+    let sdel = sqrt0(r * r * d2 - dd * dd);
+    let (ex, ey) = (sdy * dx * sdel, dy.abs() * sdel);
+    let (x_1, x_2) = (muldiv(dd * dy + ex, 1.0, d2), muldiv(dd * dy - ex, 1.0, d2));
+    let (y_1, y_2) = (muldiv(-dd * dx + ey, 1.0, d2), muldiv(-dd * dx - ey, 1.0, d2));
+    let n1 = (nx - x_1).hypot(ny - y_1);
+    let n2 = (nx - x_2).hypot(ny - y_2);
+    if n2 - n1 > 0.0 { (x_1, y_1) } else { (x_2, y_2) }
+}
+
+/// The guides the three circular arrows share, up to the arrowhead at `enAng`.
+struct CircArrow {
+    st_ang: f64,
+    a_ang: f64,
+    thh: f64,
+    rw1: f64,
+    rh1: f64,
+    rw2: f64,
+    rh2: f64,
+    rw3: f64,
+    rh3: f64,
+    a: (f64, f64),
+    gp: (f64, f64),
+    bp: (f64, f64),
+    f: (f64, f64),
+    c: (f64, f64),
+    p5: f64,
+    /// `en2`: angle of `F` on the outer ellipse.
+    en2: f64,
+    /// `istAng` before the per-preset adjustment: angle of `C` on the inner ellipse.
+    ist: f64,
+}
+
+/// `left` picks leftCircularArrow's negative `aAng`.
+fn circ_arrow(b: &ArrowBox, adj: [f64; 5], left: bool) -> CircArrow {
+    let (hc, vc, ss) = (b.hc, b.vc, b.ss);
+    let a5 = pin(0.0, adj[4], 25000.0);
+    let a1 = pin(0.0, adj[0], a5 * 2.0);
+    let en_ang = pin(1.0, adj[2], 21599999.0);
+    let st_ang = pin(0.0, adj[3], 21599999.0);
+    let th = ss * a1 / 100000.0;
+    let thh = ss * a5 / 100000.0;
+    let th2 = th / 2.0;
+    let rw1 = b.w / 2.0 + th2 - thh;
+    let rh1 = b.h / 2.0 + th2 - thh;
+    let (rw2, rh2) = (rw1 - th, rh1 - th);
+    let (rw3, rh3) = (rw2 + th2, rh2 + th2);
+    let (x_h, y_h) = ellipse_at(b, rw3, rh3, en_ang);
+    let (dx_h, dy_h) = (x_h - hc, y_h - vc);
+    let r_i = rw2.min(rh2);
+    let u1 = dx_h * dx_h;
+    let u2 = dy_h * dy_h;
+    let u3 = r_i * r_i;
+    let (u4, u5) = (u1 - u3, u2 - u3);
+    let u7 = muldiv(muldiv(u4, u5, u1), 1.0, u2);
+    let u9 = sqrt0(1.0 - u7);
+    let u11 = muldiv(muldiv(u4, 1.0, dx_h), 1.0, dy_h);
+    let u12 = muldiv(1.0 + u9, 1.0, u11);
+    let u13 = at2(1.0, u12);
+    let u15 = ifpos(u13, u13, u13 + C360);
+    let u16 = u15 - en_ang;
+    let u18 = ifpos(u16, u16, u16 + C360);
+    let u21 = ifpos(u18 - CD2, u18 - C360, u18);
+    let a_ang = if left { pin(-u21.abs(), -adj[1].abs(), 0.0) } else { pin(0.0, adj[1], u21.abs()) };
+    let pt_ang = en_ang + a_ang;
+    let a = ellipse_at(b, rw3, rh3, pt_ang);
+    let (dx_g, dy_g) = (thh * rad(pt_ang).cos(), thh * rad(pt_ang).sin());
+    let (x_g, y_g) = (x_h + dx_g, y_h + dy_g);
+    let (x_b, y_b) = (x_h - dx_g, y_h - dy_g);
+    let (sx1, sy1, sx2, sy2) = (x_b - hc, y_b - vc, x_g - hc, y_g - vc);
+    let r_o = rw1.min(rh1);
+    let (x1o, y1o) = (muldiv(sx1, r_o, rw1), muldiv(sy1, r_o, rh1));
+    let (x2o, y2o) = (muldiv(sx2, r_o, rw1), muldiv(sy2, r_o, rh1));
+    let sdy = ifpos(-(y2o - y1o), -1.0, 1.0);
+    let (dx_f, dy_f) = circle_hit(x1o, y1o, x2o, y2o, r_o, sdy, x2o, y2o);
+    let (sdx_f, sdy_f) = (muldiv(dx_f, rw1, r_o), muldiv(dy_f, rh1, r_o));
+    let f = (hc + sdx_f, vc + sdy_f);
+    let (x1i, y1i) = (muldiv(sx1, r_i, rw2), muldiv(sy1, r_i, rh2));
+    let (x2i, y2i) = (muldiv(sx2, r_i, rw2), muldiv(sy2, r_i, rh2));
+    let (dx_c, dy_c) = circle_hit(x1i, y1i, x2i, y2i, r_i, sdy, x1i, y1i);
+    let (sdx_c, sdy_c) = (muldiv(dx_c, rw2, r_i), muldiv(dy_c, rh2, r_i));
+    let c = (hc + sdx_c, vc + sdy_c);
+    let p5 = (f.0 - c.0).hypot(f.1 - c.1) / 2.0 - thh;
+    let gp = if p5 > 0.0 { f } else { (x_g, y_g) };
+    let bp = if p5 > 0.0 { c } else { (x_b, y_b) };
+    let en0 = at2(sdx_f, sdy_f);
+    let ist0 = at2(sdx_c, sdy_c);
+    CircArrow {
+        st_ang,
+        a_ang,
+        thh,
+        rw1,
+        rh1,
+        rw2,
+        rh2,
+        rw3,
+        rh3,
+        a,
+        gp,
+        bp,
+        f,
+        c,
+        p5,
+        en2: ifpos(en0, en0, en0 + C360),
+        ist: ifpos(ist0, ist0, ist0 + C360),
+    }
+}
+
+fn circular_arrow(b: &ArrowBox, adj: [f64; 5]) -> Vec<ArcCmd> {
+    use ArcCmd::{A, L, M, Z};
+    let k = circ_arrow(b, adj, false);
+    let e = ellipse_at(b, k.rw1, k.rh1, k.st_ang);
+    let isw1 = k.st_ang - k.ist;
+    let isw_ang = ifpos(isw1, isw1 - C360, isw1);
+    let sw0 = k.en2 - k.st_ang;
+    let sw_ang = ifpos(sw0, sw0, sw0 + C360);
+    vec![
+        M(e.0, e.1),
+        A(k.rw1, k.rh1, k.st_ang, sw_ang),
+        L(k.gp.0, k.gp.1),
+        L(k.a.0, k.a.1),
+        L(k.bp.0, k.bp.1),
+        L(k.c.0, k.c.1),
+        A(k.rw2, k.rh2, k.ist, isw_ang),
+        Z,
+    ]
+}
+
+fn left_circular_arrow(b: &ArrowBox, adj: [f64; 5]) -> Vec<ArcCmd> {
+    use ArcCmd::{A, L, M, Z};
+    let k = circ_arrow(b, adj, true);
+    let e = ellipse_at(b, k.rw1, k.rh1, k.st_ang);
+    let d = ellipse_at(b, k.rw2, k.rh2, k.st_ang);
+    let isw1 = k.st_ang - k.ist;
+    let isw_ang0 = ifpos(isw1, isw1, isw1 + C360);
+    let sw0 = k.en2 - k.st_ang;
+    let sw_ang = ifpos(sw0, sw0 - C360, sw0);
+    vec![
+        M(e.0, e.1),
+        L(d.0, d.1),
+        A(k.rw2, k.rh2, k.ist + isw_ang0, -isw_ang0),
+        L(k.bp.0, k.bp.1),
+        L(k.a.0, k.a.1),
+        L(k.gp.0, k.gp.1),
+        L(k.f.0, k.f.1),
+        A(k.rw1, k.rh1, k.st_ang + sw_ang, -sw_ang),
+        Z,
+    ]
+}
+
+fn left_right_circular_arrow(b: &ArrowBox, adj: [f64; 5]) -> Vec<ArcCmd> {
+    use ArcCmd::{A, L, M, Z};
+    let k = circ_arrow(b, adj, false);
+    let en_ang = pin(1.0, adj[2], 21599999.0);
+    let i = ellipse_at(b, k.rw3, k.rh3, k.st_ang);
+    let lpt_ang = k.st_ang - k.a_ang;
+    let l = ellipse_at(b, k.rw3, k.rh3, lpt_ang);
+    let (dx_k, dy_k) = (k.thh * rad(lpt_ang).cos(), k.thh * rad(lpt_ang).sin());
+    let od0 = k.en2 - en_ang;
+    let od2 = ifpos(od0, od0, od0 + C360);
+    let st0 = k.st_ang - od2;
+    let st2 = ifpos(st0, st0, st0 + C360);
+    let sw0 = k.en2 - st2;
+    let sw_ang = ifpos(sw0, sw0, sw0 + C360);
+    let id0 = k.ist - en_ang;
+    let id2 = ifpos(id0, id0 - C360, id0);
+    let ien0 = k.st_ang - id2;
+    let ien1 = ien0 - C360;
+    let ien2 = ifpos(ien1, ien1, ien0);
+    let isw1 = ien2 - k.ist;
+    let isw_ang = ifpos(isw1, isw1 - C360, isw1);
+    let e = ellipse_at(b, k.rw1, k.rh1, st2);
+    let d = ellipse_at(b, k.rw2, k.rh2, ien2);
+    let kp = if k.p5 > 0.0 { e } else { (i.0 + dx_k, i.1 + dy_k) };
+    let jp = if k.p5 > 0.0 { d } else { (i.0 - dx_k, i.1 - dy_k) };
+    vec![
+        M(l.0, l.1),
+        L(kp.0, kp.1),
+        L(e.0, e.1),
+        A(k.rw1, k.rh1, st2, sw_ang),
+        L(k.gp.0, k.gp.1),
+        L(k.a.0, k.a.1),
+        L(k.bp.0, k.bp.1),
+        L(k.c.0, k.c.1),
+        A(k.rw2, k.rh2, k.ist, isw_ang),
+        L(jp.0, jp.1),
+        Z,
+    ]
 }
