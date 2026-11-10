@@ -167,7 +167,7 @@ fn diamond_preset_prints_four_points_off_the_corners() {
 
 #[test]
 fn preset_without_an_outline_prints_its_box() {
-    let mut s = shape_session(ShapeKind::Rectangle, preset("cloud"));
+    let mut s = shape_session(ShapeKind::Rectangle, preset("notAPreset"));
     let p = red_paths(&mut s);
     assert_eq!(p.len(), 1, "{p:?}");
     assert_eq!(p[0].len(), 4, "{p:?}");

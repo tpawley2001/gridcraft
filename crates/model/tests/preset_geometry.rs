@@ -91,7 +91,7 @@ fn unparsable_adjust_uses_the_default() {
 
 #[test]
 fn unknown_presets_custom_geometry_and_empty_boxes_have_no_outline() {
-    assert!(preset_paths(&geom("cloud", &[]), 200, 100).is_none());
+    assert!(preset_paths(&geom("notAPreset", &[]), 200, 100).is_none());
     assert!(preset_paths(&geom("", &[]), 200, 100).is_none());
     assert!(preset_paths(&geom("rightArrow", &[]), 0, 100).is_none());
     let mut custom = geom("rightArrow", &[]);

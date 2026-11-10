@@ -127,6 +127,9 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
     if let Some(paths) = bracket_paths(g, w, h) {
         return Some(paths);
     }
+    if let Some(paths) = shaded_paths(g, wi, hi) {
+        return Some(paths);
+    }
     let pts: Vec<(i128, i128)> = match g.preset.as_str() {
         "rightArrow" => {
             let a1 = adj("adj1", 50000, 100000);
@@ -446,6 +449,173 @@ fn curved_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> 
     };
     Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }])
 }
+
+/// Can, folded corner, bevel, sun and cloud: several paths each, some filled with the shape's fill
+/// shaded (`fill="lighten"` …), or `None` for another preset. Points and radii are clamped into the
+/// box.
+fn shaded_paths(g: &ShapeGeometry, wi: i128, hi: i128) -> Option<Vec<GeometryPath>> {
+    let (w, h) = (i64::try_from(wi).ok()?, i64::try_from(hi).ok()?);
+    let ss = wi.min(hi);
+    let (l, t, r, b, hc, vc) = (0, 0, wi, hi, wi / 2, hi / 2);
+    let cd2 = 10_800_000;
+    let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
+    let to_i64 = |v: i128| i64::try_from(v).unwrap_or(if v < 0 { 0 } else { i64::MAX });
+    let m = |x: i128, y: i128| PathCommand::MoveTo(to_i64(x.clamp(0, wi)), to_i64(y.clamp(0, hi)));
+    let ln = |x: i128, y: i128| PathCommand::LineTo(to_i64(x.clamp(0, wi)), to_i64(y.clamp(0, hi)));
+    let arc = |w_r: i128, h_r: i128, st_ang: i64, sw_ang: i64| PathCommand::ArcTo {
+        w_r: to_i64(w_r.clamp(0, wi)),
+        h_r: to_i64(h_r.clamp(0, hi)),
+        st_ang,
+        sw_ang,
+    };
+    let path = |fill: bool, stroke: bool, shade: PathShade, commands: Vec<PathCommand>| GeometryPath { w, h, fill, stroke, shade, commands };
+    let close = || PathCommand::Close;
+    let pin = |lo: i128, v: i128, up: i128| v.max(lo).min(up.max(lo));
+    Some(match g.preset.as_str() {
+        "can" => {
+            let max_adj = md(50000, hi, ss);
+            let a = pin(0, adjust(g, "adj", 25000), max_adj);
+            let y1 = md(ss, a, 200000);
+            let y3 = b - y1;
+            let wd2 = hc;
+            vec![
+                path(true, false, PathShade::Norm, vec![m(l, y1), arc(wd2, y1, cd2, -cd2), ln(r, y3), arc(wd2, y1, 0, cd2), close()]),
+                path(true, false, PathShade::Lighten, vec![m(l, y1), arc(wd2, y1, cd2, cd2), arc(wd2, y1, 0, cd2), close()]),
+                path(
+                    false,
+                    true,
+                    PathShade::Norm,
+                    vec![m(r, y1), arc(wd2, y1, 0, cd2), arc(wd2, y1, cd2, cd2), ln(r, y3), arc(wd2, y1, 0, cd2), ln(l, y1)],
+                ),
+            ]
+        }
+        "foldedCorner" => {
+            let a = pin(0, adjust(g, "adj", 16667), 50000);
+            let dy2 = md(ss, a, 100000);
+            let dy1 = md(dy2, 1, 5);
+            let (x1, y2) = (r - dy2, b - dy2);
+            let (x2, y1) = (x1 + dy1, y2 + dy1);
+            vec![
+                path(true, false, PathShade::Norm, vec![m(l, t), ln(r, t), ln(r, y2), ln(x1, b), ln(l, b), close()]),
+                path(true, false, PathShade::DarkenLess, vec![m(x1, b), ln(x2, y1), ln(r, y2), close()]),
+                path(false, true, PathShade::Norm, vec![m(x1, b), ln(x2, y1), ln(r, y2), ln(x1, b), ln(l, b), ln(l, t), ln(r, t), ln(r, y2)]),
+            ]
+        }
+        "bevel" => {
+            let a = pin(0, adjust(g, "adj", 12500), 50000);
+            let x1 = md(ss, a, 100000);
+            let (x2, y2) = (r - x1, b - x1);
+            vec![
+                path(true, false, PathShade::Norm, vec![m(x1, x1), ln(x2, x1), ln(x2, y2), ln(x1, y2), close()]),
+                path(true, false, PathShade::LightenLess, vec![m(l, t), ln(r, t), ln(x2, x1), ln(x1, x1), close()]),
+                path(true, false, PathShade::DarkenLess, vec![m(l, b), ln(x1, y2), ln(x2, y2), ln(r, b), close()]),
+                path(true, false, PathShade::Lighten, vec![m(l, t), ln(x1, x1), ln(x1, y2), ln(l, b), close()]),
+                path(true, false, PathShade::Darken, vec![m(r, t), ln(r, b), ln(x2, y2), ln(x2, x1), close()]),
+                path(
+                    false,
+                    true,
+                    PathShade::Norm,
+                    vec![
+                        m(l, t),
+                        ln(r, t),
+                        ln(r, b),
+                        ln(l, b),
+                        close(),
+                        m(x1, x1),
+                        ln(x2, x1),
+                        ln(x2, y2),
+                        ln(x1, y2),
+                        close(),
+                        m(l, t),
+                        ln(x1, x1),
+                        m(l, b),
+                        ln(x1, y2),
+                        m(r, t),
+                        ln(x2, x1),
+                        m(r, b),
+                        ln(x2, y2),
+                    ],
+                ),
+            ]
+        }
+        "sun" => {
+            let a = pin(12500, adjust(g, "adj", 25000), 46875);
+            let g0 = 50000 - a;
+            let (g1, g2) = (md(g0, 30274, 32768), md(g0, 12540, 32768));
+            let (g5, g6) = (50000 - g1, 50000 - g2);
+            let (g10, g11) = (md(g5, 3, 4), md(g6, 3, 4));
+            let (g12, g13, g14) = (g10 + 3662, g11 + 3662, g11 + 12500);
+            let (g15, g16, g17, g18) = (100000 - g10, 100000 - g12, 100000 - g13, 100000 - g14);
+            let (ox1, oy1, ox2, oy2) = (md(wi, 18436, 21600), md(hi, 3163, 21600), md(wi, 3163, 21600), md(hi, 18436, 21600));
+            let x = |f: i128| md(wi, f, 100000);
+            let y = |f: i128| md(hi, f, 100000);
+            let (x10, x12, x13, x14, x15, x16, x17, x18, x19) = (x(g10), x(g12), x(g13), x(g14), x(g15), x(g16), x(g17), x(g18), x(a));
+            let (y10, y12, y13, y14, y15, y16, y17, y18) = (y(g10), y(g12), y(g13), y(g14), y(g15), y(g16), y(g17), y(g18));
+            let (w_r, h_r) = (x(g0), y(g0));
+            let rays = [
+                [(r, vc), (x15, y18), (x15, y14)],
+                [(ox1, oy1), (x16, y13), (x17, y12)],
+                [(hc, t), (x18, y10), (x14, y10)],
+                [(ox2, oy1), (x13, y12), (x12, y13)],
+                [(l, vc), (x10, y14), (x10, y18)],
+                [(ox2, oy2), (x12, y17), (x13, y16)],
+                [(hc, b), (x14, y15), (x18, y15)],
+                [(ox1, oy2), (x17, y16), (x16, y17)],
+            ];
+            let mut commands = Vec::with_capacity(rays.len() * 4 + 3);
+            for [(x0, y0), (x1, y1), (x2, y2)] in rays {
+                commands.extend([m(x0, y0), ln(x1, y1), ln(x2, y2), close()]);
+            }
+            commands.extend([m(x19, vc), arc(w_r, h_r, cd2, 21_600_000), close()]);
+            vec![path(true, true, PathShade::Norm, commands)]
+        }
+        "cloud" => {
+            // Both paths have a 43200 × 43200 box of their own.
+            let sx = |v: i128| md(wi, v, 43200);
+            let sy = |v: i128| md(hi, v, 43200);
+            let mut outline = vec![m(sx(3900), sy(14370))];
+            outline.extend(CLOUD_OUTLINE.iter().map(|&(w_r, h_r, st, sw)| arc(sx(w_r), sy(h_r), st, sw)));
+            outline.push(close());
+            let mut creases = Vec::with_capacity(CLOUD_CREASES.len() * 2);
+            for &(x0, y0, w_r, h_r, st, sw) in &CLOUD_CREASES {
+                creases.extend([m(sx(x0), sy(y0)), arc(sx(w_r), sy(h_r), st, sw)]);
+            }
+            vec![path(true, true, PathShade::Norm, outline), path(false, true, PathShade::Norm, creases)]
+        }
+        _ => return None,
+    })
+}
+
+/// The cloud's outline in its 43200 × 43200 path box: `wR`, `hR`, `stAng`, `swAng` per arc, from
+/// (3900, 14370).
+const CLOUD_OUTLINE: [(i128, i128, i64, i64); 11] = [
+    (6753, 9190, -11429249, 7426832),
+    (5333, 7267, -8646143, 5396714),
+    (4365, 5945, -8748475, 5983381),
+    (4857, 6595, -7859164, 7034504),
+    (5333, 7273, -4722533, 6541615),
+    (6775, 9220, -2776035, 7816140),
+    (5785, 7867, 37501, 6842000),
+    (6752, 9215, 1347096, 6910353),
+    (7720, 10543, 3974558, 4542661),
+    (4360, 5918, -16496525, 8804134),
+    (4345, 5945, -14809710, 9151131),
+];
+
+/// The cloud's unfilled inner creases: start point, then `wR`, `hR`, `stAng`, `swAng` of one arc.
+const CLOUD_CREASES: [(i128, i128, i128, i128, i64, i64); 11] = [
+    (4693, 26177, 4345, 5945, 5204520, 1585770),
+    (6928, 34899, 4360, 5918, 4416628, 686848),
+    (16478, 39090, 6752, 9215, 8257449, 844866),
+    (28827, 34751, 6752, 9215, 387196, 959901),
+    (34129, 22954, 5785, 7867, -4217541, 4255042),
+    (41798, 15354, 5333, 7273, 1819082, 1665090),
+    (38324, 5426, 4857, 6595, -824660, 891534),
+    (29078, 3952, 4857, 6595, -8950887, 1091722),
+    (22141, 4720, 4365, 5945, -9809656, 1061181),
+    (14000, 5192, 6753, 9190, -4002417, 739161),
+    (4127, 15789, 6753, 9190, 9459261, 711490),
+];
 
 /// A fixed polygon in its own path box: path box `w`, `h`, then the vertices.
 type FixedPolygon = (i128, i128, &'static [(i128, i128)]);

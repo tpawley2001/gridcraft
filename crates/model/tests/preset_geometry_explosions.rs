@@ -267,5 +267,5 @@ fn explosions_ignore_stray_adjusts_and_tiny_boxes_stay_inside() {
             assert!(got.iter().all(|&(x, y)| (0..=w).contains(&x) && (0..=h).contains(&y)), "{preset} {w}x{h}: {got:?}");
         }
     }
-    assert!(preset_paths(&geom("cloud", &[]), 200, 100).is_none(), "other presets unchanged");
+    assert!(preset_paths(&geom("notAPreset", &[]), 200, 100).is_none(), "other presets unchanged");
 }
