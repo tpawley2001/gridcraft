@@ -11,6 +11,7 @@ mod binary_workbook_view_tests;
 mod camera_picture_vml_tests;
 mod cellmetadata;
 mod chart_3d;
+mod chart_3d_series_shape;
 mod chart_axis_options;
 mod chart_book_names;
 mod chart_bool_default;
