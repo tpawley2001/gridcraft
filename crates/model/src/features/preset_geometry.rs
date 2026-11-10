@@ -148,6 +148,9 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
     if let Some(paths) = wedge_callout(g, w, h) {
         return Some(paths);
     }
+    if let Some(paths) = line_callout_paths(g, w, h) {
+        return Some(paths);
+    }
     let pts: Vec<(i128, i128)> = match g.preset.as_str() {
         "rightArrow" => {
             let a1 = adj("adj1", 50000, 100000);
@@ -3702,4 +3705,56 @@ fn curved_down_arrow(b: &ArrowBox, adj1: f64, adj2: f64, adj3: f64) -> Vec<(bool
         arc(st_ang, msw_ang),
     ];
     vec![(true, false, PathShade::Norm, body), (true, false, PathShade::DarkenLess, back), (false, true, PathShade::Norm, outline)]
+}
+
+/// Line callouts (`callout1-3`, `borderCallout1-3`, `accentCallout1-3`, `accentBorderCallout1-3`),
+/// or `None` for another preset: the box (filled; stroked only for the border variants), for the
+/// accent variants an open vertical accent bar, and the leader, an open polyline of 2-4 points.
+/// The leader and the bar are where the adjust values put them, usually outside the box, so they
+/// are not pinned into it; each coordinate is bounded to ten box sizes from the centre.
+fn line_callout_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    let preset = g.preset.as_str();
+    let (rest, border, accent) = if let Some(rest) = preset.strip_prefix("accentBorderCallout") {
+        (rest, true, true)
+    } else if let Some(rest) = preset.strip_prefix("accentCallout") {
+        (rest, false, true)
+    } else if let Some(rest) = preset.strip_prefix("borderCallout") {
+        (rest, true, false)
+    } else {
+        (preset.strip_prefix("callout")?, false, false)
+    };
+    // Each leader point is (adjust for y, its default, adjust for x, its default).
+    let defaults: &[(&str, i128, &str, i128)] = match rest {
+        "1" => &[("adj1", 18750, "adj2", -8333), ("adj3", 112500, "adj4", -38333)],
+        "2" => &[("adj1", 18750, "adj2", -8333), ("adj3", 18750, "adj4", -16667), ("adj5", 112500, "adj6", -46667)],
+        "3" => &[("adj1", 18750, "adj2", -8333), ("adj3", 18750, "adj4", -16667), ("adj5", 100000, "adj6", -16667), ("adj7", 112963, "adj8", -8333)],
+        _ => return None,
+    };
+    if w <= 0 || h <= 0 {
+        return None;
+    }
+    let (wi, hi) = (i128::from(w), i128::from(h));
+    let (l, t, r, b) = (0, 0, wi, hi);
+    let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
+    let bound = |v: i128, size: i128| {
+        let c = size / 2;
+        let reach = size.saturating_mul(10);
+        v.clamp(c.saturating_sub(reach), c.saturating_add(reach))
+    };
+    let to_i64 = |v: i128| i64::try_from(v).unwrap_or(if v < 0 { i64::MIN } else { i64::MAX });
+    let m = |x: i128, y: i128| PathCommand::MoveTo(to_i64(x), to_i64(y));
+    let ln = |x: i128, y: i128| PathCommand::LineTo(to_i64(x), to_i64(y));
+    let path = |fill: bool, stroke: bool, commands: Vec<PathCommand>| GeometryPath { w, h, fill, stroke, shade: PathShade::Norm, commands };
+    let points: Vec<(i128, i128)> = defaults
+        .iter()
+        .map(|&(ny, dy, nx, dx)| (bound(md(wi, adjust(g, nx, dx), 100000), wi), bound(md(hi, adjust(g, ny, dy), 100000), hi)))
+        .collect();
+    let mut paths = vec![path(true, border, vec![m(l, t), ln(r, t), ln(r, b), ln(l, b), PathCommand::Close])];
+    let &(x1, _) = points.first()?;
+    if accent {
+        paths.push(path(false, true, vec![m(x1, t), PathCommand::Close, ln(x1, b)]));
+    }
+    let leader = points.iter().enumerate().map(|(i, &(x, y))| if i == 0 { m(x, y) } else { ln(x, y) }).collect();
+    paths.push(path(false, true, leader));
+    Some(paths)
 }

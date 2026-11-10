@@ -246,3 +246,28 @@ fn wedge_callout_prints_its_tail_below_the_box() {
     let lowest = p[0].iter().map(|v| v.1).fold(f32::INFINITY, f32::min);
     assert!((bottom - lowest - (top - bottom) / 8.0).abs() < 0.5, "box {bottom}..{top}, tip {lowest}: {p:?}");
 }
+
+#[test]
+fn line_callout_prints_its_leader_left_of_the_box() {
+    let mut s = shape_session(ShapeKind::Rectangle, None);
+    let rect = red_paths(&mut s);
+    let left = rect[0].iter().map(|v| v.0).fold(f32::INFINITY, f32::min);
+    let width = rect[0].iter().map(|v| v.0).fold(f32::NEG_INFINITY, f32::max) - left;
+    let mut s = shape_session(ShapeKind::Rectangle, preset("accentBorderCallout1"));
+    let text = page_stream(&mut s);
+    // The box, the accent bar and the leader are stroked blue; the bar's empty first subpath
+    // prints nothing.
+    let strokes: Vec<String> = painted(&text, " RG").into_iter().filter(|(c, _)| c.starts_with("0 0 1 RG")).map(|(_, p)| p).collect();
+    assert_eq!(strokes.len(), 3, "{strokes:?}");
+    let xs: Vec<f32> = strokes[2]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .windows(3)
+        .filter(|t| t[2] == "m" || t[2] == "l")
+        .filter_map(|t| t[0].parse().ok())
+        .collect();
+    assert_eq!(xs.len(), 2, "{strokes:?}");
+    // Not clipped to the box: the leader ends 38.333% of the box width left of it.
+    let end = xs.iter().copied().fold(f32::INFINITY, f32::min);
+    assert!((left - end - width * 0.38333).abs() < 0.5, "box from {left}, width {width}, leader {xs:?}");
+}
