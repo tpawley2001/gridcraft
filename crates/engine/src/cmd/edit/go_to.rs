@@ -153,6 +153,86 @@ pub fn go_to_names(wb: &gridcraft_model::Workbook, sheet: usize) -> Vec<String> 
     out
 }
 
+/// The value types Go To Special's Constants and Formulas options filter by.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ValueTypes {
+    numbers: bool,
+    text: bool,
+    logicals: bool,
+    errors: bool,
+}
+
+impl ValueTypes {
+    const ALL: ValueTypes = ValueTypes { numbers: true, text: true, logicals: true, errors: true };
+
+    /// The `types` param: missing means every type, as Excel's dialog starts with every box
+    /// ticked. An empty list or an unknown name is a usage error.
+    fn param(p: &Json) -> Result<ValueTypes> {
+        let Some(list) = p.get("types") else { return Ok(ValueTypes::ALL) };
+        let Some(items) = list.as_array() else { return Err(bad("edit.goToSpecial", "`types` must be an array of numbers, text, logicals, errors")) };
+        if items.is_empty() {
+            return Err(bad("edit.goToSpecial", "`types` must name at least one of numbers, text, logicals, errors"));
+        }
+        let mut t = ValueTypes { numbers: false, text: false, logicals: false, errors: false };
+        for item in items {
+            match item.as_str().map(str::to_ascii_lowercase).as_deref() {
+                Some("numbers") => t.numbers = true,
+                Some("text") => t.text = true,
+                Some("logicals") => t.logicals = true,
+                Some("errors") => t.errors = true,
+                _ => return Err(bad("edit.goToSpecial", format!("unknown type `{item}`; use numbers, text, logicals or errors"))),
+            }
+        }
+        Ok(t)
+    }
+
+    /// Whether a value is of one of the chosen types. Dates are numbers; a formula returning `""`
+    /// is text.
+    fn matches(self, v: &gridcraft_core::Value) -> bool {
+        match v {
+            gridcraft_core::Value::Number(_) => self.numbers,
+            gridcraft_core::Value::Text(_) => self.text,
+            gridcraft_core::Value::Bool(_) => self.logicals,
+            gridcraft_core::Value::Error(_) => self.errors,
+            gridcraft_core::Value::Empty | gridcraft_core::Value::Array(_) => false,
+        }
+    }
+}
+
+/// A cell's formula in R1C1 form, relative to the cell itself, so that a formula and its relative
+/// copies compare equal. `None` for a cell without a formula.
+fn relative_formula(sheet: &gridcraft_model::Sheet, c: CellRef) -> Option<String> {
+    let f = sheet.cell(c)?.formula.as_ref()?;
+    let expr = match &f.expr {
+        Some(e) => e.clone(),
+        None => std::sync::Arc::new(gridcraft_formula::parse(&f.text).ok()?),
+    };
+    Some(gridcraft_formula::print_r1c1(&expr, c))
+}
+
+/// Whether two cells differ for Row/Column differences: formulas compare in relative R1C1 form,
+/// anything else by value.
+fn differs(sheet: &gridcraft_model::Sheet, a: CellRef, b: CellRef) -> bool {
+    match (relative_formula(sheet, a), relative_formula(sheet, b)) {
+        (Some(x), Some(y)) => x != y,
+        (None, None) => sheet.value(a) != sheet.value(b),
+        _ => true,
+    }
+}
+
+/// The cells of `scope` that differ from the comparison cell of their row (or column): the cell
+/// in the active cell's column (resp. row). The comparison cells themselves are left out.
+fn differences(sheet: &gridcraft_model::Sheet, scope: RangeRef, active: CellRef, by_row: bool) -> Vec<CellRef> {
+    let mut hits = Vec::new();
+    for c in scope.iter() {
+        let base = if by_row { CellRef::new(c.row, active.col) } else { CellRef::new(active.row, c.col) };
+        if c != base && differs(sheet, c, base) {
+            hits.push(c);
+        }
+    }
+    hits
+}
+
 pub(super) fn go_to_special(s: &mut Session, p: &Json) -> Result<Json> {
     let kind = str_param(p, "kind").unwrap_or("blanks");
     let d = s.doc()?;
@@ -165,28 +245,48 @@ pub(super) fn go_to_special(s: &mut Session, p: &Json) -> Result<Json> {
     if kind == "currentRegion" {
         return select_region(s, &json!({}));
     }
+    let types = match kind {
+        "constants" | "formulas" => ValueTypes::param(p)?,
+        _ => ValueTypes::ALL,
+    };
+    let active = d.selection.active;
+    let same = bool_param(p, "same") == Some(true);
     let mut hits: Vec<CellRef> = Vec::new();
     if scope.count() > 4_000_000 {
         return Err(bad("edit.goToSpecial", "range too large"));
     }
-    for c in scope.iter() {
-        let cell = sheet.cell(c);
-        let v = sheet.value(c);
-        let ok = match kind {
-            "blanks" => v.is_empty(),
-            "constants" => cell.is_some_and(|x| x.formula.is_none() && x.py.is_none() && !x.value.is_empty()),
-            "formulas" => cell.is_some_and(|x| x.formula.is_some() || x.py.is_some()),
-            "comments" | "notes" => sheet.comments.contains_key(&c),
-            "errors" => v.is_error(),
-            "numbers" => v.is_number(),
-            "text" => v.is_text(),
-            "visible" => !sheet.is_row_hidden(c.row) && !sheet.is_col_hidden(c.col),
-            "conditionalFormats" => sheet.cond_formats.iter().any(|cf| cf.ranges.iter().any(|r| r.contains(c))),
-            "dataValidation" => sheet.validations.iter().any(|dv| dv.ranges.iter().any(|r| r.contains(c))),
-            _ => return Err(bad("edit.goToSpecial", format!("unknown kind `{kind}`"))),
-        };
-        if ok {
-            hits.push(c);
+    if kind == "rowDifferences" || kind == "columnDifferences" {
+        if !d.selection.is_single_cell() {
+            hits = differences(sheet, scope, active, kind == "rowDifferences");
+        }
+    } else if kind == "dataValidation" && same {
+        // Excel looks at the whole sheet for "Same": the rule that holds the active cell.
+        let rule = sheet.validations.iter().find(|dv| dv.ranges.iter().any(|r| r.contains(active)));
+        if let Some(dv) = rule {
+            for r in &dv.ranges {
+                hits.extend(r.iter());
+            }
+        }
+    } else {
+        for c in scope.iter() {
+            let cell = sheet.cell(c);
+            let v = sheet.value(c);
+            let ok = match kind {
+                "blanks" => v.is_empty(),
+                "constants" => cell.is_some_and(|x| x.formula.is_none() && x.py.is_none() && !x.value.is_empty()) && types.matches(&v),
+                "formulas" => cell.is_some_and(|x| x.formula.is_some() || x.py.is_some()) && types.matches(&v),
+                "comments" | "notes" => sheet.comments.contains_key(&c),
+                "errors" => v.is_error(),
+                "numbers" => v.is_number(),
+                "text" => v.is_text(),
+                "visible" => !sheet.is_row_hidden(c.row) && !sheet.is_col_hidden(c.col),
+                "conditionalFormats" => sheet.cond_formats.iter().any(|cf| cf.ranges.iter().any(|r| r.contains(c))),
+                "dataValidation" => sheet.validations.iter().any(|dv| dv.ranges.iter().any(|r| r.contains(c))),
+                _ => return Err(bad("edit.goToSpecial", format!("unknown kind `{kind}`"))),
+            };
+            if ok {
+                hits.push(c);
+            }
         }
     }
     if hits.is_empty() {
