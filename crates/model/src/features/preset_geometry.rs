@@ -124,6 +124,9 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
     if let Some(paths) = arc_flowchart_paths(&g.preset, w, h) {
         return Some(paths);
     }
+    if let Some(paths) = bracket_paths(g, w, h) {
+        return Some(paths);
+    }
     let pts: Vec<(i128, i128)> = match g.preset.as_str() {
         "rightArrow" => {
             let a1 = adj("adj1", 50000, 100000);
@@ -673,6 +676,118 @@ fn straight_multipath(preset: &str, w: i128, h: i128) -> Option<Vec<(bool, bool,
             })
             .collect(),
     )
+
+/// Brackets and braces (`leftBracket`, `rightBracket`, `leftBrace`, `rightBrace`, `bracketPair`,
+/// `bracePair`): a fill-only path and an open stroke-only outline of arcs and lines, or `None` for
+/// another preset. `w` and `h` are positive.
+fn bracket_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    let (wi, hi) = (i128::from(w), i128::from(h));
+    let ss = wi.min(hi);
+    let (l, t, r, b, hc, vc, wd2) = (0, 0, wi, hi, wi / 2, hi / 2, wi / 2);
+    let (cd4, cd2, cd34) = (5_400_000, 10_800_000, 16_200_000);
+    let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
+    let pin = |lo: i128, x: i128, hi: i128| x.min(hi).max(lo);
+    let px = |v: i128| i64::try_from(v.clamp(0, wi)).unwrap_or(w);
+    let py = |v: i128| i64::try_from(v.clamp(0, hi)).unwrap_or(h);
+    let m = |x: i128, y: i128| PathCommand::MoveTo(px(x), py(y));
+    let ln = |x: i128, y: i128| PathCommand::LineTo(px(x), py(y));
+    let arc = |w_r: i128, h_r: i128, st_ang: i64, sw_ang: i64| PathCommand::ArcTo { w_r: px(w_r), h_r: py(h_r), st_ang, sw_ang };
+    // The outline is the filled path without its closing segment, except where the pair presets
+    // split it into two open sub-paths.
+    let paths = |fill: Vec<PathCommand>, outline: Vec<PathCommand>| {
+        let path = |fill: bool, stroke: bool, commands: Vec<PathCommand>| GeometryPath { w, h, fill, stroke, shade: PathShade::Norm, commands };
+        vec![path(true, false, fill), path(false, true, outline)]
+    };
+    let with_close = |mut c: Vec<PathCommand>| {
+        c.push(PathCommand::Close);
+        c
+    };
+    Some(match g.preset.as_str() {
+        "leftBracket" | "rightBracket" => {
+            let max_adj = md(50000, hi, ss);
+            let a = pin(0, adjust(g, "adj", 8333), max_adj);
+            let y1 = md(ss, a, 100000);
+            let y2 = b - y1;
+            let c = if g.preset == "leftBracket" {
+                vec![m(r, b), arc(wi, y1, cd4, cd4), ln(l, y1), arc(wi, y1, cd2, cd4)]
+            } else {
+                vec![m(l, t), arc(wi, y1, cd34, cd4), ln(r, y2), arc(wi, y1, 0, cd4)]
+            };
+            paths(with_close(c.clone()), c)
+        }
+        "leftBrace" | "rightBrace" => {
+            let a2 = pin(0, adjust(g, "adj2", 50000), 100000);
+            let q1 = 100000 - a2;
+            let q2 = q1.min(a2);
+            let q3 = md(q2, 1, 2);
+            let max_adj1 = md(q3, hi, ss);
+            let a1 = pin(0, adjust(g, "adj1", 8333), max_adj1);
+            let y1 = md(ss, a1, 100000);
+            let y3 = md(hi, a2, 100000);
+            let c = if g.preset == "leftBrace" {
+                let y4 = y3 + y1;
+                vec![m(r, b), arc(wd2, y1, cd4, cd4), ln(hc, y4), arc(wd2, y1, 0, -cd4), arc(wd2, y1, cd4, -cd4), ln(hc, y1), arc(wd2, y1, cd2, cd4)]
+            } else {
+                let (y2, y4) = (y3 - y1, b - y1);
+                vec![
+                    m(l, t),
+                    arc(wd2, y1, cd34, cd4),
+                    ln(hc, y2),
+                    arc(wd2, y1, cd2, -cd4),
+                    arc(wd2, y1, cd34, -cd4),
+                    ln(hc, y4),
+                    arc(wd2, y1, 0, cd4),
+                ]
+            };
+            paths(with_close(c.clone()), c)
+        }
+        "bracketPair" => {
+            let a = pin(0, adjust(g, "adj", 16667), 50000);
+            let x1 = md(ss, a, 100000);
+            let (x2, y2) = (r - x1, b - x1);
+            let fill = vec![
+                m(l, x1),
+                arc(x1, x1, cd2, cd4),
+                ln(x2, t),
+                arc(x1, x1, cd34, cd4),
+                ln(r, y2),
+                arc(x1, x1, 0, cd4),
+                ln(x1, b),
+                arc(x1, x1, cd4, cd4),
+                PathCommand::Close,
+            ];
+            let outline = vec![
+                m(x1, b),
+                arc(x1, x1, cd4, cd4),
+                ln(l, x1),
+                arc(x1, x1, cd2, cd4),
+                m(x2, t),
+                arc(x1, x1, cd34, cd4),
+                ln(r, y2),
+                arc(x1, x1, 0, cd4),
+            ];
+            paths(fill, outline)
+        }
+        "bracePair" => {
+            let a = pin(0, adjust(g, "adj", 8333), 25000);
+            let x1 = md(ss, a, 100000);
+            let x2 = md(ss, a, 50000);
+            let (x3, x4) = (r - x2, r - x1);
+            let (y2, y3, y4) = (vc - x1, vc + x1, b - x1);
+            let left =
+                vec![m(x2, b), arc(x1, x1, cd4, cd4), ln(x1, y3), arc(x1, x1, 0, -cd4), arc(x1, x1, cd4, -cd4), ln(x1, x1), arc(x1, x1, cd2, cd4)];
+            let right = [arc(x1, x1, cd34, cd4), ln(x4, y2), arc(x1, x1, cd2, -cd4), arc(x1, x1, cd34, -cd4), ln(x4, y4), arc(x1, x1, 0, cd4)];
+            let mut fill = left.clone();
+            fill.push(ln(x3, t));
+            fill.extend(right.iter().cloned());
+            fill.push(PathCommand::Close);
+            let mut outline = left;
+            outline.push(m(x3, t));
+            outline.extend(right);
+            paths(fill, outline)
+        }
+        _ => return None,
+    })
 }
 
 /// Explosion 1 (`irregularSeal1`): a fixed 24-point polygon in a 21600 × 21600 path box.
