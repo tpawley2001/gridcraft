@@ -33,6 +33,7 @@ fn literal_category_with_separators_survives_save() {
             trendlines: Vec::new(),
             explosion: 0,
             point_explosions: Vec::new(),
+            bar_shape: None,
         })
         .collect();
     s.charts.push(Chart {

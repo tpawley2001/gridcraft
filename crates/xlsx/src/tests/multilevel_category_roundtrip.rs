@@ -43,6 +43,7 @@ fn workbook(categories: &str, values: &str) -> Workbook {
             trendlines: Vec::new(),
             explosion: 0,
             point_explosions: Vec::new(),
+            bar_shape: None,
             quartiles: Default::default(),
         }],
         legend: LegendPos::Bottom,

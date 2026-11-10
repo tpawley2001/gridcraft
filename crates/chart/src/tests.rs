@@ -569,6 +569,7 @@ fn resolve_from_workbook() {
             trendlines: Vec::new(),
             explosion: 0,
             point_explosions: Vec::new(),
+            bar_shape: None,
         },
         Series {
             name: None,
@@ -583,6 +584,7 @@ fn resolve_from_workbook() {
             trendlines: Vec::new(),
             explosion: 0,
             point_explosions: Vec::new(),
+            bar_shape: None,
         },
         Series {
             name: Some("Literal".into()),
@@ -597,6 +599,7 @@ fn resolve_from_workbook() {
             trendlines: Vec::new(),
             explosion: 0,
             point_explosions: Vec::new(),
+            bar_shape: None,
         },
     ];
     let d = resolve(&wb, 0, &c);
@@ -638,6 +641,7 @@ fn resolve_from_workbook() {
             trendlines: Vec::new(),
             explosion: 0,
             point_explosions: Vec::new(),
+            bar_shape: None,
         },
         Series {
             name: None,
@@ -652,6 +656,7 @@ fn resolve_from_workbook() {
             trendlines: Vec::new(),
             explosion: 0,
             point_explosions: Vec::new(),
+            bar_shape: None,
         },
     ];
     let d = resolve(&wb, 0, &c);
@@ -671,6 +676,7 @@ fn resolve_from_workbook() {
         trendlines: Vec::new(),
         explosion: 0,
         point_explosions: Vec::new(),
+        bar_shape: None,
     }];
     let d = resolve(&wb, 0, &c);
     assert_eq!(d.series[0].x.as_ref().map(|x| x.len()), Some(3));
@@ -691,6 +697,7 @@ fn resolve_from_workbook() {
         trendlines: Vec::new(),
         explosion: 0,
         point_explosions: Vec::new(),
+        bar_shape: None,
     }];
     let d = resolve(&wb, 7, &c);
     assert_eq!(d.series.len(), 1);
@@ -1398,6 +1405,7 @@ fn pie_points_follow_workbook_theme() {
         trendlines: Vec::new(),
         explosion: 0,
         point_explosions: Vec::new(),
+        bar_shape: None,
     }];
     let d = resolve(&wb, 0, &c);
     let expected = vec![series_color(&wb.theme, 0), series_color(&wb.theme, 1)];
@@ -1729,6 +1737,7 @@ fn a_series_named_by_a_name_on_a_sheet_with_an_apostrophe_resolves() {
         trendlines: Vec::new(),
         explosion: 0,
         point_explosions: Vec::new(),
+        bar_shape: None,
     }];
     let d = resolve(&wb, 0, &c);
     assert_eq!(d.series.first().map(|s| s.name.as_str()), Some("Takings"));
@@ -1767,6 +1776,7 @@ fn a_series_named_by_a_name_on_a_sheet_with_a_bang_resolves() {
         trendlines: Vec::new(),
         explosion: 0,
         point_explosions: Vec::new(),
+        bar_shape: None,
     }];
     let d = resolve(&wb, 0, &c);
     assert_eq!(d.series.first().map(|s| s.name.as_str()), Some("Takings"));

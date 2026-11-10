@@ -113,6 +113,7 @@ fn sales(s: &mut Session) -> bool {
                 trendlines: Vec::new(),
                 explosion: 0,
                 point_explosions: Vec::new(),
+                bar_shape: None,
             }];
         }
     }

@@ -1791,6 +1791,7 @@ fn chart_series(name: &str, values: String, categories: Option<String>, cumulati
         trendlines: Vec::new(),
         explosion: 0,
         point_explosions: Vec::new(),
+        bar_shape: None,
     }
 }
 

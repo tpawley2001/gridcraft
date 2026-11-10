@@ -437,6 +437,7 @@ fn forecast_sheet(s: &mut Session, p: &Json) -> Result<Json> {
                 trendlines: Vec::new(),
                 explosion: 0,
                 point_explosions: Vec::new(),
+                bar_shape: None,
             })
             .collect();
         sheet.charts.push(Chart {

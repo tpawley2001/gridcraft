@@ -245,6 +245,7 @@ fn added_chart_keeps_control_anchor() {
             trendlines: Vec::new(),
             explosion: 0,
             point_explosions: Vec::new(),
+            bar_shape: None,
             quartiles: Default::default(),
         }],
         legend: LegendPos::Bottom,
