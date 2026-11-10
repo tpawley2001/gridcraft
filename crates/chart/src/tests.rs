@@ -11,6 +11,7 @@ mod of_pie;
 mod pie_explosion;
 mod surface;
 mod three_d;
+mod three_d_bar_shapes;
 
 const ALL_KINDS: [ChartKind; 32] = [
     ChartKind::ColumnClustered,

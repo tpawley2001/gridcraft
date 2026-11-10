@@ -147,3 +147,41 @@ fn three_d_charts_survive_empty_and_hostile_data() {
         assert_sane(&render(&c, &d, 640.0, 400.0, &ApproxMeasure), 640.0, 400.0);
     }
 }
+
+#[test]
+fn every_bar_shape_stays_inside_for_columns_bars_and_stacks() {
+    use ChartKind::*;
+    for kind in [ColumnClustered, ColumnStacked, ColumnStacked100, BarClustered, BarStacked, BarStacked100] {
+        for shape in ["box", "cylinder", "cone", "coneToMax", "pyramid", "pyramidToMax"] {
+            for (rx, ry) in [(15, 20), (-30, 300), (0, 0), (90, 90)] {
+                let mut c = chart(kind);
+                c.view_3d = Some(Chart3d { shape: Some(shape.into()), ..view(rx, ry) });
+                let d = sample(kind);
+                let p = render(&c, &d, 640.0, 400.0, &ApproxMeasure);
+                assert_sane(&p, 640.0, 400.0);
+                assert!(polygons_in(&p, [20, 96, 130, 255]) > 0, "{kind:?} {shape} ({rx}, {ry})");
+            }
+        }
+    }
+}
+
+#[test]
+fn to_max_shapes_cut_bars_below_the_axis_maximum() {
+    let north = [20, 96, 130, 255];
+    for shape in ["coneToMax", "pyramidToMax"] {
+        let mut c = chart(ChartKind::ColumnClustered);
+        c.view_3d = Some(Chart3d { shape: Some(shape.into()), ..view(15, 20) });
+        let p = render(&c, &sample(c.kind), 640.0, 400.0, &ApproxMeasure);
+        assert_sane(&p, 640.0, 400.0);
+        // No North value reaches the axis maximum, so every front face keeps a flat top.
+        for pts in p.iter().filter_map(|x| match x {
+            Prim::Polygon { pts, fill, .. } if *fill == north => Some(pts),
+            _ => None,
+        }) {
+            let top = pts.iter().map(|q| q[1]).fold(f32::INFINITY, f32::min);
+            let near: Vec<f32> = pts.iter().filter(|q| q[1] <= top + 1.0).map(|q| q[0]).collect();
+            let spread = near.iter().copied().fold(f32::NEG_INFINITY, f32::max) - near.iter().copied().fold(f32::INFINITY, f32::min);
+            assert!(spread > 1.0, "{shape}: a cut solid, not a point");
+        }
+    }
+}
