@@ -145,6 +145,7 @@ pub fn read_chartex(root: &El) -> Option<Chart> {
         by_rows: false,
         pivot: None,
         scale: Default::default(),
+        view_3d: None,
     })
 }
 

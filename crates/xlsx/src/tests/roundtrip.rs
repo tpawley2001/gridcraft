@@ -503,6 +503,7 @@ fn sample() -> Workbook {
         by_rows: false,
         pivot: None,
         scale: Default::default(),
+        view_3d: None,
     };
     for kind in [
         ChartKind::ColumnClustered,

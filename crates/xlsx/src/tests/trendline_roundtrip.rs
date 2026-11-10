@@ -70,6 +70,7 @@ fn chart(id: u32, kind: ChartKind, trendlines: Vec<Trendline>) -> Chart {
         by_rows: false,
         pivot: None,
         scale: Default::default(),
+        view_3d: None,
     }
 }
 

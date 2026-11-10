@@ -500,6 +500,29 @@ fn rich_sheet_renders() {
 }
 
 #[test]
+fn three_d_charts_print() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Fruit", "Qty", "Cost"], ["Apples", 3, 4], ["Pears", 5, 2]]})).unwrap();
+    s.execute("insert.chart", json!({"range": "A1:C3", "at": "E2", "type": "column"})).unwrap();
+    s.execute("insert.chart", json!({"range": "A1:B3", "at": "E20", "type": "pie"})).unwrap();
+    let (flat, _) = pdf_of(&mut s, json!({}));
+    let d = s.doc_mut().unwrap();
+    let wb = std::sync::Arc::make_mut(&mut d.wb);
+    for ch in &mut wb.sheet_mut(0).unwrap().charts {
+        if ch.kind == gridcraft_model::ChartKind::Pie
+            && let Some(x) = ch.series.first_mut()
+        {
+            x.explosion = 20;
+        }
+        ch.view_3d = Some(gridcraft_model::Chart3d { rot_x: Some(15), rot_y: Some(20), series_in_depth: true, ..Default::default() });
+    }
+    let (deep, pages) = pdf_of(&mut s, json!({}));
+    assert!(pages >= 1);
+    assert!(contains(&deep, "(Apples) Tj"), "category labels print");
+    assert_ne!(flat, deep, "3-D charts print differently from flat ones");
+}
+
+#[test]
 fn charts_and_images_are_drawn() {
     let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [["Fruit", "Qty"], ["Apples", 3], ["Pears", 5]]})).unwrap();

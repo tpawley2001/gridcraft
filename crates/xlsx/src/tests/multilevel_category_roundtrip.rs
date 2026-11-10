@@ -58,6 +58,7 @@ fn workbook(categories: &str, values: &str) -> Workbook {
         by_rows: false,
         pivot: None,
         scale: Default::default(),
+        view_3d: None,
     });
     Workbook { sheets: vec![Arc::new(s)], ..Workbook::default() }
 }

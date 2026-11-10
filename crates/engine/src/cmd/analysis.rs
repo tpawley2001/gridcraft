@@ -1963,6 +1963,7 @@ fn report_charts(s: &Session, p: &Json, tool: &str, sheet_name: &str, rect: Rang
             by_rows: false,
             pivot: None,
             scale: Default::default(),
+            view_3d: None,
         });
     }
     Ok(out)

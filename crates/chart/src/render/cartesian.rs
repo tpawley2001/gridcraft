@@ -10,7 +10,7 @@ use super::{
 // ---------------------------------------------------------------- cartesian (column/bar/line/area/combo)
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Fam {
+pub(super) enum Fam {
     Col,
     ColStack,
     Col100,
@@ -24,7 +24,7 @@ enum Fam {
 /// Stack accumulator: (axis, family) key with positive and negative running sums.
 type Stack = ((bool, Fam), Vec<f64>, Vec<f64>);
 
-fn family(k: ChartKind) -> Fam {
+pub(super) fn family(k: ChartKind) -> Fam {
     use ChartKind::*;
     match k {
         ColumnStacked | BarStacked => Fam::ColStack,
@@ -155,7 +155,7 @@ impl BarSink {
     }
 }
 
-fn series_spans(data: &ChartData, fams: &[Fam], sec: &[bool], ncat: usize) -> Vec<Vec<Option<(f64, f64)>>> {
+pub(super) fn series_spans(data: &ChartData, fams: &[Fam], sec: &[bool], ncat: usize) -> Vec<Vec<Option<(f64, f64)>>> {
     // Totals for 100% stacking, per axis and family (100% columns and 100% areas stack apart).
     let mut totals: Vec<((bool, Fam), Vec<f64>)> = Vec::new();
     for (i, s) in data.series.iter().enumerate() {
@@ -233,7 +233,7 @@ fn series_spans(data: &ChartData, fams: &[Fam], sec: &[bool], ncat: usize) -> Ve
     spans
 }
 
-fn axis_scales(chart: &Chart, data: &ChartData, fams: &[Fam], sec: &[bool], spans: &[Vec<Option<(f64, f64)>>]) -> Vec<(Scale, Fmt)> {
+pub(super) fn axis_scales(chart: &Chart, data: &ChartData, fams: &[Fam], sec: &[bool], spans: &[Vec<Option<(f64, f64)>>]) -> Vec<(Scale, Fmt)> {
     // Axis scales.
     let mut axes: Vec<(Scale, Fmt)> = Vec::new();
     for axis in [false, true] {

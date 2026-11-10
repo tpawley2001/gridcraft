@@ -271,6 +271,7 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
         by_rows,
         pivot: None,
         scale: Default::default(),
+        view_3d: None,
     };
     Ok((sheet, chart))
 }

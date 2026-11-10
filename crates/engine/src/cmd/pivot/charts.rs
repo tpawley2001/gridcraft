@@ -93,6 +93,7 @@ pub(super) fn insert_pivot_chart(s: &mut Session, p: &Json) -> Result<Json> {
         by_rows: false,
         pivot: Some(link),
         scale: Default::default(),
+        view_3d: None,
     };
     edit(s, |cx| {
         cx.sheet_mut(si)?.charts.push(chart);

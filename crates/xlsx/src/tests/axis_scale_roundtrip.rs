@@ -45,6 +45,7 @@ fn chart(id: u32, kind: ChartKind, scale: ChartScale) -> Chart {
         pivot: None,
         data_table: None,
         scale,
+        view_3d: None,
     }
 }
 
