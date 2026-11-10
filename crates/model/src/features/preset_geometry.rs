@@ -295,6 +295,7 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
         "corner" => corner_points(wi, hi, g),
         "diagStripe" => diag_stripe_points(wi, hi, g),
         "lightningBolt" => lightning_bolt_points(wi, hi),
+        "pie" | "chord" | "arc" | "blockArc" | "plaque" => return arc_shape_paths(g, w, h),
         preset => {
             let (pw, ph, table) = flowchart_polygon(preset)?;
             table.iter().map(|&(x, y)| (md(wi, x, pw), md(hi, y, ph))).collect()
@@ -786,6 +787,99 @@ fn bracket_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>>
             outline.push(m(x3, t));
             outline.extend(right);
             paths(fill, outline)
+        }
+        _ => return None,
+    })
+}
+
+/// The arc-based basic shapes (`pie`, `chord`, `arc`, `blockArc`, `plaque`): one path per `<path>`
+/// of the definition, `a:arcTo` kept as [`PathCommand::ArcTo`], points and radii pinned into the
+/// box. `None` for another preset or an empty box.
+fn arc_shape_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    if w <= 0 || h <= 0 {
+        return None;
+    }
+    let (wi, hi) = (i128::from(w), i128::from(h));
+    let ss = wi.min(hi);
+    let (l, t, r, b, hc, vc) = (0, 0, wi, hi, wi / 2, hi / 2);
+    let (wd2, hd2) = (hc, vc);
+    let (cd4, cd2, cd34, c360) = (5_400_000, 10_800_000, 16_200_000, 21_600_000);
+    let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
+    // `sin r a`, `cos r a` with `a` in 60000ths of a degree, and `cat2 x y z`, `sat2 x y z`.
+    let rad = |a: i128| (a as f64 / 60000.0).to_radians();
+    let sin = |r: i128, a: i128| (r as f64 * rad(a).sin()) as i128;
+    let cos = |r: i128, a: i128| (r as f64 * rad(a).cos()) as i128;
+    let cat2 = |x: i128, y: i128, z: i128| (x as f64 * (z as f64).atan2(y as f64).cos()) as i128;
+    let sat2 = |x: i128, y: i128, z: i128| (x as f64 * (z as f64).atan2(y as f64).sin()) as i128;
+    // The point at angle `ang` on the ellipse of radii `rx`, `ry` round the centre.
+    let on_ellipse = |rx: i128, ry: i128, ang: i128| {
+        let (wt, ht) = (sin(rx, ang), cos(ry, ang));
+        (hc.saturating_add(cat2(rx, ht, wt)), vc.saturating_add(sat2(ry, ht, wt)))
+    };
+    // `swAng = ?: sw1 sw1 sw2`: the sweep from `st` to `en`, positive.
+    let sweep = |st: i128, en: i128| {
+        let sw1 = en - st;
+        if sw1 > 0 { sw1 } else { sw1 + c360 }
+    };
+    let to_i64 = |v: i128| i64::try_from(v).unwrap_or(if v < 0 { 0 } else { i64::MAX });
+    let m = |x: i128, y: i128| PathCommand::MoveTo(to_i64(x.clamp(0, wi)), to_i64(y.clamp(0, hi)));
+    let ln = |x: i128, y: i128| PathCommand::LineTo(to_i64(x.clamp(0, wi)), to_i64(y.clamp(0, hi)));
+    let arc = |w_r: i128, h_r: i128, st_ang: i128, sw_ang: i128| PathCommand::ArcTo {
+        w_r: to_i64(w_r.clamp(0, wi)),
+        h_r: to_i64(h_r.clamp(0, hi)),
+        st_ang: i64::try_from(st_ang).unwrap_or(0),
+        sw_ang: i64::try_from(sw_ang).unwrap_or(0),
+    };
+    let path = |fill: bool, stroke: bool, commands: Vec<PathCommand>| GeometryPath { w, h, fill, stroke, shade: PathShade::Norm, commands };
+    let close = PathCommand::Close;
+    Some(match g.preset.as_str() {
+        "pie" | "chord" | "arc" => {
+            let (d1, d2) = match g.preset.as_str() {
+                "pie" => (0, cd34),
+                "chord" => (2_700_000, cd34),
+                _ => (cd34, 0),
+            };
+            let st_ang = adjust(g, "adj1", d1).clamp(0, 21_599_999);
+            let en_ang = adjust(g, "adj2", d2).clamp(0, 21_599_999);
+            let sw_ang = sweep(st_ang, en_ang);
+            let (x1, y1) = on_ellipse(wd2, hd2, st_ang);
+            let outline = vec![m(x1, y1), arc(wd2, hd2, st_ang, sw_ang)];
+            match g.preset.as_str() {
+                "pie" => vec![path(true, true, [outline, vec![ln(hc, vc), close]].concat())],
+                "chord" => vec![path(true, true, [outline, vec![close]].concat())],
+                _ => vec![path(true, false, [outline.clone(), vec![ln(hc, vc), close]].concat()), path(false, true, outline)],
+            }
+        }
+        "blockArc" => {
+            let st_ang = adjust(g, "adj1", cd2).clamp(0, 21_599_999);
+            let ist_ang = adjust(g, "adj2", 0).clamp(0, 21_599_999);
+            let a3 = adjust(g, "adj3", 25000).clamp(0, 50000);
+            let sw_ang = sweep(st_ang, ist_ang);
+            let dr = md(ss, a3, 100000);
+            let (iwd2, ihd2) = ((wd2 - dr).max(0), (hd2 - dr).max(0));
+            let (x1, y1) = on_ellipse(wd2, hd2, st_ang);
+            let (x2, y2) = on_ellipse(iwd2, ihd2, ist_ang);
+            vec![path(true, true, vec![m(x1, y1), arc(wd2, hd2, st_ang, sw_ang), ln(x2, y2), arc(iwd2, ihd2, ist_ang, -sw_ang), close])]
+        }
+        "plaque" => {
+            let a = adjust(g, "adj", 16667).clamp(0, 50000);
+            let x1 = md(ss, a, 100000);
+            let (x2, y2) = (r - x1, b - x1);
+            vec![path(
+                true,
+                true,
+                vec![
+                    m(l, x1),
+                    arc(x1, x1, cd4, -cd4),
+                    ln(x2, t),
+                    arc(x1, x1, cd2, -cd4),
+                    ln(r, y2),
+                    arc(x1, x1, cd34, -cd4),
+                    ln(x1, b),
+                    arc(x1, x1, 0, -cd4),
+                    close,
+                ],
+            )]
         }
         _ => return None,
     })
