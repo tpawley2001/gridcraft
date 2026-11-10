@@ -1,7 +1,6 @@
 # Chart parity
 
-> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-11-10 · **Change:** minor (G0247: exploded pie and doughnut slices are kept on open and save and drawn pulled out; earlier: Analysis ToolPak Regression Residual, Line Fit and Normal Probability plots; earlier: chart-data-table keys pass the series index to the shared combo plot-kind rule, restoring compilation after #1150; earlier: Analysis ToolPak chart output for Histogram, Moving Average and Exponential Smoothing; doughnut charts: every series is a concentric ring, the first series innermost; hole size and first slice angle kept; rotated slices cover their own sweep; legend names categories; earlier: charts resize from eight handles, chart data tables, legend keys and borders, native XLSX round-trip and print/PDF; earlier: selected chart source outlines stay beneath floating objects) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
-> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-11-10 · **Change:** minor (pie of pie and bar of pie: opened, drawn, printed and saved as `c:ofPieChart` with their split settings; earlier: G0244: 3-D surface, wireframe 3-D surface, contour and wireframe contour open, draw, print and save; earlier: Analysis ToolPak Regression Residual, Line Fit and Normal Probability plots; earlier: chart-data-table keys pass the series index to the shared combo plot-kind rule, restoring compilation after #1150; earlier: Analysis ToolPak chart output for Histogram, Moving Average and Exponential Smoothing; doughnut charts: every series is a concentric ring, the first series innermost; hole size and first slice angle kept; rotated slices cover their own sweep; legend names categories; earlier: charts resize from eight handles, chart data tables, legend keys and borders, native XLSX round-trip and print/PDF; earlier: selected chart source outlines stay beneath floating objects) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-11-10 · **Change:** minor (G0246: 3-D column, bar, line, area and pie charts kept on open and save and drawn in 3-D; earlier: G0247 exploded pie slices; earlier: pie of pie and bar of pie; earlier: G0244 surface charts; earlier: Analysis ToolPak Regression Residual, Line Fit and Normal Probability plots; earlier: chart-data-table keys pass the series index to the shared combo plot-kind rule, restoring compilation after #1150; earlier: Analysis ToolPak chart output for Histogram, Moving Average and Exponential Smoothing; doughnut charts: every series is a concentric ring, the first series innermost; hole size and first slice angle kept; rotated slices cover their own sweep; legend names categories; earlier: charts resize from eight handles, chart data tables, legend keys and borders, native XLSX round-trip and print/PDF; earlier: selected chart source outlines stay beneath floating objects) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's chart types and chart elements against GridCraft. Part of
 [target-app-parity.md](target-app-parity.md). **Breadth ~50%, ready ~30%, 40–60 h** (estimated).
@@ -16,11 +15,11 @@ Sources: `crates/model/src/features.rs` (`ChartKind`, `Chart`, `Series`), `crate
 
 | Excel type | Excel subtypes | GridCraft | Notes |
 |---|---|---|---|
-| Column | clustered, stacked, 100% stacked, 3-D clustered/stacked/100%, 3-D column | 3 of 7 | no 3-D |
-| Bar | clustered, stacked, 100%, 3-D ×3 | 3 of 6 | no 3-D |
-| Line | line, stacked, 100% stacked, with markers ×3, 3-D line | 3 of 7 (line, with markers, stacked) | no 100% stacked; smoothed lines landed (#62) |
-| Pie | pie, 3-D pie, pie of pie, bar of pie, doughnut | 4 of 5 (pie, pie of pie, bar of pie, doughnut) | no 3-D pie; pie of pie and bar of pie draw the second plot, combined slice and series lines, and keep gap width, split (auto, position, value, percent, custom) and second plot size on XLSX round-trip; exploded slices (series and single-slice `c:explosion`) are kept on open and save and drawn pulled out, the pie shrinking so they fit (doughnut: outer ring); doughnut draws every series as a concentric ring, first series innermost; its legend names categories, matching Excel's default vary-by-category colours |
-| Area | area, stacked, 100%, 3-D ×3 | 3 of 6 | no 3-D; 100% stacked drawn as shares of each category's total and kept as `percentStacked` in XLSX |
+| Column | clustered, stacked, 100% stacked, 3-D clustered/stacked/100%, 3-D column | 3 of 7, + 4 3-D opened, drawn and saved | 3-D kept on open/save (`c:bar3DChart`, view angles, gap depth, shape, series axis) and drawn as shaded boxes on a floor and walls; oblique projection, so perspective and `hPercent` are approximate; cylinder, cone and pyramid shapes draw as boxes; 3-D not yet in Insert ▸ Chart |
+| Bar | clustered, stacked, 100%, 3-D ×3 | 3 of 6, + 3 3-D opened, drawn and saved | 3-D drawn and kept as for Column; not yet in Insert ▸ Chart |
+| Line | line, stacked, 100% stacked, with markers ×3, 3-D line | 3 of 7 (line, with markers, stacked), + 3-D line opened, drawn and saved | no 100% stacked; smoothed lines landed (#62); 3-D line kept (`c:line3DChart` with its series axis) and drawn as ribbons, one row per series |
+| Pie | pie, 3-D pie, pie of pie, bar of pie, doughnut | 4 of 5 (pie, pie of pie, bar of pie, doughnut), + 3-D pie opened, drawn and saved | 3-D pie kept (`c:pie3DChart`, view angles) and drawn as a tilted ellipse with a side band, exploded slices pulled out; pie of pie and bar of pie draw the second plot, combined slice and series lines, and keep gap width, split (auto, position, value, percent, custom) and second plot size on XLSX round-trip; exploded slices (series and single-slice `c:explosion`) are kept on open and save and drawn pulled out, the pie shrinking so they fit (doughnut: outer ring); doughnut draws every series as a concentric ring, first series innermost; its legend names categories, matching Excel's default vary-by-category colours |
+| Area | area, stacked, 100%, 3-D ×3 | 3 of 6, + 3 3-D opened, drawn and saved | 3-D kept (`c:area3DChart`, series axis for standard grouping) and drawn as extruded slabs; not yet in Insert ▸ Chart; 100% stacked drawn as shares of each category's total and kept as `percentStacked` in XLSX |
 | X Y (scatter) | markers, smooth lines (±markers), straight lines (±markers) | 2 of 5 | no smooth lines |
 | Bubble | bubble, 3-D bubble | 1 of 2 | |
 | Stock | high-low-close, open-high-low-close, volume-HLC, volume-OHLC | 1 kind | |
@@ -34,7 +33,7 @@ Sources: `crates/model/src/features.rs` (`ChartKind`, `Chart`, `Series`), `crate
 | Waterfall, Funnel | 2 | 2 of 2 | |
 | Filled map | 1 | 0 | needs geographic boundary data (licensing decision) |
 | Combo | custom combinations, secondary axis | yes (line on secondary axis) | |
-| **Total** | ~60 subtypes | **30 (~50%)** | usage-weighted breadth higher (~65%): column, bar, line, pie and scatter dominate |
+| **Total** | ~60 subtypes | **30 (~50%)**, + 12 3-D subtypes opened, drawn and saved | usage-weighted breadth higher (~65%): column, bar, line, pie and scatter dominate |
 
 ## Chart elements and formatting
 
@@ -103,13 +102,14 @@ are (#1686). Such series get no `numCache`/`strCache` on save (#1690).
 2. Axis options, label options, gridlines per axis, legend formatting: 10–15 h.
 3. Error bars; Format Trendline pane (trendlines landed): 4–6 h.
 4. Per-element Format pane parity, smoothed lines, 100% variants: 8–12 h.
-5. 3-D column/bar/pie/area, Pareto: 6–10 h.
+5. 3-D column/bar/line/area in Insert ▸ Chart (opening, drawing and saving landed), Pareto: 6–10 h.
 6. Chart sheets, templates and PivotChart field buttons: 5–8 h. Filled map: owner decision on boundary data.
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-10 | minor | 3-D column, bar, line, area and pie charts stay 3-D on open and save (`c:*3DChart`, `c:view3D` values as the file had them, floor and walls, gap depth, shape, series axis) and draw in 3-D on screen, print and PDF: shaded boxes, ribbons, extruded areas and a tilted pie. No readiness score change. |
 | 2026-11-10 | minor | G0247: exploded pie and doughnut slices: series `c:explosion` and per-slice `c:dPt` explosion are read (clamped to 400%) and written in pie and doughnut series, and drawn pulled out along each slice's bisector on screen, print and PDF; the pie shrinks so the farthest slice fits. No readiness score change. |
 | 2026-11-10 | minor | Pie of pie and bar of pie open as their own kinds instead of a plain pie, draw and print the second pie or stacked bar with the combined slice and series lines, save back as `c:ofPieChart` with gap width, split and second plot size, and are offered in Insert ▸ Pie and All Charts. Pie row 2 of 5 → 4 of 5. |
 | 2026-11-10 | minor | G0244: the four surface chart types are chart kinds: read from and written to XLSX (`c:wireframe`, three axis ids, `c:serAx`, `c:view3D`), inserted from the ribbon, All Charts and Change Chart Type, and drawn on screen, in print and PDF: contour as value bands with a band legend, 3-D surface as a projected grid with floor, walls and three labelled axes. |

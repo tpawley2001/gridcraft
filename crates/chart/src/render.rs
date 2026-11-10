@@ -17,6 +17,7 @@ mod legend;
 mod lines;
 mod surface;
 mod table;
+mod three_d;
 mod trend;
 
 use cartesian::{cartesian, scatter};
@@ -239,6 +240,17 @@ pub fn render(chart: &Chart, data: &ChartData, w: f32, h: f32, m: &dyn Measure) 
 
 fn draw_kind(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
     use ChartKind::*;
+    if let Some(v) = chart.view_3d.as_ref().filter(|_| three_d::is_3d(chart)) {
+        if chart.kind == Pie {
+            three_d::pie_3d(ctx, chart, data, area, v);
+        } else {
+            let area = axis_titles(ctx, chart, area);
+            if area.ok() {
+                three_d::cartesian_3d(ctx, chart, data, area, v);
+            }
+        }
+        return;
+    }
     match chart.kind {
         Pie => pie(ctx, chart, data, area, 0.0, false),
         Doughnut => doughnut(ctx, chart, data, area),

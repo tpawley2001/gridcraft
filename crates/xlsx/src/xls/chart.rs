@@ -1915,6 +1915,7 @@ impl Parser {
             by_rows: false,
             pivot: None,
             scale: self.scale,
+            view_3d: None,
             data_table: None,
         })
     }

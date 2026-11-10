@@ -10,6 +10,7 @@ mod data_table;
 mod of_pie;
 mod pie_explosion;
 mod surface;
+mod three_d;
 
 const ALL_KINDS: [ChartKind; 32] = [
     ChartKind::ColumnClustered,
@@ -70,6 +71,7 @@ fn chart(kind: ChartKind) -> Chart {
         by_rows: false,
         pivot: None,
         scale: Default::default(),
+        view_3d: None,
     }
 }
 

@@ -6,7 +6,8 @@ use std::fmt::Write as _;
 use gridcraft_core::{RangeRef, Value, category_levels};
 use gridcraft_formula::{Expr, SheetSel};
 use gridcraft_model::{
-    AxisScale, Chart, ChartKind, ChartScale, Color, DefinedName, LegendPos, LineDash, OfPie, OfPieSplit, Series, Trendline, TrendlineKind, Workbook,
+    AxisScale, Chart, Chart3d, ChartKind, ChartScale, Color, DefinedName, LegendPos, LineDash, OfPie, OfPieSplit, Series, Trendline, TrendlineKind,
+    Workbook,
 };
 
 use crate::drawing::{dml_color, srgb};
@@ -33,6 +34,9 @@ fn group_kind(g: &El) -> Option<ChartKind> {
         "lineChart" | "line3DChart" => {
             if stacked || pct {
                 ChartKind::LineStacked
+            } else if g.name == "line3DChart" {
+                // A 3-D line is a ribbon: it has no markers.
+                ChartKind::Line
             } else {
                 let group_markers = g.child_val("marker").is_none_or(|v| v == "1" || v == "true");
                 let all_none = g.kids("ser").all(|s| s.path(&["marker", "symbol"]).and_then(|m| m.attr("val")) == Some("none"));
@@ -246,6 +250,38 @@ fn rich_title(t: &El) -> Option<String> {
     None
 }
 
+/// The 3-D settings of a single `c:*3DChart` group: the chart's `c:view3D` (each value kept only
+/// when present and inside its schema range), the group's `gapDepth` and `shape`, whether the
+/// series stand in depth (a real third axis id with a `c:serAx`).
+fn read_3d(chart: &El, plot: &El, g: &El) -> Option<Chart3d> {
+    if !matches!(g.name.as_str(), "bar3DChart" | "line3DChart" | "area3DChart" | "pie3DChart") {
+        return None;
+    }
+    let view = chart.child("view3D");
+    let int = |tag: &str| view.and_then(|v| v.child_val(tag)).and_then(|v| v.trim().trim_end_matches('%').parse::<i64>().ok());
+    let in_range = |tag: &str, lo: i64, hi: i64| int(tag).filter(|v| (lo..=hi).contains(v));
+    let third_axis = axis_ids(g).get(2).is_some_and(|id| id.trim() != "0");
+    let series_in_depth = match g.name.as_str() {
+        "line3DChart" => true,
+        "bar3DChart" | "area3DChart" => third_axis && plot.child("serAx").is_some() && g.child_val("grouping").is_none_or(|v| v == "standard"),
+        _ => false,
+    };
+    Some(Chart3d {
+        rot_x: in_range("rotX", -90, 90).and_then(|v| i16::try_from(v).ok()),
+        h_percent: in_range("hPercent", 5, 500).and_then(|v| u16::try_from(v).ok()),
+        rot_y: in_range("rotY", 0, 360).and_then(|v| u16::try_from(v).ok()),
+        depth_percent: in_range("depthPercent", 20, 2000).and_then(|v| u16::try_from(v).ok()),
+        right_angle_axes: view.and_then(|v| v.child("rAngAx")).map(|r| r.flag("val", true)),
+        perspective: in_range("perspective", 0, 240).and_then(|v| u8::try_from(v).ok()),
+        gap_depth: g.child_val("gapDepth").and_then(|v| v.trim().trim_end_matches('%').parse::<u16>().ok()).filter(|v| *v <= 500),
+        shape: g.child_val("shape").filter(|v| SHAPES.contains(v)).map(str::to_string),
+        series_in_depth,
+    })
+}
+
+/// `ST_Shape` values.
+const SHAPES: [&str; 6] = ["box", "cylinder", "cone", "coneToMax", "pyramid", "pyramidToMax"];
+
 fn axis_ids(g: &El) -> Vec<String> {
     g.kids("axId").filter_map(|a| a.attr("val")).map(str::to_string).collect()
 }
@@ -327,6 +363,7 @@ pub fn read_chart(root: &El) -> Option<Chart> {
             x: if scatter { x_ax.map(read_scale).unwrap_or_default() } else { AxisScale::default() },
             y: y_ax.map(read_scale).unwrap_or_default(),
         },
+        view_3d: if groups.len() == 1 { read_3d(chart, plot, first) } else { None },
     })
 }
 
@@ -890,6 +927,79 @@ fn of_pie_xml(bar: bool, sers: &str, dl: &str, o: &OfPie) -> String {
     x
 }
 
+/// Whether a chart of group `g` with 3-D settings `v` has its series in depth (a series axis).
+/// A 3-D line always has one; columns, bars and areas only in standard grouping.
+fn in_depth(g: G, v: &Chart3d) -> bool {
+    match g {
+        G::Line { .. } => true,
+        G::Bar { grouping, .. } => v.series_in_depth && grouping == "clustered",
+        G::Area { grouping } => v.series_in_depth && grouping == "standard",
+        _ => false,
+    }
+}
+
+/// A 3-D group (`c:bar3DChart`, `c:line3DChart`, `c:area3DChart`, `c:pie3DChart`) with its children
+/// in schema order; `None` for groups that have no 3-D form here. A third axis id of `0` means
+/// "no series axis"; the series axis is id 3.
+fn group_3d_xml(g: G, v: &Chart3d, series: &[(usize, &Series)], ch: &Chart, wb: &Workbook, si: usize) -> Option<String> {
+    let sers: String = series.iter().map(|(i, s)| series_xml(s, *i, g, wb, si)).collect();
+    let dl = dlbls(ch.data_labels);
+    let depth = in_depth(g, v);
+    let ax = format!("<c:axId val=\"1\"/><c:axId val=\"2\"/><c:axId val=\"{}\"/>", if depth { 3 } else { 0 });
+    let gap_depth = v.gap_depth.filter(|d| *d <= 500).map(|d| format!("<c:gapDepth val=\"{d}\"/>")).unwrap_or_default();
+    Some(match g {
+        G::Bar { bar, grouping } => {
+            let shape = v.shape.as_deref().filter(|s| SHAPES.contains(s)).map(|s| format!("<c:shape val=\"{s}\"/>")).unwrap_or_default();
+            format!(
+                "<c:bar3DChart><c:barDir val=\"{}\"/><c:grouping val=\"{}\"/><c:varyColors val=\"0\"/>{sers}{dl}<c:gapWidth val=\"150\"/>{gap_depth}{shape}{ax}</c:bar3DChart>",
+                if bar { "bar" } else { "col" },
+                if depth { "standard" } else { grouping }
+            )
+        }
+        G::Line { stacked, .. } => format!(
+            "<c:line3DChart><c:grouping val=\"{}\"/><c:varyColors val=\"0\"/>{sers}{dl}{gap_depth}{ax}</c:line3DChart>",
+            if stacked { "stacked" } else { "standard" }
+        ),
+        G::Area { grouping } => {
+            format!("<c:area3DChart><c:grouping val=\"{grouping}\"/><c:varyColors val=\"0\"/>{sers}{dl}{gap_depth}{ax}</c:area3DChart>")
+        }
+        G::Pie => format!("<c:pie3DChart><c:varyColors val=\"1\"/>{sers}{dl}</c:pie3DChart>"),
+        _ => return None,
+    })
+}
+
+/// `c:view3D` with exactly the values the chart has, in schema order (rotX, hPercent, rotY,
+/// depthPercent, rAngAx, perspective), then a floor and walls without thickness.
+fn view_3d_xml(v: &Chart3d) -> String {
+    let mut s = String::from("<c:view3D>");
+    if let Some(x) = v.rot_x.filter(|x| (-90..=90).contains(x)) {
+        let _ = write!(s, "<c:rotX val=\"{x}\"/>");
+    }
+    if let Some(h) = v.h_percent.filter(|h| (5..=500).contains(h)) {
+        let _ = write!(s, "<c:hPercent val=\"{h}\"/>");
+    }
+    if let Some(y) = v.rot_y.filter(|y| *y <= 360) {
+        let _ = write!(s, "<c:rotY val=\"{y}\"/>");
+    }
+    if let Some(d) = v.depth_percent.filter(|d| (20..=2000).contains(d)) {
+        let _ = write!(s, "<c:depthPercent val=\"{d}\"/>");
+    }
+    if let Some(r) = v.right_angle_axes {
+        let _ = write!(s, "<c:rAngAx val=\"{}\"/>", r as u8);
+    }
+    if let Some(p) = v.perspective.filter(|p| *p <= 240) {
+        let _ = write!(s, "<c:perspective val=\"{p}\"/>");
+    }
+    s.push_str("</c:view3D>");
+    for wall in ["floor", "sideWall", "backWall"] {
+        let _ = write!(s, "<c:{wall}><c:thickness val=\"0\"/></c:{wall}>");
+    }
+    s
+}
+
+/// The series axis of a chart whose series stand in depth: id 3, crossing the value axis (id 2).
+const SER_AX_3D: &str = "<c:serAx><c:axId val=\"3\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"b\"/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"2\"/><c:crosses val=\"autoZero\"/></c:serAx>";
+
 fn title_xml(t: &str) -> String {
     let mut s = String::from("<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/>");
     for line in t.split('\n') {
@@ -1003,6 +1113,15 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
     if let Some(three_d) = surface {
         s.push_str(&surface_view_xml(three_d));
     }
+    // A 3-D chart: one 3-D group of a kind that has a 3-D form (combo charts stay flat).
+    let three_d = ch
+        .view_3d
+        .as_ref()
+        .filter(|_| ch.kind != ChartKind::Combo)
+        .filter(|_| matches!(group_for(ch.kind), G::Bar { .. } | G::Line { .. } | G::Area { .. } | G::Pie));
+    if let Some(v) = three_d {
+        s.push_str(&view_3d_xml(v));
+    }
     s.push_str("<c:plotArea><c:layout/>");
     let all: Vec<(usize, &Series)> = ch.series.iter().enumerate().collect();
     let primary_g;
@@ -1054,7 +1173,10 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
             G::Stock if !(3..=4).contains(&ch.series.len()) => G::Line { stacked: false, markers: false },
             g => g,
         };
-        s.push_str(&group_xml(primary_g, &all, ch, (1, 2), wb, si));
+        match three_d.and_then(|v| group_3d_xml(primary_g, v, &all, ch, wb, si)) {
+            Some(x) => s.push_str(&x),
+            None => s.push_str(&group_xml(primary_g, &all, ch, (1, 2), wb, si)),
+        }
     }
     match primary_g {
         G::Pie | G::OfPie { .. } | G::Doughnut => {}
@@ -1139,6 +1261,9 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 s.push_str(&ser_axis_xml());
             }
         }
+    }
+    if three_d.is_some_and(|v| in_depth(primary_g, v)) {
+        s.push_str(SER_AX_3D);
     }
     if secondary.is_some() {
         s.push_str(&axis_xml(&Ax {

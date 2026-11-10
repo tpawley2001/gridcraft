@@ -260,6 +260,7 @@ fn added_chart_keeps_control_anchor() {
         pivot: None,
         data_table: None,
         scale: Default::default(),
+        view_3d: None,
     });
     let u = roundtrip(&wb);
     let (part, x) = u.drawing("Controls");

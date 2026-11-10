@@ -51,6 +51,7 @@ fn waterfall(alt: &str) -> Chart {
         by_rows: false,
         pivot: None,
         scale: Default::default(),
+        view_3d: None,
     }
 }
 

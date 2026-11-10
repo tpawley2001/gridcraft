@@ -1006,6 +1006,7 @@ mod tests {
                 pivot: None,
                 hidden: false,
                 scale: Default::default(),
+                view_3d: None,
             }),
             ObjKind::Image => s.images.push(Image {
                 camera: None,

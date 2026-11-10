@@ -137,3 +137,22 @@ fn closed_pie_writes_no_explosion() {
     assert!(!out.contains("<c:explosion"), "{out}");
     assert!(!out.contains("<c:dPt>"), "{out}");
 }
+
+/// A 3-D pie keeps its exploded series through open and save with exactly one `c:explosion` per
+/// series (CT_PieSer allows one), and stays a `c:pie3DChart`.
+#[test]
+fn exploded_3d_pie_writes_one_explosion_per_series() {
+    let ch = read(&chart_xml("pie3DChart", "<c:explosion val=\"25\"/>"));
+    assert!(ch.view_3d.is_some(), "the pie stays 3-D");
+    let out = save(&ch);
+    assert!(out.contains("<c:pie3DChart>"), "{out}");
+    for s in out.split("<c:ser>").skip(1) {
+        let s = &s[..s.find("</c:ser>").unwrap_or(s.len())];
+        assert_eq!(s.matches("<c:explosion").count(), 1, "one explosion per series: {s}");
+    }
+    let s = ser(&out);
+    assert_eq!(series_explosion(s).as_deref(), Some("25"), "{s}");
+    check_order(s);
+    let again = save(&read(&out));
+    assert_eq!(again, out, "stable through a second save");
+}

@@ -818,6 +818,35 @@ pub struct Chart {
     /// Pie of pie / bar of pie second-plot settings; `None` uses [`OfPie::default`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub of_pie: Option<OfPie>,
+    /// A 3-D column, bar, line, area or pie chart's settings (`c:view3D`, the `c:*3DChart` group's
+    /// `gapDepth` and `shape`, series in depth); `None` for a flat chart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_3d: Option<Chart3d>,
+}
+
+/// A 3-D chart's view (`c:view3D`) and group settings. Each view value is kept exactly as the file
+/// had it: `None` when the file left it out, so it stays out on save.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Chart3d {
+    /// X rotation (elevation) in degrees, -90..=90 (`rotX`).
+    pub rot_x: Option<i16>,
+    /// Height as a percentage of the chart width, 5..=500 (`hPercent`).
+    pub h_percent: Option<u16>,
+    /// Y rotation in degrees, 0..=359 (`rotY`).
+    pub rot_y: Option<u16>,
+    /// Depth as a percentage of the chart width, 20..=2000 (`depthPercent`).
+    pub depth_percent: Option<u16>,
+    /// Right-angle axes (`rAngAx`).
+    pub right_angle_axes: Option<bool>,
+    /// Field of view in degrees, 0..=240 (`perspective`).
+    pub perspective: Option<u8>,
+    /// Gap between series in depth as a percentage of the column width, 0..=500 (`gapDepth`).
+    pub gap_depth: Option<u16>,
+    /// The bar shape (`shape`): box, cylinder, cone, coneToMax, pyramid or pyramidToMax.
+    pub shape: Option<String>,
+    /// The series stand one behind the other (standard grouping with a series axis).
+    pub series_in_depth: bool,
 }
 
 /// One value axis's scaling: `c:scaling` (min, max, log base, orientation) and the major/minor
@@ -1784,6 +1813,7 @@ mod tests {
             by_rows: false,
             pivot: None,
             scale: Default::default(),
+            view_3d: None,
         };
         let mut json = serde_json::to_value(&chart).expect("serialize chart");
         json.as_object_mut().expect("chart object").remove("hole_size");
