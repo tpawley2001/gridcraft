@@ -1108,6 +1108,27 @@ pub enum PathCommand {
     Close,
 }
 
+/// An `a:arcTo`'s start and sweep as ellipse parameters, in radians, for flattening it as
+/// `(cx + w_r cos t, cy + h_r sin t)`. DrawingML angles are the visual angle of the point from the
+/// ellipse's centre (the presets compute them with `at2`), not the parameter; the two differ when
+/// `w_r` ≠ `h_r`. The sweep keeps its direction and is at most one turn.
+pub fn arc_parameters(w_r: i64, h_r: i64, st_ang: i64, sw_ang: i64) -> (f64, f64) {
+    let (wr, hr) = (w_r as f64, h_r as f64);
+    let st = (st_ang as f64 / 60_000.0).to_radians();
+    let sw_deg = (sw_ang as f64 / 60_000.0).clamp(-360.0, 360.0);
+    let param = |a: f64| (wr * a.sin()).atan2(hr * a.cos());
+    let t0 = param(st);
+    if sw_deg.abs() >= 360.0 || wr <= 0.0 || hr <= 0.0 {
+        return (if wr > 0.0 && hr > 0.0 { t0 } else { st }, sw_deg.to_radians());
+    }
+    let tau = std::f64::consts::TAU;
+    let mut dt = (param(st + sw_deg.to_radians()) - t0).rem_euclid(tau);
+    if sw_deg < 0.0 && dt > 0.0 {
+        dt -= tau;
+    }
+    (t0, dt)
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Shape {
     /// Hidden drawing objects stay in the workbook but are not displayed or printed.

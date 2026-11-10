@@ -146,3 +146,39 @@ fn wedge_callout_tail_is_drawn_outside_the_box() {
     // The default tip: 20.833% of the width left of centre, 62.5% of the height below it.
     assert!(has_point_near(&out[0].points, pos2(68.34, 155.0)), "{:?}", out[0].points);
 }
+
+fn preset_outlines(preset: &str, r: Rect) -> Vec<gridcraft_ui_egui::freeform::FreeformOutline> {
+    use gridcraft_engine::model::{ShapeGeometry, preset_paths};
+    let g = ShapeGeometry { preset: preset.into(), adjust: Vec::new(), paths: Vec::new() };
+    outlines(&preset_paths(&g, 1000, 600).unwrap(), r)
+}
+
+#[test]
+fn arc_angles_are_visual_angles_on_a_stretched_ellipse() {
+    // The moon's inner arc has radii larger than the box and starts at a visual angle of about
+    // -158°: it runs from the top-right corner through the box's middle back to the start corner.
+    let r = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 60.0));
+    let out = preset_outlines("moon", r);
+    assert_eq!(out.len(), 1);
+    let pts = &out[0].points;
+    assert!(near(pts[0], pos2(100.0, 60.0)) && near(*pts.last().unwrap(), pos2(100.0, 60.0)), "{pts:?}");
+    assert!(has_point_near(pts, pos2(100.0, 0.0)) && has_point_near(pts, pos2(50.0, 30.0)), "{pts:?}");
+}
+
+#[test]
+fn quadratic_control_point_outside_the_box_is_not_clipped() {
+    // The tilted-up curved ribbon's top edge has its control point above the box: (500, -19)
+    // between (250, 19) and (750, 19), so the curve's midpoint touches the top edge.
+    let r = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 60.0));
+    let out = preset_outlines("ellipseRibbon2", r);
+    assert!(has_point_near(&out[0].points, pos2(50.0, 0.0)), "{:?}", out[0].points);
+}
+
+#[test]
+fn cloud_callout_bubbles_are_drawn_below_the_box() {
+    let r = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 60.0));
+    let out = preset_outlines("cloudCallout", r);
+    // The smallest bubble is centred on the callout point (29.2, 67.5).
+    let lowest = out.iter().flat_map(|o| &o.points).map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+    assert!(lowest > 69.0, "{lowest}");
+}

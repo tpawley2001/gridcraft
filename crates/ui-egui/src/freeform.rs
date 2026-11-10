@@ -81,14 +81,13 @@ pub fn outlines(paths: &[GeometryPath], r: Rect) -> Vec<FreeformOutline> {
                     cur.push(at(pen));
                 }
                 PathCommand::ArcTo { w_r, h_r, st_ang, sw_ang } => {
-                    // Angles are 60000ths of a degree, clockwise on screen (y grows downward). A
-                    // sweep beyond a full turn draws nothing more, so it is clamped.
+                    // Angles are 60000ths of a degree, clockwise on screen (y grows downward), and
+                    // visual angles, turned into the ellipse's parameter. A sweep beyond a full
+                    // turn draws nothing more, so it is clamped.
                     let (wr, hr) = (*w_r as f64, *h_r as f64);
-                    let st = (*st_ang as f64 / 60_000.0).to_radians();
-                    let sw_deg = (*sw_ang as f64 / 60_000.0).clamp(-360.0, 360.0);
+                    let (st, sw) = gridcraft_engine::model::arc_parameters(*w_r, *h_r, *st_ang, *sw_ang);
                     let centre = (pen.0 - wr * st.cos(), pen.1 - hr * st.sin());
-                    let n = ((sw_deg.abs() / ARC_STEP_DEG).ceil() as u32).max(1);
-                    let sw = sw_deg.to_radians();
+                    let n = ((sw.to_degrees().abs() / ARC_STEP_DEG).ceil() as u32).max(1);
                     for i in 1..=n {
                         let th = st + sw * i as f64 / n as f64;
                         pen = (centre.0 + wr * th.cos(), centre.1 + hr * th.sin());

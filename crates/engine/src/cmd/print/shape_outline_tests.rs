@@ -271,3 +271,32 @@ fn line_callout_prints_its_leader_left_of_the_box() {
     let end = xs.iter().copied().fold(f32::INFINITY, f32::min);
     assert!((left - end - width * 0.38333).abs() < 0.5, "box from {left}, width {width}, leader {xs:?}");
 }
+
+#[test]
+fn moon_prints_its_inner_arc_back_to_the_start_corner() {
+    let mut s = shape_session(ShapeKind::Rectangle, None);
+    let rect = red_paths(&mut s);
+    let (left, right) = (rect[0].iter().map(|v| v.0).fold(f32::INFINITY, f32::min), rect[0].iter().map(|v| v.0).fold(f32::NEG_INFINITY, f32::max));
+    let mut s = shape_session(ShapeKind::Rectangle, preset("moon"));
+    let p = red_paths(&mut s);
+    assert_eq!(p.len(), 1, "{p:?}");
+    // The arcs' angles are visual angles: the inner arc, wider than the box, ends where the outline
+    // started, and its leftmost point is the box's middle.
+    let (first, last) = (p[0][0], p[0][p[0].len() - 1]);
+    assert!((first.0 - last.0).abs() < 0.5 && (first.1 - last.1).abs() < 0.5, "{p:?}");
+    let mid = (left + right) / 2.0;
+    assert!(p[0].iter().any(|v| (v.0 - mid).abs() < 0.5), "{p:?}");
+}
+
+#[test]
+fn cloud_callout_prints_its_bubbles_below_the_box() {
+    let mut s = shape_session(ShapeKind::Rectangle, None);
+    let rect = red_paths(&mut s);
+    let bottom = rect[0].iter().map(|v| v.1).fold(f32::INFINITY, f32::min);
+    let mut s = shape_session(ShapeKind::Rectangle, preset("cloudCallout"));
+    let p = red_paths(&mut s);
+    assert_eq!(p.len(), 4, "the cloud and three bubbles: {p:?}");
+    // PDF y grows upward: the smallest bubble lies below the box's bottom edge.
+    let lowest = p[1].iter().map(|v| v.1).fold(f32::INFINITY, f32::min);
+    assert!(lowest < bottom - 1.0, "box bottom {bottom}, bubbles {lowest}: {p:?}");
+}

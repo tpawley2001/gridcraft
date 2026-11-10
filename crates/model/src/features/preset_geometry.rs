@@ -344,6 +344,7 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
         | "actionButtonMovie" => {
             return action_button_glyph_paths(&g.preset, w, h);
         }
+        "ellipseRibbon" | "ellipseRibbon2" | "moon" | "cloudCallout" | "swooshArrow" => return curved_outside_paths(g, w, h),
         preset => {
             let (pw, ph, table) = flowchart_polygon(preset)?;
             table.iter().map(|&(x, y)| (md(wi, x, pw), md(hi, y, ph))).collect()
@@ -3757,4 +3758,272 @@ fn line_callout_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryP
     let leader = points.iter().enumerate().map(|(i, &(x, y))| if i == 0 { m(x, y) } else { ln(x, y) }).collect();
     paths.push(path(false, true, leader));
     Some(paths)
+}
+
+/// One command of an outline that may leave the shape box, before rounding: `Q` is
+/// `a:quadBezTo` (control point, end point) and `A` is `a:arcTo` (`wR`, `hR`, `stAng`, `swAng`).
+#[derive(Clone, Copy)]
+enum OutCmd {
+    M(f64, f64),
+    L(f64, f64),
+    Q(f64, f64, f64, f64),
+    A(f64, f64, f64, f64),
+    Z,
+}
+
+/// The shape box for presets whose definition puts some values outside it (Bézier control
+/// points, arc radii, the cloud callout's bubbles). Those values are kept, bounded to ten box
+/// sizes from the centre so hostile adjust values cannot overflow.
+struct OutsideBox {
+    w: i64,
+    h: i64,
+    wf: f64,
+    hf: f64,
+}
+
+impl OutsideBox {
+    /// `v` rounded and held within ten box sizes (`size`) of the centre; 0 for NaN or infinity.
+    fn bound(v: f64, size: f64) -> i64 {
+        let v = if v.is_finite() { v } else { 0.0 };
+        v.clamp(size / 2.0 - size * 10.0, size / 2.0 + size * 10.0).round() as i64
+    }
+    fn pt(&self, x: f64, y: f64) -> (i64, i64) {
+        (Self::bound(x, self.wf), Self::bound(y, self.hf))
+    }
+    fn radius(v: f64, size: f64) -> i64 {
+        let v = if v.is_finite() { v } else { 0.0 };
+        v.clamp(0.0, size * 10.0).round() as i64
+    }
+    fn angle(v: f64) -> i64 {
+        if v.is_finite() { v.clamp(-C360 * 4.0, C360 * 4.0).round() as i64 } else { 0 }
+    }
+    fn path(&self, fill: bool, stroke: bool, shade: PathShade, cmds: &[OutCmd]) -> GeometryPath {
+        let commands = cmds
+            .iter()
+            .map(|c| match *c {
+                OutCmd::M(x, y) => {
+                    let (x, y) = self.pt(x, y);
+                    PathCommand::MoveTo(x, y)
+                }
+                OutCmd::L(x, y) => {
+                    let (x, y) = self.pt(x, y);
+                    PathCommand::LineTo(x, y)
+                }
+                OutCmd::Q(cx, cy, x, y) => PathCommand::QuadBezTo([self.pt(cx, cy), self.pt(x, y)]),
+                OutCmd::A(w_r, h_r, st, sw) => PathCommand::ArcTo {
+                    w_r: Self::radius(w_r, self.wf),
+                    h_r: Self::radius(h_r, self.hf),
+                    st_ang: Self::angle(st),
+                    sw_ang: Self::angle(sw),
+                },
+                OutCmd::Z => PathCommand::Close,
+            })
+            .collect();
+        GeometryPath { w: self.w, h: self.h, fill, stroke, shade, commands }
+    }
+}
+
+/// Curved ribbons (`ellipseRibbon`, `ellipseRibbon2`), `moon`, `cloudCallout` and `swooshArrow`.
+/// The guides are evaluated in `f64` and rounded at the end; values the definition puts outside
+/// the box are kept (see [`OutsideBox`]).
+fn curved_outside_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    if !g.paths.is_empty() || w <= 0 || h <= 0 {
+        return None;
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let b = OutsideBox { w, h, wf: w as f64, hf: h as f64 };
+    let adj = |name: &str, default: i128| adjust(g, name, default) as f64;
+    Some(match g.preset.as_str() {
+        "ellipseRibbon" | "ellipseRibbon2" => {
+            ellipse_ribbon(&b, g.preset == "ellipseRibbon2", adj("adj1", 25000), adj("adj2", 50000), adj("adj3", 12500))
+        }
+        "moon" => moon(&b, adj("adj", 50000)),
+        "cloudCallout" => cloud_callout(&b, adj("adj1", -20833), adj("adj2", 62500)),
+        "swooshArrow" => swoosh_arrow(&b, adj("adj1", 25000), adj("adj2", 16667)),
+        _ => return None,
+    })
+}
+
+/// `ellipseRibbon` (tilted down) and `ellipseRibbon2` (tilted up, its guides the first's mirrored
+/// top to bottom): body, shaded folds and outline. The curved edges' control points lie just
+/// outside the box.
+fn ellipse_ribbon(b: &OutsideBox, up: bool, adj1: f64, adj2: f64, adj3: f64) -> Vec<GeometryPath> {
+    use OutCmd::{L, M, Q, Z};
+    let (w, h) = (b.wf, b.hf);
+    let (hc, wd8) = (w / 2.0, w / 8.0);
+    let a1 = pin(0.0, adj1, 100000.0);
+    let a2 = pin(25000.0, adj2, 75000.0);
+    let q11 = (100000.0 - a1) / 2.0;
+    let a3 = pin((a1 - q11).max(0.0), adj3, a1);
+    let x2 = hc - w * a2 / 200000.0;
+    let x3 = x2 + wd8;
+    let (x4, x5, x6) = (w - x3, w - x2, w - wd8);
+    let dy1 = h * a3 / 100000.0;
+    let f1 = muldiv(4.0, dy1, w);
+    let u1 = f1 * (x3 - muldiv(x3, x3, w));
+    let cx1 = x3 / 2.0;
+    let cu1 = f1 * cx1;
+    let cx2 = w - cx1;
+    let q1 = h * a1 / 100000.0;
+    let dy3 = q1 - dy1;
+    let q5 = f1 * (x2 - muldiv(x2, x2, w));
+    let u3 = q5 + dy3;
+    let cu3 = dy1 + dy3 - u3 + dy1 + dy3;
+    let rh = h - q1;
+    let u2 = (dy1 * 14.0 / 16.0 + rh) / 2.0;
+    let (u5, u6) = (q5 + rh, u3 + rh);
+    let cx4 = x2 / 2.0;
+    let cu4 = f1 * cx4 + rh;
+    let cx5 = w - cx4;
+    let cu6 = cu3 + rh;
+    let u7 = u1 + dy3;
+    let cu7 = q1 + q1 - u7;
+    // The tilted-up ribbon is the tilted-down one mirrored top to bottom.
+    let fy = |v: f64| if up { h - v } else { v };
+    let (top, rh) = (fy(0.0), fy(rh));
+    let (y1, cy1, y2, y3, cy3, cy4) = (fy(u1), fy(cu1), fy(u2), fy(u3), fy(cu3), fy(cu4));
+    let (y5, y6, cy6, y7, cy7) = (fy(u5), fy(u6), fy(cu6), fy(u7), fy(cu7));
+    let body = vec![
+        M(0.0, top),
+        Q(cx1, cy1, x3, y1),
+        L(x2, y3),
+        Q(hc, cy3, x5, y3),
+        L(x4, y1),
+        Q(cx2, cy1, w, top),
+        L(x6, y2),
+        L(w, rh),
+        Q(cx5, cy4, x5, y5),
+        L(x5, y6),
+        Q(hc, cy6, x2, y6),
+        L(x2, y5),
+        Q(cx4, cy4, 0.0, rh),
+        L(wd8, y2),
+        Z,
+    ];
+    let folds = [M(x3, y7), L(x3, y1), L(x2, y3), Q(hc, cy3, x5, y3), L(x4, y1), L(x4, y7), Q(hc, cy7, x3, y7), Z];
+    let outline = if up {
+        vec![
+            M(0.0, top),
+            L(wd8, y2),
+            L(0.0, rh),
+            Q(cx4, cy4, x2, y5),
+            L(x2, y6),
+            Q(hc, cy6, x5, y6),
+            L(x5, y5),
+            Q(cx5, cy4, w, rh),
+            L(x6, y2),
+            L(w, top),
+            Q(cx2, cy1, x4, y1),
+            L(x5, y3),
+            Q(hc, cy3, x2, y3),
+            L(x3, y1),
+            Q(cx1, cy1, 0.0, top),
+            Z,
+            M(x2, y3),
+            L(x2, y5),
+            M(x5, y5),
+            L(x5, y3),
+            M(x3, y7),
+            L(x3, y1),
+            M(x4, y1),
+            L(x4, y7),
+        ]
+    } else {
+        let mut outline = body.clone();
+        outline.extend([M(x2, y5), L(x2, y3), M(x5, y3), L(x5, y5), M(x3, y1), L(x3, y7), M(x4, y7), L(x4, y1)]);
+        outline
+    };
+    vec![
+        b.path(true, false, PathShade::Norm, &body),
+        b.path(true, false, PathShade::DarkenLess, &folds),
+        b.path(false, true, PathShade::Norm, &outline),
+    ]
+}
+
+/// `moon`: the outer half ellipse, then the inner arc back, whose radii are larger than the box.
+fn moon(b: &OutsideBox, adj: f64) -> Vec<GeometryPath> {
+    use OutCmd::{A, M, Z};
+    let (w, h) = (b.wf, b.hf);
+    let (ss, hd2) = (w.min(h), h / 2.0);
+    let a = pin(0.0, adj, 87500.0);
+    let g0 = ss * a / 100000.0;
+    let g0w = muldiv(g0, w, ss);
+    let g1 = ss - g0;
+    let g5 = muldiv(ss, ss, g1) * 2.0 - muldiv(g0, g0, g1);
+    let g6w = muldiv(g5 - g0, w, ss);
+    let dy1 = muldiv(g5 / 2.0 - g0, hd2, ss);
+    let g18w = (g6w - g0w) / 2.0;
+    let dx2 = -(g0w + g18w - w);
+    let st_ang1 = at2(dx2, -hd2);
+    let en_ang1 = at2(dx2, hd2) - C360;
+    vec![b.path(true, true, PathShade::Norm, &[M(w, h), A(w, hd2, CD4, CD2), A(g18w, dy1, st_ang1, en_ang1 - st_ang1), Z])]
+}
+
+/// `cloudCallout`: the cloud, three thought bubbles stepping from the cloud's edge to the callout
+/// point (`adj1`/`adj2` from the centre, by default below the box), and the unfilled creases.
+fn cloud_callout(b: &OutsideBox, adj1: f64, adj2: f64) -> Vec<GeometryPath> {
+    use OutCmd::{A, M, Z};
+    let (w, h) = (b.wf, b.hf);
+    let (hc, vc, ss) = (w / 2.0, h / 2.0, w.min(h));
+    let (sx, sy) = (w / 43200.0, h / 43200.0);
+    let dx_pos = w * adj1 / 100000.0;
+    let dy_pos = h * adj2 / 100000.0;
+    let (x_pos, y_pos) = (hc + dx_pos, vc + dy_pos);
+    // `cat2`/`sat2`: the point where the line to the callout point leaves the ellipse.
+    let ang = dy_pos.atan2(dx_pos);
+    let (ht, wt) = (vc * ang.cos(), hc * ang.sin());
+    let ang2 = wt.atan2(ht);
+    let (g6, g7) = (hc + hc * ang2.cos() - x_pos, vc + vc * ang2.sin() - y_pos);
+    let g8 = (g6 * g6 + g7 * g7).sqrt();
+    let g11 = (g8 - ss * 6600.0 / 21600.0) / 3.0;
+    let g12 = ss * 1800.0 / 21600.0;
+    let g13 = g11 + g12;
+    let (g16, g17) = (muldiv(g13, g6, g8) + x_pos, muldiv(g13, g7, g8) + y_pos);
+    let g20 = ss * 4800.0 / 21600.0 + g11 * 2.0;
+    let (g23, g24) = (muldiv(g20, g6, g8) + x_pos, muldiv(g20, g7, g8) + y_pos);
+    let (g25, g26) = (ss * 1200.0 / 21600.0, ss * 600.0 / 21600.0);
+    // The cloud and its creases are the `cloud` preset's, in their own 43200 × 43200 path box.
+    let (fx, fy) = (|v: i128| v as f64 * sx, |v: i128| v as f64 * sy);
+    let arc = |w_r: i128, h_r: i128, st: i64, sw: i64| A(fx(w_r), fy(h_r), st as f64, sw as f64);
+    let mut cloud = vec![M(fx(3900), fy(14370))];
+    cloud.extend(CLOUD_OUTLINE.iter().map(|&(w_r, h_r, st, sw)| arc(w_r, h_r, st, sw)));
+    cloud.push(Z);
+    let bubble = |x: f64, y: f64, r: f64| [M(x, y), A(r, r, 0.0, C360), Z];
+    let creases: Vec<OutCmd> = CLOUD_CREASES.iter().flat_map(|&(x, y, w_r, h_r, st, sw)| [M(fx(x), fy(y)), arc(w_r, h_r, st, sw)]).collect();
+    vec![
+        b.path(true, true, PathShade::Norm, &cloud),
+        b.path(true, true, PathShade::Norm, &bubble(x_pos + g26, y_pos, g26)),
+        b.path(true, true, PathShade::Norm, &bubble(g16 + g25, g17, g25)),
+        b.path(true, true, PathShade::Norm, &bubble(g23 + g12, g24, g12)),
+        b.path(false, true, PathShade::Norm, &creases),
+    ]
+}
+
+/// `swooshArrow`: two quadratic curves from the bottom-left corner to the arrowhead at the right.
+fn swoosh_arrow(b: &OutsideBox, adj1: f64, adj2: f64) -> Vec<GeometryPath> {
+    use OutCmd::{L, M, Q, Z};
+    let (w, h) = (b.wf, b.hf);
+    let ss = w.min(h);
+    let ssd8 = ss / 8.0;
+    let a1 = pin(1.0, adj1, 75000.0);
+    let a2 = pin(0.0, adj2, muldiv(70000.0, w, ss));
+    let ad1 = h * a1 / 100000.0;
+    let x_b = w - ss * a2 / 100000.0;
+    let y_b = ssd8;
+    // `alfa` = cd4 / 14, in radians for `tan`.
+    let tan_alfa = rad(CD4 / 14.0).tan();
+    let dx0 = ssd8 * tan_alfa;
+    let x_c = x_b - dx0;
+    let (y_f, x_f) = (y_b + ad1, x_b + ad1 * tan_alfa);
+    let (x_e, y_e) = (x_f + dx0, y_f + ssd8);
+    let y_d = y_e / 2.0 - h / 20.0;
+    let hd6 = h / 6.0;
+    let (x_p1, y_p1) = (w / 6.0, hd6 * 2.0);
+    let (x_p2, y_p2) = (w / 4.0, y_f + hd6 / 2.0);
+    vec![b.path(
+        true,
+        true,
+        PathShade::Norm,
+        &[M(0.0, h), Q(x_p1, y_p1, x_b, y_b), L(x_c, 0.0), L(w, y_d), L(x_e, y_e), L(x_f, y_f), Q(x_p2, y_p2, 0.0, h), Z],
+    )]
 }
