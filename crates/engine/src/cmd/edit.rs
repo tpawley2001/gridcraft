@@ -60,7 +60,7 @@ pub fn specs() -> Vec<CommandSpec> {
             range_fill
         ),
         cmd!(noundo "selection.set", "Select", [], None, "{range: \"A1:B2,D4\" | cell, active?: \"A1\", sheet?}", has_doc, selection_set),
-        cmd!(noundo "selection.move", "Move Selection", [], None, "{dr, dc, extend?: bool, jump?: bool (Ctrl+arrow), page?: bool}", has_doc, selection_move),
+        cmd!(noundo "selection.move", "Move Selection", [], None, "{dr, dc, extend?: bool, jump?: bool (Ctrl+arrow), page?: bool, tab?: bool (Tab: next unlocked cell on a protected sheet)}", has_doc, selection_move),
         cmd!(noundo "selection.next", "Next Cell in Selection", [], None, "{forward?: true, byRow?: false} (Enter/Tab inside a selection)", has_doc, selection_next),
         cmd!(
             noundo "selection.nextCorner",

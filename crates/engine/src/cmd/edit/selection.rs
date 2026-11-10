@@ -60,9 +60,24 @@ pub(super) fn selection_move(s: &mut Session, p: &Json) -> Result<Json> {
     let dc = p.get("dc").and_then(Json::as_i64).unwrap_or(0);
     let extend = bool_param(p, "extend").unwrap_or(false);
     let jmp = bool_param(p, "jump").unwrap_or(false);
+    let tab = bool_param(p, "tab").unwrap_or(false);
     let d = s.doc_mut()?;
     let Some(sheet) = d.wb.active() else { return Err(EngineError::NoDocument) };
     let sel = &mut d.selection;
+    if tab
+        && dr == 0
+        && dc.abs() == 1
+        && !extend
+        && !jmp
+        && sheet.is_protected()
+        && let Some(to) = next_unlocked(&d.wb, sheet, sel.active, dc > 0)
+    {
+        *sel = crate::Selection::at(to);
+        if let Some(m) = sheet.merge_at(to) {
+            sel.ranges = vec![m];
+        }
+        return Ok(json!({"selection": sel.a1(), "active": sel.active.a1()}));
+    }
     // Extension moves the far corner, not the active cell.
     let from = if extend { sel.moving_end() } else { sel.active };
     // Skip hidden rows/columns and step over merged areas.
@@ -134,6 +149,55 @@ pub(super) fn selection_move(s: &mut Session, p: &Json) -> Result<Json> {
         }
     }
     Ok(json!({"selection": sel.a1(), "active": sel.active.a1()}))
+}
+
+/// Most cells Tab looks at on a protected sheet before giving up and moving one cell.
+const TAB_SCAN_LIMIT: u64 = 16_000_000;
+
+/// Tab on a protected sheet: the next (or previous) unlocked, visible, selectable cell after
+/// `from` in reading order, wrapping around the sheet's used extent. A merged cell counts once,
+/// at its top-left cell. `None` when there is no such cell (or the extent is too big to search).
+fn next_unlocked(wb: &gridcraft_model::Workbook, sheet: &gridcraft_model::Sheet, from: CellRef, forward: bool) -> Option<CellRef> {
+    // The extent covers stored cells plus rows and columns formatted as a whole, from A1, so a
+    // whole-row or whole-column unlocked style is found without scanning the full grid.
+    let mut last = from;
+    if let Some(r) = sheet.used_range() {
+        last = CellRef::new(last.row.max(r.end.row), last.col.max(r.end.col));
+    }
+    if let Some((&row, _)) = sheet.rows.iter().rev().find(|(_, i)| i.style.is_some()) {
+        last.row = last.row.max(row);
+    }
+    if let Some((&col, _)) = sheet.cols.iter().rev().find(|(_, i)| i.style.is_some()) {
+        last.col = last.col.max(col);
+    }
+    let (rows, cols) = (u64::from(last.row) + 1, u64::from(last.col) + 1);
+    let total = rows.checked_mul(cols)?;
+    let start = u64::from(from.row) * cols + u64::from(from.col);
+    let mut checked = 0u64;
+    let mut k = 1u64;
+    while k <= total {
+        let i = if forward { (start + k) % total } else { (start + total - k % total) % total };
+        let (r, c) = (u32::try_from(i / cols).ok()?, u32::try_from(i % cols).ok()?);
+        if sheet.is_row_hidden(r) {
+            // Skip the rest of a hidden row in one step.
+            let in_row = if forward { cols - u64::from(c) } else { u64::from(c) + 1 };
+            k += in_row;
+            continue;
+        }
+        checked += 1;
+        if checked > TAB_SCAN_LIMIT {
+            return None;
+        }
+        k += 1;
+        let cell = CellRef::new(r, c);
+        if sheet.is_col_hidden(c) || sheet.merge_at(cell).is_some_and(|m| m.start != cell) {
+            continue;
+        }
+        if !wb.styles.get(sheet.style_id(cell)).protection.locked && cell_selectable(wb, sheet, cell) {
+            return Some(cell);
+        }
+    }
+    None
 }
 
 pub(super) fn selection_next(s: &mut Session, p: &Json) -> Result<Json> {

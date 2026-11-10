@@ -417,7 +417,7 @@ impl SheetApp {
             let back = i64::from(col) - i64::from(at.col);
             let _ = self.session.run("selection.move", json!({"dr": 1, "dc": back}));
         } else {
-            let _ = self.session.run("selection.move", json!({"dr": dr, "dc": dc}));
+            let _ = self.session.run("selection.move", json!({"dr": dr, "dc": dc, "tab": dr == 0 && dc != 0}));
             if dr == 0 && dc != 0 {
                 let start = run.map(|r| r.2);
                 self.tab_run = self.session.active().and_then(|d| {
