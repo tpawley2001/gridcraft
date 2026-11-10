@@ -753,7 +753,7 @@ fn diag_stripe_points(w: i128, h: i128, g: &ShapeGeometry) -> Vec<(i128, i128)> 
     round_points(&[(0.0, y2), (x2, 0.0), (wf, 0.0), (0.0, hf)], w, h)
 }
 
-/// `lightningBolt`: a fixed eleven-point bolt in a 21600 × 21600 path box, pinned into the shape box.
+/// `lightningBolt`: a fixed eleven-point bolt in a 21600 × 21600 path box, scaled to the shape box.
 fn lightning_bolt_points(w: i128, h: i128) -> Vec<(i128, i128)> {
     const BOLT: [(i128, i128); 11] = [
         (8472, 0),
@@ -768,7 +768,7 @@ fn lightning_bolt_points(w: i128, h: i128) -> Vec<(i128, i128)> {
         (7602, 8382),
         (0, 3890),
     ];
-    BOLT.iter().map(|&(x, y)| (x.clamp(0, w), y.clamp(0, h))).collect()
+    BOLT.iter().map(|&(x, y)| (w.saturating_mul(x) / 21600, h.saturating_mul(y) / 21600)).collect()
 }
 
 /// Rounds the vertices of a guide-computed outline and pins them into the shape box: scale factors
