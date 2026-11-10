@@ -130,6 +130,9 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
     if let Some(paths) = shaded_paths(g, wi, hi) {
         return Some(paths);
     }
+    if let Some(commands) = rounded_rect_paths(g, wi, hi) {
+        return Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }]);
+    }
     let pts: Vec<(i128, i128)> = match g.preset.as_str() {
         "rightArrow" => {
             let a1 = adj("adj1", 50000, 100000);
@@ -616,6 +619,73 @@ const CLOUD_CREASES: [(i128, i128, i128, i128, i64, i64); 11] = [
     (14000, 5192, 6753, 9190, -4002417, 739161),
     (4127, 15789, 6753, 9190, 9459261, 711490),
 ];
+
+/// The rounded rectangles (`round1Rect`, `round2SameRect`, `round2DiagRect`) and the quarter-ellipse
+/// pie wedge (`pieWedge`), or `None` for another preset.
+///
+/// Each corner is a quarter arc of radius `dx1`/`bx1`/`a`; a corner whose adjust is 0 still emits its
+/// `arcTo`, with zero radii. Points and radii are pinned into the box.
+fn rounded_rect_paths(g: &ShapeGeometry, wi: i128, hi: i128) -> Option<Vec<PathCommand>> {
+    let (l, t, r, b) = (0, 0, wi, hi);
+    let ss = wi.min(hi);
+    let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
+    let adj = |name: &str, default: i128| adjust(g, name, default).clamp(0, 50000);
+    let (cd2, cd4, cd34) = (10_800_000, 5_400_000, 16_200_000);
+    let x = |v: i128| i64::try_from(v.clamp(l, r)).unwrap_or(0);
+    let y = |v: i128| i64::try_from(v.clamp(t, b)).unwrap_or(0);
+    let m = |px: i128, py: i128| PathCommand::MoveTo(x(px), y(py));
+    let ln = |px: i128, py: i128| PathCommand::LineTo(x(px), y(py));
+    let arc = |w_r: i128, h_r: i128, st_ang: i64, sw_ang: i64| PathCommand::ArcTo {
+        w_r: i64::try_from(w_r.clamp(0, r)).unwrap_or(0),
+        h_r: i64::try_from(h_r.clamp(0, b)).unwrap_or(0),
+        st_ang,
+        sw_ang,
+    };
+    let close = PathCommand::Close;
+    Some(match g.preset.as_str() {
+        "round1Rect" => {
+            let dx1 = md(ss, adj("adj", 16667), 100000);
+            let x1 = r - dx1;
+            vec![m(l, t), ln(x1, t), arc(dx1, dx1, cd34, cd4), ln(r, b), ln(l, b), close]
+        }
+        "round2SameRect" => {
+            let tx1 = md(ss, adj("adj1", 16667), 100000);
+            let bx1 = md(ss, adj("adj2", 0), 100000);
+            let (tx2, by1) = (r - tx1, b - bx1);
+            vec![
+                m(tx1, t),
+                ln(tx2, t),
+                arc(tx1, tx1, cd34, cd4),
+                ln(r, by1),
+                arc(bx1, bx1, 0, cd4),
+                ln(bx1, b),
+                arc(bx1, bx1, cd4, cd4),
+                ln(l, tx1),
+                arc(tx1, tx1, cd2, cd4),
+                close,
+            ]
+        }
+        "round2DiagRect" => {
+            let x1 = md(ss, adj("adj1", 16667), 100000);
+            let a = md(ss, adj("adj2", 0), 100000);
+            let (x2, y1) = (r - a, b - x1);
+            vec![
+                m(x1, t),
+                ln(x2, t),
+                arc(a, a, cd34, cd4),
+                ln(r, y1),
+                arc(x1, x1, 0, cd4),
+                ln(a, b),
+                arc(a, a, cd4, cd4),
+                ln(l, x1),
+                arc(x1, x1, cd2, cd4),
+                close,
+            ]
+        }
+        "pieWedge" => vec![m(l, b), arc(wi, hi, cd2, cd4), ln(r, b), close],
+        _ => return None,
+    })
+}
 
 /// A fixed polygon in its own path box: path box `w`, `h`, then the vertices.
 type FixedPolygon = (i128, i128, &'static [(i128, i128)]);
