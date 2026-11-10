@@ -279,6 +279,16 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
         }
         "mathPlus" | "mathMinus" | "mathMultiply" | "mathEqual" | "mathNotEqual" => return math_paths(g, w, h),
         "upDownArrow" | "quadArrow" | "leftRightUpArrow" | "leftUpArrow" | "bentUpArrow" | "stripedRightArrow" => return block_arrow_paths(g, w, h),
+        "heptagon" => heptagon_points(wi, hi, g),
+        "decagon" => decagon_points(wi, hi, g),
+        "dodecagon" => dodecagon_points(wi, hi),
+        "nonIsoscelesTrapezoid" => non_isosceles_trapezoid_points(wi, hi, g),
+        "snip2SameRect" => snip_2_same_rect_points(wi, hi, g),
+        "snip2DiagRect" => snip_2_diag_rect_points(wi, hi, g),
+        "halfFrame" => half_frame_points(wi, hi, g),
+        "corner" => corner_points(wi, hi, g),
+        "diagStripe" => diag_stripe_points(wi, hi, g),
+        "lightningBolt" => lightning_bolt_points(wi, hi),
         preset => {
             let (pw, ph, table) = flowchart_polygon(preset)?;
             table.iter().map(|&(x, y)| (md(wi, x, pw), md(hi, y, ph))).collect()
@@ -634,6 +644,148 @@ const EXPLOSION2: [(i128, i128); 28] = [
     (8550, 6382),
     (9722, 1887),
 ];
+
+/// `heptagon`: a seven-sided polygon, wider and taller than the box by its scale factors `hf`/`vf`.
+fn heptagon_points(w: i128, h: i128, g: &ShapeGeometry) -> Vec<(i128, i128)> {
+    let (wf, hf) = (w as f64, h as f64);
+    let (hc, vc) = (wf / 2.0, hf / 2.0);
+    let hf = adjust(g, "hf", 102572) as f64;
+    let vf = adjust(g, "vf", 105210) as f64;
+    let swd2 = hc * hf / 100000.0;
+    let shd2 = vc * vf / 100000.0;
+    let svc = vc * vf / 100000.0;
+    let (dx1, dx2, dx3) = (swd2 * 97493.0 / 100000.0, swd2 * 78183.0 / 100000.0, swd2 * 43388.0 / 100000.0);
+    let (dy1, dy2, dy3) = (shd2 * 62349.0 / 100000.0, shd2 * 22252.0 / 100000.0, shd2 * 90097.0 / 100000.0);
+    let (x1, x2, x3) = (hc - dx1, hc - dx2, hc - dx3);
+    let (x4, x5, x6) = (hc + dx3, hc + dx2, hc + dx1);
+    let (y1, y2, y3) = (svc - dy1, svc + dy2, svc + dy3);
+    round_points(&[(x1, y2), (x2, y1), (hc, 0.0), (x5, y1), (x6, y2), (x4, y3), (x3, y3)], w, h)
+}
+
+/// `decagon`: a ten-sided polygon, taller than the box by its scale factor `vf`.
+fn decagon_points(w: i128, h: i128, g: &ShapeGeometry) -> Vec<(i128, i128)> {
+    let (wf, hf) = (w as f64, h as f64);
+    let (hc, vc) = (wf / 2.0, hf / 2.0);
+    let vf = adjust(g, "vf", 105146) as f64;
+    let shd2 = vc * vf / 100000.0;
+    let (dx1, dx2) = (hc * 36_f64.to_radians().cos(), hc * 72_f64.to_radians().cos());
+    let (dy1, dy2) = (shd2 * 72_f64.to_radians().sin(), shd2 * 36_f64.to_radians().sin());
+    let (x1, x2, x3, x4) = (hc - dx1, hc - dx2, hc + dx2, hc + dx1);
+    let (y1, y2, y3, y4) = (vc - dy1, vc - dy2, vc + dy2, vc + dy1);
+    round_points(&[(0.0, vc), (x1, y2), (x2, y1), (x3, y1), (x4, y2), (wf, vc), (x4, y3), (x3, y4), (x2, y4), (x1, y3)], w, h)
+}
+
+/// `dodecagon`: a twelve-sided polygon with fixed proportions (21600ths of the box).
+fn dodecagon_points(w: i128, h: i128) -> Vec<(i128, i128)> {
+    let (wf, hf) = (w as f64, h as f64);
+    let [x1, x2, x3, x4] = [2894.0, 7906.0, 13694.0, 18706.0].map(|n| wf * n / 21600.0);
+    let [y1, y2, y3, y4] = [2894.0, 7906.0, 13694.0, 18706.0].map(|n| hf * n / 21600.0);
+    round_points(&[(0.0, y2), (x1, y1), (x2, 0.0), (x3, 0.0), (x4, y1), (wf, y2), (wf, y3), (x4, y4), (x3, hf), (x2, hf), (x1, y4), (0.0, y3)], w, h)
+}
+
+/// `nonIsoscelesTrapezoid`: a trapezoid whose top edge is shifted by `adj1` and narrowed by `adj2`.
+fn non_isosceles_trapezoid_points(w: i128, h: i128, g: &ShapeGeometry) -> Vec<(i128, i128)> {
+    let (wf, hf) = (w as f64, h as f64);
+    let ss = wf.min(hf);
+    let max_adj = 50000.0 * wf / ss;
+    let a1 = (adjust(g, "adj1", 25000) as f64).clamp(0.0, max_adj);
+    let a2 = (adjust(g, "adj2", 25000) as f64).clamp(0.0, max_adj);
+    let x2 = ss * a1 / 100000.0;
+    let x3 = wf - ss * a2 / 100000.0;
+    round_points(&[(0.0, hf), (x2, 0.0), (x3, 0.0), (wf, hf)], w, h)
+}
+
+/// `snip2SameRect`: a rectangle with two snipped corners, `adj1` on the top and `adj2` on the bottom.
+fn snip_2_same_rect_points(w: i128, h: i128, g: &ShapeGeometry) -> Vec<(i128, i128)> {
+    let (wf, hf) = (w as f64, h as f64);
+    let ss = wf.min(hf);
+    let a1 = (adjust(g, "adj1", 16667) as f64).clamp(0.0, 50000.0);
+    let a2 = (adjust(g, "adj2", 0) as f64).clamp(0.0, 50000.0);
+    let tx1 = ss * a1 / 100000.0;
+    let bx1 = ss * a2 / 100000.0;
+    round_points(&[(tx1, 0.0), (wf - tx1, 0.0), (wf, tx1), (wf, hf - bx1), (wf - bx1, hf), (bx1, hf), (0.0, hf - bx1), (0.0, tx1)], w, h)
+}
+
+/// `snip2DiagRect`: a rectangle with two snipped corners, `adj1` on the left and `adj2` on the right.
+fn snip_2_diag_rect_points(w: i128, h: i128, g: &ShapeGeometry) -> Vec<(i128, i128)> {
+    let (wf, hf) = (w as f64, h as f64);
+    let ss = wf.min(hf);
+    let a1 = (adjust(g, "adj1", 0) as f64).clamp(0.0, 50000.0);
+    let a2 = (adjust(g, "adj2", 16667) as f64).clamp(0.0, 50000.0);
+    let lx1 = ss * a1 / 100000.0;
+    let rx1 = ss * a2 / 100000.0;
+    round_points(&[(lx1, 0.0), (wf - rx1, 0.0), (wf, rx1), (wf, hf - lx1), (wf - lx1, hf), (rx1, hf), (0.0, hf - rx1), (0.0, lx1)], w, h)
+}
+
+/// `halfFrame`: a rectangle with its lower-left corner cut back to a point by `adj1` and `adj2`.
+fn half_frame_points(w: i128, h: i128, g: &ShapeGeometry) -> Vec<(i128, i128)> {
+    let (wf, hf) = (w as f64, h as f64);
+    let ss = wf.min(hf);
+    let max_adj2 = 100000.0 * wf / ss;
+    let a2 = (adjust(g, "adj2", 33333) as f64).clamp(0.0, max_adj2);
+    let x1 = ss * a2 / 100000.0;
+    let g1 = hf * x1 / wf;
+    let max_adj1 = 100000.0 * (hf - g1).max(0.0) / ss;
+    let a1 = (adjust(g, "adj1", 33333) as f64).clamp(0.0, max_adj1);
+    let y1 = ss * a1 / 100000.0;
+    let x2 = wf - y1 * wf / hf;
+    let y2 = hf - x1 * hf / wf;
+    round_points(&[(0.0, 0.0), (wf, 0.0), (x2, y1), (x1, y1), (x1, y2), (0.0, hf)], w, h)
+}
+
+/// `corner`: a rectangle with its upper-left corner folded in by `adj1` and `adj2`.
+fn corner_points(w: i128, h: i128, g: &ShapeGeometry) -> Vec<(i128, i128)> {
+    let (wf, hf) = (w as f64, h as f64);
+    let ss = wf.min(hf);
+    let a1 = (adjust(g, "adj1", 50000) as f64).clamp(0.0, 100000.0 * hf / ss);
+    let a2 = (adjust(g, "adj2", 50000) as f64).clamp(0.0, 100000.0 * wf / ss);
+    let x1 = ss * a2 / 100000.0;
+    let y1 = hf - ss * a1 / 100000.0;
+    round_points(&[(0.0, 0.0), (x1, 0.0), (x1, y1), (wf, y1), (wf, hf), (0.0, hf)], w, h)
+}
+
+/// `diagStripe`: a diagonal band from the left edge to the top edge, widened by `adj`.
+fn diag_stripe_points(w: i128, h: i128, g: &ShapeGeometry) -> Vec<(i128, i128)> {
+    let (wf, hf) = (w as f64, h as f64);
+    let a = (adjust(g, "adj", 50000) as f64).clamp(0.0, 100000.0);
+    let x2 = wf * a / 100000.0;
+    let y2 = hf * a / 100000.0;
+    round_points(&[(0.0, y2), (x2, 0.0), (wf, 0.0), (0.0, hf)], w, h)
+}
+
+/// `lightningBolt`: a fixed eleven-point bolt in a 21600 × 21600 path box, scaled to the shape box.
+fn lightning_bolt_points(w: i128, h: i128) -> Vec<(i128, i128)> {
+    const BOLT: [(i128, i128); 11] = [
+        (8472, 0),
+        (12860, 6080),
+        (11050, 6797),
+        (16577, 12007),
+        (14767, 12877),
+        (21600, 21600),
+        (10012, 14915),
+        (12222, 13987),
+        (5022, 9705),
+        (7602, 8382),
+        (0, 3890),
+    ];
+    BOLT.iter().map(|&(x, y)| (w.saturating_mul(x) / 21600, h.saturating_mul(y) / 21600)).collect()
+}
+
+/// Rounds the vertices of a guide-computed outline and pins them into the shape box: scale factors
+/// can push a vertex outside it, and the conversion of a hostile float is clamped.
+fn round_points(pts: &[(f64, f64)], w: i128, h: i128) -> Vec<(i128, i128)> {
+    let to_i = |v: f64, max: i128| {
+        let n = if v.is_nan() { 0.0 } else { v.round() };
+        if n <= 0.0 {
+            0
+        } else if n >= max as f64 {
+            max
+        } else {
+            n as i128
+        }
+    };
+    pts.iter().map(|&(x, y)| (to_i(x, w), to_i(y, h))).collect()
+}
 
 /// The adjust value `name` (`a:gd fmla="val N"`), or `default` when missing or not a plain value.
 fn adjust(g: &ShapeGeometry, name: &str, default: i128) -> i128 {
