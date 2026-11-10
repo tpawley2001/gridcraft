@@ -56,7 +56,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gridcraft_core::{CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{CalcMode, CalcSettings, Cell, DefinedName, Formula, LineInfo, Sheet, StyleId, Visibility, Workbook, WorkbookView};
+use gridcraft_model::{
+    CalcMode, CalcSettings, Cell, DefinedName, Formula, LineInfo, Sheet, SheetViewMode, StyleId, Visibility, Workbook, WorkbookView,
+};
 
 use crate::DecryptError;
 use crate::cfb::{self, Compound};
@@ -1315,6 +1317,39 @@ const WINDOW2_MIN_LEN: usize = 10;
 /// Columns in a BIFF8 sheet (IV).
 const XLS_MAX_COLS: u32 = 256;
 
+/// SCL ([MS-XLS] 2.4.247): the current view's zoom as the fraction nscl / dscl. A zero
+/// denominator or a zoom outside 10..=400% leaves the sheet at 100%.
+fn read_scl(c: &mut Cursor<'_, '_>, sheet: &mut Sheet) {
+    let (Ok(n), Ok(d)) = (c.u16(), c.u16()) else { return };
+    if d == 0 {
+        return;
+    }
+    let pct = (u32::from(n) * 100 + u32::from(d) / 2) / u32::from(d);
+    if let Ok(pct) = u16::try_from(pct)
+        && (10..=400).contains(&pct)
+    {
+        sheet.zoom = pct;
+    }
+}
+
+/// PLV ([MS-XLS] 2.4.200): FrtHeader (12 bytes), wScalePLV, then flags whose bit 0 is
+/// fPageLayoutView.
+fn read_plv(c: &mut Cursor<'_, '_>, sheet: &mut Sheet) {
+    if c.skip(14).is_ok()
+        && let Ok(flags) = c.u16()
+        && flags & 0x0001 != 0
+    {
+        sheet.view = SheetViewMode::PageLayout;
+    }
+}
+
+/// WINDOW2 fSLV: Page Break Preview. A PLV record's Page Layout view wins, whichever comes first.
+fn read_fslv(fslv: bool, sheet: &mut Sheet) {
+    if fslv && sheet.view != SheetViewMode::PageLayout {
+        sheet.view = SheetViewMode::PageBreakPreview;
+    }
+}
+
 fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, report: &mut ReadReport) -> Result<(), IoError> {
     let mut c = Cursor::new(&rec.parts);
     // A formula's string result is the String record right after it (shared/array records may sit between).
@@ -1518,6 +1553,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
             st.sheet.show_headings = on(0x0004);
             st.sheet.show_zeros = on(0x0010);
             st.sheet.right_to_left = on(0x0040);
+            read_fslv(on(0x0800), &mut st.sheet);
             // rwTop and colLeft: the scroll position, which frozen panes replace.
             if let (Ok(top), Ok(left)) = (c.u16(), c.u16())
                 && st.sheet.freeze.is_none()
@@ -1527,6 +1563,8 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
                 st.sheet.view_top_left = CellRef::new(u32::from(top), u32::from(left));
             }
         }
+        0x00A0 => read_scl(&mut c, &mut st.sheet),
+        0x088B => read_plv(&mut c, &mut st.sheet),
         0x001D => {
             // SELECTION ([MS-XLS] 2.4.248): pnn, rwAct, colAct, irefAct, cref, then RefU entries
             // (2.5.207: rwFirst, rwLast, colFirst, colLast = 6 bytes each).
