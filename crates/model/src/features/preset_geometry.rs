@@ -676,6 +676,7 @@ fn straight_multipath(preset: &str, w: i128, h: i128) -> Option<Vec<(bool, bool,
             })
             .collect(),
     )
+}
 
 /// Brackets and braces (`leftBracket`, `rightBracket`, `leftBrace`, `rightBrace`, `bracketPair`,
 /// `bracePair`): a fill-only path and an open stroke-only outline of arcs and lines, or `None` for
