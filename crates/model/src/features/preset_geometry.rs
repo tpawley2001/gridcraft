@@ -320,6 +320,13 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
         "lightningBolt" => lightning_bolt_points(wi, hi),
         "pie" | "chord" | "arc" | "blockArc" | "plaque" => return arc_shape_paths(g, w, h),
         "bentArrow" | "uturnArrow" | "circularArrow" | "leftCircularArrow" | "leftRightCircularArrow" => return arc_arrow_paths(g, w, h),
+        "smileyFace"
+        | "actionButtonBlank"
+        | "actionButtonBackPrevious"
+        | "actionButtonForwardNext"
+        | "actionButtonBeginning"
+        | "actionButtonEnd"
+        | "actionButtonHome" => return button_paths(g, w, h),
         preset => {
             let (pw, ph, table) = flowchart_polygon(preset)?;
             table.iter().map(|&(x, y)| (md(wi, x, pw), md(hi, y, ph))).collect()
@@ -2847,4 +2854,159 @@ fn ribbon_or_scroll_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<Geome
         })
         .collect();
     Some(paths)
+}
+
+/// Smiley face and the action buttons (blank, back, forward, beginning, end, home): one path per
+/// `<path>` of the definition, in order. A body path is filled only, shaded faces (`darken`,
+/// `darkenLess`) are filled only, and the outline paths are stroked only.
+///
+/// Guides are evaluated in `f64`; every point and radius is rounded and pinned into the box.
+fn button_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    if !g.paths.is_empty() || w <= 0 || h <= 0 {
+        return None;
+    }
+    let b = ButtonBox { w, h, wf: w as f64, hf: h as f64 };
+    let paths = match g.preset.as_str() {
+        "smileyFace" => smiley_face(&b, adjust(g, "adj", 4653) as f64),
+        "actionButtonBlank" => vec![b.path(true, true, PathShade::Norm, b.rect())],
+        "actionButtonHome" => action_button_home(&b),
+        preset => action_button_arrows(&b, preset)?,
+    };
+    Some(paths)
+}
+
+/// The shape box for [`button_paths`] (`l` = `t` = 0).
+struct ButtonBox {
+    w: i64,
+    h: i64,
+    wf: f64,
+    hf: f64,
+}
+
+impl ButtonBox {
+    fn fix(v: f64, max: i64) -> i64 {
+        if v.is_finite() { (v.round() as i64).clamp(0, max) } else { 0 }
+    }
+    fn pt(&self, x: f64, y: f64) -> (i64, i64) {
+        (Self::fix(x, self.w), Self::fix(y, self.h))
+    }
+    fn m(&self, x: f64, y: f64) -> PathCommand {
+        let (x, y) = self.pt(x, y);
+        PathCommand::MoveTo(x, y)
+    }
+    fn ln(&self, x: f64, y: f64) -> PathCommand {
+        let (x, y) = self.pt(x, y);
+        PathCommand::LineTo(x, y)
+    }
+    /// A whole ellipse from its leftmost point (`stAng` = cd2, `swAng` = 21600000).
+    fn ellipse(&self, w_r: f64, h_r: f64) -> PathCommand {
+        PathCommand::ArcTo { w_r: Self::fix(w_r, self.w), h_r: Self::fix(h_r, self.h), st_ang: 10_800_000, sw_ang: 21_600_000 }
+    }
+    /// A closed polygon through `pts`.
+    fn poly(&self, pts: &[(f64, f64)]) -> Vec<PathCommand> {
+        let mut commands: Vec<PathCommand> = pts.iter().enumerate().map(|(i, &(x, y))| if i == 0 { self.m(x, y) } else { self.ln(x, y) }).collect();
+        commands.push(PathCommand::Close);
+        commands
+    }
+    fn rect(&self) -> Vec<PathCommand> {
+        self.poly(&[(0.0, 0.0), (self.wf, 0.0), (self.wf, self.hf), (0.0, self.hf)])
+    }
+    fn path(&self, fill: bool, stroke: bool, shade: PathShade, commands: Vec<PathCommand>) -> GeometryPath {
+        GeometryPath { w: self.w, h: self.h, fill, stroke, shade, commands }
+    }
+    /// The guides every action button shares: `dx2`, `g9`..`g12`, `g13`.
+    fn button_guides(&self) -> ButtonGuides {
+        let (hc, vc) = (self.wf / 2.0, self.hf / 2.0);
+        let ss = self.wf.min(self.hf);
+        let dx2 = ss * 3.0 / 8.0;
+        ButtonGuides { hc, vc, g9: vc - dx2, g10: vc + dx2, g11: hc - dx2, g12: hc + dx2, g13: ss * 3.0 / 4.0 }
+    }
+}
+
+struct ButtonGuides {
+    hc: f64,
+    vc: f64,
+    g9: f64,
+    g10: f64,
+    g11: f64,
+    g12: f64,
+    g13: f64,
+}
+
+fn smiley_face(b: &ButtonBox, adj: f64) -> Vec<GeometryPath> {
+    let (w, h) = (b.wf, b.hf);
+    let (hc, vc) = (w / 2.0, h / 2.0);
+    let a = pin(-4653.0, adj, 4653.0);
+    let (x1, x2, x3, x4) = (w * 4969.0 / 21699.0, w * 6215.0 / 21600.0, w * 13135.0 / 21600.0, w * 16640.0 / 21600.0);
+    let (y1, y3) = (h * 7570.0 / 21600.0, h * 16515.0 / 21600.0);
+    let dy2 = h * a / 100000.0;
+    let (y2, y4) = (y3 - dy2, y3 + dy2);
+    let y5 = y4 + h * a / 50000.0;
+    let (w_r, h_r) = (w * 1125.0 / 21600.0, h * 1125.0 / 21600.0);
+    let face = || vec![b.m(0.0, vc), b.ellipse(hc, vc), PathCommand::Close];
+    let eyes = vec![b.m(x2, y1), b.ellipse(w_r, h_r), b.m(x3, y1), b.ellipse(w_r, h_r)];
+    let mouth = vec![b.m(x1, y2), PathCommand::QuadBezTo([b.pt(hc, y5), b.pt(x4, y2)])];
+    vec![
+        b.path(true, false, PathShade::Norm, face()),
+        b.path(true, true, PathShade::DarkenLess, eyes),
+        b.path(false, true, PathShade::Norm, mouth),
+        b.path(false, true, PathShade::Norm, face()),
+    ]
+}
+
+/// Back/previous, forward/next, beginning and end: the button body with its symbol, the symbol
+/// darkened, the symbol's outline and the button's outline.
+fn action_button_arrows(b: &ButtonBox, preset: &str) -> Option<Vec<GeometryPath>> {
+    let ButtonGuides { vc, g9, g10, g11, g12, g13, .. } = b.button_guides();
+    let (faces, outline) = match preset {
+        "actionButtonBackPrevious" => {
+            let tri = b.poly(&[(g11, vc), (g12, g9), (g12, g10)]);
+            (tri.clone(), tri)
+        }
+        "actionButtonForwardNext" => (b.poly(&[(g12, vc), (g11, g9), (g11, g10)]), b.poly(&[(g12, vc), (g11, g10), (g11, g9)])),
+        "actionButtonBeginning" => {
+            let (g16, g17) = (g11 + g13 / 8.0, g11 + g13 / 4.0);
+            let tri = b.poly(&[(g17, vc), (g12, g9), (g12, g10)]);
+            let bar = b.poly(&[(g16, g9), (g11, g9), (g11, g10), (g16, g10)]);
+            let bar_outline = b.poly(&[(g16, g9), (g16, g10), (g11, g10), (g11, g9)]);
+            ([tri.clone(), bar].concat(), [tri, bar_outline].concat())
+        }
+        "actionButtonEnd" => {
+            let (g16, g17) = (g11 + g13 * 3.0 / 4.0, g11 + g13 * 7.0 / 8.0);
+            let bar = b.poly(&[(g17, g9), (g12, g9), (g12, g10), (g17, g10)]);
+            let tri = b.poly(&[(g16, vc), (g11, g9), (g11, g10)]);
+            let tri_outline = b.poly(&[(g16, vc), (g11, g10), (g11, g9)]);
+            ([tri, bar.clone()].concat(), [tri_outline, bar].concat())
+        }
+        _ => return None,
+    };
+    Some(vec![
+        b.path(true, false, PathShade::Norm, [b.rect(), faces.clone()].concat()),
+        b.path(true, false, PathShade::Darken, faces),
+        b.path(false, true, PathShade::Norm, outline),
+        b.path(false, true, PathShade::Norm, b.rect()),
+    ])
+}
+
+fn action_button_home(b: &ButtonBox) -> Vec<GeometryPath> {
+    let ButtonGuides { hc, vc, g9, g10, g11, g12, g13 } = b.button_guides();
+    let s = |n: f64| g13 * n / 16.0;
+    let (g24, g25, g26, g27) = (g9 + s(1.0), g9 + s(3.0), g9 + s(5.0), g9 + s(12.0));
+    let (g28, g29, g30, g31, g32, g33) = (g11 + s(2.0), g11 + s(7.0), g11 + s(9.0), g11 + s(11.0), g11 + s(13.0), g11 + s(14.0));
+    let house =
+        b.poly(&[(hc, g9), (g11, vc), (g28, vc), (g28, g10), (g33, g10), (g33, vc), (g12, vc), (g32, g26), (g32, g24), (g31, g24), (g31, g25)]);
+    let chimney = b.poly(&[(g32, g26), (g32, g24), (g31, g24), (g31, g25)]);
+    let walls = b.poly(&[(g28, vc), (g28, g10), (g29, g10), (g29, g27), (g30, g27), (g30, g10), (g33, g10), (g33, vc)]);
+    let roof = b.poly(&[(hc, g9), (g11, vc), (g12, vc)]);
+    let door = b.poly(&[(g29, g27), (g30, g27), (g30, g10), (g29, g10)]);
+    let mut outline =
+        b.poly(&[(hc, g9), (g31, g25), (g31, g24), (g32, g24), (g32, g26), (g12, vc), (g33, vc), (g33, g10), (g28, g10), (g28, vc), (g11, vc)]);
+    outline.extend([b.m(g31, g25), b.ln(g32, g26), b.m(g33, vc), b.ln(g28, vc), b.m(g29, g10), b.ln(g29, g27), b.ln(g30, g27), b.ln(g30, g10)]);
+    vec![
+        b.path(true, false, PathShade::Norm, [b.rect(), house].concat()),
+        b.path(true, false, PathShade::DarkenLess, [chimney, walls].concat()),
+        b.path(true, false, PathShade::Darken, [roof, door].concat()),
+        b.path(false, true, PathShade::Norm, outline),
+        b.path(false, true, PathShade::Norm, b.rect()),
+    ]
 }
