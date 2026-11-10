@@ -39,6 +39,9 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             ),
         ]);
     }
+    if let Some(paths) = flowchart_curved(&g.preset, w, h) {
+        return Some(paths);
+    }
     // Predefined process and internal storage: a filled rectangle, two open inner lines, and the
     // rectangle's outline.
     if g.preset == "flowChartPredefinedProcess" || g.preset == "flowChartInternalStorage" {
@@ -258,6 +261,55 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
         commands.push(if i == 0 { PathCommand::MoveTo(x, y) } else { PathCommand::LineTo(x, y) });
     }
     commands.push(PathCommand::Close);
+    Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }])
+}
+
+/// Curved flowchart presets (terminator, alternate process, delay, document): one filled and
+/// stroked path of lines, arcs and a Bézier. `w` and `h` are positive.
+fn flowchart_curved(preset: &str, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    use PathCommand::{ArcTo, Close, CubicBezTo, LineTo, MoveTo};
+    let (wi, hi) = (i128::from(w), i128::from(h));
+    let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
+    let to_i64 = |v: i128| i64::try_from(v).unwrap_or(if v < 0 { 0 } else { i64::MAX });
+    // Path-box coordinates scaled to the shape box; a 21600 box for the fixed-path presets.
+    let sx = |x: i128, pw: i128| to_i64(md(x, wi, pw));
+    let sy = |y: i128, ph: i128| to_i64(md(y, hi, ph));
+    let (cd4, cd2, cd34) = (5_400_000, 10_800_000, 16_200_000);
+    let commands = match preset {
+        "flowChartTerminator" => {
+            let (x, y) = (|v| sx(v, 21600), |v| sy(v, 21600));
+            vec![
+                MoveTo(x(3475), 0),
+                LineTo(x(18125), 0),
+                ArcTo { w_r: x(3475), h_r: y(10800), st_ang: cd34, sw_ang: cd2 },
+                LineTo(x(3475), y(21600)),
+                ArcTo { w_r: x(3475), h_r: y(10800), st_ang: cd4, sw_ang: cd2 },
+                Close,
+            ]
+        }
+        "flowChartAlternateProcess" => {
+            let ssd6 = md(wi.min(hi), 1, 6);
+            let s = to_i64(ssd6);
+            let arc = |st_ang| ArcTo { w_r: s, h_r: s, st_ang, sw_ang: cd4 };
+            vec![MoveTo(0, s), arc(cd2), LineTo(to_i64(wi - ssd6), 0), arc(cd34), LineTo(w, to_i64(hi - ssd6)), arc(0), LineTo(s, h), arc(cd4), Close]
+        }
+        "flowChartDelay" => {
+            let (wd2, hd2) = (to_i64(wi / 2), to_i64(hi / 2));
+            vec![MoveTo(0, 0), LineTo(wd2, 0), ArcTo { w_r: wd2, h_r: hd2, st_ang: cd34, sw_ang: cd2 }, LineTo(0, h), Close]
+        }
+        "flowChartDocument" => {
+            let (x, y) = (|v| sx(v, 21600), |v| sy(v, 21600));
+            // The second control point lies below the box (23922 > 21600), as the preset defines.
+            vec![
+                MoveTo(0, 0),
+                LineTo(x(21600), 0),
+                LineTo(x(21600), y(17322)),
+                CubicBezTo([(x(10800), y(17322)), (x(10800), y(23922)), (0, y(20172))]),
+                Close,
+            ]
+        }
+        _ => return None,
+    };
     Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }])
 }
 

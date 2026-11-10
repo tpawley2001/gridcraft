@@ -104,8 +104,9 @@ fn internal_storage_has_an_inner_vertical_and_horizontal() {
 
 #[test]
 fn curved_flowchart_presets_are_not_claimed() {
-    // Out of scope for this change: these still fall back to the rectangle.
-    for preset in ["flowChartTerminator", "flowChartDocument", "flowChartMagneticDisk"] {
+    // Not drawn yet: these still fall back to the rectangle. Terminator, alternate process, delay
+    // and document are covered by `preset_geometry_flowchart_curved.rs`.
+    for preset in ["flowChartMagneticDisk", "flowChartMultidocument", "flowChartOnlineStorage", "flowChartDisplay"] {
         assert!(preset_paths(&geom(preset), 1000, 600).is_none(), "{preset}");
     }
 }
