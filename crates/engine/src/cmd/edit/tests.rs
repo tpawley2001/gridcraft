@@ -591,6 +591,8 @@ fn go_to_special_same_validation_on_whole_columns_is_bounded() {
     s.execute("selection.set", json!({"range": "B2"})).unwrap();
     assert!(s.execute("edit.goToSpecial", json!({"kind": "dataValidation", "same": true})).is_err());
     assert_eq!(s.doc().unwrap().selection.a1(), "B2", "the selection is unchanged");
+}
+
 #[test]
 fn tab_on_a_protected_sheet_skips_hidden_rows_and_lands_on_merged_cells() {
     let mut s = Session::new();
