@@ -265,6 +265,15 @@ pub(super) fn axis_scales(chart: &Chart, data: &ChartData, fams: &[Fam], sec: &[
     axes
 }
 
+/// Where a bar starts: clustered bars on the primary axis grow from the category axis crossing
+/// (`col_base`, when set); stacked ones from their stack.
+fn bar_base(col_base: Option<f64>, fam: Fam, secondary: bool, b: f64) -> f64 {
+    match col_base {
+        Some(base) if fam == Fam::Col && !secondary => base,
+        _ => b,
+    }
+}
+
 fn column_slots(fams: &[Fam], sec: &[bool]) -> (Vec<usize>, f32) {
     // Column slots: each clustered series gets one, each stack group shares one.
     let mut slot_keys: Vec<(bool, Fam, usize)> = Vec::new();
@@ -395,10 +404,7 @@ pub(super) fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx
                     let mut sink = BarSink::new(bw, horizontal, s.color, nslots, k);
                     for (j, sp) in row.iter().enumerate() {
                         let Some((b, t)) = *sp else { continue };
-                        let b = match col_base {
-                            Some(base) if fam == Fam::Col && !sec.get(i).copied().unwrap_or(false) => base,
-                            _ => b,
-                        };
+                        let b = bar_base(col_base, fam, sec.get(i).copied().unwrap_or(false), b);
                         let (pb, pt) = (vpos(inside(b, &sc), &sc), vpos(inside(t, &sc), &sc));
                         let c = center(j);
                         let lo = pb.min(pt);
