@@ -15,6 +15,7 @@ mod frame;
 mod kinds;
 mod legend;
 mod lines;
+mod surface;
 mod table;
 mod trend;
 
@@ -23,6 +24,7 @@ use frame::{Bx, axis_titles, chart_title};
 use kinds::{box_whisker, doughnut, funnel, histogram, pie, radar, stock, treemap, waterfall};
 use legend::draw_legend;
 pub use legend::{Swatch, legend_entries};
+use surface::surface;
 pub use trend::supports_trendline;
 
 pub(crate) const TEXT: Rgba = [0x59, 0x59, 0x59, 0xFF];
@@ -256,6 +258,7 @@ fn draw_kind(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
                 Waterfall => waterfall(ctx, chart, data, area),
                 BoxWhisker => box_whisker(ctx, chart, data, area),
                 Stock => stock(ctx, chart, data, area),
+                Surface | SurfaceWireframe | Contour | ContourWireframe => surface(ctx, chart, data, area),
                 _ => cartesian(ctx, chart, data, area, false),
             }
         }

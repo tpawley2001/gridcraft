@@ -203,6 +203,10 @@ fn format_chart(app: &mut SheetApp, ui: &mut Ui) {
                 ("Doughnut", "doughnut", ""),
                 ("Scatter", "scatter", ""),
                 ("Radar", "radar", ""),
+                ("3-D Surface", "surface", ""),
+                ("Wireframe 3-D Surface", "surfaceWireframe", ""),
+                ("Contour", "contour", ""),
+                ("Wireframe Contour", "contourWireframe", ""),
             ] {
                 let cur = chart.kind == gridcraft_engine::cmd::insert::chart_kind(k, s);
                 if ui.selectable_label(cur, l).clicked() {

@@ -1,6 +1,6 @@
 # Chart parity
 
-> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-11-09 · **Change:** minor (Analysis ToolPak Regression Residual, Line Fit and Normal Probability plots; earlier: chart-data-table keys pass the series index to the shared combo plot-kind rule, restoring compilation after #1150; earlier: Analysis ToolPak chart output for Histogram, Moving Average and Exponential Smoothing; doughnut charts: every series is a concentric ring, the first series innermost; hole size and first slice angle kept; rotated slices cover their own sweep; legend names categories; earlier: charts resize from eight handles, chart data tables, legend keys and borders, native XLSX round-trip and print/PDF; earlier: selected chart source outlines stay beneath floating objects) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-11-10 · **Change:** minor (G0244: 3-D surface, wireframe 3-D surface, contour and wireframe contour open, draw, print and save; earlier: Analysis ToolPak Regression Residual, Line Fit and Normal Probability plots; earlier: chart-data-table keys pass the series index to the shared combo plot-kind rule, restoring compilation after #1150; earlier: Analysis ToolPak chart output for Histogram, Moving Average and Exponential Smoothing; doughnut charts: every series is a concentric ring, the first series innermost; hole size and first slice angle kept; rotated slices cover their own sweep; legend names categories; earlier: charts resize from eight handles, chart data tables, legend keys and borders, native XLSX round-trip and print/PDF; earlier: selected chart source outlines stay beneath floating objects) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's chart types and chart elements against GridCraft. Part of
 [target-app-parity.md](target-app-parity.md). **Breadth ~50%, ready ~30%, 40–60 h** (estimated).
@@ -23,7 +23,7 @@ Sources: `crates/model/src/features.rs` (`ChartKind`, `Chart`, `Series`), `crate
 | X Y (scatter) | markers, smooth lines (±markers), straight lines (±markers) | 2 of 5 | no smooth lines |
 | Bubble | bubble, 3-D bubble | 1 of 2 | |
 | Stock | high-low-close, open-high-low-close, volume-HLC, volume-OHLC | 1 kind | |
-| Surface | 3-D surface, wireframe, contour, wireframe contour | 0 of 4 | |
+| Surface | 3-D surface, wireframe, contour, wireframe contour | 4 of 4 | read and written as `c:surface3DChart` / `c:surfaceChart` with series axis and view; contour bands and legend follow the value axis' major unit; the 3-D view is drawn at Excel's default angles (a file's own rotation is written back as the default) with one colour per cell, not split at band edges |
 | Radar | radar, with markers, filled | 1 of 3 | |
 | Treemap, Sunburst | 1 each | 2 of 2 | |
 | Histogram, Pareto | 2 | 1 of 2 | no Pareto |
@@ -33,7 +33,7 @@ Sources: `crates/model/src/features.rs` (`ChartKind`, `Chart`, `Series`), `crate
 | Waterfall, Funnel | 2 | 2 of 2 | |
 | Filled map | 1 | 0 | needs geographic boundary data (licensing decision) |
 | Combo | custom combinations, secondary axis | yes (line on secondary axis) | |
-| **Total** | ~60 subtypes | **26 (~43%)** | usage-weighted breadth higher (~65%): column, bar, line, pie and scatter dominate |
+| **Total** | ~60 subtypes | **30 (~50%)** | usage-weighted breadth higher (~65%): column, bar, line, pie and scatter dominate |
 
 ## Chart elements and formatting
 
@@ -102,13 +102,14 @@ are (#1686). Such series get no `numCache`/`strCache` on save (#1690).
 2. Axis options, label options, gridlines per axis, legend formatting: 10–15 h.
 3. Error bars; Format Trendline pane (trendlines landed): 4–6 h.
 4. Per-element Format pane parity, smoothed lines, exploded pie, pie/bar of pie, 100% variants: 8–12 h.
-5. 3-D column/bar/pie/area, surface and contour, Pareto: 8–12 h.
+5. 3-D column/bar/pie/area, Pareto: 6–10 h.
 6. Chart sheets, templates and PivotChart field buttons: 5–8 h. Filled map: owner decision on boundary data.
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-10 | minor | G0244: the four surface chart types are chart kinds: read from and written to XLSX (`c:wireframe`, three axis ids, `c:serAx`, `c:view3D`), inserted from the ribbon, All Charts and Change Chart Type, and drawn on screen, in print and PDF: contour as value bands with a band legend, 3-D surface as a projected grid with floor, walls and three labelled axes. |
 | 2026-11-09 | minor | Analysis ToolPak Regression adds Residual, Line Fit and Normal Probability plots as XY scatter charts stacked right of the report. No readiness score change. |
 | 2026-11-07 | minor | Chart-data-table keys use the shared plot-kind helper with their series index after #1150. A focused regression checks the first combo series uses a column key and later series use line keys. No readiness score change. |
 | 2026-11-06 | minor | G0131: Histogram, Moving Average and Exponential Smoothing offer Chart Output; report and chart share one Undo step. Regression plots remain. |

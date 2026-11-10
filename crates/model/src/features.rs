@@ -559,6 +559,14 @@ pub enum ChartKind {
     BoxWhisker,
     Stock,
     Combo,
+    /// 3-D Surface (`c:surface3DChart`, filled).
+    Surface,
+    /// Wireframe 3-D Surface (`c:surface3DChart` with `c:wireframe`).
+    SurfaceWireframe,
+    /// Contour: a surface seen from above (`c:surfaceChart`, filled).
+    Contour,
+    /// Wireframe Contour (`c:surfaceChart` with `c:wireframe`).
+    ContourWireframe,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

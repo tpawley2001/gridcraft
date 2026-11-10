@@ -7,8 +7,9 @@ use crate::*;
 
 mod budget;
 mod data_table;
+mod surface;
 
-const ALL_KINDS: [ChartKind; 26] = [
+const ALL_KINDS: [ChartKind; 30] = [
     ChartKind::ColumnClustered,
     ChartKind::ColumnStacked,
     ChartKind::ColumnStacked100,
@@ -35,6 +36,10 @@ const ALL_KINDS: [ChartKind; 26] = [
     ChartKind::BoxWhisker,
     ChartKind::Stock,
     ChartKind::Combo,
+    ChartKind::Surface,
+    ChartKind::SurfaceWireframe,
+    ChartKind::Contour,
+    ChartKind::ContourWireframe,
 ];
 
 fn chart(kind: ChartKind) -> Chart {
