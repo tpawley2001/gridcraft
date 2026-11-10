@@ -27,7 +27,7 @@ use std::sync::Arc;
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_model::{
     CalcMode, Cell, Color, Comment, EditRange, Formula, Hyperlink, LineInfo, Orientation, PasswordHash, PrintSettings, Sheet, SheetProtection,
-    StyleId, Visibility, Workbook,
+    SheetViewMode, StyleId, Visibility, Workbook,
 };
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
@@ -1953,7 +1953,8 @@ fn sheet_code_name(payload: &[u8]) -> Option<String> {
 fn sheet_view(sheet: &mut Sheet, payload: &[u8], seen: bool) -> Result<bool, IoError> {
     let mut b = Bytes::new(payload);
     let flags = b.u16()?;
-    b.take(16)?; // xlView, rwTop, colLeft, icvHdr and reserved fields.
+    let view = b.u32()?; // xlView.
+    b.take(12)?; // rwTop, colLeft, icvHdr and reserved fields.
     let zoom = b.u16()?;
     b.take(6)?; // wScaleNormal, wScaleSLV, wScalePLV.
     let book_view = b.u32()?;
@@ -1968,6 +1969,11 @@ fn sheet_view(sheet: &mut Sheet, payload: &[u8], seen: bool) -> Result<bool, IoE
     sheet.right_to_left = on(0x0020);
     sheet.show_outline_symbols = on(0x0100);
     sheet.zoom = if zoom == 0 { 100 } else { zoom.clamp(10, 400) };
+    sheet.view = match view {
+        1 => SheetViewMode::PageBreakPreview,
+        2 => SheetViewMode::PageLayout,
+        _ => SheetViewMode::Normal,
+    };
     Ok(true)
 }
 
