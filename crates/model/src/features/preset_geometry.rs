@@ -3242,6 +3242,9 @@ fn action_button_home(b: &ButtonBox) -> Vec<GeometryPath> {
     ]
 }
 
+/// A glyph path of an action button: its fill shade, or `None` for an unfilled outline.
+type GlyphFace = (Option<PathShade>, Vec<PathCommand>);
+
 /// The help, information, return, document, sound and movie action buttons: the filled body (box
 /// plus glyph, no outline), the glyph's shaded faces, the glyph's outline and the box's outline.
 /// Guides are evaluated in `f64` and every point and radius is rounded and pinned into the box.
@@ -3260,8 +3263,8 @@ fn action_button_glyph_paths(preset: &str, w: i64, h: i64) -> Option<Vec<Geometr
     let (g9, g10, g11, g12) = (vc - dx2, vc + dx2, hc - dx2, hc + dx2);
     let g13 = ss * 3.0 / 4.0;
     let f = |n: f64, d: f64| g13 * n / d;
-    // (shade or `None` for an unfilled outline, commands) per glyph path, between body and frame.
-    let (glyph, faces): (Vec<PathCommand>, Vec<(Option<PathShade>, Vec<PathCommand>)>) = match preset {
+    // The glyph paths between the body and the frame.
+    let (glyph, faces): (Vec<PathCommand>, Vec<GlyphFace>) = match preset {
         "actionButtonHelp" => {
             let (g14, g15, g16) = (f(1.0, 7.0), f(3.0, 14.0), f(2.0, 7.0));
             let (g41, g42) = (f(1.0, 14.0), f(3.0, 28.0));
