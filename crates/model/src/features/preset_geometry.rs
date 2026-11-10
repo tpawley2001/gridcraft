@@ -376,7 +376,7 @@ fn flowchart_polygon(preset: &str) -> Option<FixedPolygon> {
 
 /// One step of an arc-based preset path: `M`/`L` points and `A` radii (`wR`, `hR`) are in the
 /// shape box; `A` angles are `stAng`, `swAng` in 60000ths of a degree.
-enum Seg {
+enum ArcSeg {
     M(i128, i128),
     L(i128, i128),
     A(i128, i128, i64, i64),
@@ -386,7 +386,7 @@ enum Seg {
 /// Flowchart presets built from `a:arcTo` (§20.1.9.3) and lines: one path per `<path>` of the
 /// definition, or `None` for another preset. `w`, `h` are positive.
 fn arc_flowchart_paths(preset: &str, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
-    use Seg::{A, L, M, Z};
+    use ArcSeg::{A, L, M, Z};
     let (wi, hi) = (i128::from(w), i128::from(h));
     let (hc, vc) = (wi / 2, hi / 2);
     let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
@@ -399,7 +399,7 @@ fn arc_flowchart_paths(preset: &str, w: i64, h: i64) -> Option<Vec<GeometryPath>
     let idy = (vc as f64 * std::f64::consts::FRAC_PI_4.sin()) as i128;
     let ellipse = || vec![M(0, vc), A(hc, vc, cd2, cd4), A(hc, vc, cd34, cd4), A(hc, vc, 0, cd4), A(hc, vc, cd4, cd4), Z];
     // (fill, stroke, segments) per path.
-    let paths: Vec<(bool, bool, Vec<Seg>)> = match preset {
+    let paths: Vec<(bool, bool, Vec<ArcSeg>)> = match preset {
         "flowChartMagneticDisk" => {
             let (y1, y5, rx, ry) = (sy(1, 6), sy(5, 6), sx(3, 6), sy(1, 6));
             let outline = || vec![M(0, y1), A(rx, ry, cd2, cd2), L(wi, y5), A(rx, ry, 0, cd2), Z];
