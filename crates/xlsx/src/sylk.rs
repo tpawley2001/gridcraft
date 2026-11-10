@@ -124,7 +124,9 @@ pub fn read_sylk(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
                 let converted = r1c1_to_a1(&text, at);
                 let parsed = converted.as_deref().and_then(|s| gridcraft_formula::parse(s).ok());
                 match (converted, parsed) {
-                    (Some(text), Some(expr)) => Some(Arc::new(Formula { text, expr: Some(Arc::new(expr)), array: None, dynamic: false })),
+                    (Some(text), Some(expr)) => {
+                        Some(Arc::new(Formula { text, expr: Some(Arc::new(expr)), array: None, dynamic: false, legacy: false }))
+                    }
                     _ => {
                         report.warn("Some SYLK formulas could not be imported; their cached values were kept");
                         None
@@ -511,7 +513,7 @@ mod write_additional_tests {
         let mut wb = Workbook::new();
         let at = CellRef::new(0, 0);
         let mut cell = gridcraft_model::Cell::value(Value::Number(7.0));
-        cell.formula = Some(Arc::new(Formula { text: "invalid(".into(), expr: None, array: None, dynamic: false }));
+        cell.formula = Some(Arc::new(Formula { text: "invalid(".into(), expr: None, array: None, dynamic: false, legacy: false }));
         wb.sheet_mut(0).unwrap().cells.set(at, cell);
         let bytes = write_sylk(&wb, 0).unwrap();
         assert!(!std::str::from_utf8(&bytes).unwrap().lines().any(|line| line.starts_with("C;") && line.contains(";E")));

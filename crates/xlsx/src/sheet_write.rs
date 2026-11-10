@@ -80,7 +80,8 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
         .spill_ranges
         .iter()
         .filter(|(a, r)| {
-            !r.is_single() && sheet.cells.get(**a).is_some_and(|c| c.py.is_some() || c.formula.as_ref().is_some_and(|f| f.array.is_none()))
+            !r.is_single()
+                && sheet.cells.get(**a).is_some_and(|c| c.py.is_some() || c.formula.as_ref().is_some_and(|f| f.array.is_none() && !f.legacy))
         })
         .map(|(a, r)| (*a, *r))
         .collect();
@@ -814,7 +815,10 @@ fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcr
             let ex = extra.get(&cell_ref);
             let array = dynamic.get(&cell_ref).copied().or_else(|| {
                 let f = cell?.formula.as_ref()?;
-                (f.array.is_none() && crate::array_formula::needs_array(workbook, index, cell_ref, f)).then_some(RangeRef::cell(cell_ref))
+                // A legacy formula is saved as it was read: Excel calculates it with implicit
+                // intersection, as GridCraft did.
+                (f.array.is_none() && !f.legacy && crate::array_formula::needs_array(workbook, index, cell_ref, f))
+                    .then_some(RangeRef::cell(cell_ref))
             });
             write_cell(
                 s,
@@ -989,7 +993,7 @@ fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_
         s.push_str(" cm=\"1\"");
         out.dynamic_arrays = true;
     }
-    let text = formula.map(|f| esc(&crate::fmla::to_file(f))).or_else(|| py_text.map(|t| esc(&t)));
+    let text = formula.map(|f| esc_formula(&crate::fmla::to_file(f))).or_else(|| py_text.map(|t| esc(&t)));
     if let Some(text) = text {
         let t = match &value {
             Value::Text(_) => " t=\"str\"",
@@ -1087,3 +1091,10 @@ pub(crate) const DEFAULT_NOTE_BOX: NoteBox = NoteBox {
     size_pt: Some(DEFAULT_NOTE_SIZE_PT),
 };
 const DEFAULT_NOTE_SIZE_PT: (f64, f64) = (108.0, 59.25);
+
+/// Formula text as `<f>` content: [`esc`], with the quotes of text literals written as `&quot;`
+/// (equivalent XML, read back as the same formula).
+fn esc_formula(text: &str) -> String {
+    let e = esc(text);
+    if e.contains('"') { e.replace('"', "&quot;") } else { e }
+}

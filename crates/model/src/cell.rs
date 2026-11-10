@@ -25,6 +25,13 @@ pub struct Formula {
     /// rewritten in GridCraft start without it, and the writer decides from their shape.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dynamic: bool,
+    /// Read from a file as a legacy formula: neither a dynamic-array formula nor an array formula
+    /// (in .xlsx, an `<f>` without `t="array"` on a cell without `cm`). Excel calculates such a
+    /// formula with implicit intersection and never spills it, and so does the calculation engine.
+    /// The writer saves it without dynamic-array metadata, as it was read. Formulas entered or
+    /// rewritten in GridCraft start without it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub legacy: bool,
 }
 
 impl Formula {
@@ -33,12 +40,12 @@ impl Formula {
     pub fn new(text: &str) -> Formula {
         let body = text.strip_prefix('=').unwrap_or(text);
         match gridcraft_formula::parse(body) {
-            Ok(e) => Formula { text: gridcraft_formula::print(&e), expr: Some(Arc::new(e)), array: None, dynamic: false },
-            Err(_) => Formula { text: body.to_string(), expr: None, array: None, dynamic: false },
+            Ok(e) => Formula { text: gridcraft_formula::print(&e), expr: Some(Arc::new(e)), array: None, dynamic: false, legacy: false },
+            Err(_) => Formula { text: body.to_string(), expr: None, array: None, dynamic: false, legacy: false },
         }
     }
     pub fn from_expr(e: Expr) -> Formula {
-        Formula { text: gridcraft_formula::print(&e), expr: Some(Arc::new(e)), array: None, dynamic: false }
+        Formula { text: gridcraft_formula::print(&e), expr: Some(Arc::new(e)), array: None, dynamic: false, legacy: false }
     }
     /// The parsed expression, re-parsing when no tree is cached.
     pub fn expr(&self) -> Option<Expr> {
@@ -70,12 +77,14 @@ struct SavedFormula {
     array: Option<RangeRef>,
     #[serde(default)]
     dynamic: bool,
+    #[serde(default)]
+    legacy: bool,
 }
 
 impl From<SavedFormula> for Formula {
     fn from(f: SavedFormula) -> Formula {
         let expr = gridcraft_formula::parse(&f.text).ok().map(Arc::new);
-        Formula { text: f.text, expr, array: f.array, dynamic: f.dynamic }
+        Formula { text: f.text, expr, array: f.array, dynamic: f.dynamic, legacy: f.legacy }
     }
 }
 

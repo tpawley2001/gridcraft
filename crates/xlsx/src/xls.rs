@@ -1083,6 +1083,9 @@ impl SheetState<'_> {
                     return;
                 }
                 f.array = array.filter(|r| !r.is_single());
+                // BIFF has no dynamic arrays: every formula that isn't an array formula (even of
+                // one cell) is a legacy formula, calculated with implicit intersection.
+                f.legacy = array.is_none();
                 if let Some(cell) = self.sheet.cells.get_mut(pos) {
                     cell.formula = Some(Arc::new(f));
                 } else {

@@ -621,7 +621,7 @@ fn table_rename(s: &mut Session, p: &Json) -> Result<Json> {
                     o => o,
                 });
                 if let Some(cell) = sh.cells.get_mut(c) {
-                    cell.formula = Some(std::sync::Arc::new(Formula::from_expr(ne)));
+                    cell.formula = Some(std::sync::Arc::new(Formula { legacy: f.legacy, ..Formula::from_expr(ne) }));
                 }
             }
         }
