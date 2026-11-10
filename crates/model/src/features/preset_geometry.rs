@@ -94,6 +94,33 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             vec![m(l, t), ln(r, t), ln(r, b), ln(l, b), PathCommand::Close, m(x1, x1), ln(x1, y4), ln(x4, y4), ln(x4, x1), PathCommand::Close];
         return Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }]);
     }
+    // Sort, collate, offline storage, chart markers and tabs: several straight paths, some only
+    // filled and some only stroked.
+    if let Some(paths) = straight_multipath(&g.preset, wi, hi) {
+        let point = |x: i128, y: i128| (to_i64(x.clamp(l, r)), to_i64(y.clamp(t, b)));
+        return Some(
+            paths
+                .into_iter()
+                .map(|(fill, stroke, segs)| {
+                    let commands = segs
+                        .into_iter()
+                        .map(|s| match s {
+                            Seg::M(x, y) => {
+                                let (x, y) = point(x, y);
+                                PathCommand::MoveTo(x, y)
+                            }
+                            Seg::L(x, y) => {
+                                let (x, y) = point(x, y);
+                                PathCommand::LineTo(x, y)
+                            }
+                            Seg::Z => PathCommand::Close,
+                        })
+                        .collect();
+                    GeometryPath { w, h, fill, stroke, shade: PathShade::Norm, commands }
+                })
+                .collect(),
+        );
+    }
     let pts: Vec<(i128, i128)> = match g.preset.as_str() {
         "rightArrow" => {
             let a1 = adj("adj1", 50000, 100000);
@@ -479,6 +506,73 @@ fn star_points(g: &ShapeGeometry, wi: i128, hi: i128) -> Option<Vec<(i128, i128)
     };
     // Scale guides (`hf`, `vf`) can extend vertices beyond the box.
     Some(pts.into_iter().map(|(x, y)| (x.clamp(0, wi), y.clamp(t, b))).collect())
+}
+
+/// A straight path segment in a multi-path preset: move, line, or close.
+#[derive(Clone, Copy)]
+enum Seg {
+    M(i128, i128),
+    L(i128, i128),
+    Z,
+}
+
+/// One path of a fixed multi-path preset: path box `w`, `h`, fill, stroke, then the segments.
+type FixedPath = (i128, i128, bool, bool, &'static [Seg]);
+
+/// Straight-edged presets drawn with several paths, as `(fill, stroke, segments)` per path in the
+/// definition's order, in the `w` × `h` shape box. Vertices may need clamping into the box.
+fn straight_multipath(preset: &str, w: i128, h: i128) -> Option<Vec<(bool, bool, Vec<Seg>)>> {
+    use Seg::{L, M, Z};
+    const DIAMOND: &[Seg] = &[M(0, 1), L(1, 0), L(2, 1), L(1, 2), Z];
+    const FUNNEL: &[Seg] = &[M(0, 0), L(2, 0), L(1, 2), Z];
+    const MARKER_BOX: FixedPath = (10, 10, true, false, &[M(0, 0), L(0, 10), L(10, 10), L(10, 0), Z]);
+    let fixed: &[FixedPath] = match preset {
+        "flowChartSort" => &[(2, 2, true, false, DIAMOND), (2, 2, false, true, &[M(0, 1), L(2, 1)]), (2, 2, false, true, DIAMOND)],
+        "flowChartCollate" => &[(2, 2, true, true, &[M(0, 0), L(2, 0), L(1, 1), L(2, 2), L(0, 2), L(1, 1), Z])],
+        "flowChartOfflineStorage" => &[(2, 2, true, false, FUNNEL), (5, 5, false, true, &[M(2, 4), L(3, 4)]), (2, 2, false, true, FUNNEL)],
+        "chartPlus" => &[(10, 10, false, true, &[M(5, 0), L(5, 10), M(0, 5), L(10, 5)]), MARKER_BOX],
+        "chartX" => &[(10, 10, false, true, &[M(0, 0), L(10, 10), M(0, 10), L(10, 0)]), MARKER_BOX],
+        "chartStar" => &[(10, 10, false, true, &[M(0, 0), L(10, 10), M(0, 10), L(10, 0), M(5, 0), L(5, 10)]), MARKER_BOX],
+        "squareTabs" | "cornerTabs" => {
+            // `dx` is a twentieth of the box diagonal (`mod w h 0`), truncated.
+            let dx = ((w as f64).hypot(h as f64) / 20.0) as i128;
+            let (x1, y1) = (w - dx, h - dx);
+            let tabs = if preset == "squareTabs" {
+                [
+                    vec![M(0, 0), L(dx, 0), L(dx, dx), L(0, dx), Z],
+                    vec![M(0, y1), L(dx, y1), L(dx, h), L(0, h), Z],
+                    vec![M(x1, 0), L(w, 0), L(w, dx), L(x1, dx), Z],
+                    vec![M(x1, y1), L(w, y1), L(w, h), L(x1, h), Z],
+                ]
+            } else {
+                [
+                    vec![M(0, 0), L(dx, 0), L(0, dx), Z],
+                    vec![M(0, y1), L(dx, h), L(0, h), Z],
+                    vec![M(x1, 0), L(w, 0), L(w, dx), Z],
+                    vec![M(w, y1), L(w, h), L(x1, h), Z],
+                ]
+            };
+            return Some(tabs.into_iter().map(|segs| (true, true, segs)).collect());
+        }
+        _ => return None,
+    };
+    let scale = |v: i128, size: i128, path: i128| v.saturating_mul(size).checked_div(path).unwrap_or(0);
+    Some(
+        fixed
+            .iter()
+            .map(|&(pw, ph, fill, stroke, segs)| {
+                let segs = segs
+                    .iter()
+                    .map(|&s| match s {
+                        M(x, y) => M(scale(x, w, pw), scale(y, h, ph)),
+                        L(x, y) => L(scale(x, w, pw), scale(y, h, ph)),
+                        Z => Z,
+                    })
+                    .collect();
+                (fill, stroke, segs)
+            })
+            .collect(),
+    )
 }
 
 /// Explosion 1 (`irregularSeal1`): a fixed 24-point polygon in a 21600 × 21600 path box.
