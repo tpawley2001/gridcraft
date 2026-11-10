@@ -121,6 +121,9 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
                 .collect(),
         );
     }
+    if let Some(paths) = arc_flowchart_paths(&g.preset, w, h) {
+        return Some(paths);
+    }
     let pts: Vec<(i128, i128)> = match g.preset.as_str() {
         "rightArrow" => {
             let a1 = adj("adj1", 50000, 100000);
@@ -369,6 +372,93 @@ fn flowchart_polygon(preset: &str) -> Option<FixedPolygon> {
         "flowChartOffpageConnector" => (10, 10, &[(0, 0), (10, 0), (10, 8), (5, 10), (0, 8)]),
         _ => return None,
     })
+}
+
+/// One step of an arc-based preset path: `M`/`L` points and `A` radii (`wR`, `hR`) are in the
+/// shape box; `A` angles are `stAng`, `swAng` in 60000ths of a degree.
+enum ArcSeg {
+    M(i128, i128),
+    L(i128, i128),
+    A(i128, i128, i64, i64),
+    Z,
+}
+
+/// Flowchart presets built from `a:arcTo` (§20.1.9.3) and lines: one path per `<path>` of the
+/// definition, or `None` for another preset. `w`, `h` are positive.
+fn arc_flowchart_paths(preset: &str, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    use ArcSeg::{A, L, M, Z};
+    let (wi, hi) = (i128::from(w), i128::from(h));
+    let (hc, vc) = (wi / 2, hi / 2);
+    let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
+    let (cd4, cd2, cd34) = (5_400_000, 10_800_000, 16_200_000);
+    // A point or radius in a `pw` × `ph` path box, scaled to the shape box.
+    let sx = |x: i128, pw: i128| md(wi, x, pw);
+    let sy = |y: i128, ph: i128| md(hi, y, ph);
+    // `cos wd2 2700000`, `sin hd2 2700000`: the 45° point of the inscribed ellipse.
+    let idx = (hc as f64 * std::f64::consts::FRAC_PI_4.cos()) as i128;
+    let idy = (vc as f64 * std::f64::consts::FRAC_PI_4.sin()) as i128;
+    let ellipse = || vec![M(0, vc), A(hc, vc, cd2, cd4), A(hc, vc, cd34, cd4), A(hc, vc, 0, cd4), A(hc, vc, cd4, cd4), Z];
+    // (fill, stroke, segments) per path.
+    let paths: Vec<(bool, bool, Vec<ArcSeg>)> = match preset {
+        "flowChartMagneticDisk" => {
+            let (y1, y5, rx, ry) = (sy(1, 6), sy(5, 6), sx(3, 6), sy(1, 6));
+            let outline = || vec![M(0, y1), A(rx, ry, cd2, cd2), L(wi, y5), A(rx, ry, 0, cd2), Z];
+            vec![(true, false, outline()), (false, true, vec![M(wi, y1), A(rx, ry, 0, cd2)]), (false, true, outline())]
+        }
+        "flowChartMagneticDrum" => {
+            let (x1, x5, rx, ry) = (sx(1, 6), sx(5, 6), sx(1, 6), sy(3, 6));
+            let outline = || vec![M(x1, 0), L(x5, 0), A(rx, ry, cd34, cd2), L(x1, hi), A(rx, ry, cd4, cd2), Z];
+            vec![(true, false, outline()), (false, true, vec![M(x5, hi), A(rx, ry, cd4, cd2)]), (false, true, outline())]
+        }
+        "flowChartMagneticTape" => {
+            // `at2 w h`: the sweep from 0° back to the box's diagonal.
+            let ang1 = ((h as f64).atan2(w as f64).to_degrees() * 60000.0) as i64;
+            let ib = vc.saturating_add(idy);
+            let segs = vec![M(hc, hi), A(hc, vc, cd4, cd4), A(hc, vc, cd2, cd4), A(hc, vc, cd34, cd4), A(hc, vc, 0, ang1), L(wi, ib), L(wi, hi), Z];
+            vec![(true, true, segs)]
+        }
+        "flowChartDisplay" => {
+            let segs = vec![M(0, sy(3, 6)), L(sx(1, 6), 0), L(sx(5, 6), 0), A(sx(1, 6), sy(3, 6), cd34, cd2), L(sx(1, 6), hi), Z];
+            vec![(true, true, segs)]
+        }
+        "flowChartConnector" => vec![(true, true, ellipse())],
+        "flowChartOr" => vec![(true, false, ellipse()), (false, true, vec![M(hc, 0), L(hc, hi), M(0, vc), L(wi, vc)]), (false, true, ellipse())],
+        "flowChartSummingJunction" => {
+            let (il, ir, it, ib) = (hc - idx, hc.saturating_add(idx), vc - idy, vc.saturating_add(idy));
+            vec![(true, false, ellipse()), (false, true, vec![M(il, it), L(ir, ib), M(ir, it), L(il, ib)]), (false, true, ellipse())]
+        }
+        "flowChartOnlineStorage" => {
+            let (rx, ry) = (sx(1, 6), sy(3, 6));
+            let segs = vec![M(sx(1, 6), 0), L(wi, 0), A(rx, ry, cd34, -cd2), L(sx(1, 6), hi), A(rx, ry, cd4, cd2), Z];
+            vec![(true, true, segs)]
+        }
+        "flowChartPunchedTape" => {
+            let (rx, ry) = (sx(5, 20), sy(2, 20));
+            let segs = vec![M(0, sy(2, 20)), A(rx, ry, cd2, -cd2), A(rx, ry, cd2, cd2), L(wi, sy(18, 20)), A(rx, ry, 0, -cd2), A(rx, ry, 0, cd2), Z];
+            vec![(true, true, segs)]
+        }
+        _ => return None,
+    };
+    // Every point and radius is pinned into the box.
+    let x = |v: i128| i64::try_from(v.clamp(0, wi)).unwrap_or(w);
+    let y = |v: i128| i64::try_from(v.clamp(0, hi)).unwrap_or(h);
+    Some(
+        paths
+            .into_iter()
+            .map(|(fill, stroke, segs)| {
+                let commands = segs
+                    .into_iter()
+                    .map(|s| match s {
+                        M(px, py) => PathCommand::MoveTo(x(px), y(py)),
+                        L(px, py) => PathCommand::LineTo(x(px), y(py)),
+                        A(w_r, h_r, st_ang, sw_ang) => PathCommand::ArcTo { w_r: x(w_r), h_r: y(h_r), st_ang, sw_ang },
+                        Z => PathCommand::Close,
+                    })
+                    .collect();
+                GeometryPath { w, h, fill, stroke, shade: PathShade::Norm, commands }
+            })
+            .collect(),
+    )
 }
 
 /// A guide factor: `*/ r n 100000` for `F(n)`, `cos r a` for `T(a)` with `a` in degrees.
