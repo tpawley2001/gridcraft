@@ -77,7 +77,8 @@ fn preset_survives_xlsx_round_trip() {
 fn gallery_categories_follow_excel_order() {
     let mut s = session();
     let names: Vec<String> = gallery(&mut s).iter().map(|c| c["name"].as_str().unwrap().to_string()).collect();
-    let order = ["Lines", "Rectangles", "Basic Shapes", "Block Arrows", "Equation Shapes", "Flowchart", "Stars and Banners", "Callouts"];
+    let order =
+        ["Lines", "Rectangles", "Basic Shapes", "Block Arrows", "Equation Shapes", "Flowchart", "Stars and Banners", "Callouts", "Action Buttons"];
     let pos: Vec<usize> = names.iter().map(|n| order.iter().position(|o| o == n).unwrap_or_else(|| panic!("unknown category {n}"))).collect();
     assert!(pos.windows(2).all(|w| w[0] < w[1]), "categories out of order: {names:?}");
     // Presets drawn today, in the category the spec puts them.
