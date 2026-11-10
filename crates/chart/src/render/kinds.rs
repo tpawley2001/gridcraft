@@ -1,3 +1,5 @@
+use gridcraft_model::{OfPie, OfPieSplit};
+
 use super::frame::{Bx, CatAxis, ValAxis, frame, on, value_range};
 use super::legend::{cat_label, point_color};
 use super::{
@@ -261,6 +263,136 @@ pub(super) fn pie(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx, inne
         ctx.text(x, y, &t, LABEL_SIZE, c, (HAlign::Center, VAlign::Middle));
     }
 }
+
+/// Which points go to the second plot of a pie of pie or bar of pie: `true` at index `j` moves
+/// point `j` there. Auto takes the last third of the points (rounded up), as Excel draws it.
+fn second_plot_points(vals: &[f64], total: f64, split: &OfPieSplit) -> Vec<bool> {
+    let n = vals.len();
+    let last = |k: usize| -> Vec<bool> { (0..n).map(|j| j >= n.saturating_sub(k)).collect() };
+    match split {
+        OfPieSplit::Auto => last(n.div_ceil(3)),
+        OfPieSplit::Position(k) => last(if k.is_finite() && *k > 0.0 { k.round().min(n as f64) as usize } else { 0 }),
+        OfPieSplit::Value(limit) => vals.iter().map(|v| v < limit).collect(),
+        OfPieSplit::Percent(limit) => vals.iter().map(|v| v / total * 100.0 < *limit).collect(),
+        OfPieSplit::Custom(pts) => {
+            let mut out = vec![false; n];
+            for p in pts {
+                if let Some(x) = usize::try_from(*p).ok().and_then(|i| out.get_mut(i)) {
+                    *x = true;
+                }
+            }
+            out
+        }
+    }
+}
+
+/// Excel's pie of pie and bar of pie: the first series' points that stay make a pie on the left
+/// with one combined slice (the sum of the moved points, the next palette colour) centred at
+/// 3 o'clock; the moved points make a second pie, or one stacked column with the first moved point
+/// on top, `gap_width`% of the pie's radius to the right, `second_size`% of the pie's size, joined
+/// to the combined slice by thin grey series lines.
+pub(super) fn of_pie(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx, bar: bool) {
+    let Some(s) = data.series.first() else { return };
+    let vals: Vec<f64> = s.values.iter().take(MAX_CATS).map(|v| v.map(f64::abs).unwrap_or(0.0)).collect();
+    let total: f64 = vals.iter().sum();
+    if !(total.is_finite() && total > 0.0) {
+        return;
+    }
+    let default = OfPie::default();
+    let o = chart.of_pie.as_ref().unwrap_or(&default);
+    let moved = second_plot_points(&vals, total, &o.split);
+    let second: Vec<(usize, f64)> = vals.iter().copied().enumerate().filter(|(j, _)| moved.get(*j) == Some(&true)).collect();
+    let rest: f64 = second.iter().map(|(_, v)| *v).sum();
+    let gap = f32::from(o.gap_width.min(500)) / 100.0;
+    let size = f32::from(o.second_size.clamp(5, 200)) / 100.0;
+    // Width of the second plot in pie radii: a pie's diameter, or a column a third of the pie's diameter wide.
+    let second_w = if bar { size * 2.0 / 3.0 } else { size * 2.0 };
+    let r = 0.92 * (area.h / 2.0).min(area.h / (2.0 * size)).min(area.w / (2.0 + gap + second_w));
+    if !(r.is_finite() && r >= 2.0) {
+        return;
+    }
+    let left = area.cx() - r * (2.0 + gap + second_w) / 2.0;
+    let (cx, cy) = (left + r, area.cy());
+    let ring = Ring { cx, cy, outer: r, inner: 0.0, stroke: Some((WHITE, 1.5)) };
+    let value = |j: usize| s.values.get(j).copied().flatten().unwrap_or(0.0);
+    // Value labels as (x, y, value, room, fill), placed once every slice is drawn.
+    let mut labels: Vec<(f32, f32, f64, f32, Rgba)> = Vec::new();
+    // The combined slice is centred at 3 o'clock; the points that stay run clockwise from its end.
+    let quarter = TAU / 4.0;
+    let combined = (rest / total) as f32 * TAU;
+    let c0 = quarter - combined / 2.0;
+    let mut a = c0 + combined;
+    for (j, v) in vals.iter().enumerate() {
+        if moved.get(j) == Some(&true) {
+            continue;
+        }
+        let sweep = (*v / total) as f32 * TAU;
+        if sweep > 1e-4 {
+            let fill = point_color(data, j);
+            wedge(ctx, &ring, a, sweep, fill);
+            let mid = a + sweep / 2.0;
+            labels.push((cx + r * 0.65 * mid.sin(), cy - r * 0.65 * mid.cos(), value(j), sweep * r * 0.65, fill));
+        }
+        a += sweep;
+    }
+    if combined > 1e-4 {
+        let fill = point_color(data, vals.len());
+        wedge(ctx, &ring, c0, combined, fill);
+        labels.push((cx + r * 0.65, cy, rest, combined * r * 0.65, fill));
+    }
+    if rest.is_finite() && rest > 0.0 {
+        let x2 = cx + r + gap * r;
+        // The second plot's top and bottom, where the series lines end.
+        let (top, bottom) = if bar {
+            let (bw, bh) = (second_w * r, size * 2.0 * r);
+            let mut y = cy - bh / 2.0;
+            for (j, v) in &second {
+                let h = (*v / rest) as f32 * bh;
+                if h > 0.0 {
+                    let fill = point_color(data, *j);
+                    ctx.rect(x2, y, bw, h, fill, Some((WHITE, 1.5)));
+                    labels.push((x2 + bw / 2.0, y + h / 2.0, value(*j), h.max(bw), fill));
+                }
+                y += h;
+            }
+            ([x2, cy - bh / 2.0], [x2, cy + bh / 2.0])
+        } else {
+            let r2 = size * r;
+            let c2 = x2 + r2;
+            let ring2 = Ring { cx: c2, cy, outer: r2, inner: 0.0, stroke: Some((WHITE, 1.5)) };
+            // Mirrors the combined slice: the moved points fan out from 9 o'clock, facing the pie.
+            let mut a2 = 3.0 * quarter - combined / 2.0;
+            for (j, v) in &second {
+                let sweep = (*v / rest) as f32 * TAU;
+                if sweep > 1e-4 {
+                    let fill = point_color(data, *j);
+                    wedge(ctx, &ring2, a2, sweep, fill);
+                    let mid = a2 + sweep / 2.0;
+                    labels.push((c2 + r2 * 0.65 * mid.sin(), cy - r2 * 0.65 * mid.cos(), value(*j), sweep * r2 * 0.65, fill));
+                }
+                a2 += sweep;
+            }
+            ([c2, cy - r2], [c2, cy + r2])
+        };
+        if o.series_lines && combined > 1e-4 {
+            let edge = |ang: f32| [cx + r * ang.sin(), cy - r * ang.cos()];
+            ctx.line(vec![edge(c0), top], SERIES_LINE, 0.75);
+            ctx.line(vec![edge(c0 + combined), bottom], SERIES_LINE, 0.75);
+        }
+    }
+    if chart.data_labels && vals.len() <= MAX_LABELS {
+        let f = Fmt::new(&s.number_format);
+        for (x, y, v, room, fill) in labels {
+            let t = f.format(v, None);
+            if ctx.tw(&t, LABEL_SIZE) <= room && room >= LABEL_SIZE {
+                ctx.text(x, y, &t, LABEL_SIZE, on(fill), (HAlign::Center, VAlign::Middle));
+            }
+        }
+    }
+}
+
+/// Series lines of a pie of pie or bar of pie: thin and grey.
+const SERIES_LINE: Rgba = [0x59, 0x59, 0x59, 0xFF];
 
 /// Excel's doughnut: every series is one concentric ring, the first series innermost (measured in
 /// Excel: ring outer radii ≈0.83, 0.92 and 1.0 of the plot radius for series 1, 2 and 3). The hole

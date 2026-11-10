@@ -468,6 +468,7 @@ fn sample() -> Workbook {
         },
     });
     let base_chart = Chart {
+        of_pie: None,
         alt: String::new(),
         theme_override: None,
         hidden: false,

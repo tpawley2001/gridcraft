@@ -29,6 +29,7 @@ fn shape(kind: ShapeKind, text: &str, alt: &str) -> Shape {
 
 fn waterfall(alt: &str) -> Chart {
     Chart {
+        of_pie: None,
         theme_override: None,
         hidden: false,
         alt: alt.into(),

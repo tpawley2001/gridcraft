@@ -225,6 +225,7 @@ fn added_chart_keeps_control_anchor() {
     let (mut wb, _) = read_xlsx(&package(2, false)).unwrap();
     let sheet = Arc::make_mut(&mut wb.sheets[0]);
     sheet.charts.push(Chart {
+        of_pie: None,
         alt: String::new(),
         theme_override: None,
         hidden: false,

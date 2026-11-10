@@ -21,7 +21,7 @@ mod trend;
 
 use cartesian::{cartesian, scatter};
 use frame::{Bx, axis_titles, chart_title};
-use kinds::{box_whisker, doughnut, funnel, histogram, pie, radar, stock, treemap, waterfall};
+use kinds::{box_whisker, doughnut, funnel, histogram, of_pie, pie, radar, stock, treemap, waterfall};
 use legend::draw_legend;
 pub use legend::{Swatch, legend_entries};
 use surface::surface;
@@ -242,6 +242,8 @@ fn draw_kind(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
     match chart.kind {
         Pie => pie(ctx, chart, data, area, 0.0, false),
         Doughnut => doughnut(ctx, chart, data, area),
+        PieOfPie => of_pie(ctx, chart, data, area, false),
+        BarOfPie => of_pie(ctx, chart, data, area, true),
         Sunburst => pie(ctx, chart, data, area, 0.2, true),
         Treemap => treemap(ctx, chart, data, area),
         Funnel => funnel(ctx, chart, data, area),

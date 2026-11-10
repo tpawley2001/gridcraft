@@ -663,6 +663,8 @@ pub fn chart_kind(t: &str, sub: &str) -> ChartKind {
         ("line", "markers") => ChartKind::LineMarkers,
         ("line", "stacked") => ChartKind::LineStacked,
         ("line", _) => ChartKind::Line,
+        ("pie", "pieOfPie") => ChartKind::PieOfPie,
+        ("pie", "barOfPie") => ChartKind::BarOfPie,
         ("pie", _) => ChartKind::Pie,
         ("doughnut", _) => ChartKind::Doughnut,
         ("area", "stacked") => ChartKind::AreaStacked,
@@ -887,6 +889,8 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
         }
     });
     let chart = Chart {
+        // A new pie of pie or bar of pie gets Excel's settings: auto split, gap 100, second plot 75%, series lines.
+        of_pie: matches!(kind, ChartKind::PieOfPie | ChartKind::BarOfPie).then(gridcraft_model::OfPie::default),
         alt: String::new(),
         theme_override: None,
         hidden: false,
@@ -902,10 +906,23 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
         },
         title,
         series,
-        legend: if matches!(kind, ChartKind::Pie | ChartKind::Doughnut) { LegendPos::Right } else { LegendPos::Bottom },
+        legend: if matches!(kind, ChartKind::Pie | ChartKind::PieOfPie | ChartKind::BarOfPie | ChartKind::Doughnut) {
+            LegendPos::Right
+        } else {
+            LegendPos::Bottom
+        },
         data_labels: false,
         data_table: None,
-        gridlines: !matches!(kind, ChartKind::Pie | ChartKind::Doughnut | ChartKind::Treemap | ChartKind::Sunburst | ChartKind::Funnel),
+        gridlines: !matches!(
+            kind,
+            ChartKind::Pie
+                | ChartKind::PieOfPie
+                | ChartKind::BarOfPie
+                | ChartKind::Doughnut
+                | ChartKind::Treemap
+                | ChartKind::Sunburst
+                | ChartKind::Funnel
+        ),
         style: 1,
         hole_size: 75,
         first_slice_angle: 0,
@@ -955,6 +972,9 @@ fn chart_set(s: &mut Session, p: &Json) -> Result<Json> {
         let Some(c) = sh.charts.get_mut(ci) else { return Ok(Json::Null) };
         if let Some(t) = str_param(p, "type") {
             c.kind = chart_kind(t, str_param(p, "subtype").unwrap_or(""));
+            if matches!(c.kind, ChartKind::PieOfPie | ChartKind::BarOfPie) && c.of_pie.is_none() {
+                c.of_pie = Some(gridcraft_model::OfPie::default());
+            }
             if !c.supports_data_table() {
                 c.data_table = None;
             }

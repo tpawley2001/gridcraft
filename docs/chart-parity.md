@@ -1,6 +1,6 @@
 # Chart parity
 
-> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-11-10 · **Change:** minor (G0244: 3-D surface, wireframe 3-D surface, contour and wireframe contour open, draw, print and save; earlier: Analysis ToolPak Regression Residual, Line Fit and Normal Probability plots; earlier: chart-data-table keys pass the series index to the shared combo plot-kind rule, restoring compilation after #1150; earlier: Analysis ToolPak chart output for Histogram, Moving Average and Exponential Smoothing; doughnut charts: every series is a concentric ring, the first series innermost; hole size and first slice angle kept; rotated slices cover their own sweep; legend names categories; earlier: charts resize from eight handles, chart data tables, legend keys and borders, native XLSX round-trip and print/PDF; earlier: selected chart source outlines stay beneath floating objects) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-11-10 · **Change:** minor (pie of pie and bar of pie: opened, drawn, printed and saved as `c:ofPieChart` with their split settings; earlier: G0244: 3-D surface, wireframe 3-D surface, contour and wireframe contour open, draw, print and save; earlier: Analysis ToolPak Regression Residual, Line Fit and Normal Probability plots; earlier: chart-data-table keys pass the series index to the shared combo plot-kind rule, restoring compilation after #1150; earlier: Analysis ToolPak chart output for Histogram, Moving Average and Exponential Smoothing; doughnut charts: every series is a concentric ring, the first series innermost; hole size and first slice angle kept; rotated slices cover their own sweep; legend names categories; earlier: charts resize from eight handles, chart data tables, legend keys and borders, native XLSX round-trip and print/PDF; earlier: selected chart source outlines stay beneath floating objects) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's chart types and chart elements against GridCraft. Part of
 [target-app-parity.md](target-app-parity.md). **Breadth ~50%, ready ~30%, 40–60 h** (estimated).
@@ -18,7 +18,7 @@ Sources: `crates/model/src/features.rs` (`ChartKind`, `Chart`, `Series`), `crate
 | Column | clustered, stacked, 100% stacked, 3-D clustered/stacked/100%, 3-D column | 3 of 7 | no 3-D |
 | Bar | clustered, stacked, 100%, 3-D ×3 | 3 of 6 | no 3-D |
 | Line | line, stacked, 100% stacked, with markers ×3, 3-D line | 3 of 7 (line, with markers, stacked) | no 100% stacked; smoothed lines landed (#62) |
-| Pie | pie, 3-D pie, pie of pie, bar of pie, doughnut | 2 of 5 (pie, doughnut) | no exploded, pie of pie, bar of pie; doughnut draws every series as a concentric ring, first series innermost; its legend names categories, matching Excel's default vary-by-category colours |
+| Pie | pie, 3-D pie, pie of pie, bar of pie, doughnut | 4 of 5 (pie, pie of pie, bar of pie, doughnut) | no exploded or 3-D pie; pie of pie and bar of pie draw the second plot, combined slice and series lines, and keep gap width, split (auto, position, value, percent, custom) and second plot size on XLSX round-trip; doughnut draws every series as a concentric ring, first series innermost; its legend names categories, matching Excel's default vary-by-category colours |
 | Area | area, stacked, 100%, 3-D ×3 | 3 of 6 | no 3-D; 100% stacked drawn as shares of each category's total and kept as `percentStacked` in XLSX |
 | X Y (scatter) | markers, smooth lines (±markers), straight lines (±markers) | 2 of 5 | no smooth lines |
 | Bubble | bubble, 3-D bubble | 1 of 2 | |
@@ -101,7 +101,7 @@ are (#1686). Such series get no `numCache`/`strCache` on save (#1690).
 1. Preserve unmodelled chart XML on round-trip (keep the original part, patch only edited fields): 6–10 h.
 2. Axis options, label options, gridlines per axis, legend formatting: 10–15 h.
 3. Error bars; Format Trendline pane (trendlines landed): 4–6 h.
-4. Per-element Format pane parity, smoothed lines, exploded pie, pie/bar of pie, 100% variants: 8–12 h.
+4. Per-element Format pane parity, smoothed lines, exploded pie, 100% variants: 8–12 h.
 5. 3-D column/bar/pie/area, Pareto: 6–10 h.
 6. Chart sheets, templates and PivotChart field buttons: 5–8 h. Filled map: owner decision on boundary data.
 
@@ -109,6 +109,7 @@ are (#1686). Such series get no `numCache`/`strCache` on save (#1690).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-10 | minor | Pie of pie and bar of pie open as their own kinds instead of a plain pie, draw and print the second pie or stacked bar with the combined slice and series lines, save back as `c:ofPieChart` with gap width, split and second plot size, and are offered in Insert ▸ Pie and All Charts. Pie row 2 of 5 → 4 of 5. |
 | 2026-11-10 | minor | G0244: the four surface chart types are chart kinds: read from and written to XLSX (`c:wireframe`, three axis ids, `c:serAx`, `c:view3D`), inserted from the ribbon, All Charts and Change Chart Type, and drawn on screen, in print and PDF: contour as value bands with a band legend, 3-D surface as a projected grid with floor, walls and three labelled axes. |
 | 2026-11-09 | minor | Analysis ToolPak Regression adds Residual, Line Fit and Normal Probability plots as XY scatter charts stacked right of the report. No readiness score change. |
 | 2026-11-07 | minor | Chart-data-table keys use the shared plot-kind helper with their series index after #1150. A focused regression checks the first combo series uses a column key and later series use line keys. No readiness score change. |

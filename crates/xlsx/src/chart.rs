@@ -5,7 +5,9 @@ use std::fmt::Write as _;
 
 use gridcraft_core::{RangeRef, Value, category_levels};
 use gridcraft_formula::{Expr, SheetSel};
-use gridcraft_model::{AxisScale, Chart, ChartKind, ChartScale, Color, DefinedName, LegendPos, LineDash, Series, Trendline, TrendlineKind, Workbook};
+use gridcraft_model::{
+    AxisScale, Chart, ChartKind, ChartScale, Color, DefinedName, LegendPos, LineDash, OfPie, OfPieSplit, Series, Trendline, TrendlineKind, Workbook,
+};
 
 use crate::drawing::{dml_color, srgb};
 use crate::xml::{El, esc, num};
@@ -37,7 +39,15 @@ fn group_kind(g: &El) -> Option<ChartKind> {
                 if !group_markers || (all_none && g.kids("ser").next().is_some()) { ChartKind::Line } else { ChartKind::LineMarkers }
             }
         }
-        "pieChart" | "pie3DChart" | "ofPieChart" => ChartKind::Pie,
+        "pieChart" | "pie3DChart" => ChartKind::Pie,
+        // §21.2.2.128: a missing `ofPieType` is a pie of pie.
+        "ofPieChart" => {
+            if g.child_val("ofPieType") == Some("bar") {
+                ChartKind::BarOfPie
+            } else {
+                ChartKind::PieOfPie
+            }
+        }
         "doughnutChart" => ChartKind::Doughnut,
         "areaChart" | "area3DChart" => {
             if pct {
@@ -295,11 +305,40 @@ pub fn read_chart(root: &El) -> Option<Chart> {
         source: None,
         by_rows: false,
         pivot: root.path(&["pivotSource", "name"]).map(|n| strip_book(n.text.trim()).to_string()).filter(|n| !n.is_empty()),
+        of_pie: plot.child("ofPieChart").map(read_of_pie),
         scale: ChartScale {
             x: if scatter { x_ax.map(read_scale).unwrap_or_default() } else { AxisScale::default() },
             y: y_ax.map(read_scale).unwrap_or_default(),
         },
     })
+}
+
+/// Most points a custom split keeps (a hostile file could list millions).
+const MAX_CUSTOM_SPLIT: usize = 4096;
+
+/// The second plot of a `c:ofPieChart` (§21.2.2.126): gap width, split, second plot size and
+/// series lines. Values outside the schema's ranges are clamped; a split without a usable
+/// `splitPos` is automatic.
+fn read_of_pie(g: &El) -> OfPie {
+    let int = |name: &str| g.child_val(name).and_then(|v| v.trim().parse::<u32>().ok());
+    let pos = g.child_val("splitPos").and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite());
+    let split = match (g.child_val("splitType"), pos) {
+        (Some("cust"), _) => OfPieSplit::Custom(
+            g.child("custSplit")
+                .map(|c| c.kids("secondPiePt").filter_map(|p| p.attr("val")?.trim().parse::<u32>().ok()).take(MAX_CUSTOM_SPLIT).collect())
+                .unwrap_or_default(),
+        ),
+        (Some("pos"), Some(v)) => OfPieSplit::Position(v),
+        (Some("val"), Some(v)) => OfPieSplit::Value(v),
+        (Some("percent"), Some(v)) => OfPieSplit::Percent(v),
+        _ => OfPieSplit::Auto,
+    };
+    OfPie {
+        gap_width: int("gapWidth").unwrap_or(100).min(500) as u16,
+        split,
+        second_size: int("secondPieSize").unwrap_or(75).clamp(5, 200) as u16,
+        series_lines: g.child("serLines").is_some(),
+    }
 }
 
 /// A value axis's bounds, units, log base and orientation. Values that aren't finite, a log base
@@ -337,6 +376,10 @@ enum G {
         markers: bool,
     },
     Pie,
+    /// `c:ofPieChart`: bar of pie when `bar`, else pie of pie.
+    OfPie {
+        bar: bool,
+    },
     Doughnut,
     Area {
         grouping: &'static str,
@@ -365,6 +408,8 @@ fn group_for(k: ChartKind) -> G {
         ChartKind::LineMarkers => G::Line { stacked: false, markers: true },
         ChartKind::LineStacked => G::Line { stacked: true, markers: false },
         ChartKind::Pie => G::Pie,
+        ChartKind::PieOfPie => G::OfPie { bar: false },
+        ChartKind::BarOfPie => G::OfPie { bar: true },
         ChartKind::Doughnut => G::Doughnut,
         ChartKind::Area => G::Area { grouping: "standard" },
         ChartKind::AreaStacked => G::Area { grouping: "stacked" },
@@ -625,7 +670,7 @@ fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String 
     }
     // Trendlines sit between dLbls and the data in CT_LineSer, CT_BarSer, CT_AreaSer,
     // CT_ScatterSer and CT_BubbleSer; pie, radar and surface series have none.
-    if !matches!(g, G::Pie | G::Doughnut | G::Radar | G::Surface { .. }) {
+    if !matches!(g, G::Pie | G::OfPie { .. } | G::Doughnut | G::Radar | G::Surface { .. }) {
         for t in &s.trendlines {
             x.push_str(&trendline_xml(t, wb));
         }
@@ -738,6 +783,7 @@ fn group_xml(g: G, series: &[(usize, &Series)], ch: &Chart, axes: (u32, u32), wb
             if stacked { "stacked" } else { "standard" }
         ),
         G::Pie => format!("<c:pieChart><c:varyColors val=\"1\"/>{sers}{dl}<c:firstSliceAng val=\"{}\"/></c:pieChart>", ch.first_slice_angle % 360),
+        G::OfPie { bar } => of_pie_xml(bar, &sers, &dl, &ch.of_pie.clone().unwrap_or_default()),
         G::Doughnut => format!(
             "<c:doughnutChart><c:varyColors val=\"1\"/>{sers}{dl}<c:firstSliceAng val=\"{}\"/><c:holeSize val=\"{}\"/></c:doughnutChart>",
             ch.first_slice_angle % 360,
@@ -773,6 +819,40 @@ fn ser_axis_xml() -> String {
     format!(
         "<c:serAx><c:axId val=\"{SER_AX}\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"b\"/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"2\"/><c:crosses val=\"autoZero\"/></c:serAx>"
     )
+}
+
+/// `c:ofPieChart` in CT_OfPieChart order: ofPieType, varyColors, ser*, dLbls, gapWidth,
+/// splitType, splitPos, custSplit, secondPieSize, serLines. The split is written only when it
+/// isn't automatic.
+fn of_pie_xml(bar: bool, sers: &str, dl: &str, o: &OfPie) -> String {
+    let mut x = format!(
+        "<c:ofPieChart><c:ofPieType val=\"{}\"/><c:varyColors val=\"1\"/>{sers}{dl}<c:gapWidth val=\"{}\"/>",
+        if bar { "bar" } else { "pie" },
+        o.gap_width.min(500)
+    );
+    let at = |x: &mut String, ty: &str, v: f64| {
+        let v = if v.is_finite() { v } else { 0.0 };
+        let _ = write!(x, "<c:splitType val=\"{ty}\"/><c:splitPos val=\"{}\"/>", num(v));
+    };
+    match &o.split {
+        OfPieSplit::Auto => {}
+        OfPieSplit::Position(v) => at(&mut x, "pos", *v),
+        OfPieSplit::Value(v) => at(&mut x, "val", *v),
+        OfPieSplit::Percent(v) => at(&mut x, "percent", *v),
+        OfPieSplit::Custom(pts) => {
+            x.push_str("<c:splitType val=\"cust\"/><c:custSplit>");
+            for p in pts.iter().take(MAX_CUSTOM_SPLIT) {
+                let _ = write!(x, "<c:secondPiePt val=\"{p}\"/>");
+            }
+            x.push_str("</c:custSplit>");
+        }
+    }
+    let _ = write!(x, "<c:secondPieSize val=\"{}\"/>", o.second_size.clamp(5, 200));
+    if o.series_lines {
+        x.push_str("<c:serLines/>");
+    }
+    x.push_str("</c:ofPieChart>");
+    x
 }
 
 fn title_xml(t: &str) -> String {
@@ -942,7 +1022,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
         s.push_str(&group_xml(primary_g, &all, ch, (1, 2), wb, si));
     }
     match primary_g {
-        G::Pie | G::Doughnut => {}
+        G::Pie | G::OfPie { .. } | G::Doughnut => {}
         G::Scatter { .. } | G::Bubble => {
             s.push_str(&axis_xml(&Ax {
                 cat: false,
