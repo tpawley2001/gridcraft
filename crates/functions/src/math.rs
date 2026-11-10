@@ -125,9 +125,9 @@ fn product(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     num_val(v.iter().product())
 }
 
-/// SUMPRODUCT: non-numeric entries of arrays and multi-cell ranges count as 0, but a scalar
-/// argument holding text (a literal or a single-cell reference) is `#VALUE!` (observed:
-/// `SUMPRODUCT(G1330:G1330,I1330:I1330)` with G1330 = the text "4" is `#VALUE!`).
+/// SUMPRODUCT: non-numeric entries of arrays and ranges (including one-cell ranges) count as 0,
+/// but a literal scalar argument holding text is `#VALUE!` (Microsoft 365 Excel:
+/// `SUMPRODUCT(G30:G30,I30:I30)` with G30 = the text "4" is 0).
 fn sumproduct(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     // A reference is an array even when it is one cell (`SUMPRODUCT(A1:A1,B1:B1)`), so text in it
     // counts as zero; only a literal scalar argument is `#VALUE!` when it is text.
