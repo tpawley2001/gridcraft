@@ -620,6 +620,10 @@ pub struct Series {
     /// (`c:dPt`/`c:explosion`); replaces [`Series::explosion`] for that slice.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub point_explosions: Vec<(u32, u32)>,
+    /// 3-D column/bar: this series' own bar shape (`c:ser/c:shape`): box, cylinder, cone,
+    /// coneToMax, pyramid or pyramidToMax; `None` uses the group's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bar_shape: Option<String>,
 }
 
 fn is_zero_u32(v: &u32) -> bool {

@@ -168,6 +168,7 @@ fn read_series(s: &El) -> Series {
             .filter_map(|d| Some((d.child_val("idx")?.trim().parse::<u32>().ok()?, explosion_val(d)?)))
             .take(MAX_POINT_EXPLOSIONS)
             .collect(),
+        bar_shape: s.child_val("shape").filter(|v| SHAPES.contains(v)).map(str::to_string),
     }
 }
 
@@ -453,6 +454,8 @@ enum G {
     Bar {
         bar: bool,
         grouping: &'static str,
+        /// Written inside `c:bar3DChart`: series may carry their own `c:shape`.
+        three_d: bool,
     },
     Line {
         stacked: bool,
@@ -482,11 +485,11 @@ enum G {
 
 fn group_for(k: ChartKind) -> G {
     match k {
-        ChartKind::ColumnStacked => G::Bar { bar: false, grouping: "stacked" },
-        ChartKind::ColumnStacked100 => G::Bar { bar: false, grouping: "percentStacked" },
-        ChartKind::BarClustered => G::Bar { bar: true, grouping: "clustered" },
-        ChartKind::BarStacked => G::Bar { bar: true, grouping: "stacked" },
-        ChartKind::BarStacked100 => G::Bar { bar: true, grouping: "percentStacked" },
+        ChartKind::ColumnStacked => G::Bar { bar: false, grouping: "stacked", three_d: false },
+        ChartKind::ColumnStacked100 => G::Bar { bar: false, grouping: "percentStacked", three_d: false },
+        ChartKind::BarClustered => G::Bar { bar: true, grouping: "clustered", three_d: false },
+        ChartKind::BarStacked => G::Bar { bar: true, grouping: "stacked", three_d: false },
+        ChartKind::BarStacked100 => G::Bar { bar: true, grouping: "percentStacked", three_d: false },
         ChartKind::Line => G::Line { stacked: false, markers: false },
         ChartKind::LineMarkers => G::Line { stacked: false, markers: true },
         ChartKind::LineStacked => G::Line { stacked: true, markers: false },
@@ -507,7 +510,7 @@ fn group_for(k: ChartKind) -> G {
         ChartKind::Contour => G::Surface { three_d: false, wireframe: false },
         ChartKind::ContourWireframe => G::Surface { three_d: false, wireframe: true },
         // Combo charts start from clustered columns; chartex kinds have their own part.
-        _ => G::Bar { bar: false, grouping: "clustered" },
+        _ => G::Bar { bar: false, grouping: "clustered", three_d: false },
     }
 }
 
@@ -799,6 +802,12 @@ fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String 
             }
         }
     }
+    // CT_BarSer: `c:shape` follows `c:val`; only a 3-D bar group has one (Excel writes none flat).
+    if let G::Bar { three_d: true, .. } = g
+        && let Some(shape) = s.bar_shape.as_deref().filter(|v| SHAPES.contains(v))
+    {
+        let _ = write!(x, "<c:shape val=\"{shape}\"/>");
+    }
     x.push_str("</c:ser>");
     x
 }
@@ -872,7 +881,7 @@ fn group_xml(g: G, series: &[(usize, &Series)], ch: &Chart, axes: (u32, u32), wb
     let dl = dlbls(ch.data_labels);
     let ax = format!("<c:axId val=\"{}\"/><c:axId val=\"{}\"/>", axes.0, axes.1);
     match g {
-        G::Bar { bar, grouping } => {
+        G::Bar { bar, grouping, .. } => {
             let overlap = if grouping == "clustered" { String::new() } else { "<c:overlap val=\"100\"/>".into() };
             format!(
                 "<c:barChart><c:barDir val=\"{}\"/><c:grouping val=\"{grouping}\"/><c:varyColors val=\"0\"/>{sers}{dl}<c:gapWidth val=\"150\"/>{overlap}{ax}</c:barChart>",
@@ -971,13 +980,17 @@ fn in_depth(g: G, v: &Chart3d) -> bool {
 /// in schema order; `None` for groups that have no 3-D form here. A third axis id of `0` means
 /// "no series axis"; the series axis is id 3.
 fn group_3d_xml(g: G, v: &Chart3d, series: &[(usize, &Series)], ch: &Chart, wb: &Workbook, si: usize) -> Option<String> {
+    let g = match g {
+        G::Bar { bar, grouping, .. } => G::Bar { bar, grouping, three_d: true },
+        other => other,
+    };
     let sers: String = series.iter().map(|(i, s)| series_xml(s, *i, g, wb, si)).collect();
     let dl = dlbls(ch.data_labels);
     let depth = in_depth(g, v);
     let ax = format!("<c:axId val=\"1\"/><c:axId val=\"2\"/><c:axId val=\"{}\"/>", if depth { 3 } else { 0 });
     let gap_depth = v.gap_depth.filter(|d| *d <= 500).map(|d| format!("<c:gapDepth val=\"{d}\"/>")).unwrap_or_default();
     Some(match g {
-        G::Bar { bar, grouping } => {
+        G::Bar { bar, grouping, .. } => {
             let shape = v.shape.as_deref().filter(|s| SHAPES.contains(s)).map(|s| format!("<c:shape val=\"{s}\"/>")).unwrap_or_default();
             format!(
                 "<c:bar3DChart><c:barDir val=\"{}\"/><c:grouping val=\"{}\"/><c:varyColors val=\"0\"/>{sers}{dl}<c:gapWidth val=\"150\"/>{gap_depth}{shape}{ax}</c:bar3DChart>",
@@ -1203,7 +1216,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
         let all_round = !all.is_empty() && sec.is_empty() && all.iter().all(|(i, x)| round(*i, x).is_some());
         primary_g = match rounds.first() {
             Some(g) if all_round => *g,
-            _ => G::Bar { bar: false, grouping: "clustered" },
+            _ => G::Bar { bar: false, grouping: "clustered", three_d: false },
         };
         if all_round {
             for g in &rounds {

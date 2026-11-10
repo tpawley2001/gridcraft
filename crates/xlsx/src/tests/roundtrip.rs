@@ -489,6 +489,7 @@ fn sample() -> Workbook {
             trendlines: Vec::new(),
             explosion: 0,
             point_explosions: Vec::new(),
+            bar_shape: None,
         }],
         legend: LegendPos::Bottom,
         data_labels: true,

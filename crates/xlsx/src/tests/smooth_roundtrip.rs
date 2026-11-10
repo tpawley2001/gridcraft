@@ -22,6 +22,7 @@ fn smooth_line_setting_round_trips() {
         trendlines: Vec::new(),
         explosion: 0,
         point_explosions: Vec::new(),
+        bar_shape: None,
     };
     s.charts.push(Chart {
         of_pie: None,

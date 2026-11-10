@@ -730,6 +730,7 @@ pub fn series_from_range(sh: &Sheet, r: RangeRef, by_rows: bool) -> Vec<Series> 
                 trendlines: Vec::new(),
                 explosion: 0,
                 point_explosions: Vec::new(),
+                bar_shape: None,
             });
         }
     } else {
@@ -748,6 +749,7 @@ pub fn series_from_range(sh: &Sheet, r: RangeRef, by_rows: bool) -> Vec<Series> 
                 trendlines: Vec::new(),
                 explosion: 0,
                 point_explosions: Vec::new(),
+                bar_shape: None,
             });
         }
     }

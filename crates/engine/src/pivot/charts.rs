@@ -78,6 +78,7 @@ pub fn chart_series(sheet: &str, origin: CellRef, out: &Output) -> Vec<Series> {
                 trendlines: Vec::new(),
                 explosion: 0,
                 point_explosions: Vec::new(),
+                bar_shape: None,
             })
         })
         .collect()

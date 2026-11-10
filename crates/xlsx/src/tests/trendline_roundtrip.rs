@@ -56,6 +56,7 @@ fn chart(id: u32, kind: ChartKind, trendlines: Vec<Trendline>) -> Chart {
             trendlines,
             explosion: 0,
             point_explosions: Vec::new(),
+            bar_shape: None,
         }],
         legend: LegendPos::Bottom,
         data_labels: false,
