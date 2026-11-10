@@ -544,6 +544,10 @@ pub enum ChartKind {
     LineStacked,
     Pie,
     Doughnut,
+    /// Pie of pie (`c:ofPieChart` with `ofPieType val="pie"`): some points move to a second pie.
+    PieOfPie,
+    /// Bar of pie (`c:ofPieChart` with `ofPieType val="bar"`): some points move to a stacked bar.
+    BarOfPie,
     Area,
     AreaStacked,
     AreaStacked100,
@@ -684,6 +688,43 @@ fn default_hole_size() -> u8 {
     50
 }
 
+/// Which points of a pie of pie or bar of pie go to the second plot (`c:splitType`,
+/// ECMA-376 Part 1 §21.2.2.179, with `c:splitPos` and `c:custSplit`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum OfPieSplit {
+    /// Excel's automatic split: the last third of the points (rounded up).
+    #[default]
+    Auto,
+    /// The last `n` points.
+    Position(f64),
+    /// Points whose value is less than this.
+    Value(f64),
+    /// Points whose share of the total is less than this percentage.
+    Percent(f64),
+    /// These zero-based point indexes.
+    Custom(Vec<u32>),
+}
+
+/// The second plot of a pie of pie or bar of pie (`c:ofPieChart`, §21.2.2.126).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OfPie {
+    /// Gap between the pie and the second plot, as a percentage of the pie's radius (0–500).
+    pub gap_width: u16,
+    pub split: OfPieSplit,
+    /// Size of the second plot as a percentage of the pie's (5–200).
+    pub second_size: u16,
+    /// Series lines from the combined slice to the second plot (`c:serLines`).
+    pub series_lines: bool,
+}
+
+impl Default for OfPie {
+    /// Excel's settings for a new chart and for a file that leaves them out.
+    fn default() -> Self {
+        Self { gap_width: 100, split: OfPieSplit::Auto, second_size: 75, series_lines: true }
+    }
+}
+
 /// A chart's data table (`c:dTable`), independent of the chart legend.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -741,6 +782,9 @@ pub struct Chart {
     /// Fixed axis bounds and units (Format Axis ▸ Bounds/Units); automatic when unset.
     #[serde(default, skip_serializing_if = "ChartScale::is_auto")]
     pub scale: ChartScale,
+    /// Pie of pie / bar of pie second-plot settings; `None` uses [`OfPie::default`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub of_pie: Option<OfPie>,
 }
 
 /// One value axis's scaling: `c:scaling` (min, max, log base, orientation) and the major/minor
@@ -1685,6 +1729,7 @@ mod tests {
     #[test]
     fn chart_without_hole_size_keeps_the_legacy_hole() {
         let chart = Chart {
+            of_pie: None,
             alt: String::new(),
             theme_override: None,
             hidden: false,

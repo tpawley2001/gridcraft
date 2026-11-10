@@ -51,6 +51,7 @@ pub(super) fn insert_pivot_chart(s: &mut Session, p: &Json) -> Result<Json> {
     let pivot_name = pt.name.clone();
     let n = series.len();
     let chart = Chart {
+        of_pie: None,
         alt: String::new(),
         theme_override: None,
         hidden: false,
@@ -66,10 +67,23 @@ pub(super) fn insert_pivot_chart(s: &mut Session, p: &Json) -> Result<Json> {
         },
         title,
         series,
-        legend: if matches!(kind, ChartKind::Pie | ChartKind::Doughnut) { LegendPos::Right } else { LegendPos::Bottom },
+        legend: if matches!(kind, ChartKind::Pie | ChartKind::PieOfPie | ChartKind::BarOfPie | ChartKind::Doughnut) {
+            LegendPos::Right
+        } else {
+            LegendPos::Bottom
+        },
         data_labels: false,
         data_table: None,
-        gridlines: !matches!(kind, ChartKind::Pie | ChartKind::Doughnut | ChartKind::Treemap | ChartKind::Sunburst | ChartKind::Funnel),
+        gridlines: !matches!(
+            kind,
+            ChartKind::Pie
+                | ChartKind::PieOfPie
+                | ChartKind::BarOfPie
+                | ChartKind::Doughnut
+                | ChartKind::Treemap
+                | ChartKind::Sunburst
+                | ChartKind::Funnel
+        ),
         hole_size: 75,
         first_slice_angle: 0,
         style: 1,

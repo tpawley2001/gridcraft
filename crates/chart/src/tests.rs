@@ -7,9 +7,10 @@ use crate::*;
 
 mod budget;
 mod data_table;
+mod of_pie;
 mod surface;
 
-const ALL_KINDS: [ChartKind; 30] = [
+const ALL_KINDS: [ChartKind; 32] = [
     ChartKind::ColumnClustered,
     ChartKind::ColumnStacked,
     ChartKind::ColumnStacked100,
@@ -21,6 +22,8 @@ const ALL_KINDS: [ChartKind; 30] = [
     ChartKind::LineStacked,
     ChartKind::Pie,
     ChartKind::Doughnut,
+    ChartKind::PieOfPie,
+    ChartKind::BarOfPie,
     ChartKind::Area,
     ChartKind::AreaStacked,
     ChartKind::AreaStacked100,
@@ -44,6 +47,7 @@ const ALL_KINDS: [ChartKind; 30] = [
 
 fn chart(kind: ChartKind) -> Chart {
     Chart {
+        of_pie: None,
         alt: String::new(),
         theme_override: None,
         hidden: false,

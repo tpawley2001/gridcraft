@@ -1939,6 +1939,7 @@ fn report_charts(s: &Session, p: &Json, tool: &str, sheet_name: &str, rect: Rang
             .filter(|r| *r < MAX_ROWS)
             .ok_or_else(|| bad(CMD, "the charts don't fit below the report's top row"))?;
         out.push(Chart {
+            of_pie: None,
             alt: String::new(),
             id,
             theme_override: None,

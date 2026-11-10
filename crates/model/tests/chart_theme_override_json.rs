@@ -10,6 +10,7 @@ const B64: &str = "PGE+PC9hPg==";
 
 fn chart() -> Chart {
     Chart {
+        of_pie: None,
         alt: String::new(),
         theme_override: None,
         hidden: false,

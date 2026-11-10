@@ -88,7 +88,12 @@ pub(super) fn insert(app: &mut SheetApp, ui: &mut Ui) {
                         ("100% Stacked Area", "area", "stacked100"),
                     ],
                 ),
-                (Icon::ChartPie, "Pie or Doughnut", "insert.chart.pie", vec![("Pie", "pie", ""), ("Doughnut", "doughnut", "")]),
+                (
+                    Icon::ChartPie,
+                    "Pie or Doughnut",
+                    "insert.chart.pie",
+                    vec![("Pie", "pie", ""), ("Pie of Pie", "pie", "pieOfPie"), ("Bar of Pie", "pie", "barOfPie"), ("Doughnut", "doughnut", "")],
+                ),
             ] {
                 let r = small_button(ui, icon, "", tip, true);
                 control_keytip(app, ui, &r, cid);

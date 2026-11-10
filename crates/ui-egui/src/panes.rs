@@ -200,6 +200,8 @@ fn format_chart(app: &mut SheetApp, ui: &mut Ui) {
                 ("Stacked Area", "area", "stacked"),
                 ("100% Stacked Area", "area", "stacked100"),
                 ("Pie", "pie", ""),
+                ("Pie of Pie", "pie", "pieOfPie"),
+                ("Bar of Pie", "pie", "barOfPie"),
                 ("Doughnut", "doughnut", ""),
                 ("Scatter", "scatter", ""),
                 ("Radar", "radar", ""),
