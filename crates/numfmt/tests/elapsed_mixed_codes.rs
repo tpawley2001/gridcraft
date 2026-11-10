@@ -1,6 +1,7 @@
 //! Elapsed-time codes (`[h]`, `[m]`, `[s]`) mixed with plain codes in one section, against the
 //! results Excel cached in Apache POI's `test-data/spreadsheet/ElapsedFormatTests.xlsx`
-//! (sheet `Tests`: B = format, C = value, A = `=TEXT(C, B)`). The workbook is not committed.
+//! (sheet `Tests`: B = format, C = value, A = `=TEXT(C, B)`), recalculated in Excel 365 (the `s` ... `[hh]`
+//! and `s` ... `[m]` rows changed there; see `elapsed_after_seconds.rs`). The workbook is not committed.
 
 use gridcraft_core::{DateSystem, Value};
 use gridcraft_numfmt::text_function;
@@ -16,8 +17,8 @@ const CASES: &[(&str, f64, &str)] = &[
     ("[hh]:mm:ss.0", V, "75:23:53.4"),
     ("[mm]:ss.0", V, "4523:53.4"),
     ("[ss].000", V, "271433.376"),
-    ("s:m\" @ hour \"[hh]", V, "53:23 @ hour 75"),
-    ("s\" secs and \"[m]\" mins\"", V, "53 secs and 4523 mins"),
+    ("s:m\" @ hour \"[hh]", V, "53:23 @ hour 1293"),
+    ("s\" secs and \"[m]\" mins\"", V, "53 secs and 77581 mins"),
     ("\"It was \"[h]\" [yes, \"h\"] hours and \"mm:ss", V, "It was 75 [yes, 75] hours and 23:53"),
     ("[s]\" [yes, \"ss\"] seconds\"", V, "271433 [yes, 271433] seconds"),
     ("[h]:m:s.000", 0.085_462_962_962_963, "2:3:4.000"),
