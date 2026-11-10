@@ -230,3 +230,19 @@ fn cube_preset_prints_three_shaded_faces_and_its_outline() {
     assert_eq!(strokes.iter().filter(|p| p.ends_with(" h S")).count(), 1, "{strokes:?}");
     assert_eq!(strokes.iter().filter(|p| p.ends_with(" S") && !p.ends_with(" h S")).count(), 2, "{strokes:?}");
 }
+
+#[test]
+fn wedge_callout_prints_its_tail_below_the_box() {
+    let mut s = shape_session(ShapeKind::Rectangle, None);
+    let rect = red_paths(&mut s);
+    let mut s = shape_session(ShapeKind::Rectangle, preset("wedgeRectCallout"));
+    let p = red_paths(&mut s);
+    assert_eq!(p.len(), 1, "{p:?}");
+    assert_eq!(p[0].len(), 16, "{p:?}");
+    // PDF y grows upward: the box's bottom edge is its lowest y, and the tail tip lies an eighth
+    // of the printed box height below it.
+    let bottom = rect[0].iter().map(|v| v.1).fold(f32::INFINITY, f32::min);
+    let top = rect[0].iter().map(|v| v.1).fold(f32::NEG_INFINITY, f32::max);
+    let lowest = p[0].iter().map(|v| v.1).fold(f32::INFINITY, f32::min);
+    assert!((bottom - lowest - (top - bottom) / 8.0).abs() < 0.5, "box {bottom}..{top}, tip {lowest}: {p:?}");
+}

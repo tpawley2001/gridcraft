@@ -136,6 +136,9 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
     if let Some(paths) = symbol_paths(g, w, h) {
         return Some(paths);
     }
+    if let Some(paths) = wedge_callout(g, w, h) {
+        return Some(paths);
+    }
     let pts: Vec<(i128, i128)> = match g.preset.as_str() {
         "rightArrow" => {
             let a1 = adj("adj1", 50000, 100000);
@@ -2075,4 +2078,109 @@ fn symbol_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> 
         _ => return None,
     };
     Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }])
+}
+
+/// Wedge callouts (`wedgeRectCallout`, `wedgeRoundRectCallout`, `wedgeEllipseCallout`), or `None`
+/// for another preset. The body stays in the box; the tail tip is where `adj1`/`adj2` put it,
+/// relative to the centre, so it is usually outside the box. The tip is bounded to ten box sizes
+/// from the centre.
+fn wedge_callout(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    if !matches!(g.preset.as_str(), "wedgeRectCallout" | "wedgeRoundRectCallout" | "wedgeEllipseCallout") {
+        return None;
+    }
+    let (wi, hi) = (i128::from(w), i128::from(h));
+    let (l, t, r, b, hc, vc) = (0, 0, wi, hi, wi / 2, hi / 2);
+    let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
+    let a1 = adjust(g, "adj1", -20833).clamp(-1_000_000, 1_000_000);
+    let a2 = adjust(g, "adj2", 62500).clamp(-1_000_000, 1_000_000);
+    // Saturating, not pinned into the box: the tail tip may lie outside it.
+    let to_i64 = |v: i128| i64::try_from(v).unwrap_or(if v < 0 { i64::MIN } else { i64::MAX });
+    let m = |x: i128, y: i128| PathCommand::MoveTo(to_i64(x), to_i64(y));
+    let ln = |x: i128, y: i128| PathCommand::LineTo(to_i64(x), to_i64(y));
+    let path = |commands: Vec<PathCommand>| vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }];
+    if g.preset == "wedgeEllipseCallout" {
+        // Angles in floating point, as the guides' `at2`/`cos`/`sin` are, rounded at the end.
+        let (wf, hf) = (w as f64, h as f64);
+        let (wd2, hd2) = (wf / 2.0, hf / 2.0);
+        let (dx_pos, dy_pos) = (wf * a1 as f64 / 100000.0, hf * a2 as f64 / 100000.0);
+        let pang = (dy_pos * wf).atan2(dx_pos * hf);
+        let wing = 11f64.to_radians();
+        let (st, en) = (pang + wing, pang - wing);
+        let (dx1, dy1) = (wd2 * st.cos(), hd2 * st.sin());
+        let (dx2, dy2) = (wd2 * en.cos(), hd2 * en.sin());
+        let ang = |rad: f64| (rad.to_degrees() * 60000.0).round() as i64;
+        let st_ang = ang(dy1.atan2(dx1));
+        let sw1 = ang(dy2.atan2(dx2)).saturating_sub(st_ang);
+        let sw_ang = if sw1 > 0 { sw1 } else { sw1.saturating_add(21_600_000) };
+        let pt = |x: f64, y: f64| (x.round() as i64, y.round() as i64);
+        let (tx, ty) = pt(wd2 + dx_pos, hd2 + dy_pos);
+        let (x1, y1) = pt(wd2 + dx1, hd2 + dy1);
+        let arc = PathCommand::ArcTo { w_r: to_i64(hc), h_r: to_i64(vc), st_ang, sw_ang };
+        return Some(path(vec![PathCommand::MoveTo(tx, ty), PathCommand::LineTo(x1, y1), arc, PathCommand::Close]));
+    }
+    let dx_pos = md(wi, a1, 100000);
+    let dy_pos = md(hi, a2, 100000);
+    let (x_pos, y_pos) = (hc.saturating_add(dx_pos), vc.saturating_add(dy_pos));
+    let dq = md(dx_pos, hi, wi);
+    let dz = dy_pos.saturating_abs().saturating_sub(dq.saturating_abs());
+    let pick = |c: i128, y: i128, z: i128| if c > 0 { y } else { z };
+    let (x1, x2) = (md(wi, pick(dx_pos, 7, 2), 12), md(wi, pick(dx_pos, 10, 5), 12));
+    let (y1, y2) = (md(hi, pick(dy_pos, 7, 2), 12), md(hi, pick(dy_pos, 10, 5), 12));
+    let xl = pick(dz, l, pick(dx_pos, l, x_pos));
+    let xt = pick(dz, pick(dy_pos, x1, x_pos), x1);
+    let xr = pick(dz, r, pick(dx_pos, x_pos, r));
+    let xb = pick(dz, pick(dy_pos, x_pos, x1), x1);
+    let yl = pick(dz, y1, pick(dx_pos, y1, y_pos));
+    let yt = pick(dz, pick(dy_pos, t, y_pos), t);
+    let yr = pick(dz, y1, pick(dx_pos, y_pos, y1));
+    let yb = pick(dz, pick(dy_pos, y_pos, b), b);
+    if g.preset == "wedgeRectCallout" {
+        return Some(path(vec![
+            m(l, t),
+            ln(x1, t),
+            ln(xt, yt),
+            ln(x2, t),
+            ln(r, t),
+            ln(r, y1),
+            ln(xr, yr),
+            ln(r, y2),
+            ln(r, b),
+            ln(x2, b),
+            ln(xb, yb),
+            ln(x1, b),
+            ln(l, b),
+            ln(l, y2),
+            ln(xl, yl),
+            ln(l, y1),
+            PathCommand::Close,
+        ]));
+    }
+    // Corner radius: `adj3` of the shorter side, at most half of it.
+    let u1 = md(wi.min(hi), adjust(g, "adj3", 16667).clamp(0, 50000), 100000);
+    let (u2, v2) = (r - u1, b - u1);
+    let (cd4, cd2, cd34) = (5_400_000, 10_800_000, 16_200_000);
+    let arc = |st_ang: i64| PathCommand::ArcTo { w_r: to_i64(u1), h_r: to_i64(u1), st_ang, sw_ang: cd4 };
+    Some(path(vec![
+        m(l, u1),
+        arc(cd2),
+        ln(x1, t),
+        ln(xt, yt),
+        ln(x2, t),
+        ln(u2, t),
+        arc(cd34),
+        ln(r, y1),
+        ln(xr, yr),
+        ln(r, y2),
+        ln(r, v2),
+        arc(0),
+        ln(x2, b),
+        ln(xb, yb),
+        ln(x1, b),
+        ln(u1, b),
+        arc(cd4),
+        ln(l, y2),
+        ln(xl, yl),
+        ln(l, y1),
+        PathCommand::Close,
+    ]))
 }
