@@ -23,6 +23,7 @@ mod data_table_dirty;
 mod data_table_recalc;
 mod data_table_shift;
 mod drawing_alt_text;
+mod drawing_print_object;
 mod dynamicmetadata;
 mod extreme_selection_moves;
 mod fill_multi_area;
