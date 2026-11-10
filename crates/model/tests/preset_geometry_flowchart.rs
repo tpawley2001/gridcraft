@@ -106,7 +106,6 @@ fn internal_storage_has_an_inner_vertical_and_horizontal() {
 fn curved_flowchart_presets_are_not_claimed() {
     // Not drawn yet: this still falls back to the rectangle. The curved and arc flowcharts are
     // covered by `preset_geometry_flowchart_curved.rs` and the arc flowchart tests.
-    for preset in ["flowChartMultidocument"] {
-        assert!(preset_paths(&geom(preset), 1000, 600).is_none(), "{preset}");
-    }
+    let preset = "flowChartMultidocument";
+    assert!(preset_paths(&geom(preset), 1000, 600).is_none(), "{preset}");
 }
