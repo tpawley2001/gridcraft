@@ -163,6 +163,10 @@ pub(super) fn chart_design(app: &mut SheetApp, ui: &mut Ui) {
             ("Waterfall", "waterfall", ""),
             ("Funnel", "funnel", ""),
             ("Treemap", "treemap", ""),
+            ("3-D Surface", "surface", ""),
+            ("Wireframe 3-D Surface", "surfaceWireframe", ""),
+            ("Contour", "contour", ""),
+            ("Wireframe Contour", "contourWireframe", ""),
         ] {
             if ui.button(label).clicked() {
                 act(app, "chart.set", json!({"chart": id, "type": k, "subtype": s}));

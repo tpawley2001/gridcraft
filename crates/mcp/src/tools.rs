@@ -84,6 +84,10 @@ const CHART_TYPES: &[&str] = &[
     "sunburst",
     "boxWhisker",
     "stock",
+    "surface",
+    "surfaceWireframe",
+    "contour",
+    "contourWireframe",
 ];
 const BORDER_PRESETS: &[&str] = &[
     "bottom",

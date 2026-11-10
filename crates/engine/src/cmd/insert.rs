@@ -74,7 +74,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Insert Chart",
             ["Insert", "Charts"],
             None,
-            "{range?, type?: column|bar|line|pie|doughnut|area|scatter|bubble|radar|combo|histogram|waterfall|funnel|treemap|sunburst|boxWhisker|stock, subtype?: clustered|stacked|stacked100|markers, title?, at?: \"H2\", width?, height?}",
+            "{range?, type?: column|bar|line|pie|doughnut|area|scatter|bubble|radar|combo|histogram|waterfall|funnel|treemap|sunburst|boxWhisker|stock|surface|surfaceWireframe|contour|contourWireframe, subtype?: clustered|stacked|stacked100|markers|wireframe, title?, at?: \"H2\", width?, height?}",
             has_doc,
             insert_chart
         ),
@@ -679,6 +679,10 @@ pub fn chart_kind(t: &str, sub: &str) -> ChartKind {
         ("sunburst", _) => ChartKind::Sunburst,
         ("boxWhisker", _) => ChartKind::BoxWhisker,
         ("stock", _) => ChartKind::Stock,
+        ("surface", "wireframe") | ("surfaceWireframe", _) => ChartKind::SurfaceWireframe,
+        ("surface", _) => ChartKind::Surface,
+        ("contour", "wireframe") | ("contourWireframe", _) => ChartKind::ContourWireframe,
+        ("contour", _) => ChartKind::Contour,
         ("combo", _) => ChartKind::Combo,
         _ => ChartKind::ColumnClustered,
     }

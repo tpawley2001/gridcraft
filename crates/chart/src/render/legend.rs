@@ -50,6 +50,10 @@ pub fn legend_entries(chart: &Chart, data: &ChartData) -> Vec<(String, Rgba, Swa
             (0..n).map(|j| (cat_label(data, j), point_color(data, j), Swatch::Box)).collect()
         }
         ChartKind::Histogram | ChartKind::Funnel | ChartKind::Stock => vec![],
+        // Surface charts list their value bands (`0-20`, `20-40`, ...), not the series.
+        ChartKind::Surface | ChartKind::SurfaceWireframe | ChartKind::Contour | ChartKind::ContourWireframe => {
+            super::surface::band_entries(chart, data)
+        }
         ChartKind::Waterfall => {
             if data.series.is_empty() {
                 return vec![];
