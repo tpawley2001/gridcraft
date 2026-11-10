@@ -9,6 +9,7 @@ mod autocorrect_exceptions;
 mod autofit_filter_buttons;
 mod cf_formula_validate;
 mod chart_area_stacked100;
+mod chart_axis_options_render;
 mod chart_sheet_print;
 mod chart_surface_types;
 mod chart_workbook_names;
