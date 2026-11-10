@@ -273,7 +273,8 @@ fn errors_and_cycles() {
     assert_eq!(t.get("A1"), Value::Error(CellError::Div0));
     t.set("B1", "=B2");
     t.set("B2", "=B1");
-    assert!(t.get("B1").is_error());
+    // A loop keeps the values its cells show (iteration off), as in Excel.
+    assert!(matches!(t.get("B1"), Value::Number(_)), "{:?}", t.get("B1"));
     t.set("C1", "=NOSUCHFN(1)");
     assert_eq!(t.get("C1"), Value::Error(CellError::Name));
     // `_xludf.` marks a user-defined function, never the built-in of the same name (#726).
@@ -372,16 +373,19 @@ fn iterative_calculation_of_text_and_errors() {
 fn circular_references_without_iterative_calculation() {
     let mut t = T::new();
     t.set("A1", "=A1+1");
-    assert_eq!(t.get("A1"), Value::Error(CellError::Circ));
+    // Just entered, it has no value to keep: 0, as in Excel.
+    assert_eq!(t.num("A1"), 0.0);
     assert_eq!(t.calc.circular, vec![(0, c("A1"))]);
-    // Switched on, the loop is calculated from 0 rather than from the error.
+    // Switched on, the loop is calculated from 0.
     t.wb.calc.iterative = true;
     t.calc.recalc_all(&mut t.wb);
     assert_eq!(t.num("A1"), 100.0);
     assert!(t.calc.circular.is_empty());
     t.wb.calc.iterative = false;
     t.calc.recalc_all(&mut t.wb);
-    assert_eq!(t.get("A1"), Value::Error(CellError::Circ));
+    // Switched off, it keeps the value it shows and is listed again.
+    assert_eq!(t.num("A1"), 100.0);
+    assert_eq!(t.calc.circular, vec![(0, c("A1"))]);
 }
 
 /// The list of circular references keeps the loops that a recalculation of other cells does not
@@ -1969,8 +1973,9 @@ fn implicit_intersection_operator() {
     for at in ["B9", "E9"] {
         assert_eq!(t.get(at), Value::Error(CellError::Value), "{at}");
     }
-    // A 2D range that includes the formula's own cell is a circular reference (Excel shows 0).
-    assert_eq!(t.get("B3"), Value::Error(CellError::Circ));
+    // A 2D range that includes the formula's own cell is a circular reference: with iteration
+    // off it keeps the value it shows (0 when just entered), as Excel does.
+    assert_eq!(t.get("B3"), Value::Number(0.0));
     // From another sheet a 2D range intersects on both row and column; outside it is #VALUE!.
     t.wb.sheets.push(std::sync::Arc::new(gridcraft_model::Sheet::new("Other")));
     for (at, input) in [("B2", "=@Sheet1!A1:C3"), ("C1", "=@Sheet1!A1:C3"), ("B9", "=@Sheet1!A1:C3"), ("E2", "=@Sheet1!A1:C3")] {
@@ -2196,8 +2201,8 @@ fn long_circular_chain_is_circular() {
         sh.cells.set(c("B1"), Cell::formula(Formula::new("=1+2")));
     }
     t.calc.recalc_all(&mut t.wb);
-    assert_eq!(t.get("A1"), Value::Error(CellError::Circ));
-    assert_eq!(t.get(&format!("A{N}")), Value::Error(CellError::Circ));
+    assert!(t.get("A1").as_f64().is_some(), "{:?}", t.get("A1"));
+    assert!(t.get(&format!("A{N}")).as_f64().is_some(), "{:?}", t.get(&format!("A{N}")));
     assert_eq!(t.num("B1"), 3.0);
     assert!(!t.calc.circular.is_empty());
     // Each formula is listed once at most.
@@ -2228,8 +2233,10 @@ fn deep_loop_is_found_where_it_closes() {
     }
     t.calc.recalc_all(&mut t.wb);
     assert_eq!(t.calc.circular, vec![(0, c("A30"))]);
-    assert_eq!(t.get("A1"), Value::Error(CellError::Circ));
-    assert_eq!(t.num("B1"), -1.0);
+    // A30 keeps the value it shows (0, just entered); A1 to A29 are calculated from it.
+    assert_eq!(t.num("A30"), 0.0);
+    assert_eq!(t.num("A1"), 29.0);
+    assert_eq!(t.num("B1"), 29.0);
 }
 
 #[test]

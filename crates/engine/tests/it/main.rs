@@ -12,6 +12,7 @@ mod chart_area_stacked100;
 mod chart_sheet_print;
 mod chart_surface_types;
 mod chart_workbook_names;
+mod circular_keeps_value;
 mod command_sequence_fuzz;
 mod cross_sheet_cut;
 mod csv_export_budget;

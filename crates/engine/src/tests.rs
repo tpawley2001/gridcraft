@@ -3216,7 +3216,8 @@ fn calculation_options_enable_iterative_calculation() {
     };
     s.execute("cell.set", json!({"cell": "A1", "input": "=(A2+10)/2"})).unwrap();
     s.execute("cell.set", json!({"cell": "A2", "input": "=A1"})).unwrap();
-    assert_eq!(v(&s, "A1"), Value::Error(gridcraft_core::CellError::Circ));
+    // Iteration off: the loop keeps the values it shows (A2, just entered, 0), as in Excel.
+    assert_eq!((v(&s, "A1"), v(&s, "A2")), (Value::Number(5.0), Value::Number(0.0)));
     assert!(!s.doc().unwrap().calc.circular.is_empty());
     // Switching it on recalculates the loop.
     let r = s.execute("formulas.calculationOptions", json!({"iterative": true})).unwrap();
@@ -3239,7 +3240,8 @@ fn calculation_options_enable_iterative_calculation() {
     near(&s, "A1", 10.0);
     // Undo brings the previous settings back.
     s.execute("formulas.calculationOptions", json!({"iterative": false})).unwrap();
-    assert_eq!(v(&s, "A1"), Value::Error(gridcraft_core::CellError::Circ));
+    near(&s, "A1", 10.0);
+    assert!(!s.doc().unwrap().calc.circular.is_empty());
     s.execute("edit.undo", json!({})).unwrap();
     assert!(s.doc().unwrap().wb.calc.iterative);
     near(&s, "A1", 10.0);
