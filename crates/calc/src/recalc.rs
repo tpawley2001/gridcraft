@@ -5,9 +5,10 @@
 //! intervals per column (wide ranges per sheet), each an interval index so a lookup costs
 //! O(log n + matches) however many ranges share the column. After an edit, the dirty set is the
 //! transitive closure of dependents; it is evaluated in topological order, with on-demand
-//! evaluation as a safety net for dynamic references. Cycles produce `#CIRC!` unless iterative
-//! calculation is on: then a formula read while it is being evaluated gives its previous value,
-//! and the formulas that read one are evaluated again until the loop settles
+//! evaluation as a safety net for dynamic references. A formula read while it is being evaluated
+//! (a circular reference) gives its previous value. With iterative calculation off, as in Excel,
+//! the formulas on the loop keep the values they show and the loop is listed in `circular`; on,
+//! the formulas that read one are evaluated again until the loop settles
 //! (`PassHost::iterate_loops`).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -185,7 +186,7 @@ impl Calc {
     /// Rebuilds the graph from scratch.
     pub fn rebuild(&mut self, wb: &Workbook) {
         self.graph = Graph::default();
-        let mut circ = Vec::new();
+        let mut formulas = Vec::new();
         self.spill_errors.clear();
         for (si, sheet) in wb.sheets.iter().enumerate() {
             for (c, cell) in sheet.cells.iter() {
@@ -196,9 +197,7 @@ impl Calc {
                     && let Some((areas, dynamic)) = f.with_expr(|e| precedents(wb, si, e))
                 {
                     self.graph.insert((si, c), Node { areas, dynamic });
-                    if cell.value == Value::Error(CellError::Circ) {
-                        circ.push((si, c));
-                    }
+                    formulas.push((si, c));
                 } else if cell.py.is_some() {
                     // A Python cell lays out its kept result, so it is calculated like a formula
                     // that reads nothing: its spill is blocked and unblocked like a formula's.
@@ -207,11 +206,11 @@ impl Calc {
             }
         }
         self.graph.settle();
-        self.circular = if wb.calc.iterative { Vec::new() } else { self.loops_among(&circ) };
+        self.circular = if wb.calc.iterative { Vec::new() } else { self.loops_among(&formulas) };
     }
 
     /// The circular references of a rebuilt workbook (after undo, redo or a rollback, which put
-    /// back cells without calculating them), from the formulas whose cached value is `#CIRC!`:
+    /// back cells without calculating them), from the dependency graph of `circ`, the formulas:
     /// the listed cells still on a loop, and one cell of each loop none of them is on.
     fn loops_among(&self, circ: &[Key]) -> Vec<Key> {
         if circ.is_empty() {
@@ -219,7 +218,7 @@ impl Calc {
         }
         let n = circ.len();
         let index: HashMap<Key, usize> = circ.iter().enumerate().map(|(i, k)| (*k, i)).collect();
-        // Edges from a cell to the `#CIRC!` formulas that read it; loops are the same either way.
+        // Edges from a formula to the formulas that read it; loops are the same either way.
         let mut deps = Vec::new();
         let edges: Vec<Vec<usize>> = circ
             .iter()

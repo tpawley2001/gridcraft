@@ -57,13 +57,16 @@ pub(super) struct PassHost<'a> {
     pub(super) spill_visits: usize,
     /// The formulas in `cycles`.
     cycle_seen: HashSet<Key>,
-    /// Iterative calculation: a circular reference reads the cell's previous value instead of
-    /// giving `#CIRC!`.
+    /// Iterative calculation: the formulas that read a circular reference are evaluated again
+    /// until the loop settles. Off, the loop is calculated once and keeps the values it shows.
     pub(super) iterate: bool,
     /// Values from the previous iteration; cells not in it read their stored value.
     prev: HashMap<Key, Value>,
-    /// Formulas being evaluated, innermost last (kept only when iterating).
+    /// Formulas being evaluated, innermost last.
     stack: Vec<Key>,
+    /// Formulas on a loop met with iterative calculation off: each ends the pass with its
+    /// previous value, so recalculating does not advance the loop.
+    kept: HashSet<Key>,
     /// Formulas found on a circular reference (when iterating).
     pub(super) members: HashSet<Key>,
     /// Results that read a previous value, directly or through other formulas.
@@ -115,6 +118,7 @@ impl<'a> PassHost<'a> {
             iterate: false,
             prev: HashMap::default(),
             stack: Vec::new(),
+            kept: HashSet::default(),
             members: HashSet::default(),
             tainted: HashSet::default(),
             taint: false,
@@ -302,7 +306,14 @@ impl PassHost<'_> {
             if self.cycle_seen.insert(k) {
                 self.cycles.push(k);
             }
-            return Value::Error(CellError::Circ);
+            // The value it shows, as in Excel; the formulas around the loop keep theirs too.
+            match self.stack.iter().rposition(|s| *s == k) {
+                Some(i) => self.kept.extend(self.stack.get(i..).unwrap_or_default().iter().copied()),
+                None => {
+                    self.kept.insert(k);
+                }
+            }
+            return self.previous(k);
         }
         if self.depth >= MAX_NESTED {
             self.suspend = Some(k);
@@ -314,9 +325,7 @@ impl PassHost<'_> {
         self.in_progress.insert(k);
         self.depth += 1;
         let outer_taint = std::mem::replace(&mut self.taint, false);
-        if self.iterate {
-            self.stack.push(k);
-        }
+        self.stack.push(k);
         let expr = std::sync::Arc::clone(expr);
         let outer_out_of_stack = std::mem::replace(&mut self.out_of_stack, false);
         let v = {
@@ -330,9 +339,7 @@ impl PassHost<'_> {
             self.suspend = Some(k);
             self.depth -= 1;
             self.in_progress.remove(&k);
-            if self.iterate {
-                self.stack.pop();
-            }
+            self.stack.pop();
             self.taint = outer_taint;
             return Value::Error(CellError::Calc);
         }
@@ -341,12 +348,12 @@ impl PassHost<'_> {
             self.depth -= 1;
             self.in_progress.remove(&k);
             self.abandoned.push(k);
-            if self.iterate {
-                self.stack.pop();
-            }
+            self.stack.pop();
             self.taint = outer_taint;
             return Value::Error(CellError::Calc);
         }
+        // On a loop with iteration off: the value it showed before this calculation.
+        let v = if self.kept.contains(&k) { self.previous(k) } else { v };
         // A legacy array formula fills the range it was entered in.
         let legacy = self.wb.sheet(k.0).and_then(|s| s.cell(k.1)).and_then(|c| c.formula.as_ref()).and_then(|f| f.array);
         let v = match legacy {
@@ -356,8 +363,8 @@ impl PassHost<'_> {
         self.depth -= 1;
         self.in_progress.remove(&k);
         self.pending.remove(&k);
+        self.stack.pop();
         if self.iterate {
-            self.stack.pop();
             if self.taint {
                 self.tainted.insert(k);
             } else {
@@ -454,8 +461,8 @@ impl PassHost<'_> {
         v
     }
 
-    /// A formula's previous value for iterative calculation: from the last iteration, else the
-    /// value it shows. Blank, and the `#CIRC!` of a loop calculated with iteration off, are 0.
+    /// A formula's previous value on a loop: from the last iteration, else the value it shows.
+    /// Blank, and a stale `#CIRC!` from an older calculation, are 0.
     fn previous(&self, k: Key) -> Value {
         let v = match self.prev.get(&k) {
             Some(v) => v.clone(),
