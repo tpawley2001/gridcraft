@@ -280,6 +280,13 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
         }
         "star6" | "star7" | "star8" | "star10" | "star12" | "star16" | "star24" | "star32" => star_points(g, wi, hi)?,
         "heart" | "wave" | "doubleWave" => return curved_paths(g, w, h),
+        "leftArrowCallout"
+        | "rightArrowCallout"
+        | "upArrowCallout"
+        | "downArrowCallout"
+        | "leftRightArrowCallout"
+        | "upDownArrowCallout"
+        | "quadArrowCallout" => return arrow_callout(g, w, h),
         "irregularSeal1" | "irregularSeal2" => {
             let table: &[(i128, i128)] = if g.preset == "irregularSeal1" { &EXPLOSION1 } else { &EXPLOSION2 };
             table.iter().map(|&(x, y)| (md(wi, x, 21600), md(hi, y, 21600))).collect()
@@ -1525,4 +1532,192 @@ fn striped_right_arrow(b: &ArrowBox, adj1: f64, adj2: f64) -> Vec<Vec<(f64, f64)
         vec![(ssd16, y1), (ssd8, y1), (ssd8, y2), (ssd16, y2)],
         vec![(x4, y1), (x5, y1), (x5, 0.0), (r, vc), (x5, bt), (x5, y2), (x4, y2)],
     ]
+}
+
+/// Arrow callouts (`leftArrowCallout` … `quadArrowCallout`): one filled, stroked polygon in the
+/// shape box. Their guides are ratios of the box and the adjusts, so they are evaluated in `f64`;
+/// every vertex is rounded and pinned into the box, and the guide pins bound every adjust, so a
+/// hostile box or adjust cannot overflow.
+fn arrow_callout(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    let (wf, hf) = (w as f64, h as f64);
+    let ss = wf.min(hf);
+    let (l, t, r, b, hc, vc) = (0.0, 0.0, wf, hf, wf / 2.0, hf / 2.0);
+    // `x * y / z`, 0 when `z` is zero.
+    let md = |x: f64, y: f64, z: f64| if z == 0.0 { 0.0 } else { x * y / z };
+    // `pin x y z`: `y` clamped to `x..=z`.
+    let pin = |v: f64, lo: f64, hi: f64| v.max(lo).min(hi.max(lo));
+    let adj = |name: &str, default: i128| adjust(g, name, default) as f64;
+    // `a2` is the arrow head's half-depth, `a1` the shaft's; `maxAdj1 = */ a2 2 1` keeps the
+    // shaft from being deeper than the head.
+    let head = |adj2: f64, adj1: f64, max: f64| {
+        let a2 = pin(adj2, 0.0, max);
+        (a2, pin(adj1, 0.0, md(a2, 2.0, 1.0)))
+    };
+    // The horizontal arrow's top and bottom edges: `y1`/`y4` at the head's depth, `y2`/`y3` at
+    // the shaft's.
+    let rows = |a2: f64, a1: f64| {
+        let (dy1, dy2) = (md(ss, a2, 100000.0), md(ss, a1, 200000.0));
+        (vc - dy1, vc - dy2, vc + dy2, vc + dy1)
+    };
+    // The vertical arrow's left and right edges: `x1`/`x4` at the head's width, `x2`/`x3` at the
+    // shaft's.
+    let cols = |a2: f64, a1: f64| {
+        let (dx1, dx2) = (md(ss, a2, 100000.0), md(ss, a1, 200000.0));
+        (hc - dx1, hc - dx2, hc + dx2, hc + dx1)
+    };
+    let points: Vec<(f64, f64)> = match g.preset.as_str() {
+        "leftArrowCallout" => {
+            let (a2, a1) = head(adj("adj2", 25000), adj("adj1", 25000), md(50000.0, hf, ss));
+            let a3 = pin(adj("adj3", 25000), 0.0, md(100000.0, wf, ss));
+            let a4 = pin(adj("adj4", 64977), 0.0, 100000.0 - md(a3, ss, wf));
+            let (y1, y2, y3, y4) = rows(a2, a1);
+            let x1 = md(ss, a3, 100000.0);
+            let x2 = r - md(wf, a4, 100000.0);
+            vec![(l, vc), (x1, y1), (x1, y2), (x2, y2), (x2, t), (r, t), (r, b), (x2, b), (x2, y3), (x1, y3), (x1, y4)]
+        }
+        "rightArrowCallout" => {
+            let (a2, a1) = head(adj("adj2", 25000), adj("adj1", 25000), md(50000.0, hf, ss));
+            let a3 = pin(adj("adj3", 25000), 0.0, md(100000.0, wf, ss));
+            let a4 = pin(adj("adj4", 64977), 0.0, 100000.0 - md(a3, ss, wf));
+            let (y1, y2, y3, y4) = rows(a2, a1);
+            let x2 = md(wf, a4, 100000.0);
+            let x3 = r - md(ss, a3, 100000.0);
+            vec![(l, t), (x2, t), (x2, y2), (x3, y2), (x3, y1), (r, vc), (x3, y4), (x3, y3), (x2, y3), (x2, b), (l, b)]
+        }
+        "upArrowCallout" => {
+            let (a2, a1) = head(adj("adj2", 25000), adj("adj1", 25000), md(50000.0, wf, ss));
+            let a3 = pin(adj("adj3", 25000), 0.0, md(100000.0, hf, ss));
+            let a4 = pin(adj("adj4", 64977), 0.0, 100000.0 - md(a3, ss, hf));
+            let (x1, x2, x3, x4) = cols(a2, a1);
+            let y1 = md(ss, a3, 100000.0);
+            let y2 = b - md(hf, a4, 100000.0);
+            vec![(l, y2), (x2, y2), (x2, y1), (x1, y1), (hc, t), (x4, y1), (x3, y1), (x3, y2), (r, y2), (r, b), (l, b)]
+        }
+        "downArrowCallout" => {
+            let (a2, a1) = head(adj("adj2", 25000), adj("adj1", 25000), md(50000.0, wf, ss));
+            let a3 = pin(adj("adj3", 25000), 0.0, md(100000.0, hf, ss));
+            let a4 = pin(adj("adj4", 64977), 0.0, 100000.0 - md(a3, ss, hf));
+            let (x1, x2, x3, x4) = cols(a2, a1);
+            let y2 = md(hf, a4, 100000.0);
+            let y3 = b - md(ss, a3, 100000.0);
+            vec![(l, t), (r, t), (r, y2), (x3, y2), (x3, y3), (x4, y3), (hc, b), (x1, y3), (x2, y3), (x2, y2), (l, y2)]
+        }
+        "leftRightArrowCallout" => {
+            let (a2, a1) = head(adj("adj2", 25000), adj("adj1", 25000), md(50000.0, hf, ss));
+            let a3 = pin(adj("adj3", 25000), 0.0, md(50000.0, wf, ss));
+            let a4 = pin(adj("adj4", 48123), 0.0, 100000.0 - md(a3, ss, hc));
+            let (y1, y2, y3, y4) = rows(a2, a1);
+            let x1 = md(ss, a3, 100000.0);
+            let x4 = r - x1;
+            let dx2 = md(wf, a4, 200000.0);
+            let (x2, x3) = (hc - dx2, hc + dx2);
+            vec![
+                (l, vc),
+                (x1, y1),
+                (x1, y2),
+                (x2, y2),
+                (x2, t),
+                (x3, t),
+                (x3, y2),
+                (x4, y2),
+                (x4, y1),
+                (r, vc),
+                (x4, y4),
+                (x4, y3),
+                (x3, y3),
+                (x3, b),
+                (x2, b),
+                (x2, y3),
+                (x1, y3),
+                (x1, y4),
+            ]
+        }
+        "upDownArrowCallout" => {
+            let (a2, a1) = head(adj("adj2", 25000), adj("adj1", 25000), md(50000.0, wf, ss));
+            let a3 = pin(adj("adj3", 25000), 0.0, md(50000.0, hf, ss));
+            let a4 = pin(adj("adj4", 48123), 0.0, 100000.0 - md(a3, ss, vc));
+            let (x1, x2, x3, x4) = cols(a2, a1);
+            let y1 = md(ss, a3, 100000.0);
+            let y4 = b - y1;
+            let dy2 = md(hf, a4, 200000.0);
+            let (y2, y3) = (vc - dy2, vc + dy2);
+            vec![
+                (l, y2),
+                (x2, y2),
+                (x2, y1),
+                (x1, y1),
+                (hc, t),
+                (x4, y1),
+                (x3, y1),
+                (x3, y2),
+                (r, y2),
+                (r, y3),
+                (x3, y3),
+                (x3, y4),
+                (x4, y4),
+                (hc, b),
+                (x1, y4),
+                (x2, y4),
+                (x2, y3),
+                (l, y3),
+            ]
+        }
+        "quadArrowCallout" => {
+            let a2 = pin(adj("adj2", 18515), 0.0, 50000.0);
+            let a1 = pin(adj("adj1", 18515), 0.0, md(a2, 2.0, 1.0));
+            let a3 = pin(adj("adj3", 18515), 0.0, 50000.0 - a2);
+            let a4 = pin(adj("adj4", 48123), a1, 100000.0 - md(a3, 2.0, 1.0));
+            let ah = md(ss, a3, 100000.0);
+            let (dx2, dx3) = (md(ss, a2, 100000.0), md(ss, a1, 200000.0));
+            let (x3, x6) = (hc - dx2, hc + dx2);
+            let (x4, x5) = (hc - dx3, hc + dx3);
+            let (x2, x7) = (hc - md(wf, a4, 200000.0), hc + md(wf, a4, 200000.0));
+            let (y2, y7) = (vc - md(hf, a4, 200000.0), vc + md(hf, a4, 200000.0));
+            let (y3, y6) = (vc - dx2, vc + dx2);
+            let (y4, y5) = (vc - dx3, vc + dx3);
+            let (x8, y8) = (r - ah, b - ah);
+            vec![
+                (l, vc),
+                (ah, y3),
+                (ah, y4),
+                (x2, y4),
+                (x2, y2),
+                (x4, y2),
+                (x4, ah),
+                (x3, ah),
+                (hc, t),
+                (x6, ah),
+                (x5, ah),
+                (x5, y2),
+                (x7, y2),
+                (x7, y4),
+                (x8, y4),
+                (x8, y3),
+                (r, vc),
+                (x8, y6),
+                (x8, y5),
+                (x7, y5),
+                (x7, y7),
+                (x5, y7),
+                (x5, y8),
+                (x6, y8),
+                (hc, b),
+                (x3, y8),
+                (x4, y8),
+                (x4, y7),
+                (x2, y7),
+                (x2, y5),
+                (ah, y5),
+                (ah, y6),
+            ]
+        }
+        _ => return None,
+    };
+    let mut commands = Vec::with_capacity(points.len() + 1);
+    for (i, &(x, y)) in points.iter().enumerate() {
+        let (x, y) = (x.round().clamp(0.0, wf) as i64, y.round().clamp(0.0, hf) as i64);
+        commands.push(if i == 0 { PathCommand::MoveTo(x, y) } else { PathCommand::LineTo(x, y) });
+    }
+    commands.push(PathCommand::Close);
+    Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }])
 }
