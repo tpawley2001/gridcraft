@@ -189,9 +189,11 @@ fn a_spilled_error_leads_to_the_references_of_its_array_formula() {
 fn a_circular_reference_ends_the_walk() {
     let mut s = Session::new();
     s.new_workbook();
-    s.execute("cell.set", json!({"cell": "A1", "input": "=B1+1"})).unwrap();
+    // A loop keeps the values its cells show (iteration off), so these loops never read
+    // themselves while calculating and show the error of the branch taken.
+    s.execute("cell.set", json!({"cell": "A1", "input": "=IF(TRUE,1/0,B1)"})).unwrap();
     s.execute("cell.set", json!({"cell": "B1", "input": "=A1+1"})).unwrap();
-    s.execute("cell.set", json!({"cell": "C1", "input": "=C1"})).unwrap();
+    s.execute("cell.set", json!({"cell": "C1", "input": "=IF(TRUE,1/0,C1)"})).unwrap();
     s.execute("cell.set", json!({"cell": "D1", "input": "=B1"})).unwrap();
     let r = trace(&mut s, "D1");
     assert!(r["error"].is_string(), "{r}");
