@@ -9,6 +9,13 @@ use crate::{EngineError, Result};
 
 mod sylk;
 
+/// The function library's answers to what the XLSX and XLS readers and the XLSX writer need to know about functions
+/// (which names are built in, which parameters take a single value).
+pub const XLSX_FUNCTIONS: gridcraft_xlsx::FunctionInfo = gridcraft_xlsx::FunctionInfo {
+    is_builtin: |name| gridcraft_functions::lookup(name).is_some(),
+    is_scalar_arg: |name, i| gridcraft_functions::lookup(name).is_none_or(|s| s.is_scalar_arg(i)),
+};
+
 /// File formats GridCraft reads or writes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileKind {
@@ -268,10 +275,10 @@ fn read_xls(name: &str, bytes: &[u8], password: Option<&str>) -> Result<(Workboo
         })
     };
     // Without a password first: whether the given one was needed decides the notice.
-    match gridcraft_xlsx::read_xls_with_password(bytes, None) {
+    match gridcraft_xlsx::read_xls_with_password_using(bytes, None, XLSX_FUNCTIONS) {
         Ok((wb, report)) => Ok((wb, report.warnings)),
         Err(XlsOpenError::PasswordRequired) if password.is_some() => {
-            let (wb, mut report) = gridcraft_xlsx::read_xls_with_password(bytes, password).map_err(error)?;
+            let (wb, mut report) = gridcraft_xlsx::read_xls_with_password_using(bytes, password, XLSX_FUNCTIONS).map_err(error)?;
             report.warnings.insert(0, DECRYPTED_NOTICE.into());
             Ok((wb, report.warnings))
         }
@@ -325,12 +332,13 @@ fn read_plain(name: &str, bytes: &[u8], password: Option<&str>, csv_as_text: boo
     // Text named `.xlsx` is read as text.
     if sniffed == gridcraft_xlsx::Format::Xlsx || (kind == Some(FileKind::Xlsx) && sniffed != gridcraft_xlsx::Format::Csv) {
         // Google Sheets' export wrapper is read as the formula inside when GridCraft calculates it (#2871).
-        let (wb, report) = gridcraft_xlsx::read_xlsx_with(bytes, &gridcraft_calc::is_known_function).map_err(|e| {
-            EngineError::Other(match (&e, gridcraft_xlsx::oversized_part(bytes)) {
-                (gridcraft_xlsx::IoError::TooLarge(_), Some((part, size))) => part_too_large_message(name, &part, size),
-                _ => format!("We can't open '{name}': {e}"),
-            })
-        })?;
+        let (wb, report) = gridcraft_xlsx::read_xlsx_with(bytes, (XLSX_FUNCTIONS, &gridcraft_calc::is_known_function as &dyn Fn(&str) -> bool))
+            .map_err(|e| {
+                EngineError::Other(match (&e, gridcraft_xlsx::oversized_part(bytes)) {
+                    (gridcraft_xlsx::IoError::TooLarge(_), Some((part, size))) => part_too_large_message(name, &part, size),
+                    _ => format!("We can't open '{name}': {e}"),
+                })
+            })?;
         return Ok((wb, report.warnings));
     }
     if let Some(read) = read_html_table(name, kind, bytes, csv_as_text) {
@@ -543,7 +551,7 @@ pub fn save_bytes_as(wb: &Workbook, path: &str, kind: FileKind) -> Result<Vec<u8
                 None => named,
             };
             let book = std::path::Path::new(path).file_name().and_then(std::ffi::OsStr::to_str).unwrap_or_default();
-            gridcraft_xlsx::write_xlsx_named(named.as_ref().unwrap_or(wb), gridcraft_xlsx::XlsxKind::from_path(path), book)
+            gridcraft_xlsx::write_xlsx_named_with(named.as_ref().unwrap_or(wb), gridcraft_xlsx::XlsxKind::from_path(path), book, XLSX_FUNCTIONS)
                 .map_err(|e| EngineError::Other(e.to_string()))
         }
         FileKind::Xls => {

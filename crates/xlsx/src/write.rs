@@ -9,7 +9,7 @@ use gridcraft_model::{CalcMode, CalcSettings, PhoneticString, ShowObjects, Style
 
 use crate::package::ZipOut;
 use crate::xml::{esc, esc_attr};
-use crate::{IoError, XlsxKind};
+use crate::{FunctionInfo, IoError, XlsxKind};
 
 pub const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 pub const NS_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -156,6 +156,10 @@ pub struct Out {
     pub cell_pictures: crate::richdata::PicturesOut,
     /// Kept (pass-through) parts written so far.
     pub kept: crate::passthrough::KeptOut,
+    /// Decides which formulas need dynamic-array metadata.
+    pub functions: FunctionInfo,
+    /// Defined names analysed for implicit intersection, shared by every formula written.
+    pub(crate) names: crate::array_formula::NameCache,
     /// The code of the Python cells written so far, in order: script `i` of the Python part.
     pub python_scripts: Vec<String>,
 }
@@ -323,8 +327,8 @@ fn single_cell_ids(wb: &Workbook) -> std::collections::HashSet<u32> {
 /// Workbook name written in a PivotChart's link when the file name isn't known.
 const DEFAULT_BOOK_NAME: &str = "Workbook.xlsx";
 
-pub fn write_xlsx(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
-    write_xlsx_named(wb, kind, None)
+pub fn write_xlsx(wb: &Workbook, kind: XlsxKind, functions: FunctionInfo) -> Result<Vec<u8>, IoError> {
+    write_xlsx_named_with(wb, kind, None, functions)
 }
 
 /// The `<workbookView>` attributes beyond `activeTab`: the window's display settings
@@ -400,7 +404,7 @@ fn workbook_pr(wb: &Workbook) -> String {
 
 /// Writes the workbook for the file `book_name` (a bare file name). A PivotChart is bound to its
 /// PivotTable in Excel only when its link starts with the workbook in brackets.
-pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) -> Result<Vec<u8>, IoError> {
+pub fn write_xlsx_named_with(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>, functions: FunctionInfo) -> Result<Vec<u8>, IoError> {
     if wb.sheets.is_empty() {
         return Err(IoError::Format("a workbook needs at least one sheet".into()));
     }
@@ -431,6 +435,8 @@ pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) 
         needs_calc: false,
         cell_pictures: Default::default(),
         kept: Default::default(),
+        functions,
+        names: Default::default(),
         python_scripts: vec![],
     };
     out.kept.reserve_vml_blocks(wb);
@@ -749,6 +755,10 @@ fn write_defined_names(wb: &Workbook, kept: &crate::passthrough::WorkbookKept, c
 
 /// Cell metadata declaring dynamic-array formulas (MS-XLSX `XLDAPR`).
 const METADATA: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<metadata xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:xda=\"http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray\"><metadataTypes count=\"1\"><metadataType name=\"XLDAPR\" minSupportedVersion=\"120000\" copy=\"1\" pasteAll=\"1\" pasteValues=\"1\" merge=\"1\" splitFirst=\"1\" rowColShift=\"1\" clearFormats=\"1\" clearComments=\"1\" assign=\"1\" coerce=\"1\" cellMeta=\"1\"/></metadataTypes><futureMetadata name=\"XLDAPR\" count=\"1\"><bk><extLst><ext uri=\"{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}\"><xda:dynamicArrayProperties fDynamic=\"1\" fCollapsed=\"0\"/></ext></extLst></bk></futureMetadata><cellMetadata count=\"1\"><bk><rc t=\"1\" v=\"0\"/></bk></cellMetadata></metadata>";
+/// Writes a workbook with a caller-supplied file name and the default function facts.
+pub fn write_xlsx_named(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>) -> Result<Vec<u8>, IoError> {
+    write_xlsx_named_with(wb, kind, book_name, FunctionInfo::default())
+}
 
 /// `<workbookProtection>` (ECMA-376 Part 1 §18.2.29): the structure lock from
 /// [`Workbook::protected_structure`], plus the window and revision locks and passwords kept from
@@ -825,7 +835,7 @@ mod table_id_tests {
     fn exhausted_table_ids_return_an_error() {
         let mut wb = Workbook::new();
         wb.sheet_mut(0).unwrap().tables = vec![table(u32::MAX, "A1:A2"), table(0, "C1:C2")];
-        assert!(matches!(write_xlsx(&wb, XlsxKind::Workbook), Err(IoError::Format(_))));
+        assert!(matches!(write_xlsx(&wb, XlsxKind::Workbook, FunctionInfo::default()), Err(IoError::Format(_))));
     }
 
     #[test]
@@ -834,7 +844,7 @@ mod table_id_tests {
         let mut skipped = table(3, "A1");
         skipped.totals_row = true;
         wb.sheet_mut(0).unwrap().tables = vec![skipped, table(7, "C1:C2")];
-        let bytes = write_xlsx(&wb, XlsxKind::Workbook).unwrap();
+        let bytes = write_xlsx(&wb, XlsxKind::Workbook, FunctionInfo::default()).unwrap();
         let mut saved = crate::package::Package::open(&bytes).unwrap();
         let xml = saved.read_xml("xl/tables/table1.xml").unwrap().unwrap();
         assert_eq!(xml.attr_u32("id"), Some(7));
