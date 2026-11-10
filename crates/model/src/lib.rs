@@ -28,8 +28,8 @@ pub use python::{PyCode, PyOutput};
 pub use sheet::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, DataTable, LineIndex, Sheet, SheetUid, SheetViewMode, Visibility, points_to_chars};
 pub use store::CellStore;
 pub use style::{
-    Alignment, BorderLine, BorderStyle, Borders, Color, Fill, Font, HAlign, NumFmt, PatternType, Style, StyleId, StyleTable, Theme, Underline,
-    VAlign, VertAlign,
+    Alignment, BorderLine, BorderStyle, Borders, Color, Fill, Font, HAlign, NumFmt, PatternType, ReadingOrder, Style, StyleId, StyleTable, Theme,
+    Underline, VAlign, VertAlign,
 };
 pub use workbook::{
     CalcMode, CalcSettings, CellStyleId, DefinedName, DocProps, EQUATION_BUDGET_MESSAGE, MAX_EQUATION_LAYOUT_BYTES, PhoneticProps, PhoneticRun,
