@@ -250,6 +250,7 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             let table: &[(i128, i128)] = if g.preset == "irregularSeal1" { &EXPLOSION1 } else { &EXPLOSION2 };
             table.iter().map(|&(x, y)| (md(wi, x, 21600), md(hi, y, 21600))).collect()
         }
+        "mathPlus" | "mathMinus" | "mathMultiply" | "mathEqual" | "mathNotEqual" => return math_paths(g, w, h),
         preset => {
             let (pw, ph, table) = flowchart_polygon(preset)?;
             table.iter().map(|&(x, y)| (md(wi, x, pw), md(hi, y, ph))).collect()
@@ -547,4 +548,163 @@ fn adjust(g: &ShapeGeometry, name: &str, default: i128) -> i128 {
         .and_then(|(_, f)| f.trim().strip_prefix("val "))
         .and_then(|v| v.trim().parse::<i64>().ok())
         .map_or(default, i128::from)
+}
+
+/// Equation shapes (`mathPlus`, `mathMinus`, `mathMultiply`, `mathEqual`, `mathNotEqual`): one
+/// filled path of closed polygons (`mathEqual` has two, top bar first).
+///
+/// The guides use trigonometry and square roots, so they are evaluated in `f64`; each vertex is
+/// rounded and pinned into the box at the end.
+fn math_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    if w <= 0 || h <= 0 {
+        return None;
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let (wf, hf) = (w as f64, h as f64);
+    let polygons = match g.preset.as_str() {
+        "mathPlus" => vec![math_plus(g, wf, hf)],
+        "mathMinus" => vec![math_minus(g, wf, hf)],
+        "mathMultiply" => vec![math_multiply(g, wf, hf)],
+        "mathEqual" => math_equal(g, wf, hf),
+        "mathNotEqual" => vec![math_not_equal(g, wf, hf)],
+        _ => return None,
+    };
+    let mut commands = Vec::new();
+    for polygon in polygons {
+        for (i, &(x, y)) in polygon.iter().enumerate() {
+            let (x, y) = (math_pin(x, w), math_pin(y, h));
+            commands.push(if i == 0 { PathCommand::MoveTo(x, y) } else { PathCommand::LineTo(x, y) });
+        }
+        commands.push(PathCommand::Close);
+    }
+    Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }])
+}
+
+/// `v` rounded and pinned into `0..=max`; NaN is 0.
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+fn math_pin(v: f64, max: i64) -> i64 {
+    if v.is_nan() || v <= 0.0 {
+        0
+    } else if v >= max as f64 {
+        max
+    } else {
+        (v.round() as i64).clamp(0, max)
+    }
+}
+
+/// Adjust `name` (or `default`) pinned into `min..=max`, as `f64`.
+#[allow(clippy::cast_precision_loss)]
+fn math_adj(g: &ShapeGeometry, name: &str, default: i128, min: f64, max: f64) -> f64 {
+    (adjust(g, name, default) as f64).clamp(min, max.max(min))
+}
+
+/// `mathPlus`: a cross of two bars.
+fn math_plus(g: &ShapeGeometry, w: f64, h: f64) -> Vec<(f64, f64)> {
+    let (hc, vc, ss) = (w / 2.0, h / 2.0, w.min(h));
+    let a1 = math_adj(g, "adj1", 23520, 0.0, 73490.0);
+    let dx1 = w * 73490.0 / 200000.0;
+    let dy1 = h * 73490.0 / 200000.0;
+    let dx2 = ss * a1 / 200000.0;
+    let (x1, x2, x3, x4) = (hc - dx1, hc - dx2, hc + dx2, hc + dx1);
+    let (y1, y2, y3, y4) = (vc - dy1, vc - dx2, vc + dx2, vc + dy1);
+    vec![(x1, y2), (x2, y2), (x2, y1), (x3, y1), (x3, y2), (x4, y2), (x4, y3), (x3, y3), (x3, y4), (x2, y4), (x2, y3), (x1, y3)]
+}
+
+/// `mathMinus`: one horizontal bar.
+fn math_minus(g: &ShapeGeometry, w: f64, h: f64) -> Vec<(f64, f64)> {
+    let (hc, vc) = (w / 2.0, h / 2.0);
+    let a1 = math_adj(g, "adj1", 23520, 0.0, 100000.0);
+    let dy1 = h * a1 / 200000.0;
+    let dx1 = w * 73490.0 / 200000.0;
+    let (y1, y2, x1, x2) = (vc - dy1, vc + dy1, hc - dx1, hc + dx1);
+    vec![(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+}
+
+/// `mathMultiply`: two bars crossing along the box diagonals.
+fn math_multiply(g: &ShapeGeometry, w: f64, h: f64) -> Vec<(f64, f64)> {
+    let (r, b, hc, vc, ss) = (w, h, w / 2.0, h / 2.0, w.min(h));
+    let a1 = math_adj(g, "adj1", 23520, 0.0, 51965.0);
+    let th = ss * a1 / 100000.0;
+    let a = h.atan2(w);
+    let (sa, ca, ta) = (a.sin(), a.cos(), a.tan());
+    let dl = w.hypot(h);
+    let rw = dl * 51965.0 / 100000.0;
+    let lm = dl - rw;
+    let (xm, ym) = (ca * lm / 2.0, sa * lm / 2.0);
+    let (dxam, dyam) = (sa * th / 2.0, ca * th / 2.0);
+    let (xa, ya, xb, yb) = (xm - dxam, ym + dyam, xm + dxam, ym - dyam);
+    let ybc = (hc - xb) * ta;
+    let yc = ybc + yb;
+    let (xd, xe) = (r - xb, r - xa);
+    let xfe = if ta > 0.0 { (vc - ya) / ta } else { 0.0 };
+    let (xf, xl) = (xe - xfe, xa + xfe);
+    let (yg, yh, yi) = (b - ya, b - yb, b - yc);
+    vec![(xa, ya), (xb, yb), (hc, yc), (xd, yb), (xe, ya), (xf, vc), (xe, yg), (xd, yh), (hc, yi), (xb, yh), (xa, yg), (xl, vc)]
+}
+
+/// `mathEqual`: two horizontal bars, top first.
+fn math_equal(g: &ShapeGeometry, w: f64, h: f64) -> Vec<Vec<(f64, f64)>> {
+    let (hc, vc) = (w / 2.0, h / 2.0);
+    let a1 = math_adj(g, "adj1", 23520, 0.0, 36745.0);
+    let a2 = math_adj(g, "adj2", 11760, 0.0, 100000.0 - a1 * 2.0);
+    let dy1 = h * a1 / 100000.0;
+    let dy2 = h * a2 / 200000.0;
+    let dx1 = w * 73490.0 / 200000.0;
+    let (y2, y3) = (vc - dy2, vc + dy2);
+    let (y1, y4) = (y2 - dy1, y3 + dy1);
+    let (x1, x2) = (hc - dx1, hc + dx1);
+    vec![vec![(x1, y1), (x2, y1), (x2, y2), (x1, y2)], vec![(x1, y3), (x2, y3), (x2, y4), (x1, y4)]]
+}
+
+/// `mathNotEqual`: two horizontal bars crossed by a slanted stroke.
+fn math_not_equal(g: &ShapeGeometry, w: f64, h: f64) -> Vec<(f64, f64)> {
+    let (hc, vc, hd2) = (w / 2.0, h / 2.0, h / 2.0);
+    let a1 = math_adj(g, "adj1", 23520, 0.0, 50000.0);
+    let cr_ang = math_adj(g, "adj2", 6600000, 4200000.0, 6600000.0);
+    let a3 = math_adj(g, "adj3", 11760, 0.0, 100000.0 - a1 * 2.0);
+    let dy1 = h * a1 / 100000.0;
+    let dy2 = h * a3 / 200000.0;
+    let dx1 = w * 73490.0 / 200000.0;
+    let (x1, x8) = (hc - dx1, hc + dx1);
+    let (y2, y3) = (vc - dy2, vc + dy2);
+    let (y1, y4) = (y2 - dy1, y3 + dy1);
+    let cadj2 = cr_ang - 5400000.0;
+    let xadj2 = hd2 * (cadj2 / 60000.0).to_radians().tan();
+    let len = xadj2.hypot(hd2);
+    let div = |x: f64, z: f64| if z > 0.0 { x / z } else { 0.0 };
+    let bhw = div(len * dy1, hd2);
+    let x7 = hc + xadj2 - bhw / 2.0;
+    let x6 = x7 - div(xadj2 * y1, hd2);
+    let x5 = x7 - div(xadj2 * y2, hd2);
+    let x4 = x7 - div(xadj2 * y3, hd2);
+    let x3 = x7 - div(xadj2 * y4, hd2);
+    let (rx7, rx6, rx5, rx4, rx3) = (x7 + bhw, x6 + bhw, x5 + bhw, x4 + bhw, x3 + bhw);
+    let dx7 = div(dy1 * hd2, len);
+    let (rxt, lxt) = (x7 + dx7, rx7 - dx7);
+    let (rx, lx) = if cadj2 > 0.0 { (rxt, x7) } else { (rx7, lxt) };
+    let dy3 = div(dy1 * xadj2, len);
+    let (ry, ly) = if cadj2 > 0.0 { (dy3, 0.0) } else { (0.0, -dy3) };
+    let (dlx, drx, dly, dry) = (w - rx, w - lx, h - ry, h - ly);
+    vec![
+        (x1, y1),
+        (x6, y1),
+        (lx, ly),
+        (rx, ry),
+        (rx6, y1),
+        (x8, y1),
+        (x8, y2),
+        (rx5, y2),
+        (rx4, y3),
+        (x8, y3),
+        (x8, y4),
+        (rx3, y4),
+        (drx, dry),
+        (dlx, dly),
+        (x3, y4),
+        (x1, y4),
+        (x1, y3),
+        (x4, y3),
+        (x5, y2),
+        (x1, y2),
+    ]
 }
