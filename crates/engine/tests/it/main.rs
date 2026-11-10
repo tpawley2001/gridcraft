@@ -41,6 +41,7 @@ mod outline_apply_styles;
 mod percent_entry;
 mod pivot_unknown_func;
 mod pivotchart_link;
+mod print_from_a1;
 mod print_long_text;
 mod range_fill_formats;
 mod recently_used;
