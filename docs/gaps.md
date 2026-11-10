@@ -271,7 +271,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-11-10 | minor | G0239: §17: curved right, left, up and down arrow presets kept from XLSX draw and print their own outline and the shaded back face of the band, built from `a:arcTo` and lines. Seventy-one presets in all. |
+| 2026-11-10 | minor | G0239: §17: curved right, left, up and down arrow presets kept from XLSX draw and print their own outline and the shaded back face of the band, built from `a:arcTo` and lines. One hundred and fifty-two presets in all. |
 | 2026-11-10 | minor | G0247: charts: exploded pie and doughnut slices (`c:explosion` on the series or a `c:dPt`) are kept on open and save and drawn pulled out, the pie shrinking so they fit. |
 | 2026-11-10 | minor | G0242: §17: the help, information, return, document, sound and movie action buttons kept from XLSX draw and print their own outline, with the glyph's darkened and lightened faces shaded as their definitions say. One hundred and forty-eight presets in all. |
 | 2026-11-10 | minor | G0244: charts: 3-D surface, wireframe 3-D surface, contour and wireframe contour are read from XLSX instead of dropped, saved as Excel writes them, and drawn on screen, in print and PDF (chart-parity Surface 4 of 4). |
