@@ -254,10 +254,7 @@ impl<'h> Evaluator<'h> {
         }
         let value = match self.eval(&args[0]) {
             Ev::R(areas) => match areas.as_slice() {
-                [area] if !area.range.is_single() => {
-                    let range = self.trim_lines(area, area.range.is_full_cols());
-                    self.host.cell_value(area.sheet, range.start)
-                }
+                [area] if !area.range.is_single() => self.host.cell_value(area.sheet, area.range.start),
                 _ => self.deref(Ev::R(areas)).scalar(),
             },
             ev => self.deref(ev).scalar(),
@@ -265,7 +262,7 @@ impl<'h> Evaluator<'h> {
         match value {
             Value::Text(t) => Ev::V(Value::Text(t)),
             Value::Error(e) => err(e),
-            _ => Ev::V(Value::Text(String::new())),
+            _ => Ev::V(Value::text("")),
         }
     }
 
