@@ -243,6 +243,8 @@ fn added_chart_keeps_control_anchor() {
             kind: None,
             smooth: false,
             trendlines: Vec::new(),
+            explosion: 0,
+            point_explosions: Vec::new(),
             quartiles: Default::default(),
         }],
         legend: LegendPos::Bottom,

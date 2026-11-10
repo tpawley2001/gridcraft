@@ -29,6 +29,8 @@ fn chart(id: u32, kind: ChartKind, scale: ChartScale) -> Chart {
             quartiles: Default::default(),
             smooth: false,
             trendlines: Vec::new(),
+            explosion: 0,
+            point_explosions: Vec::new(),
         }],
         legend: LegendPos::Bottom,
         data_labels: false,

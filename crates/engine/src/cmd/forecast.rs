@@ -435,6 +435,8 @@ fn forecast_sheet(s: &mut Session, p: &Json) -> Result<Json> {
                 quartiles: Default::default(),
                 smooth: false,
                 trendlines: Vec::new(),
+                explosion: 0,
+                point_explosions: Vec::new(),
             })
             .collect();
         sheet.charts.push(Chart {

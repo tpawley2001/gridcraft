@@ -728,6 +728,8 @@ pub fn series_from_range(sh: &Sheet, r: RangeRef, by_rows: bool) -> Vec<Series> 
                 quartiles: Default::default(),
                 smooth: false,
                 trendlines: Vec::new(),
+                explosion: 0,
+                point_explosions: Vec::new(),
             });
         }
     } else {
@@ -744,6 +746,8 @@ pub fn series_from_range(sh: &Sheet, r: RangeRef, by_rows: bool) -> Vec<Series> 
                 quartiles: Default::default(),
                 smooth: false,
                 trendlines: Vec::new(),
+                explosion: 0,
+                point_explosions: Vec::new(),
             });
         }
     }

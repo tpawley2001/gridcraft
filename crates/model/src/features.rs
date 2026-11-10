@@ -612,6 +612,39 @@ pub struct Series {
     /// Trendlines fitted to this series (Excel allows several per series).
     #[serde(default)]
     pub trendlines: Vec<Trendline>,
+    /// Pie and doughnut: every slice pulled out from the centre by this percent of the radius
+    /// (`c:explosion`, 0 = closed, at most [`Series::MAX_EXPLOSION`]).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub explosion: u32,
+    /// Pie and doughnut: `(point index, percent)` for slices pulled out on their own
+    /// (`c:dPt`/`c:explosion`); replaces [`Series::explosion`] for that slice.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub point_explosions: Vec<(u32, u32)>,
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
+impl Series {
+    /// Largest explosion percent kept (the most Excel's Format Data Series pane accepts).
+    pub const MAX_EXPLOSION: u32 = 400;
+
+    /// Explosion percent of slice `point`: its own value if it has one, else the series value.
+    /// Clamped to [`Series::MAX_EXPLOSION`].
+    pub fn explosion_of(&self, point: usize) -> u32 {
+        self.point_explosions
+            .iter()
+            .rev()
+            .find(|(i, _)| usize::try_from(*i).is_ok_and(|i| i == point))
+            .map_or(self.explosion, |(_, e)| *e)
+            .min(Self::MAX_EXPLOSION)
+    }
+
+    /// Largest explosion of any slice (clamped), for sizing the pie.
+    pub fn max_explosion(&self) -> u32 {
+        self.point_explosions.iter().map(|(_, e)| *e).chain([self.explosion]).max().unwrap_or(0).min(Self::MAX_EXPLOSION)
+    }
 }
 
 /// Regression a trendline fits (`c:trendlineType`).
