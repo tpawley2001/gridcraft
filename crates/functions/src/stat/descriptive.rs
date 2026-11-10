@@ -225,8 +225,17 @@ pub(super) fn quartile_exc(v: Vec<f64>, q: f64) -> R<f64> {
     percentile_exc(v, q / 4.0)
 }
 
+/// The numbers of a data-array argument. A one-cell reference reads like any other reference:
+/// its text, logical or empty cell is ignored rather than coerced.
 pub(super) fn arg_nums(a: &[Arg], i: usize) -> R<Vec<f64>> {
-    array_numbers(&arg(a, i)?.value)
+    let x = arg(a, i)?;
+    match &x.value {
+        Value::Array(_) => array_numbers(&x.value),
+        Value::Number(n) => Ok(vec![*n]),
+        Value::Error(e) => Err(*e),
+        _ if x.from_ref => Ok(Vec::new()),
+        other => array_numbers(other),
+    }
 }
 
 /// Pairs of numbers at matching positions of two arrays (pairs with a non-number skipped).
