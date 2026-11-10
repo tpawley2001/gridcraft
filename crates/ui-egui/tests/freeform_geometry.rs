@@ -134,3 +134,15 @@ fn right_arrow_preset_outline_is_drawn_like_a_freeform() {
     // Concave, so filled through triangulation: 5 triangles.
     assert_eq!(triangulate(&out[0].points).map(|t| t.len()), Some(5));
 }
+
+#[test]
+fn wedge_callout_tail_is_drawn_outside_the_box() {
+    use gridcraft_engine::model::{ShapeGeometry, preset_paths};
+    let g = ShapeGeometry { preset: "wedgeRectCallout".into(), adjust: Vec::new(), paths: Vec::new() };
+    let r = Rect::from_min_max(pos2(10.0, 20.0), pos2(210.0, 140.0));
+    let paths = preset_paths(&g, 20_000, 12_000).unwrap();
+    let out = outlines(&paths, r);
+    assert_eq!(out.len(), 1);
+    // The default tip: 20.833% of the width left of centre, 62.5% of the height below it.
+    assert!(has_point_near(&out[0].points, pos2(68.34, 155.0)), "{:?}", out[0].points);
+}
