@@ -1973,8 +1973,9 @@ fn implicit_intersection_operator() {
     for at in ["B9", "E9"] {
         assert_eq!(t.get(at), Value::Error(CellError::Value), "{at}");
     }
-    // A 2D range that includes the formula's own cell is a circular reference (Excel shows 0).
-    assert_eq!(t.get("B3"), Value::Error(CellError::Circ));
+    // A 2D range that includes the formula's own cell is a circular reference: with iteration
+    // off it keeps the value it shows (0 when just entered), as Excel does.
+    assert_eq!(t.get("B3"), Value::Number(0.0));
     // From another sheet a 2D range intersects on both row and column; outside it is #VALUE!.
     t.wb.sheets.push(std::sync::Arc::new(gridcraft_model::Sheet::new("Other")));
     for (at, input) in [("B2", "=@Sheet1!A1:C3"), ("C1", "=@Sheet1!A1:C3"), ("B9", "=@Sheet1!A1:C3"), ("E2", "=@Sheet1!A1:C3")] {
