@@ -67,5 +67,5 @@ fn snip1rect_default_tall_and_pinned() {
 
 #[test]
 fn unknown_presets_still_have_no_outline() {
-    assert!(preset_paths(&geom("cloud", &[]), 100, 100).is_none());
+    assert!(preset_paths(&geom("notAPreset", &[]), 100, 100).is_none());
 }

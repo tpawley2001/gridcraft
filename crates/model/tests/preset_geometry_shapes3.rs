@@ -66,5 +66,5 @@ fn star4_default_and_adjusted() {
 
 #[test]
 fn unknown_presets_still_have_no_outline() {
-    assert!(preset_paths(&geom("cloud", &[]), 100, 100).is_none());
+    assert!(preset_paths(&geom("notAPreset", &[]), 100, 100).is_none());
 }
