@@ -279,6 +279,7 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             vec![(l, vc), (sx1, sy1), (hc, t), (sx2, sy1), (r, vc), (sx2, sy2), (hc, b), (sx1, sy2)]
         }
         "star6" | "star7" | "star8" | "star10" | "star12" | "star16" | "star24" | "star32" => star_points(g, wi, hi)?,
+        "heart" | "wave" | "doubleWave" => return curved_paths(g, w, h),
         "irregularSeal1" | "irregularSeal2" => {
             let table: &[(i128, i128)] = if g.preset == "irregularSeal1" { &EXPLOSION1 } else { &EXPLOSION2 };
             table.iter().map(|&(x, y)| (md(wi, x, 21600), md(hi, y, 21600))).collect()
@@ -353,6 +354,86 @@ fn flowchart_curved(preset: &str, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
                 CubicBezTo([(x(10800), y(17322)), (x(10800), y(23922)), (0, y(20172))]),
                 Close,
             ]
+        }
+        _ => return None,
+    };
+    Some(vec![GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands }])
+}
+
+/// Heart, wave and double wave: one filled and stroked path of cubic Béziers and lines, or `None`
+/// for another preset. On-curve points are clamped into the box; control points are kept as the
+/// definition computes them, even outside it (the heart's lobes).
+fn curved_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    let (wi, hi) = (i128::from(w), i128::from(h));
+    let (l, t, r, b, hc) = (0, 0, wi, hi, wi / 2);
+    let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
+    let pin = |name: &str, default: i128, lo: i128, hi: i128| adjust(g, name, default).clamp(lo, hi);
+    let to_i64 = |v: i128| i64::try_from(v).unwrap_or(if v < 0 { i64::MIN } else { i64::MAX });
+    let on = |x: i128, y: i128| (to_i64(x.clamp(l, r)), to_i64(y.clamp(t, b)));
+    let m = |x: i128, y: i128| {
+        let (x, y) = on(x, y);
+        PathCommand::MoveTo(x, y)
+    };
+    let ln = |x: i128, y: i128| {
+        let (x, y) = on(x, y);
+        PathCommand::LineTo(x, y)
+    };
+    let bez = |c1: (i128, i128), c2: (i128, i128), e: (i128, i128)| {
+        PathCommand::CubicBezTo([(to_i64(c1.0), to_i64(c1.1)), (to_i64(c2.0), to_i64(c2.1)), on(e.0, e.1)])
+    };
+    let commands = match g.preset.as_str() {
+        "heart" => {
+            let (dx1, dx2) = (md(wi, 49, 48), md(wi, 10, 48));
+            let (x1, x2, x3, x4) = (hc - dx1, hc - dx2, hc + dx2, hc + dx1);
+            let hd4 = hi / 4;
+            let y1 = t - hi / 3;
+            vec![m(hc, hd4), bez((x3, y1), (x4, hd4), (hc, b)), bez((x1, hd4), (x2, y1), (hc, hd4)), PathCommand::Close]
+        }
+        "wave" | "doubleWave" => {
+            let double = g.preset == "doubleWave";
+            let a1 = if double { pin("adj1", 6250, 0, 12500) } else { pin("adj1", 12500, 0, 20000) };
+            let a2 = pin("adj2", 0, -10000, 10000);
+            let y1 = md(hi, a1, 100000);
+            // `*/ y1 10 3` from `h` directly, so `y1`'s truncation is not tripled.
+            let dy2 = md(hi, a1.saturating_mul(10), 300000);
+            let (y2, y3) = (y1 - dy2, y1 + dy2);
+            let y4 = b - y1;
+            let (y5, y6) = (y4 - dy2, y4 + dy2);
+            let of2 = md(wi, a2, 50000);
+            let dx2 = if of2 > 0 { 0 } else { of2 };
+            let dxr = if of2 > 0 { of2 } else { 0 };
+            let x2 = l - dx2;
+            let xr = r - dxr;
+            let xl = l + dxr;
+            let xr2 = r + dx2;
+            let avg = |x: i128, y: i128, z: i128| x.saturating_add(y) / z;
+            if double {
+                let (x8, x9, x15) = (xr, xl, xr2);
+                let (dx3, dx4) = (avg(dx2, x8, 6), avg(dx2, x8, 3));
+                let (x3, x4, x5) = (x2 + dx3, x2 + dx4, avg(x2, x8, 2));
+                let x6 = x5 + dx3;
+                let x7 = avg(x6, x8, 2);
+                let (x10, x11, x12) = (x9 + dx3, x9 + dx4, avg(x9, x15, 2));
+                let x13 = x12 + dx3;
+                let x14 = avg(x13, x15, 2);
+                vec![
+                    m(x2, y1),
+                    bez((x3, y2), (x4, y3), (x5, y1)),
+                    bez((x6, y2), (x7, y3), (x8, y1)),
+                    ln(x15, y4),
+                    bez((x14, y6), (x13, y5), (x12, y4)),
+                    bez((x11, y6), (x10, y5), (x9, y4)),
+                    PathCommand::Close,
+                ]
+            } else {
+                let (x5, x6, x10) = (xr, xl, xr2);
+                let dx3 = avg(dx2, x5, 3);
+                let x3 = x2 + dx3;
+                let x4 = avg(x3, x5, 2);
+                let x7 = x6 + dx3;
+                let x8 = avg(x7, x10, 2);
+                vec![m(x2, y1), bez((x3, y2), (x4, y3), (x5, y1)), ln(x10, y4), bez((x8, y6), (x7, y5), (x6, y4)), PathCommand::Close]
+            }
         }
         _ => return None,
     };
