@@ -30,21 +30,7 @@ pub(super) fn insert(app: &mut SheetApp, ui: &mut Ui) {
     });
     let shapes = big_button(ui, Icon::Shapes, "Shapes", "Shapes", true);
     anchor_keytip(app, ui, &shapes, &["insert.shape"]);
-    egui::Popup::menu(&shapes).show(|ui| {
-        for (label, kind) in [
-            ("Rectangle", "rectangle"),
-            ("Rounded Rectangle", "roundedRectangle"),
-            ("Oval", "ellipse"),
-            ("Triangle", "triangle"),
-            ("Line", "line"),
-            ("Arrow", "arrow"),
-            ("Text Box", "textBox"),
-        ] {
-            if ui.button(label).clicked() {
-                act(app, "insert.shape", json!({"kind": kind}));
-            }
-        }
-    });
+    egui::Popup::menu(&shapes).show(|ui| shape_gallery(app, ui));
     let icn = big_button(ui, Icon::Theme, "Icons", "Insert an icon", true);
     anchor_keytip(app, ui, &icn, &["insert.icons"]);
     egui::Popup::menu(&icn).show(|ui| {
@@ -298,5 +284,88 @@ pub(super) fn draw(app: &mut SheetApp, ui: &mut Ui) {
     control_keytip(app, ui, &__k, "draw.inkToShape");
     if __k.clicked() {
         act(app, "draw.inkToShape", json!({}));
+    }
+}
+
+/// The Shapes popup: `insert.shapeGallery`'s categories, each a heading over a wrapping grid of
+/// outline buttons; a click inserts the shape.
+fn shape_gallery(app: &mut SheetApp, ui: &mut Ui) {
+    let gallery = app.session.execute("insert.shapeGallery", json!({})).unwrap_or_default();
+    let categories = gallery["categories"].as_array().cloned().unwrap_or_default();
+    ui.set_width(300.0);
+    egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+        for category in &categories {
+            ui.label(egui::RichText::new(category["name"].as_str().unwrap_or_default()).small().strong());
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
+                for entry in category["shapes"].as_array().map(Vec::as_slice).unwrap_or_default() {
+                    let label = entry["label"].as_str().unwrap_or_default();
+                    let params = match (entry["kind"].as_str(), entry["preset"].as_str()) {
+                        (Some(kind), _) => json!({"kind": kind}),
+                        (None, Some(preset)) => json!({"preset": preset}),
+                        (None, None) => continue,
+                    };
+                    let (r, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
+                    let t = Tokens::get(ui.ctx());
+                    if resp.hovered() {
+                        ui.painter().rect_filled(r, 3.0, t.hover);
+                    }
+                    paint_gallery_shape(ui.painter(), r.shrink(5.0), &params, t.text);
+                    if resp.on_hover_text(label).clicked() {
+                        act(app, "insert.shape", params);
+                        ui.close();
+                    }
+                }
+            });
+        }
+    });
+}
+
+/// A gallery button's glyph: a preset's outline from the renderer's geometry, flattened like a
+/// sheet shape, or a simple drawing of a kind.
+fn paint_gallery_shape(p: &egui::Painter, r: egui::Rect, params: &serde_json::Value, color: egui::Color32) {
+    let stroke = Stroke::new(1.0, color);
+    if let Some(preset) = params["preset"].as_str() {
+        let g = gridcraft_engine::model::ShapeGeometry { preset: preset.into(), adjust: vec![], paths: vec![] };
+        // Hundredths of a pixel, so guide arithmetic keeps its precision at button size.
+        let res = |v: f32| (v * 100.0).round() as i64;
+        for o in crate::freeform::outlines(&gridcraft_engine::model::preset_paths(&g, res(r.width()), res(r.height())).unwrap_or_default(), r) {
+            if o.stroke && o.points.len() >= 2 {
+                p.add(if o.closed {
+                    egui::epaint::PathShape::closed_line(o.points, stroke)
+                } else {
+                    egui::epaint::PathShape::line(o.points, stroke)
+                });
+            }
+        }
+        return;
+    }
+    match params["kind"].as_str().unwrap_or_default() {
+        "line" => {
+            p.line_segment([r.left_top(), r.right_bottom()], stroke);
+        }
+        "arrow" => {
+            p.line_segment([r.left_top(), r.right_bottom()], stroke);
+            let d = (r.right_bottom() - r.left_top()).normalized();
+            let n = vec2(-d.y, d.x);
+            let tip = r.right_bottom();
+            p.add(egui::epaint::PathShape::convex_polygon(vec![tip, tip - d * 6.0 + n * 3.0, tip - d * 6.0 - n * 3.0], color, Stroke::NONE));
+        }
+        "roundedRectangle" => {
+            p.rect_stroke(r, 4.0, stroke, StrokeKind::Inside);
+        }
+        "ellipse" => {
+            p.add(egui::Shape::ellipse_stroke(r.center(), r.size() / 2.0, stroke));
+        }
+        "textBox" => {
+            p.rect_stroke(r, 0.0, stroke, StrokeKind::Inside);
+            for i in 1..=3 {
+                let y = r.top() + r.height() * i as f32 / 4.0;
+                p.line_segment([egui::pos2(r.left() + 3.0, y), egui::pos2(r.right() - 3.0, y)], Stroke::new(1.0, color.gamma_multiply(0.6)));
+            }
+        }
+        _ => {
+            p.rect_stroke(r, 0.0, stroke, StrokeKind::Inside);
+        }
     }
 }

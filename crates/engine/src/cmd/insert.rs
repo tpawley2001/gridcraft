@@ -12,10 +12,12 @@ use serde_json::{Value as Json, json};
 
 use super::sheet::{rewrite, shift_cell_features};
 use super::{
-    CommandSpec, EngineError, PROTECTED, Result, Session, anchor_mode_name, anchor_mode_param, bad, bool_param, cell_param, cell_param_on, cmd, edit,
-    f64_param, has_doc, locked_cell_error, ok, split_sheet, str_param, target_range, target_ranges, target_sheet, u32_param,
+    CommandSpec, EngineError, PROTECTED, Result, Session, always, anchor_mode_name, anchor_mode_param, bad, bool_param, cell_param, cell_param_on,
+    cmd, edit, f64_param, has_doc, locked_cell_error, ok, split_sheet, str_param, target_range, target_ranges, target_sheet, u32_param,
 };
 use crate::selection::current_region;
+
+mod shape_gallery;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -128,9 +130,18 @@ pub fn specs() -> Vec<CommandSpec> {
             "Shapes",
             ["Insert", "Illustrations"],
             None,
-            "{kind: rectangle|roundedRectangle|ellipse|triangle|line|arrow|textBox, at?, width?, height?, text?, fill?, line?}",
+            "{kind?: rectangle|roundedRectangle|ellipse|triangle|line|arrow|textBox, preset?: a DrawingML preset name the renderer draws (\"star5\", \"chevron\"; see insert.shapeGallery), not both, at?, width?, height?, text?, fill?, line?}",
             has_doc,
             insert_shape
+        ),
+        cmd!(
+            query "insert.shapeGallery",
+            "Shapes Gallery",
+            ["Insert", "Illustrations"],
+            None,
+            "{} → {categories: [{name, shapes: [{kind | preset, label}]}]} every shape insert.shape inserts, by gallery category",
+            always,
+            shape_gallery::shape_gallery
         ),
         cmd!(
             "insert.icons",
@@ -1215,7 +1226,19 @@ fn validate_cell_picture(data: &[u8]) -> Result<&'static str> {
 }
 
 fn insert_shape(s: &mut Session, p: &Json) -> Result<Json> {
-    let kind = match str_param(p, "kind").unwrap_or("rectangle") {
+    // A preset the renderer draws; `kind` stays the closest kind GridCraft draws without it.
+    let geometry = match p.get("preset") {
+        None | Some(Json::Null) => None,
+        Some(_) if p.get("kind").is_some_and(|k| !k.is_null()) => return Err(bad("insert.shape", "give `kind` or `preset`, not both")),
+        Some(Json::String(preset)) if shape_gallery::drawn(preset) => Some(shape_gallery::preset_geometry(preset)),
+        Some(_) => return Err(bad("insert.shape", "`preset` must be a preset shape GridCraft draws (see insert.shapeGallery)")),
+    };
+    let kind = match geometry.as_ref().map(|g| g.preset.as_str()) {
+        Some("triangle") => "triangle",
+        Some(_) => "rectangle",
+        None => str_param(p, "kind").unwrap_or("rectangle"),
+    };
+    let kind = match kind {
         "roundedRectangle" => ShapeKind::RoundedRectangle,
         "ellipse" | "oval" => ShapeKind::Ellipse,
         "triangle" => ShapeKind::Triangle,
@@ -1242,7 +1265,7 @@ fn insert_shape(s: &mut Session, p: &Json) -> Result<Json> {
         math: Default::default(),
         id,
         kind,
-        geometry: None,
+        geometry,
         anchor: Anchor {
             cell: at,
             dx: 0.0,
