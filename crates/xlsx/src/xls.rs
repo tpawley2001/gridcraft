@@ -25,6 +25,9 @@
 //! Workbooks encrypted with Excel's default password (`VelvetSweatshop`) are decrypted first
 //! (see `xls_crypto`), as Excel opens them without a prompt; others open with their password
 //! ([`read_xls_with_password`]). Versions before BIFF5 are refused.
+//!
+//! Every formula in the file is a legacy (pre-dynamic-array) one, so it is read with Excel's
+//! implicit `@` (see `array_formula.rs`), like an `.xlsx` formula saved without `cm`.
 
 mod autofilter;
 mod cetab;
@@ -59,7 +62,7 @@ use crate::DecryptError;
 use crate::cfb::{self, Compound};
 use crate::tables::{col_width_to_px, pt_to_px};
 use crate::xls_crypto;
-use crate::{IoError, ReadReport};
+use crate::{FunctionInfo, IoError, ReadReport};
 use formula::{Biff5, Extern, ExternKind, Links, Mode, SupBook, Unsupported, Xti, cell_error, decode, decode_cell, decode_name, external_sheet_text};
 use records::{Cursor, Record, Records};
 
@@ -222,14 +225,21 @@ struct Globals {
     code_name: Option<String>,
 }
 
-/// Reads an Excel 97-2003 workbook. Inspect the report's warnings for what was skipped.
+/// Reads an Excel 97-2003 workbook, with the default [`FunctionInfo`]. Inspect the report's
+/// warnings for what was skipped.
 pub fn read_xls(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
-    read_xls_with(bytes, Budget::default())
+    read_xls_budgeted(bytes, Budget::default(), FunctionInfo::default())
 }
 
-/// [`read_xls`] with an explicit resource budget.
-pub(crate) fn read_xls_with(bytes: &[u8], budget: Budget) -> Result<(Workbook, ReadReport), IoError> {
-    read_xls_inner(bytes, budget, Lock::Refuse).map_err(|e| match e {
+/// [`read_xls`] with the function library's facts, which decide where the legacy formulas get
+/// Excel's implicit `@`.
+pub fn read_xls_with(bytes: &[u8], functions: FunctionInfo) -> Result<(Workbook, ReadReport), IoError> {
+    read_xls_budgeted(bytes, Budget::default(), functions)
+}
+
+/// [`read_xls_with`] with an explicit resource budget.
+pub(crate) fn read_xls_budgeted(bytes: &[u8], budget: Budget, functions: FunctionInfo) -> Result<(Workbook, ReadReport), IoError> {
+    read_xls_inner(bytes, budget, Lock::Refuse, functions).map_err(|e| match e {
         XlsOpenError::Io(e) => e,
         // `Lock::Refuse` turns these into ENCRYPTED already.
         XlsOpenError::PasswordRequired | XlsOpenError::Decrypt(_) => invalid(ENCRYPTED),
@@ -245,7 +255,7 @@ enum Lock<'a> {
     Password(Option<&'a str>),
 }
 
-fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>) -> Result<(Workbook, ReadReport), XlsOpenError> {
+fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>, functions: FunctionInfo) -> Result<(Workbook, ReadReport), XlsOpenError> {
     let cf = Compound::open(bytes).map_err(invalid)?;
     // Excel 5.0/95 keeps the workbook in a `Book` stream.
     let (stream, book) = match cf.root_stream("Workbook").map_err(invalid)? {
@@ -401,6 +411,10 @@ fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>) -> Result<(W
     chart::add_chart_sheets(&mut wb, chart_sheets);
     macro_sheet::add_macro_sheets(&mut wb, macro_sheets, &chart_bounds);
     defined_names(&g.names, &g.links, g.biff5.as_ref(), &model_index, &mut wb, &mut report);
+    // Every .xls formula is a legacy (pre-dynamic-array) one: read with Excel's implicit `@`, like
+    // an .xlsx formula without `cm`. Ctrl+Shift+Enter arrays are read as they are.
+    let legacy = wb.sheets.iter().enumerate().map(|(si, s)| (si, legacy_cells(s))).collect();
+    crate::array_formula::apply_legacy(&mut wb, legacy, functions);
     connections.finish(&mut wb, &mut report);
     if !g.custom_views.is_empty() {
         crate::binary_custom_views::pin_sheet_ids(&mut wb);
@@ -458,6 +472,11 @@ fn keep_custom_properties(wb: &mut Workbook, xml: String) {
         external: false,
     };
     keep_package_root_part(wb, rel, CT_CUSTOM_PROPERTIES, xml.into_bytes());
+}
+
+/// The cells holding a formula that is not a Ctrl+Shift+Enter array.
+fn legacy_cells(sheet: &Sheet) -> Vec<CellRef> {
+    sheet.cells.iter().filter(|(_, c)| c.formula.as_ref().is_some_and(|f| f.array.is_none())).map(|(at, _)| at).collect()
 }
 
 fn bof(rec: &Record<'_>) -> Result<(u16, u16), IoError> {
@@ -1082,10 +1101,9 @@ impl SheetState<'_> {
                     self.unsupported("syntax that can't be parsed yet");
                     return;
                 }
-                f.array = array.filter(|r| !r.is_single());
-                // BIFF has no dynamic arrays: every formula that isn't an array formula (even of
-                // one cell) is a legacy formula, calculated with implicit intersection.
-                f.legacy = array.is_none();
+                // A one-cell Ctrl+Shift+Enter array keeps its range, as when an .xlsx is read:
+                // it evaluates as an array, not with implicit intersection.
+                f.array = array;
                 if let Some(cell) = self.sheet.cells.get_mut(pos) {
                     cell.formula = Some(Arc::new(f));
                 } else {
@@ -1748,5 +1766,10 @@ pub enum XlsOpenError {
 /// [`read_xls`], decrypting a workbook encrypted with `password`. Excel's default password is
 /// always tried first, so an unencrypted or default-password workbook opens with any password.
 pub fn read_xls_with_password(bytes: &[u8], password: Option<&str>) -> Result<(Workbook, ReadReport), XlsOpenError> {
-    read_xls_inner(bytes, Budget::default(), Lock::Password(password))
+    read_xls_with_password_using(bytes, password, FunctionInfo::default())
+}
+
+/// [`read_xls_with_password`] with the function library's facts (see [`read_xls_with`]).
+pub fn read_xls_with_password_using(bytes: &[u8], password: Option<&str>, functions: FunctionInfo) -> Result<(Workbook, ReadReport), XlsOpenError> {
+    read_xls_inner(bytes, Budget::default(), Lock::Password(password), functions)
 }
