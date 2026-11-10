@@ -330,6 +330,14 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
         | "actionButtonBeginning"
         | "actionButtonEnd"
         | "actionButtonHome" => return button_paths(g, w, h),
+        "actionButtonHelp"
+        | "actionButtonInformation"
+        | "actionButtonReturn"
+        | "actionButtonDocument"
+        | "actionButtonSound"
+        | "actionButtonMovie" => {
+            return action_button_glyph_paths(&g.preset, w, h);
+        }
         preset => {
             let (pw, ph, table) = flowchart_polygon(preset)?;
             table.iter().map(|&(x, y)| (md(wi, x, pw), md(hi, y, ph))).collect()
@@ -3232,4 +3240,188 @@ fn action_button_home(b: &ButtonBox) -> Vec<GeometryPath> {
         b.path(false, true, PathShade::Norm, outline),
         b.path(false, true, PathShade::Norm, b.rect()),
     ]
+}
+
+/// The help, information, return, document, sound and movie action buttons: the filled body (box
+/// plus glyph, no outline), the glyph's shaded faces, the glyph's outline and the box's outline.
+/// Guides are evaluated in `f64` and every point and radius is rounded and pinned into the box.
+#[allow(clippy::cast_precision_loss)]
+fn action_button_glyph_paths(preset: &str, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    use PathCommand::{ArcTo, Close, LineTo, MoveTo};
+    let (wf, hf) = (w as f64, h as f64);
+    let (ss, hc, vc) = (wf.min(hf), wf / 2.0, hf / 2.0);
+    let (cd4, cd2, cd34, c360) = (5_400_000, 10_800_000, 16_200_000, 21_600_000);
+    let m = |x: f64, y: f64| MoveTo(math_pin(x, w), math_pin(y, h));
+    let ln = |x: f64, y: f64| LineTo(math_pin(x, w), math_pin(y, h));
+    let arc = |w_r: f64, h_r: f64, st_ang: i64, sw_ang: i64| ArcTo { w_r: math_pin(w_r, w), h_r: math_pin(h_r, h), st_ang, sw_ang };
+    let path = |fill: bool, stroke: bool, shade: PathShade, commands: Vec<PathCommand>| GeometryPath { w, h, fill, stroke, shade, commands };
+    let rect = vec![m(0.0, 0.0), ln(wf, 0.0), ln(wf, hf), ln(0.0, hf), Close];
+    let dx2 = ss * 3.0 / 8.0;
+    let (g9, g10, g11, g12) = (vc - dx2, vc + dx2, hc - dx2, hc + dx2);
+    let g13 = ss * 3.0 / 4.0;
+    let f = |n: f64, d: f64| g13 * n / d;
+    // (shade or `None` for an unfilled outline, commands) per glyph path, between body and frame.
+    let (glyph, faces): (Vec<PathCommand>, Vec<(Option<PathShade>, Vec<PathCommand>)>) = match preset {
+        "actionButtonHelp" => {
+            let (g14, g15, g16) = (f(1.0, 7.0), f(3.0, 14.0), f(2.0, 7.0));
+            let (g41, g42) = (f(1.0, 14.0), f(3.0, 28.0));
+            let (g27, g29, g30, g31) = (g9 + g16, g9 + f(17.0, 28.0), g9 + f(21.0, 28.0), g9 + f(11.0, 14.0));
+            let (g33, g36, g37) = (g11 + g15, g11 + f(3.0, 7.0), g11 + f(4.0, 7.0));
+            let glyph = vec![
+                m(g33, g27),
+                arc(g16, g16, cd2, cd2),
+                arc(g14, g15, 0, cd4),
+                arc(g41, g42, cd34, -cd4),
+                ln(g37, g30),
+                ln(g36, g30),
+                ln(g36, g29),
+                arc(g14, g15, cd2, cd4),
+                arc(g41, g42, cd4, -cd4),
+                arc(g14, g14, 0, -cd2),
+                Close,
+                m(hc, g31),
+                arc(g42, g42, cd34, c360),
+                Close,
+            ];
+            let faces = vec![(Some(PathShade::Darken), glyph.clone()), (None, glyph.clone())];
+            (glyph, faces)
+        }
+        "actionButtonInformation" => {
+            let (g38, g25) = (f(3.0, 32.0), g9 + f(1.0, 32.0));
+            let (g28, g29, g30, g31) = (g9 + f(5.0, 16.0), g9 + f(3.0, 8.0), g9 + f(13.0, 16.0), g9 + f(7.0, 8.0));
+            let (g32, g34, g35, g37) = (g11 + f(5.0, 16.0), g11 + f(13.0, 32.0), g11 + f(19.0, 32.0), g11 + f(11.0, 16.0));
+            let circle = vec![m(hc, g9), arc(dx2, dx2, cd34, c360), Close];
+            let dot = vec![m(hc, g25), arc(g38, g38, cd34, c360)];
+            let stem_dark = [(g32, g29), (g34, g29), (g34, g30), (g32, g30), (g32, g31), (g37, g31), (g37, g30), (g35, g30), (g35, g28)];
+            let stem_light = [(g35, g28), (g35, g30), (g37, g30), (g37, g31), (g32, g31), (g32, g30), (g34, g30), (g34, g29), (g32, g29)];
+            let stem = |pts: &[(f64, f64)]| {
+                let mut c = vec![m(g32, g28)];
+                c.extend(pts.iter().map(|&(x, y)| ln(x, y)));
+                c.push(Close);
+                c
+            };
+            let dark = [circle.clone(), dot.clone(), stem(&stem_dark)].concat();
+            let light = [dot.clone(), stem(&stem_light)].concat();
+            let outline = [circle.clone(), dot, stem(&stem_light)].concat();
+            (circle, vec![(Some(PathShade::Darken), dark), (Some(PathShade::Lighten), light), (None, outline)])
+        }
+        "actionButtonReturn" => {
+            let (g17, g27) = (f(3.0, 8.0), f(1.0, 8.0));
+            let (g19, g20, g21) = (g9 + f(3.0, 4.0), g9 + f(5.0, 8.0), g9 + f(1.0, 4.0));
+            let (g22, g23, g24, g25, g26) = (g11 + f(7.0, 8.0), g11 + f(3.0, 4.0), g11 + f(5.0, 8.0), g11 + g17, g11 + f(1.0, 4.0));
+            let glyph = vec![
+                m(g12, g21),
+                ln(g23, g9),
+                ln(hc, g21),
+                ln(g24, g21),
+                ln(g24, g20),
+                arc(g27, g27, 0, cd4),
+                ln(g25, g19),
+                arc(g27, g27, cd4, cd4),
+                ln(g26, g21),
+                ln(g11, g21),
+                ln(g11, g20),
+                arc(g17, g17, cd2, -cd4),
+                ln(hc, g10),
+                arc(g17, g17, cd4, -cd4),
+                ln(g22, g21),
+                Close,
+            ];
+            let outline = vec![
+                m(g12, g21),
+                ln(g22, g21),
+                ln(g22, g20),
+                arc(g17, g17, 0, cd4),
+                ln(g25, g10),
+                arc(g17, g17, cd4, cd4),
+                ln(g11, g21),
+                ln(g26, g21),
+                ln(g26, g20),
+                arc(g27, g27, cd2, -cd4),
+                ln(hc, g19),
+                arc(g27, g27, cd4, -cd4),
+                ln(g24, g21),
+                ln(hc, g21),
+                ln(g23, g9),
+                Close,
+            ];
+            (glyph.clone(), vec![(Some(PathShade::Darken), glyph), (None, outline)])
+        }
+        "actionButtonDocument" => {
+            let dx1 = ss * 9.0 / 32.0;
+            let (g11, g12, g13) = (hc - dx1, hc + dx1, ss * 3.0 / 16.0);
+            let (g14, g15) = (g12 - g13, g9 + g13);
+            let page = vec![m(g11, g9), ln(g14, g9), ln(g12, g15), ln(g12, g10), ln(g11, g10), Close];
+            let sheet = vec![m(g11, g9), ln(g14, g9), ln(g14, g15), ln(g12, g15), ln(g12, g10), ln(g11, g10), Close];
+            let corner = vec![m(g14, g9), ln(g14, g15), ln(g12, g15), Close];
+            let outline = [page.clone(), vec![m(g12, g15), ln(g14, g15), ln(g14, g9)]].concat();
+            (page, vec![(Some(PathShade::DarkenLess), sheet), (Some(PathShade::Darken), corner), (None, outline)])
+        }
+        "actionButtonSound" => {
+            let (g20, g21, g22, g23) = (g9 + f(1.0, 8.0), g9 + f(5.0, 16.0), g9 + f(11.0, 16.0), g9 + f(7.0, 8.0));
+            let (g24, g25, g26) = (g11 + f(5.0, 16.0), g11 + f(5.0, 8.0), g11 + f(3.0, 4.0));
+            let speaker = vec![m(g11, g21), ln(g11, g22), ln(g24, g22), ln(g25, g10), ln(g25, g9), ln(g24, g21), Close];
+            let outline = vec![
+                m(g11, g21),
+                ln(g24, g21),
+                ln(g25, g9),
+                ln(g25, g10),
+                ln(g24, g22),
+                ln(g11, g22),
+                Close,
+                m(g26, g21),
+                ln(g12, g20),
+                m(g26, vc),
+                ln(g12, vc),
+                m(g26, g22),
+                ln(g12, g23),
+            ];
+            (speaker.clone(), vec![(Some(PathShade::Darken), speaker), (None, outline)])
+        }
+        "actionButtonMovie" => {
+            let k = |n: f64| f(n, 21600.0);
+            let (g31, g32, g33, g34) = (g11 + k(1455.0), g11 + k(1905.0), g11 + k(2325.0), g11 + k(16155.0));
+            let (g35, g36, g37, g38) = (g11 + k(17010.0), g11 + k(19335.0), g11 + k(19725.0), g11 + k(20595.0));
+            let (g39, g40, g41, g42, g43) = (g9 + k(5280.0), g9 + k(5730.0), g9 + k(6630.0), g9 + k(7492.0), g9 + k(9067.0));
+            let (g44, g45, g46, g47) = (g9 + k(9555.0), g9 + k(13342.0), g9 + k(14580.0), g9 + k(15592.0));
+            let camera = [
+                (g11, g44),
+                (g31, g44),
+                (g32, g43),
+                (g33, g43),
+                (g33, g47),
+                (g35, g47),
+                (g35, g45),
+                (g36, g45),
+                (g38, g46),
+                (g12, g46),
+                (g12, g41),
+                (g38, g41),
+                (g37, g42),
+                (g35, g42),
+                (g35, g41),
+                (g34, g40),
+                (g32, g40),
+                (g31, g39),
+            ];
+            let trace = |pts: &mut dyn Iterator<Item = &(f64, f64)>| {
+                let mut c = vec![m(g11, g39)];
+                c.extend(pts.map(|&(x, y)| ln(x, y)));
+                c.push(Close);
+                c
+            };
+            let glyph = trace(&mut camera.iter());
+            // The outline runs the other way round, from the first point back to the last.
+            let outline = trace(&mut camera.iter().rev());
+            (glyph.clone(), vec![(Some(PathShade::Darken), glyph), (None, outline)])
+        }
+        _ => return None,
+    };
+    let mut paths = vec![path(true, false, PathShade::Norm, [rect.clone(), glyph].concat())];
+    paths.extend(faces.into_iter().map(|(shade, commands)| match shade {
+        Some(shade) => path(true, false, shade, commands),
+        None => path(false, true, PathShade::Norm, commands),
+    }));
+    paths.push(path(false, true, PathShade::Norm, rect));
+    Some(paths)
 }
