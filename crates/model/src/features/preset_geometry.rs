@@ -647,7 +647,8 @@ const EXPLOSION2: [(i128, i128); 28] = [
 
 /// `heptagon`: a seven-sided polygon, wider and taller than the box by its scale factors `hf`/`vf`.
 fn heptagon_points(w: i128, h: i128, g: &ShapeGeometry) -> Vec<(i128, i128)> {
-    let (hc, vc) = (w as f64 / 2.0, h as f64 / 2.0);
+    let (wf, hf) = (w as f64, h as f64);
+    let (hc, vc) = (wf / 2.0, hf / 2.0);
     let hf = adjust(g, "hf", 102572) as f64;
     let vf = adjust(g, "vf", 105210) as f64;
     let swd2 = hc * hf / 100000.0;
@@ -663,14 +664,15 @@ fn heptagon_points(w: i128, h: i128, g: &ShapeGeometry) -> Vec<(i128, i128)> {
 
 /// `decagon`: a ten-sided polygon, taller than the box by its scale factor `vf`.
 fn decagon_points(w: i128, h: i128, g: &ShapeGeometry) -> Vec<(i128, i128)> {
-    let (hc, vc) = (w as f64 / 2.0, h as f64 / 2.0);
+    let (wf, hf) = (w as f64, h as f64);
+    let (hc, vc) = (wf / 2.0, hf / 2.0);
     let vf = adjust(g, "vf", 105146) as f64;
     let shd2 = vc * vf / 100000.0;
     let (dx1, dx2) = (hc * 36_f64.to_radians().cos(), hc * 72_f64.to_radians().cos());
     let (dy1, dy2) = (shd2 * 72_f64.to_radians().sin(), shd2 * 36_f64.to_radians().sin());
     let (x1, x2, x3, x4) = (hc - dx1, hc - dx2, hc + dx2, hc + dx1);
     let (y1, y2, y3, y4) = (vc - dy1, vc - dy2, vc + dy2, vc + dy1);
-    round_points(&[(0.0, vc), (x1, y2), (x2, y1), (x3, y1), (x4, y2), (w as f64, vc), (x4, y3), (x3, y4), (x2, y4), (x1, y3)], w, h)
+    round_points(&[(0.0, vc), (x1, y2), (x2, y1), (x3, y1), (x4, y2), (wf, vc), (x4, y3), (x3, y4), (x2, y4), (x1, y3)], w, h)
 }
 
 /// `dodecagon`: a twelve-sided polygon with fixed proportions (21600ths of the box).
@@ -751,7 +753,7 @@ fn diag_stripe_points(w: i128, h: i128, g: &ShapeGeometry) -> Vec<(i128, i128)> 
     round_points(&[(0.0, y2), (x2, 0.0), (wf, 0.0), (0.0, hf)], w, h)
 }
 
-/// `lightningBolt`: a fixed eleven-point bolt in a 21600 × 21600 path box.
+/// `lightningBolt`: a fixed eleven-point bolt in a 21600 × 21600 path box, pinned into the shape box.
 fn lightning_bolt_points(w: i128, h: i128) -> Vec<(i128, i128)> {
     const BOLT: [(i128, i128); 11] = [
         (8472, 0),
@@ -766,8 +768,7 @@ fn lightning_bolt_points(w: i128, h: i128) -> Vec<(i128, i128)> {
         (7602, 8382),
         (0, 3890),
     ];
-    let md = |x: i128, y: i128, z: i128| x.saturating_mul(y).checked_div(z).unwrap_or(0);
-    BOLT.iter().map(|&(x, y)| (md(w, x, 21600), md(h, y, 21600))).collect()
+    BOLT.iter().map(|&(x, y)| (x.clamp(0, w), y.clamp(0, h))).collect()
 }
 
 /// Rounds the vertices of a guide-computed outline and pins them into the shape box: scale factors
