@@ -31,6 +31,7 @@ mod find_notes_comments;
 mod flash_fill_substrings;
 mod font_scheme_minor;
 mod format_as_table_restyle;
+mod go_to_special_options;
 mod hidden_drawing_print;
 mod hidden_sheet_navigation;
 mod ink_roundtrip;
