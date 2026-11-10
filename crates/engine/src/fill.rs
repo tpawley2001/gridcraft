@@ -619,7 +619,8 @@ pub fn series(cx: &mut Ctx, sheet: usize, options: SeriesOptions<'_>) -> Result<
 /// Flash Fill: learns a transformation from the examples typed in the column of `at` (rows
 /// above it with values) from the column(s) to the left, and fills the remaining rows.
 /// Supported transformations: a token (word) of the source by index, concatenations of tokens
-/// with literal separators, upper/lower/proper case, and fixed-position substrings.
+/// with literal separators, upper/lower/proper case, letter/digit runs inside a token, and
+/// substrings of a token by position from its start or end.
 pub fn flash_fill(cx: &mut Ctx, sheet: usize, at: CellRef) -> Result<usize> {
     let Some(sh) = cx.wb.sheet(sheet) else { return Ok(0) };
     if at.col == 0 {
@@ -677,6 +678,10 @@ enum Piece {
     Tok(i32, Case),
     /// First character of a token.
     Initial(i32, Case),
+    /// A letter or digit run inside a token: token index, run index (both negative from the end).
+    Run(i32, i32, Case),
+    /// Characters `start..end` of a token, each position counted from its start or its end.
+    Sub(i32, Anchor, Anchor, Case),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -687,11 +692,48 @@ enum Case {
     Proper,
 }
 
+const CASES: [Case; 4] = [Case::Same, Case::Upper, Case::Lower, Case::Proper];
+
+/// A character position in a token: `Start(n)` is `n` characters after its start, `End(n)` is
+/// `n` characters before its end.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Anchor {
+    Start(u32),
+    End(u32),
+}
+
+impl Anchor {
+    fn at(self, len: usize) -> Option<usize> {
+        match self {
+            Anchor::Start(n) => usize::try_from(n).ok().filter(|&n| n <= len),
+            Anchor::End(n) => len.checked_sub(usize::try_from(n).ok()?),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct Program(Vec<Piece>);
 
-fn tokens(s: &str) -> Vec<String> {
-    s.split(|c: char| !c.is_alphanumeric() && c != '\'').filter(|t| !t.is_empty()).map(str::to_string).collect()
+fn tokens(s: &str) -> Vec<Vec<char>> {
+    s.split(|c: char| !c.is_alphanumeric() && c != '\'').filter(|t| !t.is_empty()).map(|t| t.chars().collect()).collect()
+}
+
+/// Spans of a token split at every letter/digit boundary (`ABC123` -> `ABC`, `123`).
+fn runs(tok: &[char]) -> Vec<(usize, usize)> {
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    for (i, c) in tok.iter().enumerate() {
+        match out.last_mut() {
+            Some((s, e)) if tok.get(*s).is_some_and(|p| p.is_numeric() == c.is_numeric()) => *e = i + 1,
+            _ => out.push((i, i + 1)),
+        }
+    }
+    out
+}
+
+/// Item `i` of a list of `len` (negative from the end).
+fn nth(len: usize, i: i32) -> Option<usize> {
+    let j = if i >= 0 { usize::try_from(i).ok()? } else { len.checked_sub(i.unsigned_abs() as usize)? };
+    (j < len).then_some(j)
 }
 
 fn apply_case(s: &str, c: Case) -> String {
@@ -713,86 +755,289 @@ fn apply_case(s: &str, c: Case) -> String {
     }
 }
 
+impl Piece {
+    /// The text this piece takes from a source's tokens, `None` when the source lacks it.
+    fn eval(&self, toks: &[Vec<char>]) -> Option<String> {
+        let tok = |i: i32| toks.get(nth(toks.len(), i)?);
+        let text = |chars: &[char], c: Case| apply_case(&chars.iter().collect::<String>(), c);
+        match self {
+            Piece::Lit(l) => Some(l.clone()),
+            Piece::Tok(i, c) => Some(text(tok(*i)?, *c)),
+            Piece::Initial(i, c) => Some(text(tok(*i)?.get(..1)?, *c)),
+            Piece::Run(i, r, c) => {
+                let t = tok(*i)?;
+                let rs = runs(t);
+                let (s, e) = *rs.get(nth(rs.len(), *r)?)?;
+                Some(text(t.get(s..e)?, *c))
+            }
+            Piece::Sub(i, a, b, c) => {
+                let t = tok(*i)?;
+                let (s, e) = (a.at(t.len())?, b.at(t.len())?);
+                (s < e).then_some(())?;
+                Some(text(t.get(s..e)?, *c))
+            }
+        }
+    }
+
+    /// Ranking terms after literals and piece count: kind (whole token, run, part of a token),
+    /// positions counted from the end, case change.
+    fn rank(&self) -> (u32, u32, u32) {
+        let neg = |i: &i32| u32::from(*i < 0);
+        let end = |a: &Anchor| u32::from(matches!(a, Anchor::End(_)));
+        let case = |c: &Case| u32::from(*c != Case::Same);
+        match self {
+            Piece::Lit(_) => (0, 0, 0),
+            Piece::Tok(i, c) => (0, neg(i), case(c)),
+            Piece::Run(i, r, c) => (1, neg(i) + neg(r), case(c)),
+            Piece::Initial(i, c) => (2, neg(i), case(c)),
+            Piece::Sub(i, a, b, c) => (2, neg(i) + end(a) + end(b), case(c)),
+        }
+    }
+}
+
 impl Program {
     fn apply(&self, src: &str) -> Option<String> {
         let toks = tokens(src);
-        let get = |i: i32| -> Option<&String> {
-            if i >= 0 { toks.get(i as usize) } else { toks.len().checked_sub(i.unsigned_abs() as usize).and_then(|j| toks.get(j)) }
-        };
         let mut out = String::new();
         for p in &self.0 {
-            match p {
-                Piece::Lit(l) => out.push_str(l),
-                Piece::Tok(i, c) => out.push_str(&apply_case(get(*i)?, *c)),
-                Piece::Initial(i, c) => out.push_str(&apply_case(&get(*i)?.chars().next()?.to_string(), *c)),
-            }
+            out.push_str(&p.eval(&toks)?);
         }
         Some(out)
     }
 }
 
-/// Finds a program consistent with every example.
+/// Finds the best-ranked program consistent with every example.
 fn learn(examples: &[(String, String)]) -> Option<Program> {
-    let (src, dst) = examples.first()?;
-    let candidates = synthesize(src, dst);
-    candidates.into_iter().find(|p| examples.iter().all(|(s, d)| p.apply(s).as_deref() == Some(d.as_str())))
+    let exs: Vec<Example> = examples
+        .iter()
+        .take(FLASH_MAX_EXAMPLES)
+        .map(|(s, d)| Example { toks: tokens(s).into_iter().take(FLASH_MAX_TOKENS).collect(), out: d.chars().collect() })
+        .collect();
+    let program = synthesize(&exs)?;
+    examples.iter().all(|(s, d)| program.apply(s).as_deref() == Some(d.as_str())).then_some(program)
 }
 
-/// Candidate programs for one example, by greedy segmentation of the output into token matches
-/// and literals (tries several index conventions).
-fn synthesize(src: &str, dst: &str) -> Vec<Program> {
-    let toks = tokens(src);
-    let n = toks.len() as i32;
+/// Bounds of the program search: examples searched together (the rest are checked after),
+/// output characters, tokens per source, token length for parts of a token, states kept per
+/// output position and candidate pieces per state.
+const FLASH_MAX_EXAMPLES: usize = 16;
+const FLASH_MAX_OUT: usize = 512;
+const FLASH_MAX_TOKENS: usize = 50;
+const FLASH_MAX_SUB_TOKEN: usize = 256;
+const FLASH_STATES_PER_POS: usize = 6;
+const FLASH_PIECES_PER_STATE: usize = 512;
+
+struct Example {
+    toks: Vec<Vec<char>>,
+    out: Vec<char>,
+}
+
+/// Search cost, compared in order: literal characters, pieces, kind, positions from the end,
+/// substrings that don't continue where the previous part of the same token ended, case changes.
+type Cost = [u32; 6];
+
+struct Node {
+    /// Characters of each example's output explained so far.
+    pos: Vec<usize>,
+    cost: Cost,
+    prev: Option<(usize, Piece)>,
+    /// The last piece that isn't a literal.
+    last: Option<Piece>,
+}
+
+struct Search {
+    nodes: Vec<Node>,
+    /// Node of each explained-so-far position.
+    index: std::collections::HashMap<Vec<usize>, usize>,
+    /// Nodes by how much of the first example's output they explain.
+    buckets: Vec<Vec<usize>>,
+}
+
+/// Records reaching `pos` at `cost` from node `from` with `piece`, keeping the cheaper way.
+fn relax(sr: &mut Search, pos: Vec<usize>, cost: Cost, from: usize, piece: Piece, last: Option<Piece>) {
+    if let Some(&id) = sr.index.get(&pos) {
+        if let Some(node) = sr.nodes.get_mut(id)
+            && cost < node.cost
+        {
+            *node = Node { pos, cost, prev: Some((from, piece)), last };
+        }
+        return;
+    }
+    let id = sr.nodes.len();
+    if let Some(b) = pos.first().and_then(|&p| sr.buckets.get_mut(p)) {
+        b.push(id);
+    }
+    sr.index.insert(pos.clone(), id);
+    sr.nodes.push(Node { pos, cost, prev: Some((from, piece)), last });
+}
+
+/// Number of characters `s` covers at the start of `rest`, if `rest` starts with it.
+fn prefix_len(s: &str, rest: &[char]) -> Option<usize> {
+    let mut n = 0;
+    for ch in s.chars() {
+        (rest.get(n) == Some(&ch)).then_some(())?;
+        n += 1;
+    }
+    (n > 0).then_some(n)
+}
+
+/// Pieces whose text on `ex` starts its output at `p`, best kinds first.
+fn candidates(ex: &Example, p: usize) -> Vec<Piece> {
+    let rest = ex.out.get(p..).unwrap_or(&[]);
+    let n = i32::try_from(ex.toks.len()).unwrap_or(0);
     let mut out = Vec::new();
-    for prefer_neg in [false, true] {
-        let mut pieces = Vec::new();
-        let mut rest = dst;
-        let mut guard = 0;
-        while !rest.is_empty() && guard < 64 {
-            guard += 1;
-            // Longest token (with any case) that prefixes `rest`.
-            let mut best: Option<(usize, Piece)> = None;
-            for (i, t) in toks.iter().enumerate() {
-                let idx = if prefer_neg { i as i32 - n } else { i as i32 };
-                for c in [Case::Same, Case::Upper, Case::Lower, Case::Proper] {
-                    let cand = apply_case(t, c);
-                    if !cand.is_empty() && rest.starts_with(&cand) && best.as_ref().is_none_or(|(l, _)| cand.len() > *l) {
-                        best = Some((cand.len(), Piece::Tok(idx, c)));
-                    }
-                }
+    let both = |i: usize| {
+        let i = i32::try_from(i).unwrap_or(0);
+        [i, i - n]
+    };
+    let text = |chars: &[char], c: Case| apply_case(&chars.iter().collect::<String>(), c);
+    for (i, t) in ex.toks.iter().enumerate() {
+        for c in CASES {
+            if prefix_len(&text(t, c), rest).is_some() {
+                out.extend(both(i).map(|i| Piece::Tok(i, c)));
             }
-            if best.as_ref().is_none_or(|(l, _)| *l <= 1) {
-                // Initial letters (e.g. "J. Smith").
-                for (i, t) in toks.iter().enumerate() {
-                    let idx = if prefer_neg { i as i32 - n } else { i as i32 };
-                    if let Some(ch) = t.chars().next() {
-                        for c in [Case::Same, Case::Upper, Case::Lower] {
-                            let cand = apply_case(&ch.to_string(), c);
-                            if rest.starts_with(&cand) && best.is_none() {
-                                best = Some((cand.len(), Piece::Initial(idx, c)));
-                            }
-                        }
+        }
+    }
+    for (i, t) in ex.toks.iter().enumerate() {
+        let rs = runs(t);
+        let rn = i32::try_from(rs.len()).unwrap_or(0);
+        for (r, &(s, e)) in rs.iter().enumerate() {
+            let r = i32::try_from(r).unwrap_or(0);
+            for c in CASES {
+                if prefix_len(&text(t.get(s..e).unwrap_or(&[]), c), rest).is_some() {
+                    for ti in both(i) {
+                        out.extend([r, r - rn].map(|r| Piece::Run(ti, r, c)));
                     }
-                }
-            }
-            match best {
-                Some((len, piece)) => {
-                    pieces.push(piece);
-                    rest = rest.get(len..).unwrap_or("");
-                }
-                None => {
-                    let ch = rest.chars().next().unwrap_or(' ');
-                    match pieces.last_mut() {
-                        Some(Piece::Lit(l)) => l.push(ch),
-                        _ => pieces.push(Piece::Lit(ch.to_string())),
-                    }
-                    rest = rest.get(ch.len_utf8()..).unwrap_or("");
                 }
             }
         }
-        out.push(Program(pieces));
     }
+    for (i, t) in ex.toks.iter().enumerate() {
+        for c in CASES {
+            if prefix_len(&text(t.get(..1).unwrap_or(&[]), c), rest).is_some() {
+                out.extend(both(i).map(|i| Piece::Initial(i, c)));
+            }
+        }
+    }
+    for (i, t) in ex.toks.iter().enumerate() {
+        let len = t.len();
+        if len > FLASH_MAX_SUB_TOKEN {
+            continue;
+        }
+        for s in 0..len {
+            for c in CASES {
+                // Extend the substring one character at a time while the output agrees.
+                let mut q = 0;
+                for e in s + 1..=len {
+                    let Some(&ch) = t.get(e - 1) else { break };
+                    let first = e - 1 == s;
+                    let piece: String = match c {
+                        Case::Same => ch.to_string(),
+                        Case::Upper => ch.to_uppercase().collect(),
+                        Case::Lower => ch.to_lowercase().collect(),
+                        Case::Proper if first => ch.to_uppercase().collect(),
+                        Case::Proper => ch.to_lowercase().collect(),
+                    };
+                    let Some(k) = prefix_len(&piece, rest.get(q..).unwrap_or(&[])) else { break };
+                    q += k;
+                    // Case changes of text without letters add nothing.
+                    let cased = t.get(s..e).unwrap_or(&[]).iter().any(|ch| ch.is_alphabetic());
+                    if c != Case::Same && !cased {
+                        continue;
+                    }
+                    let (Ok(s32), Ok(e32), Ok(sb), Ok(eb)) = (u32::try_from(s), u32::try_from(e), u32::try_from(len - s), u32::try_from(len - e))
+                    else {
+                        continue;
+                    };
+                    for ti in both(i) {
+                        for a in [Anchor::Start(s32), Anchor::End(sb)] {
+                            for b in [Anchor::Start(e32), Anchor::End(eb)] {
+                                if a == Anchor::Start(0) && b == Anchor::Start(1) {
+                                    continue; // an initial
+                                }
+                                out.push(Piece::Sub(ti, a, b, c));
+                            }
+                        }
+                    }
+                    if out.len() >= FLASH_PIECES_PER_STATE {
+                        return out;
+                    }
+                }
+            }
+        }
+    }
+    out.truncate(FLASH_PIECES_PER_STATE);
     out
+}
+
+/// Searches for the cheapest program explaining every example at once: a shortest-path search
+/// over how much of each output is explained, each step adding a piece or one literal character.
+fn synthesize(exs: &[Example]) -> Option<Program> {
+    let first = exs.first()?;
+    let len0 = first.out.len();
+    if len0 > FLASH_MAX_OUT {
+        return None;
+    }
+    let target: Vec<usize> = exs.iter().map(|e| e.out.len()).collect();
+    let mut search = Search {
+        nodes: vec![Node { pos: vec![0; exs.len()], cost: [0; 6], prev: None, last: None }],
+        index: std::collections::HashMap::from([(vec![0; exs.len()], 0usize)]),
+        buckets: vec![Vec::new(); len0 + 1],
+    };
+    if let Some(b) = search.buckets.get_mut(0) {
+        b.push(0);
+    }
+    for p in 0..len0 {
+        let mut ids = std::mem::take(search.buckets.get_mut(p)?);
+        ids.sort_by_key(|&id| search.nodes.get(id).map(|n| n.cost));
+        ids.truncate(FLASH_STATES_PER_POS);
+        let pieces = candidates(first, p);
+        for id in ids {
+            let Some(node) = search.nodes.get(id) else { continue };
+            let (pos, cost, last) = (node.pos.clone(), node.cost, node.last.clone());
+            let after_lit = matches!(node.prev, Some((_, Piece::Lit(_))));
+            // One literal character, the same in every example.
+            if let Some(&ch) = first.out.get(p)
+                && exs.iter().zip(&pos).all(|(e, &q)| e.out.get(q) == Some(&ch))
+            {
+                let mut c = cost;
+                c[0] += 1;
+                c[1] += u32::from(!after_lit);
+                let np = pos.iter().map(|q| q + 1).collect();
+                relax(&mut search, np, c, id, Piece::Lit(ch.to_string()), last.clone());
+            }
+            'piece: for piece in &pieces {
+                let mut np = Vec::with_capacity(exs.len());
+                for (e, &q) in exs.iter().zip(&pos) {
+                    let Some(text) = piece.eval(&e.toks) else { continue 'piece };
+                    let Some(k) = prefix_len(&text, e.out.get(q..).unwrap_or(&[])) else { continue 'piece };
+                    np.push(q + k);
+                }
+                let (kind, neg, case) = piece.rank();
+                let gap = match (piece, &last) {
+                    (Piece::Sub(i, Anchor::Start(s), ..), Some(Piece::Sub(j, _, Anchor::Start(e), _))) => u32::from(i == j && s != e),
+                    _ => 0,
+                };
+                let c = [cost[0], cost[1] + 1, cost[2] + kind, cost[3] + neg, cost[4] + gap, cost[5] + case];
+                relax(&mut search, np, c, id, piece.clone(), Some(piece.clone()));
+            }
+        }
+    }
+    // Walk back from the node that explains every output.
+    let mut id = *search.index.get(&target)?;
+    let mut rev = Vec::new();
+    while let Some((from, piece)) = search.nodes.get(id).and_then(|n| n.prev.clone()) {
+        rev.push(piece);
+        id = from;
+    }
+    let mut pieces: Vec<Piece> = Vec::new();
+    for piece in rev.into_iter().rev() {
+        match (pieces.last_mut(), piece) {
+            (Some(Piece::Lit(l)), Piece::Lit(ch)) => l.push_str(&ch),
+            (_, piece) => pieces.push(piece),
+        }
+    }
+    Some(Program(pieces))
 }
 
 #[cfg(test)]
@@ -834,6 +1079,19 @@ mod tests {
         assert_eq!(p.apply("alan turing").as_deref(), Some("AT"));
         let p = learn(&[("alice@example.com".into(), "alice".into())]).unwrap();
         assert_eq!(p.apply("bob@example.com").as_deref(), Some("bob"));
+    }
+
+    #[test]
+    fn flash_search_stays_bounded_on_long_text() {
+        // A long word and a long output of repeated digits: many ways to explain each character.
+        let src = "1".repeat(300);
+        let dst = format!("<{}>", "1".repeat(500));
+        let p = learn(&[(src, dst.clone())]);
+        if let Some(p) = p {
+            assert_eq!(p.apply(&"1".repeat(300)).as_deref(), Some(dst.as_str()));
+        }
+        let many = (0..200).map(|i| format!("w{i}")).collect::<Vec<_>>().join(" ");
+        assert!(learn(&[(many, "x".repeat(2000))]).is_none());
     }
 
     #[test]

@@ -282,6 +282,7 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-10 | minor | G0252: Flash Fill learns parts of words: characters by position from a word's start or end and letter/digit runs inside a word, and prefers the source's text over literal text (`(425) 555-0123` from `4255550123`). |
 | 2026-11-10 | minor | G0249: imported curved and curved tilted-up ribbons, moon, cloud callout and swoosh arrow draw and print with their own outline, keeping control points, arc radii and thought bubbles outside the box; arcs use visual angles on a stretched ellipse. |
 | 2026-11-10 | minor | G0248: imported line callouts (with and without border and accent bar, 1-3 segments) draw and print their box and their leader outside it, and join Insert › Shapes › Callouts. |
 | 2026-11-10 | minor | G0239: imported curved right, left, up and down arrows draw and print with their own outline and shaded back face. |
