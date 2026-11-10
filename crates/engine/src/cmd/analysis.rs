@@ -1789,6 +1789,8 @@ fn chart_series(name: &str, values: String, categories: Option<String>, cumulati
         smooth: false,
         quartiles: Default::default(),
         trendlines: Vec::new(),
+        explosion: 0,
+        point_explosions: Vec::new(),
     }
 }
 

@@ -20,6 +20,8 @@ fn smooth_line_setting_round_trips() {
         quartiles: Default::default(),
         smooth: false,
         trendlines: Vec::new(),
+        explosion: 0,
+        point_explosions: Vec::new(),
     };
     s.charts.push(Chart {
         of_pie: None,

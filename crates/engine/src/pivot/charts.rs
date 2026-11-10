@@ -76,6 +76,8 @@ pub fn chart_series(sheet: &str, origin: CellRef, out: &Output) -> Vec<Series> {
                 quartiles: Default::default(),
                 smooth: false,
                 trendlines: Vec::new(),
+                explosion: 0,
+                point_explosions: Vec::new(),
             })
         })
         .collect()

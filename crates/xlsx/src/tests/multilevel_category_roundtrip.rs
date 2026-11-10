@@ -41,6 +41,8 @@ fn workbook(categories: &str, values: &str) -> Workbook {
             kind: None,
             smooth: false,
             trendlines: Vec::new(),
+            explosion: 0,
+            point_explosions: Vec::new(),
             quartiles: Default::default(),
         }],
         legend: LegendPos::Bottom,

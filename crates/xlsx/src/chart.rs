@@ -158,7 +158,24 @@ fn read_series(s: &El) -> Series {
         quartiles: Default::default(),
         smooth: bool_val(s, "smooth"),
         trendlines: s.kids("trendline").filter_map(read_trendline).collect(),
+        explosion: explosion_val(s).unwrap_or(0),
+        point_explosions: s
+            .kids("dPt")
+            .filter_map(|d| Some((d.child_val("idx")?.trim().parse::<u32>().ok()?, explosion_val(d)?)))
+            .take(MAX_POINT_EXPLOSIONS)
+            .collect(),
     }
+}
+
+/// Exploded slices kept per series; a hostile file cannot make the list grow without bound.
+const MAX_POINT_EXPLOSIONS: usize = 4096;
+
+/// `c:explosion` (ECMA-376 Part 1, 21.2.2.61): percent of the radius, clamped to the UI maximum.
+fn explosion_val(e: &El) -> Option<u32> {
+    let v = e.child_val("explosion")?.trim();
+    // Digits beyond u32 still mean "very far out": clamp rather than drop.
+    let n = v.parse::<u64>().ok().or_else(|| (!v.is_empty() && v.bytes().all(|b| b.is_ascii_digit())).then_some(u64::MAX))?;
+    Some(u32::try_from(n.min(u64::from(Series::MAX_EXPLOSION))).unwrap_or(Series::MAX_EXPLOSION))
 }
 
 const DASHES: [(LineDash, &str); 11] = [
@@ -667,6 +684,24 @@ fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String 
         G::Line { markers: false, .. } | G::Scatter { lines: true } | G::Stock => x.push_str("<c:marker><c:symbol val=\"none\"/></c:marker>"),
         G::Bubble => x.push_str("<c:invertIfNegative val=\"0\"/>"),
         _ => {}
+    }
+    // CT_PieSer: explosion, then one dPt (idx, explosion) per pulled-out slice, before dLbls/cat.
+    if matches!(g, G::Pie | G::Doughnut) {
+        let e = s.explosion.min(Series::MAX_EXPLOSION);
+        if e > 0 {
+            let _ = write!(x, "<c:explosion val=\"{e}\"/>");
+        }
+        let mut points: Vec<(u32, u32)> = Vec::new();
+        for &(i, pe) in &s.point_explosions {
+            match points.iter_mut().find(|(j, _)| *j == i) {
+                Some(p) => p.1 = pe,
+                None => points.push((i, pe)),
+            }
+        }
+        points.sort_by_key(|(i, _)| *i);
+        for (i, pe) in points {
+            let _ = write!(x, "<c:dPt><c:idx val=\"{i}\"/><c:explosion val=\"{}\"/></c:dPt>", pe.min(Series::MAX_EXPLOSION));
+        }
     }
     // Trendlines sit between dLbls and the data in CT_LineSer, CT_BarSer, CT_AreaSer,
     // CT_ScatterSer and CT_BubbleSer; pie, radar and surface series have none.

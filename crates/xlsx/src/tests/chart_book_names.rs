@@ -46,6 +46,8 @@ fn series(name: &str, values: &str) -> Series {
         kind: None,
         smooth: false,
         trendlines: Vec::new(),
+        explosion: 0,
+        point_explosions: Vec::new(),
         quartiles: Default::default(),
     }
 }

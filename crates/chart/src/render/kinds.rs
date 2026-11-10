@@ -6,6 +6,7 @@ use super::{
     AXIS, Chart, ChartData, Ctx, DOWN, Fmt, GRID, HAlign, LABEL_SIZE, MAX_CATS, MAX_LABELS, MAX_MARKERS, MAX_SERIES, MAX_WEDGES, Prim,
     QuartileMethod, Rgba, STOCK, SeriesData, TAU, TEXT, UP, VAlign, WHITE, clean, nice_scale,
 };
+use gridcraft_model::Series;
 
 // ---------------------------------------------------------------- histogram
 
@@ -225,6 +226,17 @@ fn wedge(ctx: &mut Ctx, ring: &Ring, a0: f32, sweep: f32, fill: Rgba) {
     }
 }
 
+/// How much larger than the pie radius the plot must be for slices pulled out by `max` percent.
+fn explosion_scale(max: u32) -> f32 {
+    1.0 + max.min(Series::MAX_EXPLOSION) as f32 / 100.0
+}
+
+/// The centre of a slice whose bisector points at `mid`, pulled out by `percent` of `r`.
+fn explode(cx: f32, cy: f32, r: f32, mid: f32, percent: u32) -> (f32, f32) {
+    let d = r * percent.min(Series::MAX_EXPLOSION) as f32 / 100.0;
+    (cx + d * mid.sin(), cy - d * mid.cos())
+}
+
 pub(super) fn pie(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx, inner: f32, names: bool) {
     let Some(s) = data.series.first() else { return };
     let vals: Vec<f64> = s.values.iter().take(MAX_CATS).map(|v| v.map(f64::abs).unwrap_or(0.0)).collect();
@@ -233,12 +245,14 @@ pub(super) fn pie(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx, inne
         return;
     }
     let (cx, cy) = (area.cx(), area.cy());
-    let r = area.w.min(area.h) / 2.0 * 0.92;
+    // Exploded slices (pie only; the sunburst draws through here with `names`): the pie shrinks so
+    // the farthest slice still fits.
+    let model = chart.series.first().filter(|_| !names);
+    let r = area.w.min(area.h) / 2.0 * 0.92 / explosion_scale(model.map_or(0, Series::max_explosion));
     if r < 2.0 {
         return;
     }
     let ri = r * inner;
-    let ring = Ring { cx, cy, outer: r, inner: ri, stroke: Some((WHITE, 1.5)) };
     let f = Fmt::new(&s.number_format);
     let mut a = (chart.first_slice_angle % 360) as f32 * TAU / 360.0;
     let mut labels = Vec::new();
@@ -246,14 +260,16 @@ pub(super) fn pie(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx, inne
         let sweep = (*v / total) as f32 * TAU;
         if sweep > 1e-4 {
             let fill = point_color(data, j);
+            let mid = a + sweep / 2.0;
+            let (sx, sy) = explode(cx, cy, r, mid, model.map_or(0, |m| m.explosion_of(j)));
+            let ring = Ring { cx: sx, cy: sy, outer: r, inner: ri, stroke: Some((WHITE, 1.5)) };
             wedge(ctx, &ring, a, sweep, fill);
             if (chart.data_labels || names) && vals.len() <= MAX_LABELS {
                 let t = if names { cat_label(data, j) } else { f.format(s.values.get(j).copied().flatten().unwrap_or(0.0), None) };
-                let mid = a + sweep / 2.0;
                 let rr = if ri > 0.0 { (r + ri) / 2.0 } else { r * 0.65 };
                 let room = sweep * rr;
                 if ctx.tw(&t, LABEL_SIZE) <= room.max(r - ri) && room >= LABEL_SIZE {
-                    labels.push((cx + rr * mid.sin(), cy - rr * mid.cos(), t, on(fill)));
+                    labels.push((sx + rr * mid.sin(), sy - rr * mid.cos(), t, on(fill)));
                 }
             }
         }
@@ -403,7 +419,10 @@ pub(super) fn doughnut(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx)
         return;
     }
     let (cx, cy) = (area.cx(), area.cy());
-    let r = area.w.min(area.h) / 2.0 * 0.92;
+    // Explosion pulls out the outer ring's slices (the last series); the doughnut shrinks so the
+    // farthest one still fits.
+    let model = chart.series.get(nser.saturating_sub(1));
+    let r = area.w.min(area.h) / 2.0 * 0.92 / explosion_scale(model.map_or(0, Series::max_explosion));
     if r < 2.0 {
         return;
     }
@@ -436,7 +455,7 @@ pub(super) fn doughnut(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx)
         // The white separator is 1.5 units wide, wider than a one-pixel band: on a thin ring it
         // would paint over the fill of this ring and its neighbour, so such rings keep only fill.
         let stroke = if outer - inner > 1.0 { Some((WHITE, 1.5)) } else { None };
-        let ring = Ring { cx, cy, outer: *outer, inner: *inner, stroke };
+        let outermost = k + 1 == rings.len();
         let vals: Vec<f64> = s.values.iter().take(MAX_CATS).map(|v| v.map(f64::abs).unwrap_or(0.0)).collect();
         let cap = (budget / (rings.len() - k)).max(1);
         let slices = largest_slices(&vals, cap);
@@ -452,13 +471,16 @@ pub(super) fn doughnut(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx)
             let sweep = (v / total) as f32 * TAU;
             if sweep > 1e-4 {
                 let fill = point_color(data, j);
+                let mid = a + sweep / 2.0;
+                let e = if outermost { model.map_or(0, |m| m.explosion_of(j)) } else { 0 };
+                let (sx, sy) = explode(cx, cy, r, mid, e);
+                let ring = Ring { cx: sx, cy: sy, outer: *outer, inner: *inner, stroke };
                 wedge(ctx, &ring, a, sweep, fill);
                 if chart.data_labels && n <= MAX_LABELS {
                     let t = f.format(s.values.get(j).copied().flatten().unwrap_or(0.0), None);
-                    let mid = a + sweep / 2.0;
                     let rr = (outer + inner) / 2.0;
                     if ctx.tw(&t, LABEL_SIZE) <= (sweep * rr).max(outer - inner) && sweep * rr >= LABEL_SIZE {
-                        labels.push((cx + rr * mid.sin(), cy - rr * mid.cos(), t, on(fill)));
+                        labels.push((sx + rr * mid.sin(), sy - rr * mid.cos(), t, on(fill)));
                     }
                 }
             }

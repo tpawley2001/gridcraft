@@ -31,6 +31,8 @@ fn literal_category_with_separators_survives_save() {
             quartiles: Default::default(),
             smooth: false,
             trendlines: Vec::new(),
+            explosion: 0,
+            point_explosions: Vec::new(),
         })
         .collect();
     s.charts.push(Chart {
