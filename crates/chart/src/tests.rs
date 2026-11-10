@@ -5,6 +5,7 @@ use gridcraft_model::{Anchor, Chart, ChartKind, Color, LegendPos, Series, Sparkl
 
 use crate::*;
 
+mod axis_options;
 mod budget;
 mod data_table;
 mod of_pie;

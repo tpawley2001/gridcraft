@@ -860,12 +860,95 @@ pub struct AxisScale {
     pub log_base: Option<f64>,
     /// Values in reverse order (`orientation maxMin`).
     pub reverse: bool,
+    /// Display units of a value axis (Format Axis ▸ Display units); `None` shows full values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_units: Option<DisplayUnits>,
+    /// Where this axis crosses the perpendicular axis, in that axis's units (`c:crosses` /
+    /// `c:crossesAt`): a category number on a category chart's value axis, an X value on a
+    /// scatter chart's Y axis, a Y value on its X axis.
+    #[serde(default, skip_serializing_if = "AxisCrosses::is_auto")]
+    pub crosses: AxisCrosses,
 }
 
 impl AxisScale {
     pub fn is_auto(&self) -> bool {
         *self == AxisScale::default()
     }
+}
+
+/// Where an axis crosses its perpendicular axis (ECMA-376 §21.2.2 `crosses` / `crossesAt`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum AxisCrosses {
+    /// At zero (or the nearest end when zero is outside the axis), at the first category.
+    #[default]
+    AutoZero,
+    /// At the perpendicular axis's minimum.
+    Min,
+    /// At the perpendicular axis's maximum.
+    Max,
+    /// At this value (category number) of the perpendicular axis.
+    At(f64),
+}
+
+impl AxisCrosses {
+    pub fn is_auto(&self) -> bool {
+        *self == AxisCrosses::AutoZero
+    }
+}
+
+/// A value axis's display unit (`c:builtInUnit` / `c:custUnit`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum DisplayUnit {
+    Hundreds,
+    Thousands,
+    TenThousands,
+    HundredThousands,
+    Millions,
+    TenMillions,
+    HundredMillions,
+    Billions,
+    Trillions,
+    Custom(f64),
+}
+
+impl DisplayUnit {
+    /// Built-in units with their `ST_BuiltInUnit` names, smallest first.
+    pub const BUILT_IN: [(DisplayUnit, &'static str); 9] = [
+        (DisplayUnit::Hundreds, "hundreds"),
+        (DisplayUnit::Thousands, "thousands"),
+        (DisplayUnit::TenThousands, "tenThousands"),
+        (DisplayUnit::HundredThousands, "hundredThousands"),
+        (DisplayUnit::Millions, "millions"),
+        (DisplayUnit::TenMillions, "tenMillions"),
+        (DisplayUnit::HundredMillions, "hundredMillions"),
+        (DisplayUnit::Billions, "billions"),
+        (DisplayUnit::Trillions, "trillions"),
+    ];
+
+    /// What axis values are divided by; 1 for an unusable custom unit (not finite or not positive).
+    pub fn factor(&self) -> f64 {
+        match self {
+            DisplayUnit::Hundreds => 1e2,
+            DisplayUnit::Thousands => 1e3,
+            DisplayUnit::TenThousands => 1e4,
+            DisplayUnit::HundredThousands => 1e5,
+            DisplayUnit::Millions => 1e6,
+            DisplayUnit::TenMillions => 1e7,
+            DisplayUnit::HundredMillions => 1e8,
+            DisplayUnit::Billions => 1e9,
+            DisplayUnit::Trillions => 1e12,
+            DisplayUnit::Custom(f) if f.is_finite() && *f > 0.0 => *f,
+            DisplayUnit::Custom(_) => 1.0,
+        }
+    }
+}
+
+/// A value axis's display units and whether their label is shown (`c:dispUnitsLbl`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DisplayUnits {
+    pub unit: DisplayUnit,
+    #[serde(default)]
+    pub show_label: bool,
 }
 
 /// The scaling of a chart's value axes: `y` is the primary value axis; `x` is the horizontal value
@@ -876,11 +959,14 @@ pub struct ChartScale {
     pub x: AxisScale,
     #[serde(default)]
     pub y: AxisScale,
+    /// Where a category chart's category axis crosses the value axis (a value).
+    #[serde(default, skip_serializing_if = "AxisCrosses::is_auto")]
+    pub cat_crosses: AxisCrosses,
 }
 
 impl ChartScale {
     pub fn is_auto(&self) -> bool {
-        self.x.is_auto() && self.y.is_auto()
+        self.x.is_auto() && self.y.is_auto() && self.cat_crosses.is_auto()
     }
 }
 

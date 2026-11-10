@@ -63,10 +63,26 @@ fn round_trip(charts: Vec<Chart>) -> (Vec<Chart>, String) {
 
 #[test]
 fn value_axis_bounds_units_log_base_and_order_survive() {
-    let y = AxisScale { min: Some(10000.0), max: Some(150000.0), major_unit: Some(20000.0), minor_unit: Some(5000.0), log_base: None, reverse: true };
-    let x = AxisScale { min: Some(-5.0), max: Some(5.0), major_unit: None, minor_unit: None, log_base: Some(10.0), reverse: false };
-    let column = ChartScale { x: AxisScale::default(), y };
-    let scatter = ChartScale { x, y: AxisScale { max: Some(1.0), ..AxisScale::default() } };
+    let y = AxisScale {
+        min: Some(10000.0),
+        max: Some(150000.0),
+        major_unit: Some(20000.0),
+        minor_unit: Some(5000.0),
+        log_base: None,
+        reverse: true,
+        ..AxisScale::default()
+    };
+    let x = AxisScale {
+        min: Some(-5.0),
+        max: Some(5.0),
+        major_unit: None,
+        minor_unit: None,
+        log_base: Some(10.0),
+        reverse: false,
+        ..AxisScale::default()
+    };
+    let column = ChartScale { x: AxisScale::default(), y, ..ChartScale::default() };
+    let scatter = ChartScale { x, y: AxisScale { max: Some(1.0), ..AxisScale::default() }, ..ChartScale::default() };
     let (back, xml) = round_trip(vec![chart(1, ChartKind::ColumnClustered, column), chart(2, ChartKind::Scatter, scatter)]);
     assert_eq!(back[0].scale, column);
     assert_eq!(back[1].scale, scatter);
@@ -77,7 +93,15 @@ fn value_axis_bounds_units_log_base_and_order_survive() {
 
 #[test]
 fn unusable_scaling_reads_as_automatic() {
-    let bad = AxisScale { min: Some(5.0), max: Some(5.0), major_unit: Some(-1.0), minor_unit: Some(f64::NAN), log_base: Some(1.0), reverse: false };
-    let (back, _) = round_trip(vec![chart(1, ChartKind::Line, ChartScale { x: AxisScale::default(), y: bad })]);
+    let bad = AxisScale {
+        min: Some(5.0),
+        max: Some(5.0),
+        major_unit: Some(-1.0),
+        minor_unit: Some(f64::NAN),
+        log_base: Some(1.0),
+        reverse: false,
+        ..AxisScale::default()
+    };
+    let (back, _) = round_trip(vec![chart(1, ChartKind::Line, ChartScale { x: AxisScale::default(), y: bad, ..ChartScale::default() })]);
     assert!(back[0].scale.is_auto(), "{:?}", back[0].scale);
 }
