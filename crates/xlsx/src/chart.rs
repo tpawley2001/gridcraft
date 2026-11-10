@@ -6,8 +6,8 @@ use std::fmt::Write as _;
 use gridcraft_core::{RangeRef, Value, category_levels};
 use gridcraft_formula::{Expr, SheetSel};
 use gridcraft_model::{
-    AxisCrosses, AxisScale, Chart, Chart3d, ChartKind, ChartScale, Color, DefinedName, DisplayUnit, DisplayUnits, LegendPos, LineDash, OfPie, OfPieSplit,
-    Series, Trendline, TrendlineKind, Workbook,
+    AxisCrosses, AxisScale, Chart, Chart3d, ChartKind, ChartScale, Color, DefinedName, DisplayUnit, DisplayUnits, LegendPos, LineDash, OfPie,
+    OfPieSplit, Series, Trendline, TrendlineKind, Workbook,
 };
 
 use crate::drawing::{dml_color, srgb};
