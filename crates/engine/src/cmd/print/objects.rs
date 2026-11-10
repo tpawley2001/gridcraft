@@ -380,13 +380,12 @@ fn flatten_path(path: &gridcraft_model::GeometryPath, (x, y, w, h): (f32, f32, f
                 pos = p2;
             }
             PathCommand::ArcTo { w_r, h_r, st_ang, sw_ang } => {
+                // Visual angles turned into the ellipse's parameter; the sweep is at most one turn.
                 let (wr, hr) = (w_r as f64, h_r as f64);
-                let st = (st_ang as f64 / 60_000.0).to_radians();
-                let sw_deg = sw_ang as f64 / 60_000.0;
-                let sw = sw_deg.to_radians();
+                let (st, sw) = gridcraft_model::arc_parameters(w_r, h_r, st_ang, sw_ang);
                 let (cx, cy) = (pos.0 - wr * st.cos(), pos.1 - hr * st.sin());
-                // One segment per 15° of sweep, at least 4; a hostile sweep is capped by the budget.
-                let segs = (sw_deg.abs() / 15.0).ceil().clamp(4.0, 1440.0) as u32;
+                // One segment per 15° of sweep, at least 4.
+                let segs = (sw.to_degrees().abs() / 15.0).ceil().clamp(4.0, 1440.0) as u32;
                 for i in 1..=segs {
                     let a = st + sw * f64::from(i) / f64::from(segs);
                     pos = (cx + wr * a.cos(), cy + hr * a.sin());
