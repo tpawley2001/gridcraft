@@ -45,6 +45,9 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
     if let Some(paths) = ribbon_or_scroll_paths(g, w, h) {
         return Some(paths);
     }
+    if let Some(paths) = tabs_funnel_gears(g, w, h) {
+        return Some(paths);
+    }
     // Predefined process and internal storage: a filled rectangle, two open inner lines, and the
     // rectangle's outline.
     if g.preset == "flowChartPredefinedProcess" || g.preset == "flowChartInternalStorage" {
@@ -702,6 +705,226 @@ fn rounded_rect_paths(g: &ShapeGeometry, wi: i128, hi: i128) -> Option<Vec<PathC
         "pieWedge" => vec![m(l, b), arc(wi, hi, cd2, cd4), ln(r, b), close],
         _ => return None,
     })
+}
+
+/// Plaque tabs, the funnel and the six- and nine-tooth gears: filled and stroked paths of lines and
+/// arcs whose guides use trigonometry. `w` and `h` are positive. Guides are evaluated in `f64` and
+/// rounded once, as points and radii pinned into the box; a huge box cannot overflow `f64`.
+fn tabs_funnel_gears(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    use PathCommand::{ArcTo, Close, LineTo, MoveTo};
+    let (wi, hi) = (w as f64, h as f64);
+    let ss = wi.min(hi);
+    let (r, b, hc, vc, wd2, hd2) = (wi, hi, wi / 2.0, hi / 2.0, wi / 2.0, hi / 2.0);
+    let (cd4, cd2, cd34) = (5_400_000.0, 10_800_000.0, 16_200_000.0);
+    // `as` saturates and maps NaN to 0.
+    let pin = |v: f64, max: i64| (v.round() as i64).clamp(0, max);
+    let m = |x: f64, y: f64| MoveTo(pin(x, w), pin(y, h));
+    let ln = |x: f64, y: f64| LineTo(pin(x, w), pin(y, h));
+    let angle = |a: f64| a.round() as i64;
+    let arc = |w_r: f64, h_r: f64, st: f64, sw: f64| ArcTo { w_r: pin(w_r, w), h_r: pin(h_r, h), st_ang: angle(st), sw_ang: angle(sw) };
+    let path = |commands: Vec<PathCommand>| GeometryPath { w, h, fill: true, stroke: true, shade: PathShade::Norm, commands };
+    match g.preset.as_str() {
+        "plaqueTabs" => {
+            let dx = guide_md(guide_mod(wi, hi, 0.0), 1.0, 20.0);
+            let (y1, x1) = (b - dx, r - dx);
+            Some(vec![
+                path(vec![m(0.0, 0.0), ln(dx, 0.0), arc(dx, dx, 0.0, cd4), Close]),
+                path(vec![m(0.0, y1), arc(dx, dx, cd34, cd4), ln(0.0, b), Close]),
+                path(vec![m(r, 0.0), ln(r, dx), arc(dx, dx, cd4, cd4), Close]),
+                path(vec![m(x1, b), arc(dx, dx, cd2, cd4), ln(r, b), Close]),
+            ])
+        }
+        "funnel" => {
+            let hd4 = hi / 4.0;
+            let d = guide_md(ss, 1.0, 20.0);
+            let (rw2, rh2) = (wd2 - d, hd4 - d);
+            let da = guide_at2(guide_cos(wd2, 480_000.0), guide_sin(hd4, 480_000.0));
+            let da2 = da * 2.0;
+            let (st_ang1, sw_ang1, sw_ang3) = (cd2 - da, cd2 + da2, cd2 - da2);
+            let (rw3, rh3) = (guide_md(wd2, 1.0, 4.0), guide_md(hd4, 1.0, 4.0));
+            let (dx1, dy1) = ellipse_offset(wd2, hd4, st_ang1);
+            let (x1, y1) = (hc + dx1, hd4 + dy1);
+            let (dx3, dy3) = ellipse_offset(rw3, rh3, da);
+            let (x3, y2) = (hc + dx3, b - rh3 + dy3);
+            let x2 = wd2 - rw2;
+            Some(vec![path(vec![
+                m(x1, y1),
+                arc(wd2, hd4, st_ang1, sw_ang1),
+                ln(x3, y2),
+                arc(rw3, rh3, da, sw_ang3),
+                Close,
+                m(x2, hd4),
+                arc(rw2, rh2, cd2, -21_600_000.0),
+                Close,
+            ])])
+        }
+        "gear6" | "gear9" => {
+            let six = g.preset == "gear6";
+            let a1 = adjust(g, "adj1", if six { 15000 } else { 10000 }).clamp(0, 20000) as f64;
+            let a2 = adjust(g, "adj2", if six { 3526 } else { 1763 }).clamp(0, if six { 5358 } else { 2679 }) as f64;
+            let th = guide_md(ss, a1, 100000.0);
+            let lfd = guide_md(ss, a2, 100000.0);
+            let l3 = guide_md(th, 1.0, 2.0) + guide_md(lfd, 1.0, 2.0);
+            let (rh, rw) = (hd2 - th, wd2 - th);
+            let maxr = if rw - rh > 0.0 { rh } else { rw };
+            let gear = Gear { rw, rh, hc, vc, ha: guide_at2(maxr, l3), th, lfd };
+            let ellipse = |a: f64| ellipse_angle(rw, rh, a);
+            let rim = |b_d: f64, sw: f64| arc(rw, rh, b_d, sw);
+            // The tooth at the top: its corners are offset straight up from the rim.
+            let (b_a9, b_d9) = (ellipse(cd34 - gear.ha), ellipse(cd34 + gear.ha));
+            let (dxd9, dyd9) = ellipse_offset(rw, rh, b_d9);
+            let (x_d9, y_d9) = (hc + dxd9, vc + dyd9);
+            let x_a9 = hc - dxd9;
+            let (x_f9, x_e9, y_c9) = (x_d9 - lfd, x_a9 + lfd, y_d9 - th);
+            let t1 = gear.tooth(if six { 19_800_000.0 } else { 18_600_000.0 });
+            if six {
+                let b_a2 = ellipse(1_800_000.0 - gear.ha);
+                let b_d2 = ellipse(1_800_000.0 + gear.ha);
+                let b_d3 = ellipse(cd4 + gear.ha);
+                let b_d4 = ellipse(9_000_000.0 + gear.ha);
+                let b_d5 = ellipse(12_600_000.0 + gear.ha);
+                let (sw1, sw2) = (t1.b_a - b_d9, b_a2 - t1.b_d);
+                let (y_a2, y_d2, y_c2, y_b2) = (hi - t1.d.1, hi - t1.a.1, hi - t1.b.1, hi - t1.c.1);
+                let (y_d3, y_b3) = (hi - y_d9, hi - y_c9);
+                let (x_d4, x_c4, x_b4) = (wi - t1.d.0, wi - t1.c.0, wi - t1.b.0);
+                let (x_d5, x_c5, x_b5) = (wi - t1.a.0, wi - t1.b.0, wi - t1.c.0);
+                return Some(vec![path(vec![
+                    m(t1.a.0, t1.a.1),
+                    ln(t1.b.0, t1.b.1),
+                    ln(t1.c.0, t1.c.1),
+                    ln(t1.d.0, t1.d.1),
+                    rim(t1.b_d, sw2),
+                    ln(t1.c.0, y_b2),
+                    ln(t1.b.0, y_c2),
+                    ln(t1.a.0, y_d2),
+                    rim(b_d2, sw1),
+                    ln(x_f9, y_b3),
+                    ln(x_e9, y_b3),
+                    ln(x_a9, y_d3),
+                    rim(b_d3, sw1),
+                    ln(x_b4, y_c2),
+                    ln(x_c4, y_b2),
+                    ln(x_d4, y_a2),
+                    rim(b_d4, sw2),
+                    ln(x_b5, t1.c.1),
+                    ln(x_c5, t1.b.1),
+                    ln(x_d5, t1.a.1),
+                    rim(b_d5, sw1),
+                    ln(x_e9, y_c9),
+                    ln(x_f9, y_c9),
+                    ln(x_d9, y_d9),
+                    rim(b_d9, sw1),
+                    Close,
+                ])]);
+            }
+            let t2 = gear.tooth(21_000_000.0);
+            let t3 = gear.tooth(1_800_000.0);
+            let t4 = gear.tooth(4_200_000.0);
+            let b_a5 = ellipse(6_600_000.0 - gear.ha);
+            let b_d5 = ellipse(6_600_000.0 + gear.ha);
+            let b_d6 = ellipse(9_000_000.0 + gear.ha);
+            let b_d7 = ellipse(11_400_000.0 + gear.ha);
+            let b_d8 = ellipse(13_800_000.0 + gear.ha);
+            let (sw1, sw2, sw3) = (t2.b_a - t1.b_d, t3.b_a - t2.b_d, t4.b_a - t3.b_d);
+            let (sw4, sw5) = (b_a5 - t4.b_d, b_a9 - b_d8);
+            // Teeth 5 to 8 mirror teeth 4 to 1 across the vertical centre line.
+            let mirror = |t: &Tooth| (wi - t.c.0, wi - t.b.0, wi - t.a.0);
+            let mut commands = vec![m(t1.a.0, t1.a.1)];
+            for (t, b_d, sw) in [(&t1, t1.b_d, sw1), (&t2, t2.b_d, sw2), (&t3, t3.b_d, sw3), (&t4, t4.b_d, sw4)] {
+                commands.extend([ln(t.b.0, t.b.1), ln(t.c.0, t.c.1), ln(t.d.0, t.d.1), rim(b_d, sw)]);
+            }
+            for (t, b_d, sw) in [(&t4, b_d5, sw3), (&t3, b_d6, sw2), (&t2, b_d7, sw1), (&t1, b_d8, sw5)] {
+                let (x_b, x_c, x_d) = mirror(t);
+                commands.extend([ln(x_b, t.c.1), ln(x_c, t.b.1), ln(x_d, t.a.1), rim(b_d, sw)]);
+            }
+            commands.extend([ln(x_e9, y_c9), ln(x_f9, y_c9), ln(x_d9, y_d9), rim(b_d9, sw5), Close]);
+            Some(vec![path(commands)])
+        }
+        _ => None,
+    }
+}
+
+/// The rim ellipse and tooth sizes of a gear preset.
+struct Gear {
+    rw: f64,
+    rh: f64,
+    hc: f64,
+    vc: f64,
+    /// Half the angle a tooth spans on the rim.
+    ha: f64,
+    th: f64,
+    lfd: f64,
+}
+
+/// One gear tooth: the rim angles where it starts (`b_a`) and ends (`b_d`), and its corners
+/// A (on the rim), B, C (the outer edge) and D (on the rim).
+struct Tooth {
+    b_a: f64,
+    b_d: f64,
+    a: (f64, f64),
+    b: (f64, f64),
+    c: (f64, f64),
+    d: (f64, f64),
+}
+
+impl Gear {
+    /// The tooth centred on the angle `mid`, from the `aA`…`xB` guides of the gear presets.
+    fn tooth(&self, mid: f64) -> Tooth {
+        let corner = |angle: f64| {
+            let b_x = ellipse_angle(self.rw, self.rh, angle);
+            let (dx, dy) = ellipse_offset(self.rw, self.rh, b_x);
+            (b_x, ((self.hc + dx), (self.vc + dy)))
+        };
+        let (b_a, a) = corner(mid - self.ha);
+        let (b_d, d) = corner(mid + self.ha);
+        let dir = guide_at2(a.1 - d.1, a.0 - d.0);
+        let (dx_f, dy_f) = (guide_sin(self.lfd, dir), guide_cos(self.lfd, dir));
+        let (y_ct, x_ct) = (guide_sin(self.th, dir), guide_cos(self.th, dir));
+        let f = ((d.0 + dx_f), (d.1 + dy_f));
+        let e = ((a.0 - dx_f), (a.1 - dy_f));
+        Tooth { b_a, b_d, a, b: ((e.0 - x_ct), (e.1 + y_ct)), c: ((f.0 - x_ct), (f.1 + y_ct)), d }
+    }
+}
+
+/// The angle on the `rw` × `rh` ellipse for the guide angle `a` (`at2 (cos rw a) (sin rh a)`).
+fn ellipse_angle(rw: f64, rh: f64, a: f64) -> f64 {
+    guide_at2(guide_cos(rw, a), guide_sin(rh, a))
+}
+
+/// The offset from the centre of the point at angle `a` on the `rw` × `rh` ellipse.
+fn ellipse_offset(rw: f64, rh: f64, a: f64) -> (f64, f64) {
+    let n = guide_md(rw, rh, guide_mod(guide_cos(rh, a), guide_sin(rw, a), 0.0));
+    (guide_cos(n, a), guide_sin(n, a))
+}
+
+/// `*/ x y z`: `x * y / z`; 0 when `z` is zero.
+fn guide_md(x: f64, y: f64, z: f64) -> f64 {
+    if z == 0.0 { 0.0 } else { x * y / z }
+}
+
+/// A guide angle (60000ths of a degree) in radians.
+fn guide_radians(a: f64) -> f64 {
+    (a / 60000.0).to_radians()
+}
+
+/// `cos r a`.
+fn guide_cos(r: f64, a: f64) -> f64 {
+    r * guide_radians(a).cos()
+}
+
+/// `sin r a`.
+fn guide_sin(r: f64, a: f64) -> f64 {
+    r * guide_radians(a).sin()
+}
+
+/// `at2 x y`: `atan2(y, x)` in 60000ths of a degree.
+fn guide_at2(x: f64, y: f64) -> f64 {
+    y.atan2(x).to_degrees() * 60000.0
+}
+
+/// `mod x y z`: `sqrt(x² + y² + z²)`.
+fn guide_mod(x: f64, y: f64, z: f64) -> f64 {
+    (x * x + y * y + z * z).sqrt()
 }
 
 /// A fixed polygon in its own path box: path box `w`, `h`, then the vertices.
