@@ -529,6 +529,14 @@ fn t_fn(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     }
 }
 
+/// PHONETIC: text comes back unchanged; a number has no phonetic text, so it is #N/A.
+fn phonetic(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    match scalar(arg(a, 0)?) {
+        Value::Number(_) => Err(CellError::NA),
+        _ => identity(a, c),
+    }
+}
+
 fn identity(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     text_val(text(a, 0)?)
 }
@@ -1103,7 +1111,7 @@ pub(crate) fn specs() -> Vec<FnSpec> {
         f!("ASC", 1, 1, Text, S, "ASC(text)", "Converts full-width characters to half-width (no change for single-byte text).", identity),
         f!("DBCS", 1, 1, Text, S, "DBCS(text)", "Converts half-width characters to full-width (no change in this locale).", identity),
         f!("JIS", 1, 1, Text, S, "JIS(text)", "Converts half-width characters to full-width (no change in this locale).", identity),
-        f!("PHONETIC", 1, 1, Text, S, "PHONETIC(reference)", "Returns the phonetic (furigana) text; here the text itself.", identity),
+        f!("PHONETIC", 1, 1, Text, S, "PHONETIC(reference)", "Returns the phonetic (furigana) text; here the text itself.", phonetic),
     ]
 }
 
