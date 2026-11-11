@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use gridcraft_core::{CellRef, number_to_text};
+use gridcraft_core::{CellRef, number_to_short_text};
 
 use crate::ast::{Anchor, BinOp, Expr, RefKind, Reference, SheetSel, StructItem, StructRef, UnOp};
 
@@ -203,7 +203,8 @@ fn write_struct_ref(s: &StructRef, at_shorthand: bool) -> String {
 }
 
 fn number(n: f64) -> String {
-    let text = number_to_text(n);
+    // Formula text keeps big constants in E notation (`=1E+20`), unlike a number turned into a text value.
+    let text = number_to_short_text(n);
     // 15 significant digits can round past f64::MAX, which no longer parses.
     if text.parse::<f64>().is_ok_and(f64::is_finite) {
         return text;

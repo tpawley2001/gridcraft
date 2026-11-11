@@ -450,10 +450,19 @@ pub fn number_to_text(n: f64) -> String {
     if n == 0.0 || !n.is_finite() {
         return "0".into();
     }
-    let a = n.abs();
-    if let Some(digits) = whole_number_digits(a) {
+    if let Some(digits) = whole_number_digits(n.abs()) {
         return if n < 0.0 { format!("-{digits}") } else { digits };
     }
+    number_to_short_text(n)
+}
+
+/// [`number_to_text`] without writing out big whole numbers: everything from 1E+15 up is in E notation, the
+/// way a number constant is shown in formula text (`=1E+20`).
+pub fn number_to_short_text(n: f64) -> String {
+    if n == 0.0 || !n.is_finite() {
+        return "0".into();
+    }
+    let a = n.abs();
     if !(1e-9..1e15).contains(&a) && a.round() != a || a >= 1e15 {
         return sci_text(n, 15);
     }
@@ -522,6 +531,7 @@ mod tests {
         assert_eq!(number_to_text(1e20), "100000000000000000000");
         assert_eq!(number_to_text(1e21), "1E+21");
         assert_eq!(number_to_text(1e-20), "1E-20");
+        assert_eq!(number_to_short_text(1e20), "1E+20");
         assert_eq!(number_to_text(1234567890123456.0), "1.23456789012346E+15");
         assert_eq!(number_to_text(0.0001), "0.0001");
         assert_eq!(number_to_text(1e-10), "1E-10");
