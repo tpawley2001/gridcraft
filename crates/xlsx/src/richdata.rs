@@ -15,7 +15,9 @@ use crate::xml::{self, El, esc};
 
 const NS_RICH: &str = "http://schemas.microsoft.com/office/spreadsheetml/2017/richdata";
 const NS_IMAGE_REL: &str = "http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel";
-const RICH_EXT: &str = "{3E2802C4-A4D2-4D8B-9148-E3BE6C30E623}";
+// Lower case, as Excel writes it: Excel refuses a workbook whose XLRICHVALUE extension URI is in
+// upper case (same class as #2339). The reader compares it case-insensitively.
+const RICH_EXT: &str = "{3e2802c4-a4d2-4d8b-9148-e3be6c30e623}";
 const MAX_IMAGE: u64 = 16 * 1024 * 1024;
 const MAX_IMAGES_TOTAL: usize = 128 * 1024 * 1024;
 const MAX_RECORDS: usize = 100_000;
@@ -287,6 +289,11 @@ pub fn write(out: &mut Out, workbook_rels: &mut Rels) -> Result<(), IoError> {
     let mut rel_list = format!("{XML_DECL}<richValueRels xmlns=\"{NS_IMAGE_REL}\" xmlns:r=\"{NS_REL}\">");
     let mut image_rels = Rels::default();
     let mut total = 0usize;
+    // Only the structures actually used are written: the one without `Text` first (index 0),
+    // then the one with `Text`.
+    let has_plain = pictures.iter().any(|picture| picture.alt.is_empty());
+    let has_text = pictures.iter().any(|picture| !picture.alt.is_empty());
+    let (plain, with_text) = (0usize, usize::from(has_plain));
     for (i, picture) in pictures.iter().enumerate() {
         total = total.saturating_add(picture.data.len());
         if picture.data.len() as u64 > MAX_IMAGE || total > MAX_IMAGES_TOTAL {
@@ -299,23 +306,36 @@ pub fn write(out: &mut Out, workbook_rels: &mut Rels) -> Result<(), IoError> {
         out.part(&format!("xl/media/{image_name}"), None, picture.data.clone());
         let rid = image_rels.add("image", &format!("../media/{image_name}"));
         let _ = write!(rel_list, "<rel r:id=\"{rid}\"/>");
-        let _ = write!(data, "<rv s=\"0\"><v>{i}</v><v>5</v><v>{}</v></rv>", esc(&picture.alt));
+        // Keys in Excel's order: CalcOrigin, [Text], _rvRel:LocalImageIdentifier. A picture
+        // without alt text uses the structure without `Text` (Excel never writes an empty `Text`).
+        let s = if picture.alt.is_empty() { plain } else { with_text };
+        if picture.alt.is_empty() {
+            let _ = write!(data, "<rv s=\"{s}\"><v>5</v><v>{i}</v></rv>");
+        } else {
+            let _ = write!(data, "<rv s=\"{s}\"><v>5</v><v>{}</v><v>{i}</v></rv>", esc(&picture.alt));
+        }
     }
     data.push_str("</rvData>");
     rel_list.push_str("</richValueRels>");
-    let structures = format!(
-        "{XML_DECL}<rvStructures xmlns=\"{NS_RICH}\" count=\"1\"><s t=\"_localImage\"><k n=\"_rvRel:LocalImageIdentifier\" t=\"i\"/><k n=\"CalcOrigin\" t=\"i\"/><k n=\"Text\" t=\"s\"/></s></rvStructures>"
-    );
+    let mut structures = format!("{XML_DECL}<rvStructures xmlns=\"{NS_RICH}\" count=\"{}\">", usize::from(has_plain) + usize::from(has_text));
+    if has_plain {
+        structures.push_str("<s t=\"_localImage\"><k n=\"CalcOrigin\" t=\"i\"/><k n=\"_rvRel:LocalImageIdentifier\" t=\"i\"/></s>");
+    }
+    if has_text {
+        structures
+            .push_str("<s t=\"_localImage\"><k n=\"CalcOrigin\" t=\"i\"/><k n=\"Text\" t=\"s\"/><k n=\"_rvRel:LocalImageIdentifier\" t=\"i\"/></s>");
+    }
+    structures.push_str("</rvStructures>");
     for (name, content_type, relation, bytes) in [
         (
             "rdrichvalue.xml",
-            "application/vnd.ms-excel.rdRichValue+xml",
+            "application/vnd.ms-excel.rdrichvalue+xml",
             "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue",
             data.into_bytes(),
         ),
         (
             "rdrichvaluestructure.xml",
-            "application/vnd.ms-excel.rdRichValueStructure+xml",
+            "application/vnd.ms-excel.rdrichvaluestructure+xml",
             "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure",
             structures.into_bytes(),
         ),
@@ -347,7 +367,7 @@ fn metadata(count: usize, dynamic: bool) -> String {
     if dynamic {
         xml.push_str("<metadataType name=\"XLDAPR\" minSupportedVersion=\"120000\" copy=\"1\" pasteAll=\"1\" pasteValues=\"1\" merge=\"1\" splitFirst=\"1\" rowColShift=\"1\" clearFormats=\"1\" clearComments=\"1\" assign=\"1\" coerce=\"1\" cellMeta=\"1\"/>");
     }
-    xml.push_str("<metadataType name=\"XLRICHVALUE\" minSupportedVersion=\"120000\" copy=\"1\" pasteAll=\"1\" pasteValues=\"1\" merge=\"1\" splitFirst=\"1\" rowColShift=\"1\" clearFormats=\"1\" clearComments=\"1\" assign=\"1\" cellMeta=\"0\"/></metadataTypes>");
+    xml.push_str("<metadataType name=\"XLRICHVALUE\" minSupportedVersion=\"120000\" copy=\"1\" pasteAll=\"1\" pasteValues=\"1\" merge=\"1\" splitFirst=\"1\" rowColShift=\"1\" clearFormats=\"1\" clearComments=\"1\" assign=\"1\" coerce=\"1\"/></metadataTypes>");
     if dynamic {
         // Lower case, as the dynamic-array-only metadata in `write.rs` spells it: Excel refuses
         // a workbook whose XLDAPR extension URI is in upper case (#2339).

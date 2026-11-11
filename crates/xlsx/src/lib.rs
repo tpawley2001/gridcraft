@@ -55,7 +55,10 @@ mod xls_crypto;
 mod xlsb;
 mod xml;
 
+// Test helpers may return plain tuple layouts (e.g. the rich-value structure/value pairs in
+// `richdata_excel_package_tests.rs`); readability there beats a type alias.
 #[cfg(test)]
+#[allow(clippy::type_complexity)]
 mod tests;
 
 use gridcraft_core::DateSystem;
