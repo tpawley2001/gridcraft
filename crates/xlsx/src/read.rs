@@ -47,6 +47,9 @@ pub struct Ctx<'a> {
     pub known_function: Option<&'a dyn Fn(&str) -> bool>,
     /// The code of the workbook's Python cells, from its Python part.
     pub python: crate::python_part::ScriptsIn,
+    /// The workbook theme's colours (lt1, dk1, lt2, dk2, accent1..6, hlink, folHlink), for
+    /// drawing colours whose transforms resolve them to RGB.
+    pub theme_colors: [u32; 12],
 }
 
 impl<'a> Ctx<'a> {
@@ -71,6 +74,7 @@ impl<'a> Ctx<'a> {
             shared_formula_bytes: 0,
             known_function: None,
             python: Default::default(),
+            theme_colors: gridcraft_model::Theme::default().colors,
         }
     }
 }
@@ -191,6 +195,7 @@ fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], ke
             cx.warn(format!("theme source XML could not be kept: {e}"));
         }
         wb.theme.preserved = kept.theme(cx, &r.target);
+        cx.theme_colors = wb.theme.colors;
         has_theme = true;
     }
     // Cell checkboxes live in the feature property bags, which styles refer to.

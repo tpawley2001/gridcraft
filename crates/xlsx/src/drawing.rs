@@ -180,6 +180,60 @@ pub fn dml_color(e: &El) -> Option<Color> {
     None
 }
 
+/// Colour of a DrawingML colour choice inside `e`, like [`dml_color`], with the `shade` and
+/// `tint` children of `a:srgbClr` / `a:schemeClr` applied in document order. A transformed colour
+/// is resolved against the theme colours (lt1, dk1, lt2, dk2, accent1..6, hlink, folHlink) to RGB;
+/// an untransformed one is returned as [`dml_color`] reads it.
+pub(crate) fn dml_color_resolved(e: &El, theme: &[u32; 12]) -> Option<Color> {
+    let base = dml_color(e)?;
+    let el = if e.child("srgbClr").is_some_and(|c| c.attr("val").is_some()) {
+        e.child("srgbClr")
+    } else if e.child("sysClr").is_some_and(|c| c.attr("lastClr").is_some()) {
+        None
+    } else {
+        e.child("schemeClr")
+    };
+    let Some(el) = el else { return Some(base) };
+    let transforms: Vec<(bool, f64)> = el
+        .children
+        .iter()
+        .filter(|c| c.name == "shade" || c.name == "tint")
+        .filter_map(|c| {
+            let v = c.attr("val")?.trim().parse::<f64>().ok().filter(|v| v.is_finite())?;
+            Some((c.name == "shade", (v / 100_000.0).clamp(0.0, 1.0)))
+        })
+        .collect();
+    if transforms.is_empty() {
+        return Some(base);
+    }
+    let rgb = match base {
+        Color::Rgb(v) => v,
+        Color::Theme(i, _) => theme.get(i as usize).copied().unwrap_or(0),
+        Color::Auto => return Some(base),
+    };
+    let channels = [(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF].map(|c| srgb_to_linear(c as u8));
+    let out = channels.map(|mut l| {
+        for &(shade, k) in &transforms {
+            l = if shade { l * k } else { 1.0 - (1.0 - l) * k };
+        }
+        linear_to_srgb(l)
+    });
+    Some(Color::rgb(out[0], out[1], out[2]))
+}
+
+/// An sRGB channel as linear light, 0..=1 (IEC 61966-2-1).
+fn srgb_to_linear(c: u8) -> f64 {
+    let c = c as f64 / 255.0;
+    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+}
+
+/// Linear light (0..=1) back to an sRGB channel.
+fn linear_to_srgb(l: f64) -> u8 {
+    let l = l.clamp(0.0, 1.0);
+    let c = if l <= 0.0031308 { 12.92 * l } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
+    (c * 255.0).round().clamp(0.0, 255.0) as u8
+}
+
 fn mime_for(name: &str) -> &'static str {
     let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     match ext.as_str() {
@@ -360,7 +414,7 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                     }
                 }
                 "sp" | "cxnSp" => {
-                    if let Some(mut s) = read_shape(obj, anchor) {
+                    if let Some(mut s) = read_shape(obj, anchor, &cx.theme_colors) {
                         s.hidden =
                             obj.path(&["nvSpPr", "cNvPr"]).or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"])).is_some_and(|p| p.flag("hidden", false));
                         s.no_print = no_print;
@@ -525,7 +579,7 @@ fn write_custom_geometry(s: &mut String, paths: &[GeometryPath]) {
     s.push_str("</a:pathLst></a:custGeom>");
 }
 
-fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
+fn read_shape(obj: &El, anchor: Anchor, theme: &[u32; 12]) -> Option<Shape> {
     let sp = obj.child("spPr")?;
     if let Some(shape) = ink::read(obj, anchor) {
         return Some(shape);
@@ -600,12 +654,14 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
             math: Default::default(),
         });
     }
-    let fill = sp.child("solidFill").and_then(dml_color).unwrap_or_default();
-    let line = ln.and_then(|l| l.child("solidFill")).and_then(dml_color).unwrap_or_default();
+    let fill = sp.child("solidFill").and_then(|f| dml_color_resolved(f, theme)).unwrap_or_default();
+    let line = ln.and_then(|l| l.child("solidFill")).and_then(|f| dml_color_resolved(f, theme)).unwrap_or_default();
     let text = obj.child("txBody").map(body_text).unwrap_or_default();
     let mut format = read_text_format(obj.child("txBody"));
     format.no_line = ln.is_some_and(|l| l.child("noFill").is_some());
     format.no_fill = sp.child("noFill").is_some();
+    // ST_LineWidth: 0..=20116800 EMU; anything else keeps the default width.
+    format.line_width_emu = ln.and_then(|l| l.attr("w")).and_then(|w| w.parse::<i32>().ok()).filter(|w| (0..=20_116_800).contains(w));
     Some(Shape {
         hidden: false,
         no_print: false,
@@ -1051,7 +1107,13 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                 if sh.format.no_line {
                     s.push_str("<a:ln><a:noFill/></a:ln>");
                 } else if line_c.is_some() || sh.kind == ShapeKind::Arrow {
-                    s.push_str("<a:ln w=\"9525\">");
+                    // The width is written only when the shape has one, so a shape without it reads back the same.
+                    match sh.format.line_width_emu {
+                        Some(w) => {
+                            let _ = write!(s, "<a:ln w=\"{w}\">");
+                        }
+                        None => s.push_str("<a:ln>"),
+                    }
                     match line_c {
                         Some(c) => {
                             let _ = write!(s, "<a:solidFill>{c}</a:solidFill>");
@@ -1256,5 +1318,33 @@ mod custom_geometry_tests {
         let paths = read_custom_paths(&crate::xml::parse(xml.as_bytes()).unwrap()).unwrap();
         let got: Vec<_> = paths.iter().map(|p| (p.fill, p.shade)).collect();
         assert_eq!(got, [(true, PathShade::Norm), (true, PathShade::Darken), (true, PathShade::Norm), (false, PathShade::Norm)]);
+    }
+}
+
+#[cfg(test)]
+mod colour_transform_tests {
+    use super::dml_color_resolved;
+    use gridcraft_model::{Color, Theme};
+
+    fn resolved(fill: &str) -> Option<Color> {
+        let xml = format!(r#"<a:solidFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">{fill}</a:solidFill>"#);
+        let el = crate::xml::parse(xml.as_bytes()).unwrap();
+        dml_color_resolved(&el, &Theme::default().colors)
+    }
+
+    #[test]
+    fn shade_is_applied_in_linear_light() {
+        assert_eq!(resolved(r#"<a:schemeClr val="lt1"><a:shade val="50000"/></a:schemeClr>"#), Some(Color::Rgb(0xBCBCBC)));
+        assert_eq!(resolved(r#"<a:srgbClr val="FFFFFF"><a:shade val="85000"/></a:srgbClr>"#), Some(Color::Rgb(0xEDEDED)));
+        assert_eq!(resolved(r#"<a:srgbClr val="4F81BD"><a:shade val="50000"/></a:srgbClr>"#), Some(Color::Rgb(0x385D8A)));
+    }
+
+    #[test]
+    fn tint_mirrors_shade_and_plain_colours_are_unchanged() {
+        assert_eq!(resolved(r#"<a:srgbClr val="000000"><a:tint val="50000"/></a:srgbClr>"#), Some(Color::Rgb(0xBCBCBC)));
+        assert_eq!(resolved(r#"<a:schemeClr val="accent1"/>"#), Some(Color::Theme(4, 0)));
+        assert_eq!(resolved(r#"<a:srgbClr val="FF0000"/>"#), Some(Color::Rgb(0xFF0000)));
+        // Hostile values are clamped, never a crash.
+        assert_eq!(resolved(r#"<a:srgbClr val="808080"><a:shade val="-5"/><a:tint val="NaN"/></a:srgbClr>"#), Some(Color::Rgb(0)));
     }
 }

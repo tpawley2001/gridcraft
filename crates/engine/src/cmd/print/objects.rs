@@ -239,7 +239,13 @@ fn draw_sparklines(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, b: &Bloc
 
 fn draw_shape(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Block, (x, y, w, h): (f32, f32, f32, f32)) {
     let fill = rgb_of(shp.fill, wb);
-    let line = rgb_of(shp.line, wb).filter(|_| !shp.format.no_line).map(|c| (c, (0.75 * b.k).max(0.25)));
+    // `a:ln w` is in EMU (12700 per point), scaled like every other printed length; without it
+    // the outline keeps the default hairline.
+    let width = match shp.format.line_width_emu {
+        Some(emu) => (emu.max(0) as f32 / 12700.0 * b.scale).clamp(0.0, 1600.0),
+        None => (0.75 * b.k).max(0.25),
+    };
+    let line = rgb_of(shp.line, wb).filter(|_| !shp.format.no_line).map(|c| (c, width));
     match shp.kind {
         ShapeKind::Ellipse => {
             let pts: Vec<[f32; 2]> = (0..72)
@@ -279,19 +285,23 @@ fn draw_shape(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Bl
     let color = fm.text_color.and_then(|c| rgb_of(c, wb)).unwrap_or([0, 0, 0]);
     let align = fm.align.unwrap_or(if text_box { ShapeTextAlign::Left } else { ShapeTextAlign::Center });
     let anchor = fm.anchor.unwrap_or(if text_box { ShapeTextAnchor::Top } else { ShapeTextAnchor::Middle });
-    let lines = wrap_lines(&shp.text, font, size, (w - 4.0 * b.k).max(size));
+    // `a:bodyPr` insets in EMU (§21.1.2.1.1 defaults: 91440 left and right, 45720 top and
+    // bottom), in points at the page's scale.
+    let inset = |v: Option<i32>, default: i32| (v.unwrap_or(default) as f32 / 12700.0 * b.scale).clamp(-1.0e4, 1.0e4);
+    let (il, it, ir, ib) = (inset(fm.inset_left, 91440), inset(fm.inset_top, 45720), inset(fm.inset_right, 91440), inset(fm.inset_bottom, 45720));
+    let lines = wrap_lines(&shp.text, font, size, (w - il - ir).max(size));
     let block_h = lines.len().min(500) as f32 * size * 1.2;
     let mut yy = match anchor {
-        ShapeTextAnchor::Top => y + 2.0 * b.k,
-        ShapeTextAnchor::Middle => y + (h - block_h) / 2.0,
-        ShapeTextAnchor::Bottom => y + h - 2.0 * b.k - block_h,
+        ShapeTextAnchor::Top => y + it,
+        ShapeTextAnchor::Middle => y + it + (h - it - ib - block_h) / 2.0,
+        ShapeTextAnchor::Bottom => y + h - ib - block_h,
     } + size * 0.8;
     for l in lines.iter().take(500) {
         let lw = gridcraft_pdf::text_width(font, size, l);
         let lx = match align {
-            ShapeTextAlign::Left => x + 2.0 * b.k,
-            ShapeTextAlign::Center => x + (w - lw) / 2.0,
-            ShapeTextAlign::Right => x + w - 2.0 * b.k - lw,
+            ShapeTextAlign::Left => x + il,
+            ShapeTextAlign::Center => x + il + (w - il - ir - lw) / 2.0,
+            ShapeTextAlign::Right => x + w - ir - lw,
         };
         pg.text(lx, yy, size, font, color, l);
         yy += size * 1.2;
