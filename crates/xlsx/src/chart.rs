@@ -368,11 +368,19 @@ pub fn read_chart(root: &El) -> Option<Chart> {
             y: y_ax.map(read_scale).unwrap_or_default(),
             cat_crosses: if scatter { AxisCrosses::AutoZero } else { cat_ax.map(read_crosses).unwrap_or_default() },
             date_axis: if scatter { None } else { cat_ax.filter(|a| a.name == "dateAx").map(read_date_axis) },
-            tick_label_skip: None,
-            tick_mark_skip: None,
+            tick_label_skip: if scatter { None } else { plot.child("catAx").and_then(|a| read_skip(a, "tickLblSkip")) },
+            tick_mark_skip: if scatter { None } else { plot.child("catAx").and_then(|a| read_skip(a, "tickMarkSkip")) },
         },
         view_3d: if groups.len() == 1 { read_3d(chart, plot, first) } else { None },
     })
+}
+
+/// The values `c:tickLblSkip` / `c:tickMarkSkip` may take (ST_Skip is >= 1; Excel's dialog stops at 31999).
+const SKIP_RANGE: std::ops::RangeInclusive<u32> = 1..=31999;
+
+/// A category axis's label or tick-mark interval; `None` when absent or outside [`SKIP_RANGE`].
+fn read_skip(ax: &El, tag: &str) -> Option<u32> {
+    ax.child_val(tag).and_then(|v| v.trim().parse::<u32>().ok()).filter(|v| SKIP_RANGE.contains(v))
 }
 
 /// Most points a custom split keeps (a hostile file could list millions).
@@ -1112,6 +1120,8 @@ struct Ax<'a> {
     mid_cat: bool,
     /// A category axis written as `c:dateAx` with these options.
     date: Option<DateAxis>,
+    /// A category axis's label and tick-mark intervals (`c:tickLblSkip`, `c:tickMarkSkip`).
+    skips: (Option<u32>, Option<u32>),
 }
 
 fn axis_xml(a: &Ax<'_>) -> String {
@@ -1184,7 +1194,14 @@ fn axis_xml(a: &Ax<'_>) -> String {
         unit(&mut s, "minorTimeUnit", d.minor_time_unit);
         s.push_str("</c:dateAx>");
     } else if a.cat {
-        s.push_str("<c:auto val=\"1\"/><c:lblAlgn val=\"ctr\"/><c:lblOffset val=\"100\"/><c:noMultiLvlLbl val=\"0\"/></c:catAx>");
+        s.push_str("<c:auto val=\"1\"/><c:lblAlgn val=\"ctr\"/><c:lblOffset val=\"100\"/>");
+        // Schema order (CT_CatAx): lblOffset, tickLblSkip, tickMarkSkip, noMultiLvlLbl.
+        for (tag, v) in [("tickLblSkip", a.skips.0), ("tickMarkSkip", a.skips.1)] {
+            if let Some(v) = v.filter(|v| SKIP_RANGE.contains(v)) {
+                let _ = write!(s, "<c:{tag} val=\"{v}\"/>");
+            }
+        }
+        s.push_str("<c:noMultiLvlLbl val=\"0\"/></c:catAx>");
     } else {
         let _ = write!(s, "<c:crossBetween val=\"{}\"/>", if a.mid_cat { "midCat" } else { "between" });
         // Schema order: crossBetween, majorUnit, minorUnit.
@@ -1358,6 +1375,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 scale: ch.scale.x,
                 mid_cat: false,
                 date: None,
+                skips: (None, None),
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
@@ -1372,6 +1390,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 scale: ch.scale.y,
                 mid_cat: false,
                 date: None,
+                skips: (None, None),
             }));
         }
         G::Bar { bar: true, .. } => {
@@ -1388,6 +1407,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 scale: AxisScale::default(),
                 mid_cat: false,
                 date: ch.scale.date_axis,
+                skips: (ch.scale.tick_label_skip, ch.scale.tick_mark_skip),
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
@@ -1402,6 +1422,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 scale: ch.scale.y,
                 mid_cat: false,
                 date: None,
+                skips: (None, None),
             }));
         }
         _ => {
@@ -1418,6 +1439,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 scale: AxisScale::default(),
                 mid_cat: false,
                 date: ch.scale.date_axis,
+                skips: (ch.scale.tick_label_skip, ch.scale.tick_mark_skip),
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
@@ -1432,6 +1454,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 scale: ch.scale.y,
                 mid_cat: surface.is_some(),
                 date: None,
+                skips: (None, None),
             }));
             if surface.is_some() {
                 s.push_str(&ser_axis_xml());
@@ -1455,6 +1478,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
             scale: AxisScale::default(),
             mid_cat: false,
             date: None,
+            skips: (None, None),
         }));
         s.push_str(&axis_xml(&Ax {
             cat: false,
@@ -1469,6 +1493,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
             scale: AxisScale::default(),
             mid_cat: false,
             date: None,
+            skips: (None, None),
         }));
     }
     if let Some(t) = &ch.data_table {

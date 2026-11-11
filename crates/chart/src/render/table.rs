@@ -12,10 +12,10 @@ pub(super) struct Layout {
     columns: usize,
 }
 
-pub(super) fn category_axis<'a>(layout: &Option<Layout>, labels: &'a [String], outer: &'a [Vec<String>]) -> CatAxis<'a> {
+pub(super) fn category_axis<'a>(layout: &Option<Layout>, labels: &'a [String], outer: &'a [Vec<String>], skip: Option<u32>) -> CatAxis<'a> {
     match layout {
         Some(t) => CatAxis::Table(labels, t.stub),
-        None => CatAxis::Labels(labels, outer),
+        None => CatAxis::Labels(labels, outer, skip),
     }
 }
 
