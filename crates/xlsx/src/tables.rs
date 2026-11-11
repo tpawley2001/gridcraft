@@ -399,6 +399,18 @@ mod tests {
     }
 
     #[test]
+    fn paper_ids_round_trip() {
+        // Every id round-trips; one without a name is kept as `Paper N`; 0 is unstated.
+        for id in [1, 2, 10, 14, 15, 16, 17, 18, 24, 25, 26, 28, 30, 31, 66, 102, 256, u32::MAX] {
+            assert_eq!(paper_name(id).and_then(|n| paper_id(&n)), Some(id), "{id}");
+        }
+        assert_eq!(paper_name(185).as_deref(), Some("Paper 185"));
+        assert_eq!(paper_name(0), None);
+        assert_eq!(paper_id("Paper 0"), None);
+        assert_eq!(paper_id("Paper x"), None);
+    }
+
+    #[test]
     fn functions() {
         assert_eq!(file_function_name("xlookup").as_deref(), Some("_xlfn.XLOOKUP"));
         assert_eq!(file_function_name("forecast.ets.confint").as_deref(), Some("_xlfn.FORECAST.ETS.CONFINT"));
@@ -426,14 +438,6 @@ mod tests {
         // The Japanese papers page setup names.
         assert_eq!(paper_name(43).as_deref(), Some("Japanese Postcard"));
         assert_eq!(paper_name(88).as_deref(), Some("B6"));
-        // Every id round-trips; one without a name is kept as `Paper N`; 0 is unstated.
-        for id in [1, 2, 10, 14, 15, 16, 17, 18, 24, 25, 26, 28, 30, 31, 66, 102, 256, u32::MAX] {
-            assert_eq!(paper_name(id).and_then(|n| paper_id(&n)), Some(id), "{id}");
-        }
-        assert_eq!(paper_name(185).as_deref(), Some("Paper 185"));
-        assert_eq!(paper_name(0), None);
-        assert_eq!(paper_id("Paper 0"), None);
-        assert_eq!(paper_id("Paper x"), None);
         for (name, id) in [
             ("Japanese Postcard", 43),
             ("japanese double postcard", 69),
