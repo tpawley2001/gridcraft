@@ -117,6 +117,10 @@ pub struct Sheet {
     #[serde(default)]
     pub default_row_custom_height: Option<bool>,
     pub merges: Vec<RangeRef>,
+    /// The sheet's default phonetic (furigana) settings: ISO/IEC 29500-1 §18.4.3 `phoneticPr`
+    /// as a child of the worksheet. `None` when the file had none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phonetic_props: Option<crate::PhoneticProps>,
     /// Frozen rows and columns (top/left).
     pub freeze: Option<(u32, u32)>,
     pub tab_color: Option<Color>,
@@ -236,6 +240,7 @@ impl Sheet {
             default_rows_hidden: None,
             default_row_custom_height: None,
             merges: vec![],
+            phonetic_props: None,
             freeze: None,
             tab_color: None,
             code_name: None,

@@ -125,17 +125,18 @@ pub fn phonetic_data(e: &El, base: &str) -> (Vec<PhoneticRun>, Option<PhoneticPr
     (runs, e.child("phoneticPr").map(phonetic_props))
 }
 
-/// `<phoneticPr>` attributes (ISO/IEC 29500-1 §18.4.7 `CT_PhoneticPr`: `fontId` is required,
-/// `type`, `alignment`). `type` and `alignment` are kept only when they are values §18.18.57
-/// `ST_PhoneticType` / §18.18.56 `ST_PhoneticAlignment` define, so a damaged file cannot make the
-/// saved file invalid; a missing or unusable `fontId` becomes 0, the Normal style's font, which an
-/// out-of-range index falls back to anyway.
 /// `ST_PhoneticType` (ISO/IEC 29500-1 §18.18.57), as `phoneticPr/@type` may write them.
 const PHONETIC_KINDS: &[&str] = &["halfwidthKatakana", "fullwidthKatakana", "Hiragana", "noConversion"];
 /// `ST_PhoneticAlignment` (ISO/IEC 29500-1 §18.18.56), as `phoneticPr/@alignment` may write them.
 const PHONETIC_ALIGNMENTS: &[&str] = &["noControl", "left", "center", "distributed"];
 
-fn phonetic_props(e: &El) -> PhoneticProps {
+/// `<phoneticPr>` attributes (ISO/IEC 29500-1 §18.4.7 `CT_PhoneticPr`: `fontId` is required,
+/// `type`, `alignment`). `type` and `alignment` are kept only when they are values §18.18.57
+/// `ST_PhoneticType` / §18.18.56 `ST_PhoneticAlignment` define, so a damaged file cannot make the
+/// saved file invalid; a missing or unusable `fontId` becomes 0, the Normal style's font, which an
+/// out-of-range index falls back to anyway. Used for a string item's `<phoneticPr>` and for the
+/// worksheet's own (§18.4.3 as a child of `CT_Worksheet`).
+pub(crate) fn phonetic_props(e: &El) -> PhoneticProps {
     const KINDS: &[&str] = PHONETIC_KINDS;
     const ALIGNMENTS: &[&str] = PHONETIC_ALIGNMENTS;
     PhoneticProps {
@@ -563,16 +564,23 @@ pub fn si_body(text: &str, phonetic: Option<&PhoneticString>) -> String {
         let _ = write!(s, "<rPh sb=\"{start}\" eb=\"{end}\">{}</rPh>", t_el(&r.text));
     }
     if let Some(pr) = &p.props {
-        let _ = write!(s, "<phoneticPr fontId=\"{}\"", pr.font_id);
-        if let Some(kind) = pr.kind.as_deref().filter(|kind| PHONETIC_KINDS.contains(kind)) {
-            let _ = write!(s, " type=\"{}\"", esc_attr(kind));
-        }
-        if let Some(alignment) = pr.alignment.as_deref().filter(|a| PHONETIC_ALIGNMENTS.contains(a)) {
-            let _ = write!(s, " alignment=\"{}\"", esc_attr(alignment));
-        }
-        s.push_str("/>");
+        push_phonetic_pr(&mut s, pr);
     }
     s
+}
+
+/// Appends `<phoneticPr fontId="N"[ type="…"][ alignment="…"]/>` (ISO/IEC 29500-1 §18.4.7) to `s`.
+/// The model is public and restored from GridCraft JSON, so `type` and `alignment` are written
+/// only when they are §18.18.57 / §18.18.56 values; `fontId` is written as stored.
+pub(crate) fn push_phonetic_pr(s: &mut String, pr: &PhoneticProps) {
+    let _ = write!(s, "<phoneticPr fontId=\"{}\"", pr.font_id);
+    if let Some(kind) = pr.kind.as_deref().filter(|kind| PHONETIC_KINDS.contains(kind)) {
+        let _ = write!(s, " type=\"{}\"", esc_attr(kind));
+    }
+    if let Some(alignment) = pr.alignment.as_deref().filter(|a| PHONETIC_ALIGNMENTS.contains(a)) {
+        let _ = write!(s, " alignment=\"{}\"", esc_attr(alignment));
+    }
+    s.push_str("/>");
 }
 
 /// Formats a number for an XML attribute/value (shortest round-trip form).
