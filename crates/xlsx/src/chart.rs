@@ -71,6 +71,8 @@ fn group_kind(g: &El) -> Option<ChartKind> {
             }
         }
         "bubbleChart" => ChartKind::Bubble,
+        // ST_RadarStyle: `standard` (the default), `marker` or `filled`.
+        "radarChart" if g.child_val("radarStyle") == Some("filled") => ChartKind::RadarFilled,
         "radarChart" => ChartKind::Radar,
         "stockChart" => ChartKind::Stock,
         // A missing `c:wireframe` means filled (CT_SurfaceChart, CT_Surface3DChart).
@@ -475,7 +477,9 @@ enum G {
         lines: bool,
     },
     Bubble,
-    Radar,
+    Radar {
+        filled: bool,
+    },
     Stock,
     /// `c:surface3DChart` (`three_d`) or `c:surfaceChart` (contour).
     Surface {
@@ -504,7 +508,8 @@ fn group_for(k: ChartKind) -> G {
         ChartKind::Scatter => G::Scatter { lines: false },
         ChartKind::ScatterLines => G::Scatter { lines: true },
         ChartKind::Bubble => G::Bubble,
-        ChartKind::Radar => G::Radar,
+        ChartKind::Radar => G::Radar { filled: false },
+        ChartKind::RadarFilled => G::Radar { filled: true },
         ChartKind::Stock => G::Stock,
         ChartKind::Surface => G::Surface { three_d: true, wireframe: false },
         ChartKind::SurfaceWireframe => G::Surface { three_d: true, wireframe: true },
@@ -732,7 +737,8 @@ fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String 
         }
     }
     let color = s.color.as_ref().and_then(|c: &Color| srgb(c, &wb.theme));
-    let line_like = matches!(g, G::Line { .. } | G::Radar | G::Scatter { lines: true });
+    // A filled radar series is a shape: its colour is the fill, like an area series.
+    let line_like = matches!(g, G::Line { .. } | G::Radar { filled: false } | G::Scatter { lines: true });
     match (&color, line_like) {
         (Some(c), true) => {
             let _ = write!(x, "<c:spPr><a:ln w=\"28575\" cap=\"rnd\"><a:solidFill>{c}</a:solidFill><a:round/></a:ln></c:spPr>");
@@ -775,7 +781,7 @@ fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String 
     }
     // Trendlines sit between dLbls and the data in CT_LineSer, CT_BarSer, CT_AreaSer,
     // CT_ScatterSer and CT_BubbleSer; pie, radar and surface series have none.
-    if !matches!(g, G::Pie | G::OfPie { .. } | G::Doughnut | G::Radar | G::Surface { .. }) {
+    if !matches!(g, G::Pie | G::OfPie { .. } | G::Doughnut | G::Radar { .. } | G::Surface { .. }) {
         for t in &s.trendlines {
             x.push_str(&trendline_xml(t, wb));
         }
@@ -905,7 +911,10 @@ fn group_xml(g: G, series: &[(usize, &Series)], ch: &Chart, axes: (u32, u32), wb
         G::Bubble => {
             format!("<c:bubbleChart><c:varyColors val=\"0\"/>{sers}{dl}<c:bubbleScale val=\"100\"/><c:showNegBubbles val=\"0\"/>{ax}</c:bubbleChart>")
         }
-        G::Radar => format!("<c:radarChart><c:radarStyle val=\"marker\"/><c:varyColors val=\"0\"/>{sers}{dl}{ax}</c:radarChart>"),
+        G::Radar { filled } => format!(
+            "<c:radarChart><c:radarStyle val=\"{}\"/><c:varyColors val=\"0\"/>{sers}{dl}{ax}</c:radarChart>",
+            if filled { "filled" } else { "marker" }
+        ),
         G::Stock => format!("<c:stockChart>{sers}{dl}<c:hiLowLines/>{ax}</c:stockChart>"),
         // CT_SurfaceChart / CT_Surface3DChart: wireframe, ser*, bandFmts?, then the category,
         // value and series axis ids; no varyColors and no data labels.
@@ -1200,7 +1209,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
     if ch.kind == ChartKind::Combo {
         // Series without a kind of their own: the first is a column, the others lines (as drawn).
         let kind = |i: usize, x: &Series| x.kind.filter(|k| *k != ChartKind::Combo).or((i > 0).then_some(ChartKind::Line));
-        let is_line = |k: Option<ChartKind>| matches!(k.map(group_for), Some(G::Line { .. } | G::Area { .. } | G::Radar | G::Scatter { .. }));
+        let is_line = |k: Option<ChartKind>| matches!(k.map(group_for), Some(G::Line { .. } | G::Area { .. } | G::Radar { .. } | G::Scatter { .. }));
         let bars: Vec<(usize, &Series)> = all.iter().filter(|(i, x)| !x.secondary && !is_line(kind(*i, x))).copied().collect();
         let lines: Vec<(usize, &Series)> = all.iter().filter(|(i, x)| !x.secondary && is_line(kind(*i, x))).copied().collect();
         let sec: Vec<(usize, &Series)> = all.iter().filter(|(_, x)| x.secondary).copied().collect();

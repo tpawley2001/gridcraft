@@ -1,4 +1,4 @@
-use gridcraft_model::{OfPie, OfPieSplit};
+use gridcraft_model::{ChartKind, OfPie, OfPieSplit};
 
 use super::frame::{Bx, CatAxis, ValAxis, frame, on, value_range};
 use super::legend::{cat_label, point_color};
@@ -607,6 +607,7 @@ pub(super) fn radar(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
     let ang = |j: usize| j as f32 / ncat as f32 * TAU;
     let pt = |a: f32, rr: f32| [cx + rr * a.sin(), cy - rr * a.cos()];
     let ticks = sc.ticks();
+    let first = ctx.out.len();
     let spacing = r / ticks.len().saturating_sub(1).max(1) as f32;
     let every = ((LABEL_SIZE * 1.3 / spacing.max(1e-3)).ceil() as usize).max(1);
     for (ti, t) in ticks.into_iter().enumerate() {
@@ -647,12 +648,27 @@ pub(super) fn radar(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
         let t = ctx.fit(labels.get(j).map(String::as_str).unwrap_or(""), LABEL_SIZE, lw.max(20.0));
         ctx.text(p[0], p[1], &t, LABEL_SIZE, TEXT, (align, valign));
     }
+    let filled = chart.kind == ChartKind::RadarFilled;
     for s in &data.series {
         let mut pts: Vec<[f32; 2]> = (0..ncat).map(|j| pt(ang(j), sc.frac(s.values.get(j).copied().flatten().unwrap_or(sc.min)) * r)).collect();
+        if filled {
+            // Filled radar: one closed shape per series, later series over earlier ones.
+            if pts.len() >= 3 {
+                ctx.out.push(Prim::Polygon { pts, fill: s.color, stroke: None });
+            }
+            continue;
+        }
         if let Some(p) = pts.first().copied() {
             pts.push(p);
         }
         ctx.line(pts, s.color, 2.0);
+    }
+    if filled {
+        // The fills cover the grid but not the axis labels: move the labels on top.
+        let tail = ctx.out.split_off(first.min(ctx.out.len()));
+        let (labels, rest): (Vec<Prim>, Vec<Prim>) = tail.into_iter().partition(|p| matches!(p, Prim::Text { .. }));
+        ctx.out.extend(rest);
+        ctx.out.extend(labels);
     }
 }
 

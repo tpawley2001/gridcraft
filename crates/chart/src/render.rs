@@ -259,7 +259,7 @@ fn draw_kind(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
         Sunburst => pie(ctx, chart, data, area, 0.2, true),
         Treemap => treemap(ctx, chart, data, area),
         Funnel => funnel(ctx, chart, data, area),
-        Radar => radar(ctx, chart, data, area),
+        Radar | RadarFilled => radar(ctx, chart, data, area),
         _ => {
             let area = axis_titles(ctx, chart, area);
             if !area.ok() {
