@@ -33,6 +33,44 @@ pub struct StylesIn {
     pub named_ids: Vec<(String, CellStyleId)>,
     /// Custom number formats (`numFmts`) by id.
     pub num_fmts: HashMap<u32, String>,
+    /// The custom palette (`colors/indexedColors`) to keep: ARGB, 64 entries, `None` when absent
+    /// or equal to the built-in one (see [`retained_palette`]).
+    pub indexed_colors: Option<Vec<u32>>,
+    /// Recent Colors (`colors/mruColors`), ARGB, in file order; only `rgb=` colours.
+    pub mru_colors: Vec<u32>,
+}
+
+/// An `rgb` attribute as ARGB: 8 hex digits as written, 6 hex digits with alpha `FF`.
+fn parse_argb(s: &str) -> Option<u32> {
+    let h = s.trim();
+    if !h.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let v = u32::from_str_radix(h, 16).ok()?;
+    match h.len() {
+        8 => Some(v),
+        6 => Some(0xFF00_0000 | v),
+        _ => None,
+    }
+}
+
+/// The palette an `indexedColors` element holds, as Excel keeps it on save: 64 ARGB entries (a
+/// short palette padded with the built-in colours, alpha `00`; an unparsable entry takes the
+/// built-in colour of its index), or `None` when it is empty or its colours equal the built-in
+/// palette (Excel drops it then).
+fn retained_palette(ix: &El) -> Option<Vec<u32>> {
+    let given: Vec<Option<u32>> = ix.kids("rgbColor").take(INDEXED.len()).map(|c| c.attr("rgb").and_then(parse_argb)).collect();
+    if given.is_empty() {
+        return None;
+    }
+    let palette: Vec<u32> = INDEXED.iter().enumerate().map(|(i, &def)| given.get(i).copied().flatten().unwrap_or(def)).collect();
+    let is_default = palette.iter().zip(INDEXED.iter()).all(|(&c, &def)| c & 0x00FF_FFFF == def);
+    (!is_default).then_some(palette)
+}
+
+/// Recent Colors (`mruColors`): the `rgb=` colours in order, unparsable ones skipped.
+fn recent_colors(root: &El) -> Vec<u32> {
+    root.path(&["colors", "mruColors"]).map(|m| m.kids("color").filter_map(|c| c.attr("rgb").and_then(parse_argb)).collect()).unwrap_or_default()
 }
 
 pub fn read_color(e: &El, palette: &[u32]) -> Color {
@@ -365,6 +403,8 @@ fn read_xf(xf: &El, fonts: &[Font], fills: &[Fill], borders: &[Borders], fmts: &
 /// scheme-linked font shows the theme's face even when its cached `<name>` is stale.
 pub fn read_styles(root: &El, checkboxes: &[bool], minor_font: &str, theme_fonts: Option<(&str, &str)>) -> StylesIn {
     let mut palette: Vec<u32> = INDEXED.to_vec();
+    let indexed_colors = root.path(&["colors", "indexedColors"]).and_then(retained_palette);
+    let mru_colors = recent_colors(root);
     if let Some(ix) = root.path(&["colors", "indexedColors"]) {
         let custom: Vec<u32> = ix
             .kids("rgbColor")
@@ -440,7 +480,7 @@ pub fn read_styles(root: &El, checkboxes: &[bool], minor_font: &str, theme_fonts
     // Inline dxf format codes are interned: a code repeated by many dxfs is one allocation.
     let mut inline_fmts = HashMap::new();
     let dxfs = root.child("dxfs").map(|d| d.kids("dxf").map(|x| read_dxf(x, &palette, &shared_fmts, &mut inline_fmts)).collect()).unwrap_or_default();
-    StylesIn { xfs, dxfs, palette, named, named_ids, num_fmts: fmts }
+    StylesIn { xfs, dxfs, palette, named, named_ids, num_fmts: fmts, indexed_colors, mru_colors }
 }
 
 /// The `builtinId`, `iLevel`, `hidden` and `customBuiltin` attributes of a `cellStyle`, each only
@@ -995,8 +1035,36 @@ pub fn write_styles(wb: &Workbook, dxfs: &[Style], extra_fmts: &[String]) -> (St
     let _ = write!(s, "<cellXfs count=\"{count}\">{xfs}</cellXfs>");
     let _ = write!(s, "<cellStyles count=\"{named}\">{cell_styles}</cellStyles>");
     let _ = write!(s, "<dxfs count=\"{}\">{dx}</dxfs>", dxfs.len());
-    s.push_str("<tableStyles count=\"0\" defaultTableStyle=\"TableStyleMedium2\" defaultPivotStyle=\"PivotStyleLight16\"/></styleSheet>");
+    s.push_str("<tableStyles count=\"0\" defaultTableStyle=\"TableStyleMedium2\" defaultPivotStyle=\"PivotStyleLight16\"/>");
+    s.push_str(&colors_xml(wb));
+    s.push_str("</styleSheet>");
     (s, nf.map)
+}
+
+/// `<colors>` (after `tableStyles`, ECMA-376 Part 1 §18.8.39): the workbook's custom palette and
+/// Recent Colors, or nothing when it has neither.
+fn colors_xml(wb: &Workbook) -> String {
+    let palette = wb.indexed_colors.as_deref().filter(|p| !p.is_empty());
+    if palette.is_none() && wb.mru_colors.is_empty() {
+        return String::new();
+    }
+    let mut s = String::from("<colors>");
+    if let Some(p) = palette {
+        s.push_str("<indexedColors>");
+        for c in p {
+            let _ = write!(s, "<rgbColor rgb=\"{c:08X}\"/>");
+        }
+        s.push_str("</indexedColors>");
+    }
+    if !wb.mru_colors.is_empty() {
+        s.push_str("<mruColors>");
+        for c in &wb.mru_colors {
+            let _ = write!(s, "<color rgb=\"{c:08X}\"/>");
+        }
+        s.push_str("</mruColors>");
+    }
+    s.push_str("</colors>");
+    s
 }
 
 /// Index of a differential format, adding it when new.

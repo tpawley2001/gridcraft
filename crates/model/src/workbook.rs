@@ -354,6 +354,13 @@ pub struct Workbook {
     /// which holds unmodelled parts), so it is saved to JSON as well as to XLSX.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub phonetics: Vec<PhoneticString>,
+    /// The workbook's custom legacy colour palette (XLSX `colors/indexedColors`), ARGB, exactly 64
+    /// entries when present. `None` = the built-in palette. Kept so an open + save keeps it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indexed_colors: Option<Vec<u32>>,
+    /// The workbook's Recent Colors (XLSX `colors/mruColors`), ARGB, most recent first, kept as read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mru_colors: Vec<u32>,
     /// VBA project (`xl/vbaProject.bin`) carried through unchanged. GridCraft does not run
     /// macros; the blob is preserved so that saving a macro-enabled workbook never destroys the
     /// macros it arrived with. base64 in JSON. `None` = the workbook has no macros. Shared, so a
@@ -488,6 +495,8 @@ impl Workbook {
             cell_styles: vec![],
             cell_style_ids: vec![],
             phonetics: vec![],
+            indexed_colors: None,
+            mru_colors: vec![],
             vba_project: None,
             csv_delimiter: None,
             macros: crate::macros::Macros::default(),
