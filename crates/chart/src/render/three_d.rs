@@ -447,7 +447,7 @@ pub(super) fn cartesian_3d(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area:
     let labels_on = chart.data_labels && ncat <= MAX_LABELS && nser.saturating_mul(ncat) <= MAX_LABELS * 4;
     match fam {
         Fam::Line | Fam::LineStack | Fam::Area | Fam::AreaStack | Fam::Area100 => surfaces(ctx, data, &lay, &spans, fam, labels_on),
-        _ => boxes(ctx, chart, data, &lay, &spans, fam, nslots, labels_on),
+        _ => boxes(ctx, chart, data, &lay, &spans, nslots, labels_on),
     }
 }
 
@@ -534,8 +534,9 @@ fn taper(lay: &Layout, shape: BarShape, a: f32, z: f32) -> (f32, f32) {
 
 /// 3-D columns and bars: one solid per value, drawn back to front. Each series is drawn with its
 /// own shape (`c:ser/c:shape`) when it names one, else with the group's.
-fn boxes(ctx: &mut Ctx, chart: &Chart, data: &ChartData, lay: &Layout, spans: &[Vec<Option<(f64, f64)>>], fam: Fam, nslots: usize, labels_on: bool) {
+fn boxes(ctx: &mut Ctx, chart: &Chart, data: &ChartData, lay: &Layout, spans: &[Vec<Option<(f64, f64)>>], nslots: usize, labels_on: bool) {
     let p = &lay.p;
+    let fam = family(chart.kind);
     let bw = lay.cw / (nslots as f32 + 1.5);
     let mut all: Vec<(Cuboid, usize, f64, BarShape)> = Vec::new();
     for (i, s) in data.series.iter().enumerate() {
