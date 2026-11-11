@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
 use gridcraft_model::{
-    Anchor, AnchorMode, CameraTool, Color, DrawingHyperlink, GeometryPath, Image, PathCommand, PathShade, PictureLocks, Shape, ShapeFormat,
-    ShapeGeometry, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextVert, ShapeTextWrap, Sheet, Theme,
+    Anchor, AnchorMode, CameraTool, Color, DrawingHyperlink, GeometryPath, Image, KeptDmlColor, PathCommand, PathShade, PictureLocks, Shape,
+    ShapeFormat, ShapeGeometry, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextVert, ShapeTextWrap, Sheet, Theme,
 };
 
 use crate::IoError;
@@ -219,6 +219,78 @@ pub(crate) fn dml_color_resolved(e: &El, theme: &[u32; 12]) -> Option<Color> {
         linear_to_srgb(l)
     });
     Some(Color::rgb(out[0], out[1], out[2]))
+}
+
+/// ST_SchemeColorVal (ECMA-376 Part 1 §20.1.10.54).
+const SCHEME_COLOR_VALS: [&str; 17] = [
+    "bg1", "tx1", "bg2", "tx2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6", "hlink", "folHlink", "phClr", "dk1", "lt1", "dk2",
+    "lt2",
+];
+
+/// The colour transform elements (ECMA-376 Part 1 §20.1.2.3) and whether each has a `val`.
+const DML_COLOR_TRANSFORMS: [(&str, bool); 28] = [
+    ("tint", true),
+    ("shade", true),
+    ("comp", false),
+    ("inv", false),
+    ("gray", false),
+    ("alpha", true),
+    ("alphaOff", true),
+    ("alphaMod", true),
+    ("hue", true),
+    ("hueOff", true),
+    ("hueMod", true),
+    ("sat", true),
+    ("satOff", true),
+    ("satMod", true),
+    ("lum", true),
+    ("lumOff", true),
+    ("lumMod", true),
+    ("red", true),
+    ("redOff", true),
+    ("redMod", true),
+    ("green", true),
+    ("greenOff", true),
+    ("greenMod", true),
+    ("blue", true),
+    ("blueOff", true),
+    ("blueMod", true),
+    ("gamma", false),
+    ("invGamma", false),
+];
+
+/// The colour choice in `e` (a `solidFill`) to write back as the file gave it: an `a:schemeClr`
+/// with a known scheme name, or an `a:srgbClr` with colour transforms, with the transforms kept
+/// in document order. The element is rebuilt from parsed values. `color` is what was read from it.
+fn kept_dml_color(e: &El, color: Color) -> Option<KeptDmlColor> {
+    // The same choice `dml_color` reads: srgbClr, then sysClr, then schemeClr.
+    let (el, val) = if let Some(c) = e.child("srgbClr").filter(|c| c.attr("val").is_some()) {
+        let Some(Color::Rgb(v)) = c.attr("val").and_then(Color::from_hex) else { return None };
+        (c, format!("{:06X}", v & 0xFF_FFFF))
+    } else if e.child("sysClr").is_some_and(|c| c.attr("lastClr").is_some()) {
+        return None;
+    } else {
+        let c = e.child("schemeClr")?;
+        let v = c.attr("val")?;
+        let v = SCHEME_COLOR_VALS.iter().find(|s| **s == v)?;
+        (c, (*v).to_string())
+    };
+    let mut kids = String::new();
+    for k in &el.children {
+        let Some(&(name, has_val)) = DML_COLOR_TRANSFORMS.iter().find(|(n, _)| *n == k.name) else { continue };
+        if has_val {
+            let Some(v) = k.attr("val").and_then(|v| v.trim().parse::<i64>().ok()) else { continue };
+            let _ = write!(kids, "<a:{name} val=\"{v}\"/>");
+        } else {
+            let _ = write!(kids, "<a:{name}/>");
+        }
+    }
+    let tag = if el.name == "srgbClr" { "srgbClr" } else { "schemeClr" };
+    if tag == "srgbClr" && kids.is_empty() {
+        return None;
+    }
+    let xml = if kids.is_empty() { format!("<a:{tag} val=\"{val}\"/>") } else { format!("<a:{tag} val=\"{val}\">{kids}</a:{tag}>") };
+    Some(KeptDmlColor { color, xml })
 }
 
 /// An sRGB channel as linear light, 0..=1 (IEC 61966-2-1).
@@ -658,6 +730,8 @@ fn read_shape(obj: &El, anchor: Anchor, theme: &[u32; 12]) -> Option<Shape> {
     let line = ln.and_then(|l| l.child("solidFill")).and_then(|f| dml_color_resolved(f, theme)).unwrap_or_default();
     let text = obj.child("txBody").map(body_text).unwrap_or_default();
     let mut format = read_text_format(obj.child("txBody"));
+    format.fill_source = sp.child("solidFill").and_then(|f| kept_dml_color(f, fill));
+    format.line_source = ln.and_then(|l| l.child("solidFill")).and_then(|f| kept_dml_color(f, line));
     format.no_line = ln.is_some_and(|l| l.child("noFill").is_some());
     format.no_fill = sp.child("noFill").is_some();
     // ST_LineWidth: 0..=20116800 EMU; anything else keeps the default width.
@@ -890,6 +964,14 @@ fn xfrm(a: &Anchor, tag: &str) -> String {
     format!("<{tag}><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{}\" cy=\"{}\"/></{tag}>", e(a.width), e(a.height))
 }
 
+/// The kept colour element when the shape still has the colour read with it, else [`srgb`].
+fn kept_or_srgb(kept: Option<&KeptDmlColor>, c: &Color, theme: &Theme) -> Option<String> {
+    match kept {
+        Some(k) if k.color == *c => Some(k.xml.clone()),
+        _ => srgb(c, theme),
+    }
+}
+
 pub fn srgb(c: &Color, theme: &Theme) -> Option<String> {
     let [r, g, b] = c.resolve(theme)?;
     Some(format!("<a:srgbClr val=\"{r:02X}{g:02X}{b:02X}\"/>"))
@@ -1100,10 +1182,10 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                 write_geometry(&mut s, prst, sh);
                 if sh.format.no_fill {
                     s.push_str("<a:noFill/>");
-                } else if let Some(c) = srgb(&sh.fill, theme) {
+                } else if let Some(c) = kept_or_srgb(sh.format.fill_source.as_ref(), &sh.fill, theme) {
                     let _ = write!(s, "<a:solidFill>{c}</a:solidFill>");
                 }
-                let line_c = srgb(&sh.line, theme);
+                let line_c = kept_or_srgb(sh.format.line_source.as_ref(), &sh.line, theme);
                 if sh.format.no_line {
                     s.push_str("<a:ln><a:noFill/></a:ln>");
                 } else if line_c.is_some() || sh.kind == ShapeKind::Arrow {
@@ -1346,5 +1428,30 @@ mod colour_transform_tests {
         assert_eq!(resolved(r#"<a:srgbClr val="FF0000"/>"#), Some(Color::Rgb(0xFF0000)));
         // Hostile values are clamped, never a crash.
         assert_eq!(resolved(r#"<a:srgbClr val="808080"><a:shade val="-5"/><a:tint val="NaN"/></a:srgbClr>"#), Some(Color::Rgb(0)));
+    }
+}
+
+#[cfg(test)]
+mod kept_color_tests {
+    use super::kept_dml_color;
+    use gridcraft_model::Color;
+
+    fn kept(xml: &str) -> Option<String> {
+        let el = crate::xml::parse(xml.as_bytes()).unwrap();
+        kept_dml_color(&el, Color::Auto).map(|k| k.xml)
+    }
+
+    #[test]
+    fn only_parsed_values_are_written() {
+        let xml = r#"<a:solidFill><a:schemeClr val="accent3"><a:lumMod val="x&quot;/&gt;"/><a:foo val="1"/><a:inv/><a:alpha val=" 50000 "/></a:schemeClr></a:solidFill>"#;
+        assert_eq!(kept(xml).as_deref(), Some(r#"<a:schemeClr val="accent3"><a:inv/><a:alpha val="50000"/></a:schemeClr>"#));
+    }
+
+    #[test]
+    fn plain_rgb_and_system_colours_are_not_kept() {
+        assert_eq!(kept(r#"<a:solidFill><a:srgbClr val="112233"/></a:solidFill>"#), None);
+        assert_eq!(kept(r#"<a:solidFill><a:sysClr val="windowText" lastClr="000000"><a:shade val="1"/></a:sysClr></a:solidFill>"#), None);
+        assert_eq!(kept(r#"<a:solidFill><a:srgbClr val="zz"><a:shade val="1"/></a:srgbClr></a:solidFill>"#), None);
+        assert_eq!(kept(r#"<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>"#).as_deref(), Some(r#"<a:schemeClr val="phClr"/>"#));
     }
 }

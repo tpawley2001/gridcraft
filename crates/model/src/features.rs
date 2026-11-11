@@ -1769,6 +1769,22 @@ pub struct ShapeFormat {
     pub text_rotation: Option<i32>,
     /// Outline width in EMU (`a:ln w`, 12700 per point); `None` is the default 0.75 pt.
     pub line_width_emu: Option<i32>,
+    /// The fill's DrawingML colour as the file gave it (a theme colour, or a colour with
+    /// transforms), written back while `Shape::fill` is still the colour read with it.
+    pub fill_source: Option<KeptDmlColor>,
+    /// The outline's DrawingML colour as the file gave it, like [`ShapeFormat::fill_source`]
+    /// for `Shape::line`.
+    pub line_source: Option<KeptDmlColor>,
+}
+
+/// A DrawingML colour choice kept from a file (ECMA-376 Part 1 §20.1.2.3): `color` is the
+/// resolved colour read with it, `xml` the `a:schemeClr` / `a:srgbClr` element (with its colour
+/// transforms) to write back, rebuilt from parsed values.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KeptDmlColor {
+    pub color: Color,
+    pub xml: String,
 }
 
 /// How a shape's text wraps (`a:bodyPr wrap`, ST_TextWrappingType).
