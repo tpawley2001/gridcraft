@@ -54,13 +54,16 @@ impl<'h> Evaluator<'h> {
             "ISFORMULA" | "FORMULATEXT" => {
                 let Some(Ev::R(a)) = args.first().map(|a| self.eval(a)) else { return err(CellError::NA) };
                 let Some(a) = a.first() else { return err(CellError::NA) };
-                let f = self.host.workbook().sheet(a.sheet).and_then(|s| s.cell(a.range.start)).and_then(|c| c.formula.clone());
+                let wb = self.host.workbook();
+                let f = wb.sheet(a.sheet).and_then(|s| s.cell(a.range.start)).and_then(|c| c.formula.clone());
+                // A formula formatted Hidden on a protected sheet stays hidden from FORMULATEXT too.
+                let hidden = wb.sheet(a.sheet).is_some_and(|s| s.is_protected() && wb.styles.get(s.style_id(a.range.start)).protection.hidden);
                 if name == "ISFORMULA" {
                     Ev::V(Value::Bool(f.is_some()))
                 } else {
                     match f {
-                        Some(f) => Ev::V(Value::text(format!("={}", f.text))),
-                        None => err(CellError::NA),
+                        Some(f) if !hidden => Ev::V(Value::text(format!("={}", f.text))),
+                        _ => err(CellError::NA),
                     }
                 }
             }
@@ -205,9 +208,9 @@ impl<'h> Evaluator<'h> {
         let index = self.value(&args[0]);
         if let Value::Array(_) = index {
             let Some(spec) = gridcraft_functions::lookup("CHOOSE") else { return err(CellError::Name) };
-            let mut evaluated = vec![Arg { value: index, from_ref: false }];
+            let mut evaluated = vec![Arg::val(index)];
             for argument in &args[1..] {
-                evaluated.push(Arg { value: self.value(argument), from_ref: false });
+                evaluated.push(Arg::val(self.value(argument)));
             }
             let mut context = FnCtx { ev: self, criteria: None, lambda: None };
             return gridcraft_functions::call(spec, &evaluated, &mut context).pipe(Ev::V);
@@ -329,15 +332,15 @@ impl<'h> Evaluator<'h> {
         let mut evaluated = Vec::with_capacity(args.len());
         for (i, a) in args.iter().enumerate() {
             let ev = self.eval(a);
-            let arg = self.builtin_arg(spec, args.len(), i, ev, &mut state);
+            let arg = self.builtin_arg(spec, args.len(), i, ev, matches!(a, Expr::Missing), &mut state);
             evaluated.push(arg);
         }
-        let mut ctx = FnCtx { ev: self, criteria: state.criteria, lambda: state.lambda };
-        gridcraft_functions::call(spec, &evaluated, &mut ctx).pipe(Ev::V)
+        let (criteria, lambda) = (state.criteria, state.lambda);
+        Ev::V(self.call_builtin(spec, &evaluated, criteria, lambda))
     }
 
     /// One evaluated argument of a worksheet function, read into the value the function gets.
-    fn builtin_arg(&mut self, spec: &gridcraft_functions::FnSpec, n_args: usize, i: usize, mut ev: Ev, state: &mut ArgState) -> Arg {
+    fn builtin_arg(&mut self, spec: &gridcraft_functions::FnSpec, n_args: usize, i: usize, mut ev: Ev, missing: bool, state: &mut ArgState) -> Arg {
         let name = spec.name;
         let lambda_at = match name {
             "GROUPBY" => Some(2),
@@ -382,7 +385,28 @@ impl<'h> Evaluator<'h> {
             }
             ev => self.deref(ev),
         };
-        Arg { value, from_ref }
+        // Only an argument left out (`f(a,,b)`) is omitted; one that computes a blank is given.
+        let blank_value = !from_ref && value == Value::Empty && lambda_at != Some(i) && !missing;
+        Arg { value, from_ref, blank_value }
+    }
+
+    /// Calls a worksheet function with its evaluated arguments.
+    fn call_builtin(&mut self, spec: &gridcraft_functions::FnSpec, evaluated: &[Arg], criteria: Option<Area>, lambda: Option<Arc<Lambda>>) -> Value {
+        // The function may go through every value it is given (a SUM inside each call of a
+        // LAMBDA over a large array): the values count against the cell's work.
+        let values = evaluated.iter().fold(0u64, |n, a| n.saturating_add(if let Value::Array(x) = &a.value { x.data.len() as u64 } else { 1 }));
+        if !self.spend(values) {
+            return Value::Error(CellError::Calc);
+        }
+        let database = criteria.is_some();
+        let mut ctx = FnCtx { ev: self, criteria, lambda };
+        let v = gridcraft_functions::call(spec, evaluated, &mut ctx);
+        // A computed criterion that ran out of work counted as not met: the result leaves
+        // records out.
+        if database && self.exhausted {
+            return Value::Error(CellError::Calc);
+        }
+        v
     }
 
     /// SUMIF, COUNTIF, AVERAGEIF and the *IFS functions. A range given as `INDIRECT` of an array
@@ -405,11 +429,11 @@ impl<'h> Evaluator<'h> {
             let mut evaluated = Vec::with_capacity(evs.len());
             for (i, arg) in evs.into_iter().enumerate() {
                 let RefArg::One(ev) = arg else { return err(CellError::Value) };
-                let arg = self.builtin_arg(spec, args.len(), i, ev, &mut state);
+                let missing = args.get(i).is_some_and(|a| matches!(a, Expr::Missing));
+                let arg = self.builtin_arg(spec, args.len(), i, ev, missing, &mut state);
                 evaluated.push(arg);
             }
-            let mut ctx = FnCtx { ev: self, criteria: None, lambda: None };
-            return gridcraft_functions::call(spec, &evaluated, &mut ctx).pipe(Ev::V);
+            return Ev::V(self.call_builtin(spec, &evaluated, None, None));
         }
         let Some(n) = broadcast_len(rows, cols) else { return err(CellError::Num) };
         let mut out = Vec::with_capacity(n);
@@ -430,12 +454,13 @@ impl<'h> Evaluator<'h> {
                             ev
                         }
                     };
-                    let arg = self.builtin_arg(spec, args.len(), i, ev, &mut state);
+                    let missing = args.get(i).is_some_and(|a| matches!(a, Expr::Missing));
+                    let arg = self.builtin_arg(spec, args.len(), i, ev, missing, &mut state);
                     evaluated.push(arg);
                 }
                 out.push(match failed {
                     Some(e) => Value::Error(e),
-                    None => gridcraft_functions::call(spec, &evaluated, &mut FnCtx { ev: self, criteria: None, lambda: None }),
+                    None => self.call_builtin(spec, &evaluated, None, None),
                 });
             }
         }
@@ -477,6 +502,12 @@ impl<'h> Evaluator<'h> {
                 acc.count = acc.count.saturating_add(count);
                 return Ok(());
             }
+            // Folded without building an array, but still walked: the part inside the used
+            // range counts against the cell's work.
+            let r = self.read_range(a);
+            if !self.spend(u64::from(r.height()) * u64::from(r.width())) {
+                return Err(err(CellError::Calc));
+            }
             let mut error = None;
             let walked = self.host.visit_range(a.sheet, a.range, &mut |v| match acc.add_cell(kind, v) {
                 Ok(()) => true,
@@ -496,10 +527,13 @@ impl<'h> Evaluator<'h> {
     /// Adds one argument's value by calling `SUM` and `COUNT` on it, so coercion and error rules
     /// stay in one place (`AVERAGE` of an argument is its `SUM` over its `COUNT`).
     fn aggregate_value(&mut self, kind: Agg, value: Value, from_ref: bool, acc: &mut Acc) -> Result<(), Ev> {
+        if !from_ref && !self.spend_on(&value) {
+            return Err(err(CellError::Calc));
+        }
         let (Some(sum), Some(count)) = (gridcraft_functions::lookup("SUM"), gridcraft_functions::lookup("COUNT")) else {
             return Err(err(CellError::Name));
         };
-        let args = [Arg { value, from_ref }];
+        let args = [Arg { value, from_ref, blank_value: false }];
         if kind != Agg::Count {
             match gridcraft_functions::call(sum, &args, &mut FnCtx { ev: self, criteria: None, lambda: None }) {
                 Value::Number(n) => acc.sum += n,
