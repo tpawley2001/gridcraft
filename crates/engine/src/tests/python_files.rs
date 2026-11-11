@@ -245,7 +245,7 @@ fn a_py_formula_naming_a_missing_script_keeps_only_its_value() {
 
 /// `bytes` with the part `name` stored uncompressed and one byte of its data changed, so the
 /// archive is intact but reading the part fails its checksum.
-fn with_damaged_part(bytes: &[u8], name: &str, marker: &str) -> Vec<u8> {
+fn with_damaged_part(bytes: &[u8], name: &str) -> Vec<u8> {
     let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
     let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     for i in 0..z.len() {
@@ -254,13 +254,22 @@ fn with_damaged_part(bytes: &[u8], name: &str, marker: &str) -> Vec<u8> {
         let mut data = Vec::new();
         f.read_to_end(&mut data).unwrap();
         let options = zip::write::SimpleFileOptions::default();
-        let options = if entry == name { options.compression_method(zip::CompressionMethod::Stored) } else { options };
+        let options = if entry == name { options.compression_method(zip::CompressionMethod::Deflated) } else { options };
         out.start_file(entry, options).unwrap();
         out.write_all(&data).unwrap();
     }
     let mut zipped = out.finish().unwrap().into_inner();
-    let at = zipped.windows(marker.len()).position(|w| w == marker.as_bytes()).expect("the marker is stored as it is");
-    zipped[at + 1] ^= 0x20;
+    // A wrong checksum alone is accepted (as Excel does): break the part's compressed stream.
+    let u16_at = |z: &[u8], i: usize| usize::from(u16::from_le_bytes([z[i], z[i + 1]]));
+    let local = zipped
+        .windows(4)
+        .enumerate()
+        .position(|(i, w)| w == b"PK\x03\x04" && zipped.get(i + 30..i + 30 + name.len()) == Some(name.as_bytes()))
+        .expect("the part's local header");
+    let data = local + 30 + u16_at(&zipped, local + 26) + u16_at(&zipped, local + 28);
+    for b in &mut zipped[data..data + 8] {
+        *b = 0xFF;
+    }
     zipped
 }
 
@@ -268,8 +277,8 @@ fn with_damaged_part(bytes: &[u8], name: &str, marker: &str) -> Vec<u8> {
 fn a_damaged_python_part_is_a_warning_and_the_workbook_opens_with_its_values() {
     let data = "<sheetData><row r=\"1\"><c r=\"A1\"><f>_xlfn._xlws.PY(0,0)</f><v>5</v></c><c r=\"B1\"><v>9</v></c></row></sheetData>";
     let good = excel_shaped(data, Some(&["5"]));
-    // The part's data fails its checksum (a damaged archive entry).
-    let damaged = with_damaged_part(&good, "xl/python/python1.xml", "<pythonScripts>");
+    // The part's compressed data is broken (a damaged archive entry).
+    let damaged = with_damaged_part(&good, "xl/python/python1.xml");
     // The part is not well-formed XML, before its first script.
     let broken = |at: &'static str, with: &'static str| {
         with_parts(&good, move |name, text| if name == "xl/python/python1.xml" { text.replace(at, with) } else { text.to_string() }, &[])
@@ -300,7 +309,7 @@ fn a_python_cell_without_its_code_keeps_its_whole_cached_result_as_values() {
                 <row r=\"2\"><c r=\"A2\"><v>2</v></c><c r=\"C2\"><v>9</v></c></row>\
                 <row r=\"3\"><c r=\"A3\"><v>3</v></c><c r=\"C3\"><v>9</v></c></row></sheetData>";
     let missing = excel_shaped(data, None);
-    let damaged = with_damaged_part(&excel_shaped(data, Some(&["[1, 2, 3]"])), "xl/python/python1.xml", "<pythonScripts>");
+    let damaged = with_damaged_part(&excel_shaped(data, Some(&["[1, 2, 3]"])), "xl/python/python1.xml");
     for (name, bytes) in [("missing.xlsx", missing), ("damaged.xlsx", damaged)] {
         let mut s = s();
         open(&mut s, name, &bytes);

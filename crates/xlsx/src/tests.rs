@@ -190,6 +190,7 @@ mod xlsb_tables_tests;
 mod xlsb_tests;
 mod xlsb_theme_tests;
 mod xlsb_vba_tests;
+mod zip_bad_checksum_tests;
 mod zip_order;
 mod zip_truncated_recovery_tests;
 

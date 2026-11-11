@@ -523,6 +523,9 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
     crate::array_formula::apply_legacy(&mut wb, legacy_formulas, functions);
     wb.styles = cx.styles;
     wb.phonetics = cx.phonetics;
+    for part in cx.pkg.checksum_failures() {
+        cx.report.warn(crate::package::checksum_warning(part));
+    }
     Ok((wb, cx.report))
 }
 

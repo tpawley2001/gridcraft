@@ -402,6 +402,9 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         .or_else(|| wb.sheets.iter().position(|s| s.visibility == Visibility::Visible))
         .unwrap_or(0);
     wb.set_active_sheet(active);
+    for part in package.checksum_failures() {
+        report.warn(crate::package::checksum_warning(part));
+    }
     Ok((wb, report))
 }
 
