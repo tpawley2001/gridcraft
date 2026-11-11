@@ -203,6 +203,7 @@ Truncated packages. When an `.xlsx`, `.xlsm` or `.xlsb` file has lost its ZIP ce
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-11 | minor | G0286: shape and text box fill and outline colours honour `a:shade` / `a:tint` (applied in linear light, ECMA-376 Part 1 §20.1.2.3.31/34); the outline width `a:ln w` is read, printed and written back; printed shape text sits at the `a:bodyPr` insets (`shape_outline_print.rs`). |
 | 2026-11-10 | minor | G0267: an `.xlsb` worksheet part missing from the package (even without a content-type Override) opens as an empty sheet in its place with one warning naming the sheet, like `.xlsx`, instead of refusing the workbook (`xlsb_missing_sheet_part_tests.rs`). |
 | 2026-11-10 | minor | G0262: `.xls` sheets open at their saved zoom (SCL, 10–400%) and in Page Break Preview (WINDOW2 fSLV) or Page Layout view (PLV), and keep both on Save As `.xlsx` (`xls_sheet_zoom_view_tests.rs`). |
 | 2026-11-10 | minor | G0264: drawing objects with Print object off (`xdr:clientData fPrintsWithSheet="0"`) still show on screen but are left out of print, print preview and PDF and don't extend the automatic print range; the setting is kept on save (`drawing_print_object.rs`) |

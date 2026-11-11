@@ -252,6 +252,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
                 // The drawing is DrawingML XML, as in .xlsx: read into a scratch sheet for its chart.
                 let mut scratch = Sheet::new(info.name.clone());
                 let mut cx = crate::read::Ctx::new(package);
+                cx.theme_colors = wb.theme.colors;
                 sheet_drawing(&mut cx, &sheet_rels, &id, &mut scratch, &mut report);
                 package = cx.pkg;
                 chart = scratch.charts.into_iter().next();
@@ -330,6 +331,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         if let Some(id) = drawing {
             // Drawing parts are DrawingML XML, as in .xlsx: read them with the .xlsx reader's state.
             let mut cx = crate::read::Ctx::new(package);
+            cx.theme_colors = wb.theme.colors;
             // Anchors the drawing reader does not model (SmartArt graphics) are kept for saving,
             // unless the drawing could not be read (already reported).
             if sheet_drawing(&mut cx, &sheet_rels, &id, &mut sheet, &mut report) {

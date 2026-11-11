@@ -1694,6 +1694,8 @@ pub struct ShapeFormat {
     pub vert: Option<ShapeTextVert>,
     /// Rotation of the text in its box (`a:bodyPr rot`), in 60000ths of a degree.
     pub text_rotation: Option<i32>,
+    /// Outline width in EMU (`a:ln w`, 12700 per point); `None` is the default 0.75 pt.
+    pub line_width_emu: Option<i32>,
 }
 
 /// How a shape's text wraps (`a:bodyPr wrap`, ST_TextWrappingType).
