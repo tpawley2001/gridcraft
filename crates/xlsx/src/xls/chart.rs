@@ -1327,7 +1327,9 @@ pub(super) fn chart_sheet(
     if pos >= stream.len() || !is_chart_bof(&first) {
         return Ok(None);
     }
-    let mut print = PrintSettings::default();
+    // Excel prints a chart sheet without a Setup record (or one without an orientation) in
+    // landscape; Setup sets portrait explicitly.
+    let mut print = PrintSettings { orientation: Orientation::Landscape, ..PrintSettings::default() };
     Ok(match read(&mut recs, budget, links, Some(&mut print), biff5, report)? {
         Read::Chart(ch) => Some((*ch, chart_sheet_print(&print))),
         Read::Skipped | Read::CutOff => None,
@@ -2062,7 +2064,8 @@ pub(crate) fn chart_sheet_print(p: &PrintSettings) -> PrintSettings {
 }
 
 /// The chart sheet XML (ECMA-376 Part 1 §18.3.1.12) in CT_Chartsheet order: the page margins, a
-/// `<pageSetup>` (§18.3.1.64) for a paper or orientation that isn't the default, and a
+/// `<pageSetup>` (§18.3.1.64) for a paper or orientation that isn't the default (a chart sheet
+/// without an orientation is landscape, so portrait is written out), and a
 /// `<headerFooter>` (§18.3.1.46) when there is one, before the drawing.
 fn chart_sheet_xml(p: &PrintSettings) -> String {
     let mut s = format!(
@@ -2070,14 +2073,13 @@ fn chart_sheet_xml(p: &PrintSettings) -> String {
     );
     crate::sheet_write::write_page_margins(&mut s, p);
     let paper = crate::tables::paper_id(&p.paper).filter(|&id| id != 1);
-    if paper.is_some() || p.orientation == Orientation::Landscape {
+    let portrait = p.orientation == Orientation::Portrait;
+    if paper.is_some() || portrait {
         s.push_str("<pageSetup");
         if let Some(id) = paper {
             let _ = write!(s, " paperSize=\"{id}\"");
         }
-        if p.orientation == Orientation::Landscape {
-            s.push_str(" orientation=\"landscape\"");
-        }
+        s.push_str(if portrait { " orientation=\"portrait\"" } else { " orientation=\"landscape\"" });
         s.push_str("/>");
     }
     crate::sheet_write::write_header_footer(&mut s, p);
