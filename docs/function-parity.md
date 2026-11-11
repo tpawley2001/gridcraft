@@ -133,6 +133,7 @@ keeps fixed notation when it shows as many significant digits as scientific (`TE
 = `0.000000001`, `TEXT(-1.234567891,"General")` = `-1.234567891`); cell display is unchanged.
 Negative values with elapsed-only time formats get a leading minus (`TEXT(-7384/86400,"[h]:m:s.000")` = `-2:3:4.000`); other date/time formats stay `#VALUE!`.
 Mixed elapsed-time sections treat `m`/`mm` after seconds as minutes and plain codes of the same unit as a bracketed elapsed code as elapsed totals, preserving rounding and other units' modulo values.
+An elapsed `[h]` or `[m]` after a seconds code `s`/`ss` shows, like Excel 365, the elapsed total of half a day plus the seconds of the minute (fraction included), not of the value.
 
 `MEDIAN` and `AGGREGATE` function number 12 use an overflow-safe midpoint for even-sized
 inputs, so large finite middle values do not become `#NUM!` merely because their sum overflows (#1579).
@@ -150,6 +151,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-10 | minor | TEXT and cell display: `[h]`/`[m]` after a seconds code show Excel 365's value (half a day plus the seconds of the minute, as elapsed hours or minutes: `TEXT(3.14159,"s:m"" @ hour ""[hh]")` = `53:23 @ hour 1293`) |
 | 2026-11-10 | minor | G0250: with iterative calculation off, a circular reference keeps the value it shows (cached, or 0 when just entered) instead of `#CIRC!`, dependents calculate from it, and open + save keeps it (`circular_keeps_value.rs`) |
 | 2026-11-09 | minor | Legacy formulas from files (.xlsx without `cm`, .xlsb without dynamic-array metadata, .xls) calculate with implicit intersection instead of spilling or showing `#SPILL!`, as Excel does (`legacy_implicit_intersection.rs`) |
 | 2026-11-09 | minor | Dropped the stale "Scope of what's missing" rows for the exponential-smoothing forecast functions and the odd-period bond functions (ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD), which are implemented. |

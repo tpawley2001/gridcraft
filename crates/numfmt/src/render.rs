@@ -92,10 +92,20 @@ pub(crate) fn render_date(sec: &Section, v: f64, sys: DateSystem) -> Option<Out>
     let pad = |n: i64, w: u8| if w >= 2 { format!("{:0w$}", n, w = w.min(20) as usize) } else { n.to_string() };
     // No date in the section's calendar (serial 60 under `B2`): shown like an out-of-range date.
     let date = sec.calendar.date(&dt)?;
+    // After a plain seconds code, Excel's `[h]`/`[m]` show the elapsed total of half a day plus
+    // the seconds-of-the-minute (with their fraction, unrounded) scaled up to days:
+    // `s" secs and "[m]" mins"` of 0 is `0 secs and 720 mins`.
+    let exact_ms = (((v - v.floor()) * 86_400_000.0).round() as i64).clamp(0, 86_400_000);
+    let after_sec_ms = (exact_ms % 60_000).saturating_mul(86_400).saturating_add(43_200_000);
+    let mut seen_second = false;
     let mut out = Out::default();
     for t in &sec.toks {
         match t {
             Tok::Date(d) => {
+                if matches!(d, DatePart::Second(_)) {
+                    seen_second = true;
+                }
+                let elapsed_hm_ms = if seen_second { after_sec_ms } else { total_ms };
                 let s = match *d {
                     DatePart::Year(n) => {
                         if n <= 2 {
@@ -134,8 +144,8 @@ pub(crate) fn render_date(sec: &Section, v: f64, sys: DateSystem) -> Option<Out>
                         }
                         s
                     }
-                    DatePart::ElapsedH(n) => pad(total_ms / 3_600_000, n),
-                    DatePart::ElapsedM(n) => pad(total_ms / 60_000, n),
+                    DatePart::ElapsedH(n) => pad(elapsed_hm_ms / 3_600_000, n),
+                    DatePart::ElapsedM(n) => pad(elapsed_hm_ms / 60_000, n),
                     DatePart::ElapsedS(n) => pad(total_ms / 1000, n),
                     DatePart::AmPm => (if hour >= 12 { "PM" } else { "AM" }).to_string(),
                     DatePart::AP(a, p) => (if hour >= 12 { p } else { a }).to_string(),
