@@ -1182,6 +1182,39 @@ fn legacy_and_dynamic_formulas_keep_their_kind() {
     }
 }
 
+/// A legacy IF whose result is one value reads its array condition with `@` (its first value),
+/// and so does an array constant as a lookup value; IF's results, IF directly in AVERAGE and
+/// constants passed to math functions keep their arrays. Saving drops the implied `@` again.
+#[test]
+fn legacy_if_condition_and_lookup_constant_take_their_first_value() {
+    let cases = [
+        ("B1", "AVERAGE(ABS(IF((FREQUENCY(A1:A3,A1:A3)-1)&gt;0,1)))", "AVERAGE(ABS(IF(@((FREQUENCY(A1:A3,A1:A3)-1)>0),1)))"),
+        ("B2", "IF(FREQUENCY(A1:A3,A1:A3)&gt;0,{1,2},3)", "@IF(@(FREQUENCY(A1:A3,A1:A3)>0),{1,2},3)"),
+        ("B3", "MODE(VLOOKUP({\"a\",\"b\"},C1:D3,2))", "MODE(VLOOKUP(@{\"a\",\"b\"},C1:D3,2))"),
+        ("B4", "MATCH({1,2},A1:A3,0)+HLOOKUP(({1,2}),C1:D3,2)", "MATCH(@{1,2},A1:A3,0)+HLOOKUP(@(({1,2})),C1:D3,2)"),
+        ("B5", "AVERAGE(IF(FREQUENCY(A1:A3,A1:A3)&gt;0,1,0))", "AVERAGE(IF(FREQUENCY(A1:A3,A1:A3)>0,1,0))"),
+        ("B6", "STDEV(2,ROUND({1,2,3},1))", "STDEV(2,ROUND({1,2,3},1))"),
+        ("B7", "COLUMNS(IF(A1,{3,4,5},{6,7}))", "COLUMNS(IF(A1,{3,4,5},{6,7}))"),
+        ("B8", "SUM(VLOOKUP(A1:A2,C1:D3,2))", "SUM(VLOOKUP(@A1:A2,C1:D3,2))"),
+        ("B9", "SUMPRODUCT(VLOOKUP({\"a\",\"b\"},C1:D3,2))", "SUMPRODUCT(VLOOKUP({\"a\",\"b\"},C1:D3,2))"),
+    ];
+    let rows: String = cases.iter().enumerate().map(|(i, (a, f, _))| format!(r#"<row r="{}"><c r="{a}"><f>{f}</f></c></row>"#, i + 1)).collect();
+    let body = format!("<sheetData>{rows}</sheetData>");
+    let (wb, _) = read_xlsx(&super::minimal(&body, &[], "", "")).unwrap();
+    let text = |wb: &Workbook, a: &str| wb.sheet(0).unwrap().cell(at(a)).and_then(|c| c.formula.as_ref()).map(|f| f.text.clone()).unwrap();
+    for (a, _, read) in cases {
+        assert_eq!(text(&wb, a), read, "{a}");
+    }
+    let bytes = write_xlsx(&wb).unwrap();
+    for (a, file, _) in cases {
+        assert_eq!(written_formula(&bytes, a), (Some(file.replace("&gt;", ">")), None), "{a}");
+    }
+    let (back, _) = read_xlsx(&bytes).unwrap();
+    for (a, _, read) in cases {
+        assert_eq!(text(&back, a), read, "{a}");
+    }
+}
+
 /// The `<f>` text and `cm` attribute of a cell in a written package's first sheet.
 fn written_formula(bytes: &[u8], a: &str) -> (Option<String>, Option<String>) {
     let mut pkg = Package::open(bytes).unwrap();
