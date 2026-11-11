@@ -103,9 +103,10 @@ fn internal_storage_has_an_inner_vertical_and_horizontal() {
 }
 
 #[test]
-fn curved_flowchart_presets_are_not_claimed() {
-    // Not drawn yet: this still falls back to the rectangle. The curved and arc flowcharts are
-    // covered by `preset_geometry_flowchart_curved.rs` and the arc flowchart tests.
+fn curved_flowchart_presets_are_not_straight_polygons() {
+    // The multidocument has Béziers: it is drawn by its own paths (`preset_geometry_last_three.rs`),
+    // not as a straight polygon.
     let preset = "flowChartMultidocument";
-    assert!(preset_paths(&geom(preset), 1000, 600).is_none(), "{preset}");
+    let paths = preset_paths(&geom(preset), 1000, 600).expect("drawn");
+    assert!(paths[0].commands.iter().any(|c| matches!(c, PathCommand::CubicBezTo(_))), "{preset}");
 }

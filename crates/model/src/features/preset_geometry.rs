@@ -345,6 +345,7 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
             return action_button_glyph_paths(&g.preset, w, h);
         }
         "ellipseRibbon" | "ellipseRibbon2" | "moon" | "cloudCallout" | "swooshArrow" => return curved_outside_paths(g, w, h),
+        "snipRoundRect" | "leftRightRibbon" | "flowChartMultidocument" => return snip_ribbon_multidoc_paths(g, w, h),
         preset => {
             let (pw, ph, table) = flowchart_polygon(preset)?;
             table.iter().map(|&(x, y)| (md(wi, x, pw), md(hi, y, ph))).collect()
@@ -4026,4 +4027,172 @@ fn swoosh_arrow(b: &OutsideBox, adj1: f64, adj2: f64) -> Vec<GeometryPath> {
         PathShade::Norm,
         &[M(0.0, h), Q(x_p1, y_p1, x_b, y_b), L(x_c, 0.0), L(w, y_d), L(x_e, y_e), L(x_f, y_f), Q(x_p2, y_p2, 0.0, h), Z],
     )]
+}
+
+/// One command of a [`snip_ribbon_multidoc_paths`] path, in `f64` until the end. `C` is a cubic
+/// Bézier: two control points, then the end point.
+#[derive(Clone, Copy)]
+enum FCmd {
+    M(f64, f64),
+    L(f64, f64),
+    A(f64, f64, i64, i64),
+    C((f64, f64), (f64, f64), (f64, f64)),
+    Z,
+}
+
+/// `snipRoundRect` (one filled and stroked path), `leftRightRibbon` (body, shaded fold, outline)
+/// and `flowChartMultidocument` (filled stack, stroked outline, and a third path that is neither
+/// filled nor stroked, kept like the definition gives it), or `None` for another preset or an
+/// empty box.
+///
+/// Guides are evaluated in `f64` (NaN and infinities count as 0); on-curve points are rounded and
+/// pinned into the box, radii into `0..=w` × `0..=h`. Bézier control points may lie outside the box
+/// (the multidocument's wave dips below it), so they are only rounded.
+fn snip_ribbon_multidoc_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    use FCmd::{A, C, L, M, Z};
+    if !g.paths.is_empty() || w <= 0 || h <= 0 {
+        return None;
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let (wf, hf) = (w as f64, h as f64);
+    let (ss, hc, vc) = (wf.min(hf), wf / 2.0, hf / 2.0);
+    let (cd4, cd2, cd34) = (5_400_000, 10_800_000, 16_200_000);
+    #[allow(clippy::cast_precision_loss)]
+    let adj = |name: &str, default: i128| adjust(g, name, default) as f64;
+    let paths: Vec<(bool, bool, PathShade, Vec<FCmd>)> = match g.preset.as_str() {
+        "snipRoundRect" => {
+            let a1 = pin(0.0, adj("adj1", 16667), 50000.0);
+            let a2 = pin(0.0, adj("adj2", 16667), 50000.0);
+            let x1 = muldiv(ss, a1, 100000.0);
+            let dx2 = muldiv(ss, a2, 100000.0);
+            let x2 = wf - dx2;
+            let body = vec![M(x1, 0.0), L(x2, 0.0), L(wf, dx2), L(wf, hf), L(0.0, hf), L(0.0, x1), A(x1, x1, cd2, cd4), Z];
+            vec![(true, true, PathShade::Norm, body)]
+        }
+        "leftRightRibbon" => {
+            let wd32 = wf / 32.0;
+            let a3 = pin(0.0, adj("adj3", 16667), 33333.0);
+            let max_adj1 = 100000.0 - a3;
+            let a1 = pin(0.0, adj("adj1", 50000), max_adj1);
+            let w1 = wf / 2.0 - wd32;
+            let max_adj2 = muldiv(100000.0, w1, ss);
+            let a2 = pin(0.0, adj("adj2", 50000), max_adj2);
+            let x1 = muldiv(ss, a2, 100000.0);
+            let x4 = wf - x1;
+            let dy1 = muldiv(hf, a1, 200000.0);
+            let dy2 = muldiv(hf, a3, -200000.0);
+            let ly1 = vc + dy2 - dy1;
+            let ry4 = vc + dy1 - dy2;
+            let ly2 = ly1 + dy1;
+            let ry3 = hf - ly2;
+            let ly4 = ly2 * 2.0;
+            let ry1 = hf - ly4;
+            let ly3 = ly4 - ly1;
+            let ry2 = hf - ly3;
+            let h_r = muldiv(a3, ss, 400000.0);
+            let (x2, x3) = (hc - wd32, hc + wd32);
+            let (y1, y2) = (ly1 + h_r, ry2 - h_r);
+            let arc = |st_ang: i64, sw_ang: i64| A(wd32, h_r, st_ang, sw_ang);
+            let body = vec![
+                M(0.0, ly2),
+                L(x1, 0.0),
+                L(x1, ly1),
+                L(hc, ly1),
+                arc(cd34, cd2),
+                arc(cd34, -cd2),
+                L(x4, ry2),
+                L(x4, ry1),
+                L(wf, ry3),
+                L(x4, hf),
+                L(x4, ry4),
+                L(hc, ry4),
+                arc(cd4, cd4),
+                L(x2, ly3),
+                L(x1, ly3),
+                L(x1, ly4),
+                Z,
+            ];
+            let fold = vec![M(x3, y1), arc(0, cd4), arc(cd34, -cd2), L(x3, ry2), Z];
+            let mut outline = body.clone();
+            outline.extend([M(x3, y1), L(x3, ry2), M(x2, y2), L(x2, ly3)]);
+            vec![(true, false, PathShade::Norm, body), (true, false, PathShade::DarkenLess, fold), (false, true, PathShade::Norm, outline)]
+        }
+        "flowChartMultidocument" => {
+            // The paths use a 21600 × 21600 path box, scaled to the shape box.
+            let p = |x: f64, y: f64| (muldiv(wf, x, 21600.0), muldiv(hf, y, 21600.0));
+            let m = |x: f64, y: f64| {
+                let (x, y) = p(x, y);
+                M(x, y)
+            };
+            let ln = |x: f64, y: f64| {
+                let (x, y) = p(x, y);
+                L(x, y)
+            };
+            let cb = |c1: (f64, f64), c2: (f64, f64), e: (f64, f64)| C(p(c1.0, c1.1), p(c2.0, c2.1), p(e.0, e.1));
+            let back_sheets = [
+                m(1532.0, 3675.0),
+                ln(1532.0, 1815.0),
+                ln(20000.0, 1815.0),
+                ln(20000.0, 16252.0),
+                cb((19298.0, 16252.0), (18595.0, 16352.0), (18595.0, 16352.0)),
+            ];
+            let top_sheet = [
+                m(2972.0, 1815.0),
+                ln(2972.0, 0.0),
+                ln(21600.0, 0.0),
+                ln(21600.0, 14392.0),
+                cb((20800.0, 14392.0), (20000.0, 14467.0), (20000.0, 14467.0)),
+            ];
+            let mut fill =
+                vec![m(0.0, 20782.0), cb((9298.0, 23542.0), (9298.0, 18022.0), (18595.0, 18022.0)), ln(18595.0, 3675.0), ln(0.0, 3675.0), Z];
+            fill.extend(back_sheets);
+            fill.extend([ln(18595.0, 3675.0), Z]);
+            fill.extend(top_sheet);
+            fill.extend([ln(20000.0, 1815.0), Z]);
+            let mut outline =
+                vec![m(0.0, 3675.0), ln(18595.0, 3675.0), ln(18595.0, 18022.0), cb((9298.0, 18022.0), (9298.0, 23542.0), (0.0, 20782.0)), Z];
+            outline.extend(back_sheets);
+            outline.extend(top_sheet);
+            let edge = vec![
+                m(0.0, 20782.0),
+                cb((9298.0, 23542.0), (9298.0, 18022.0), (18595.0, 18022.0)),
+                ln(18595.0, 16352.0),
+                cb((18595.0, 16352.0), (19298.0, 16252.0), (20000.0, 16252.0)),
+                ln(20000.0, 14467.0),
+                cb((20000.0, 14467.0), (20800.0, 14392.0), (21600.0, 14392.0)),
+                ln(21600.0, 0.0),
+                ln(2972.0, 0.0),
+                ln(2972.0, 1815.0),
+                ln(1532.0, 1815.0),
+                ln(1532.0, 3675.0),
+                ln(0.0, 3675.0),
+                Z,
+            ];
+            vec![(true, false, PathShade::Norm, fill), (false, true, PathShade::Norm, outline), (false, false, PathShade::Norm, edge)]
+        }
+        _ => return None,
+    };
+    let finite = |v: f64| if v.is_finite() { v } else { 0.0 };
+    #[allow(clippy::cast_possible_truncation)]
+    let fix = |v: f64, max: i64| (finite(v).round() as i64).clamp(0, max);
+    // A control point keeps its side of the box; `as` saturates, so a huge box cannot overflow.
+    #[allow(clippy::cast_possible_truncation)]
+    let ctl = |v: f64| finite(v).round() as i64;
+    let paths = paths
+        .into_iter()
+        .map(|(fill, stroke, shade, cmds)| {
+            let commands = cmds
+                .into_iter()
+                .map(|c| match c {
+                    M(x, y) => PathCommand::MoveTo(fix(x, w), fix(y, h)),
+                    L(x, y) => PathCommand::LineTo(fix(x, w), fix(y, h)),
+                    A(w_r, h_r, st_ang, sw_ang) => PathCommand::ArcTo { w_r: fix(w_r, w), h_r: fix(h_r, h), st_ang, sw_ang },
+                    C(c1, c2, e) => PathCommand::CubicBezTo([(ctl(c1.0), ctl(c1.1)), (ctl(c2.0), ctl(c2.1)), (fix(e.0, w), fix(e.1, h))]),
+                    Z => PathCommand::Close,
+                })
+                .collect();
+            GeometryPath { w, h, fill, stroke, shade, commands }
+        })
+        .collect();
+    Some(paths)
 }
