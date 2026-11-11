@@ -4,8 +4,8 @@
 //! BoundSheet8 whose substream is a chart substream. Both become model charts whose series are
 //! references, so their values follow the cells.
 //!
-//! Read: the chart group type (Bar, Line, Pie, Area, Scatter, Radar and their stacked, 100%,
-//! doughnut and bubble forms), pie/doughnut first slice angles and doughnut hole sizes (Pie),
+//! Read: the chart group type (Bar, Line, Pie, Area, Scatter, Radar, RadarArea and their stacked,
+//! 100%, doughnut, bubble and filled forms), pie/doughnut first slice angles and doughnut hole sizes (Pie),
 //! each series' name, values, categories and bubble sizes (BRAI
 //! references, or the literal values the substream caches), the chart and axis titles (Text +
 //! ObjectLink + SeriesText), the legend's side, value axis bounds (ValueRange), major gridlines,
@@ -1434,7 +1434,7 @@ enum Block {
     Other,
 }
 
-/// A chart group type record.
+/// A chart group type record. `Radar { filled: true }` is RadarArea (0x1040), Excel's filled radar.
 #[derive(Clone, Copy)]
 enum GroupType {
     Bar { transpose: bool, stacked: bool, percent: bool },
@@ -1442,7 +1442,7 @@ enum GroupType {
     Pie { angle: u16, donut: u16 },
     Area { stacked: bool, percent: bool },
     Scatter { bubbles: bool },
-    Radar,
+    Radar { filled: bool },
     Unsupported(&'static str),
 }
 
@@ -1973,7 +1973,9 @@ fn group_type(id: u16, c: &mut Cursor<'_, '_>) -> Result<GroupType, Skip> {
         // Pie of pie and bar of pie: drawn as a pie.
         BOP_POP => GroupType::Pie { angle: 0, donut: 0 },
         SURF => GroupType::Unsupported("surface"),
-        _ => GroupType::Radar,
+        // Radar and RadarArea: flags (axis labels, shadow) then an unused u16; neither changes the kind.
+        RADAR | RADAR_AREA => GroupType::Radar { filled: id == RADAR_AREA },
+        _ => GroupType::Unsupported("unknown"),
     })
 }
 
@@ -2014,7 +2016,8 @@ fn kind_of(g: &Group, members: &[&Ser]) -> ChartKind {
         Some(GroupType::Scatter { bubbles: true }) => ChartKind::Bubble,
         Some(GroupType::Scatter { .. }) if members.iter().any(|s| s.line.is_some_and(|(_, drawn)| drawn)) => ChartKind::ScatterLines,
         Some(GroupType::Scatter { .. }) => ChartKind::Scatter,
-        Some(GroupType::Radar) => ChartKind::Radar,
+        Some(GroupType::Radar { filled: true }) => ChartKind::RadarFilled,
+        Some(GroupType::Radar { filled: false }) => ChartKind::Radar,
         Some(GroupType::Unsupported(_)) | None => ChartKind::ColumnClustered,
     }
 }
