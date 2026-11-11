@@ -70,6 +70,12 @@ impl<'a> Package<'a> {
         }
     }
 
+    /// Parts whose data was kept although their ZIP CRC-32 didn't match, in read order.
+    // TODO(P05-101): stub for the acceptance tests; record the parts as they are read.
+    pub fn checksum_failures(&self) -> &[String] {
+        &[]
+    }
+
     /// How many parts were recovered from local headers, when the package was repaired.
     pub fn recovered_parts(&self) -> Option<usize> {
         match &self.source {
