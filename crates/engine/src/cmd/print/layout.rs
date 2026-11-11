@@ -125,8 +125,8 @@ impl PrintOptions {
     }
 }
 
-/// The range a sheet prints: its print area, else the used range grown to cover drawing
-/// objects. `None` when there is nothing to print.
+/// The range a sheet prints: its print area, else A1 to the end of the used range grown to cover
+/// visible drawing objects. `None` when there is nothing to print.
 pub fn print_range(sh: &Sheet) -> Option<RangeRef> {
     if let Some(a) = sh.print.print_area {
         return Some(trim_full(sh, a));
@@ -148,9 +148,9 @@ pub fn print_range(sh: &Sheet) -> Option<RangeRef> {
     for s in sh.shapes.iter().filter(|o| !o.hidden) {
         grow(&s.anchor);
     }
-    // Printing starts at A1 like Excel when the data starts nearby? Excel prints from the first
-    // used cell; keep the used range as is.
-    r
+    // Without a print area Excel prints from A1: leading empty rows and columns print as blank
+    // space, and pages that fall wholly inside them print as blank pages.
+    r.map(|r| RangeRef::new(CellRef::new(0, 0), r.end))
 }
 
 /// Whole rows/columns are trimmed to the used range.
