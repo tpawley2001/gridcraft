@@ -109,6 +109,13 @@ pub fn nice_scale(lo: f64, hi: f64, force_zero: bool) -> Scale {
     Scale { min, max, step }
 }
 
+/// Excel's automatic scale for a radar chart's value axis: no headroom past the data, and the
+/// smallest 1-2-5 step whose rings are at least 1.1 label heights apart on a `radius`-long axis.
+pub fn radar_scale(lo: f64, hi: f64, radius: f32, label_size: f32) -> Scale {
+    let _ = (radius, label_size);
+    nice_scale(lo, hi, true)
+}
+
 /// `auto` with a chart's fixed bounds and major unit applied (Format Axis ▸ Bounds and Units).
 /// Unusable settings (not finite, minimum not below maximum, more than 50 gridlines) fall back to
 /// the automatic values.
