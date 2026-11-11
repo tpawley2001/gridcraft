@@ -145,6 +145,13 @@ fn logicals(a: &[Arg]) -> R<Vec<bool>> {
             Value::Number(n) => out.push(*n != 0.0),
             Value::Bool(b) => out.push(*b),
             _ if arg.from_ref => {}
+            // Typed-in text counts only when it reads as TRUE/FALSE; other text is skipped like
+            // text in a reference (AND("1",1) is TRUE). #VALUE! comes only when nothing is left.
+            v @ Value::Text(_) => {
+                if let Ok(b) = v.to_bool() {
+                    out.push(b);
+                }
+            }
             v => out.push(v.to_bool()?),
         }
     }
@@ -558,6 +565,12 @@ mod tests {
         is_err(ev("AND", vec![rf(arr(vec![vec![tv("x")]]))]), CellError::Value);
         is_err(ev("AND", vec![t("abc")]), CellError::Value);
         assert_eq!(ev("AND", vec![t("TRUE")]), Value::Bool(true));
+        // Typed-in text that is not TRUE/FALSE is skipped, not converted and not an error.
+        assert_eq!(ev("AND", vec![t("1"), n(1.0)]), Value::Bool(true));
+        assert_eq!(ev("AND", vec![t("x"), b(false)]), Value::Bool(false));
+        assert_eq!(ev("OR", vec![t("1"), b(false)]), Value::Bool(false));
+        assert_eq!(ev("XOR", vec![t("x"), t("false"), b(true)]), Value::Bool(true));
+        is_err(ev("AND", vec![t("abc"), e(CellError::Div0)]), CellError::Div0);
         is_err(ev("OR", vec![b(false), e(CellError::Div0)]), CellError::Div0);
         assert_eq!(ev("OR", vec![b(false), n(2.0)]), Value::Bool(true));
         assert_eq!(ev("OR", vec![b(false), b(false)]), Value::Bool(false));
