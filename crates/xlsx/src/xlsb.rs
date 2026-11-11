@@ -293,6 +293,19 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             report.warn("XLSB non-worksheet sheets were skipped.");
             continue;
         }
+        // A worksheet part missing from the package (a truncated file) leaves its sheet empty at its
+        // position, as the .xlsx reader does, instead of refusing the workbook. Checked before the
+        // content type, since a truncated package may also lack the part's Override.
+        let Some(bytes) = package.read(&rel.target)? else {
+            report.warn(format!("sheet \"{}\" could not be read: missing part {}", info.name, rel.target));
+            let mut sheet = Sheet::new(info.name.clone());
+            sheet.visibility = info.visibility;
+            if let Some(slot) = model_index.last_mut() {
+                *slot = Some(wb.sheets.len());
+            }
+            wb.sheets.push(Arc::new(sheet));
+            continue;
+        };
         check_type(&types, &rel.target, WORKSHEET)?;
         let sheet_rels = sheet_relationships(&mut package, &rel.target, &mut report);
         budget.links = 0;
@@ -300,7 +313,7 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         let mut parts = SheetParts::default();
         let mut drawing = None;
         let mut sheet = worksheet(
-            &required(&mut package, &rel.target)?,
+            &bytes,
             &info.name,
             &strings,
             &styles,

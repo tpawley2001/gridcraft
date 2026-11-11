@@ -255,7 +255,6 @@ fn xlsb_requires_internal_typed_relationships_and_sniffs_only_root_workbook() {
     for (roots, rels, types) in [
         (ROOT.replace("officeDocument\"", "wrong\""), RELS.to_owned(), TYPES.to_owned()),
         (ROOT.replace("Target=", "TargetMode=\"External\" Target="), RELS.to_owned(), TYPES.to_owned()),
-        (ROOT.to_owned(), RELS.replace("Target=\"../data/one.bin\"", "Target=\"missing.bin\""), TYPES.to_owned()),
         (
             ROOT.to_owned(),
             RELS.replace("Target=\"../data/one.bin\"", "TargetMode=\"External\" Target=\"https://example.com/data.bin\""),
@@ -272,6 +271,12 @@ fn xlsb_requires_internal_typed_relationships_and_sniffs_only_root_workbook() {
     ] {
         assert!(read_xlsb(&package(&book(false), &sheet, &sst(), &roots, &rels, &types)).is_err());
     }
+    // A worksheet relationship naming a part that isn't in the package (and has no content type)
+    // opens with that sheet empty and a warning, like a truncated file in Excel.
+    let missing = RELS.replace("Target=\"../data/one.bin\"", "Target=\"missing.bin\"");
+    let (wb, report) = read_xlsb(&package(&book(false), &sheet, &sst(), ROOT, &missing, TYPES)).unwrap();
+    assert_eq!(wb.sheets[0].used_range(), None);
+    assert!(report.warnings.iter().any(|w| w.contains("missing part") && w.contains(&wb.sheets[0].name)), "{:?}", report.warnings);
     let chartsheet = RELS.replace(
         "Id=\"two\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet",
         "Id=\"two\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet",
