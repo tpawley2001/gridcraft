@@ -473,21 +473,23 @@ impl<'h> Evaluator<'h> {
     /// Only `SUM`, `COUNT` and `AVG` are supported currently.
     fn aggregate(&mut self, kind: Agg, args: &[Expr]) -> Ev {
         let mut acc = Acc::default();
-        let mut first_error = None;
+        // An error of a computed argument (`-A1`, `1/0`) wins over one found inside a reference,
+        // as in `gridcraft_functions::computed_error`; otherwise the first error in order.
+        let (mut ref_error, mut computed_error) = (None, None);
         for a in args {
             let ev = self.eval(a);
-            let steps = match ev {
-                Ev::R(areas) => areas.iter().map(|area| self.aggregate_area(kind, area, &mut acc)).collect(),
+            let (steps, slot) = match ev {
+                Ev::R(areas) => (areas.iter().map(|area| self.aggregate_area(kind, area, &mut acc)).collect::<Vec<_>>(), &mut ref_error),
                 ev => {
                     let value = self.deref(ev);
-                    vec![self.aggregate_value(kind, value, false, &mut acc)]
+                    (vec![self.aggregate_value(kind, value, false, &mut acc)], &mut computed_error)
                 }
             };
-            if first_error.is_none() {
-                first_error = steps.into_iter().find_map(Result::err);
+            if slot.is_none() {
+                *slot = steps.into_iter().find_map(Result::err);
             }
         }
-        first_error.unwrap_or_else(|| Ev::V(acc.finish(kind)))
+        computed_error.or(ref_error).unwrap_or_else(|| Ev::V(acc.finish(kind)))
     }
 
     /// Adds one area to `acc`; `Err` is the result the function ends with.

@@ -260,10 +260,62 @@ pub fn all() -> &'static [FnSpec] {
     &registry().0
 }
 
+/// Functions that read any number of values from references, arrays and computed arguments,
+/// and give an error when one of them is an error. With several errors, Excel lets the first error
+/// of a computed (non-reference) argument win over an error found inside a reference (see
+/// [`computed_error`]); functions with fixed positional arguments keep the first error in order.
+pub fn computed_error_first(name: &str) -> bool {
+    matches!(
+        name,
+        "SUM"
+            | "PRODUCT"
+            | "MAX"
+            | "MIN"
+            | "MAXA"
+            | "MINA"
+            | "AVERAGE"
+            | "AVERAGEA"
+            | "STDEV"
+            | "STDEV.S"
+            | "STDEV.P"
+            | "STDEVA"
+            | "STDEVP"
+            | "STDEVPA"
+            | "VAR"
+            | "VAR.S"
+            | "VAR.P"
+            | "VARA"
+            | "VARP"
+            | "VARPA"
+            | "AND"
+            | "OR"
+            | "XOR"
+            | "TEXTJOIN"
+            | "CONCAT"
+            | "NPV"
+    )
+}
+
+/// The first error among the computed arguments (those whose value is not a reference: a
+/// literal, `-A1`, `A1+0`, a function result), looking inside computed arrays too. For the
+/// functions of [`computed_error_first`] this error wins over any error inside a reference.
+pub fn computed_error(args: &[Arg]) -> Option<CellError> {
+    args.iter().filter(|a| !a.from_ref).find_map(|a| match &a.value {
+        Value::Error(e) => Some(*e),
+        Value::Array(arr) => arr.data.iter().find_map(|v| if let Value::Error(e) = v { Some(*e) } else { None }),
+        _ => None,
+    })
+}
+
 /// Calls a function with array lifting applied. Wrong arity gives `#VALUE!`.
 pub fn call(spec: &FnSpec, args: &[Arg], ctx: &mut dyn Ctx) -> Value {
     if !spec.accepts(args.len()) {
         return Value::Error(CellError::Value);
+    }
+    if computed_error_first(spec.name)
+        && let Some(e) = computed_error(args)
+    {
+        return Value::Error(e);
     }
     lift::call_lifted(spec, args, ctx)
 }
@@ -271,6 +323,16 @@ pub fn call(spec: &FnSpec, args: &[Arg], ctx: &mut dyn Ctx) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Excel: a computed argument's error wins over an error inside a reference, in the
+    /// aggregating functions only.
+    #[test]
+    fn computed_error_wins_over_reference_error() {
+        let args = [Arg::reference(Value::Error(CellError::Ref)), Arg::val(Value::Error(CellError::Value))];
+        assert_eq!(computed_error(&args), Some(CellError::Value));
+        assert_eq!(computed_error(&args[..1]), None);
+        assert!(computed_error_first("MAX") && !computed_error_first("ROUND") && !computed_error_first("CONCATENATE"));
+    }
 
     #[test]
     fn registry_is_consistent() {
