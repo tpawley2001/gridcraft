@@ -35,6 +35,7 @@ const ALL_KINDS: [ChartKind; 32] = [
     ChartKind::ScatterLines,
     ChartKind::Bubble,
     ChartKind::Radar,
+    ChartKind::RadarFilled,
     ChartKind::Histogram,
     ChartKind::Waterfall,
     ChartKind::Funnel,

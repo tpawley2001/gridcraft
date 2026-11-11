@@ -3292,6 +3292,17 @@ fn chart_data(s: &mut Session) {
 }
 
 #[test]
+fn insert_chart_filled_radar_subtype() {
+    use gridcraft_model::ChartKind;
+    let mut s = s();
+    chart_data(&mut s);
+    s.execute("insert.chart", json!({"type": "radar", "subtype": "filled", "range": "A1:E7"})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.active().unwrap().charts[0].kind, ChartKind::RadarFilled);
+    reopen(&mut s);
+    assert_eq!(s.doc().unwrap().wb.active().unwrap().charts[0].kind, ChartKind::RadarFilled);
+}
+
+#[test]
 fn every_chart_kind_survives_xlsx() {
     use gridcraft_model::ChartKind;
     let kinds = [

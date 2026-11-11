@@ -673,6 +673,7 @@ pub fn chart_kind(t: &str, sub: &str) -> ChartKind {
         ("scatter", "lines") => ChartKind::ScatterLines,
         ("scatter", _) => ChartKind::Scatter,
         ("bubble", _) => ChartKind::Bubble,
+        ("radar", "filled") | ("radarFilled", _) => ChartKind::RadarFilled,
         ("radar", _) => ChartKind::Radar,
         ("histogram", _) => ChartKind::Histogram,
         ("waterfall", _) => ChartKind::Waterfall,

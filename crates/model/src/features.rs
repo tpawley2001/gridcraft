@@ -555,6 +555,8 @@ pub enum ChartKind {
     ScatterLines,
     Bubble,
     Radar,
+    /// Filled radar (`c:radarChart` with `radarStyle val="filled"`): each series is a filled polygon.
+    RadarFilled,
     Histogram,
     Waterfall,
     Funnel,
