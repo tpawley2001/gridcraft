@@ -48,6 +48,7 @@ mod legacy_t_sumproduct;
 mod line_count_overflow;
 mod logical_text_args;
 mod long_operator_chains;
+mod ods_matrix_formulas;
 mod offset_overflow;
 mod outline_apply_styles;
 mod percent_entry;
