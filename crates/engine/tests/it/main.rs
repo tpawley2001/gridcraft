@@ -38,6 +38,7 @@ mod ink_roundtrip;
 mod legacy_implicit_intersection;
 mod legacy_t_sumproduct;
 mod line_count_overflow;
+mod logical_text_args;
 mod long_operator_chains;
 mod offset_overflow;
 mod outline_apply_styles;
