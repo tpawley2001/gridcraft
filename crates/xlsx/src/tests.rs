@@ -69,6 +69,7 @@ mod ods_repeat_edge_tests;
 mod ods_tests;
 mod page_order;
 mod page_setup_scale_zero;
+mod paper_size_ids;
 mod passthrough_tests;
 mod phonetic_tests;
 mod picture_effects;
