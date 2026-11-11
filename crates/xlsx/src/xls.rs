@@ -1594,10 +1594,16 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
             let height = c.u16()?;
             c.skip(4)?;
             let flags = c.u32()?;
-            let mut info = LineInfo { custom: flags & 0x40 != 0, hidden: flags & 0x20 != 0, ..LineInfo::default() };
-            let px = pt_to_px(f64::from(height & 0x7FFF) / 20.0);
-            if info.custom || (px - st.sheet.default_row_height).abs() > 0.5 {
-                info.size = Some(px);
+            // [MS-XLS] 2.4.221: miyRw MUST be 2..=8192 twips. Outside it (0, or 0x8000 in real
+            // files) the record carries no height, so the row keeps the sheet default height (as
+            // Excel opens it) instead of collapsing to 0.
+            let usable = (2..=8192).contains(&height);
+            let mut info = LineInfo { custom: usable && flags & 0x40 != 0, hidden: flags & 0x20 != 0, ..LineInfo::default() };
+            if usable {
+                let px = pt_to_px(f64::from(height) / 20.0);
+                if info.custom || (px - st.sheet.default_row_height).abs() > 0.5 {
+                    info.size = Some(px);
+                }
             }
             info.outline = (flags & 7) as u8;
             info.collapsed = flags & 0x10 != 0;
