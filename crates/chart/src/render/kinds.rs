@@ -658,10 +658,17 @@ pub(super) fn radar(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
             }
             continue;
         }
+        // Markers go on the points that have a value: one per category, not the closing repeat.
+        let marks: Vec<[f32; 2]> = if chart.kind == ChartKind::RadarMarkers {
+            pts.iter().zip(&s.values).filter(|(_, v)| v.is_some()).map(|(p, _)| *p).collect()
+        } else {
+            Vec::new()
+        };
         if let Some(p) = pts.first().copied() {
             pts.push(p);
         }
         ctx.line(pts, s.color, 2.0);
+        super::lines::draw_markers(ctx, marks.into_iter(), 3.5, s.color);
     }
     if filled {
         // The fills cover the grid but not the axis labels: move the labels on top.

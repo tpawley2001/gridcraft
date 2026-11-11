@@ -29,7 +29,7 @@ pub(super) fn family(k: ChartKind) -> Fam {
     match k {
         ColumnStacked | BarStacked => Fam::ColStack,
         ColumnStacked100 | BarStacked100 => Fam::Col100,
-        Line | LineMarkers | Scatter | ScatterLines | Radar | Stock => Fam::Line,
+        Line | LineMarkers | Scatter | ScatterLines | Radar | RadarMarkers | Stock => Fam::Line,
         LineStacked => Fam::LineStack,
         Area => Fam::Area,
         AreaStacked => Fam::AreaStack,

@@ -16,7 +16,7 @@ mod three_d;
 mod three_d_bar_shapes;
 mod three_d_series_shapes;
 
-const ALL_KINDS: [ChartKind; 33] = [
+const ALL_KINDS: [ChartKind; 34] = [
     ChartKind::ColumnClustered,
     ChartKind::ColumnStacked,
     ChartKind::ColumnStacked100,
@@ -37,6 +37,7 @@ const ALL_KINDS: [ChartKind; 33] = [
     ChartKind::ScatterLines,
     ChartKind::Bubble,
     ChartKind::Radar,
+    ChartKind::RadarMarkers,
     ChartKind::RadarFilled,
     ChartKind::Histogram,
     ChartKind::Waterfall,
