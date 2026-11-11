@@ -660,7 +660,7 @@ fn chart_sheet_drawing(
             CS_PAGE_SETUP => {
                 if let Some((paper, orientation)) = page.read(report, "BrtCsPageSetup", || read_cs_page_setup(payload)) {
                     if let Some(paper) = paper {
-                        print.paper = paper.to_string();
+                        print.paper = paper;
                     }
                     print.orientation = orientation;
                 }
@@ -684,7 +684,7 @@ fn chart_sheet_drawing(
 
 /// `BrtCsPageSetup` ([MS-XLSB] 2.4.343), reduced to the paper size and the orientation (a chart
 /// sheet has no scale or fit-to-pages fields).
-fn read_cs_page_setup(payload: &[u8]) -> Result<(Option<&'static str>, Orientation), IoError> {
+fn read_cs_page_setup(payload: &[u8]) -> Result<(Option<String>, Orientation), IoError> {
     let mut b = Bytes::new(payload);
     let paper = b.u32()?;
     b.u32()?; // iRes
@@ -1447,7 +1447,7 @@ impl PrintOptions {
 /// orientation and the fit-to-pages dimensions (joined with the fit-to-page flag at the end), plus
 /// the relationship id of the sheet's printer settings part.
 struct PageSetup {
-    paper: Option<&'static str>,
+    paper: Option<String>,
     scale: Option<u16>,
     orientation: Orientation,
     fit: (u16, u16),
@@ -1482,7 +1482,7 @@ impl PageSetup {
     /// Applies the modelled fields and returns the fit-to-pages dimensions.
     fn store(self, print: &mut PrintSettings) -> (u16, u16) {
         if let Some(paper) = self.paper {
-            print.paper = paper.to_string();
+            print.paper = paper;
         }
         if let Some(scale) = self.scale {
             print.scale = scale;

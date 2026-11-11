@@ -55,11 +55,13 @@ pub fn builtin_id(code: &str) -> Option<u32> {
 
 pub use gridcraft_core::color::INDEXED;
 
-/// Paper sizes (`pageSetup paperSize`) we name. ID 12/13 are the JIS B4/B5 that
-/// `pageLayout.pageSetup` calls `B4`/`B5`; 42 is ISO B4, and 43–88 are the Japanese postcards,
-/// envelopes and B6. The engine's `known_paper` uses the same names and sizes.
-const PAPERS: [(u32, &str); 23] = [
+/// Paper sizes (`pageSetup paperSize`, ECMA-376 Part 1 §18.3.1.63) we name. ID 12/13 are the JIS
+/// B4/B5 that `pageLayout.pageSetup` calls `B4`/`B5`; 42 is ISO B4, and 43–88 are the Japanese
+/// postcards, envelopes and B6. Same-sized papers (10 and 9, 17 and 3) keep distinct names so
+/// their ids survive a save. The engine's `known_paper` uses the same names and sizes.
+const PAPERS: [(u32, &str); 37] = [
     (1, "Letter"),
+    (2, "Letter Small"),
     (3, "Tabloid"),
     (4, "Ledger"),
     (5, "Legal"),
@@ -67,14 +69,27 @@ const PAPERS: [(u32, &str); 23] = [
     (7, "Executive"),
     (8, "A3"),
     (9, "A4"),
+    (10, "A4 Small"),
     (11, "A5"),
     (12, "B4"),
     (13, "B5"),
+    (14, "Folio"),
+    (15, "Quarto"),
+    (16, "10x14"),
+    (17, "11x17"),
+    (18, "Note"),
     (20, "Envelope #10"),
+    (24, "C Sheet"),
+    (25, "D Sheet"),
+    (26, "E Sheet"),
     (27, "Envelope DL"),
+    (28, "Envelope C5"),
+    (30, "Envelope C4"),
+    (31, "Envelope C6"),
     (34, "Envelope B5"),
     (42, "B4 (ISO)"),
     (43, "Japanese Postcard"),
+    (66, "A2"),
     (69, "Japanese Double Postcard"),
     (70, "A6"),
     (71, "Japanese Envelope Kaku #2"),
@@ -84,8 +99,17 @@ const PAPERS: [(u32, &str); 23] = [
     (88, "B6"),
 ];
 
-pub fn paper_name(id: u32) -> Option<&'static str> {
-    PAPERS.iter().find(|(i, _)| *i == id).map(|(_, n)| *n)
+/// The prefix of the name kept for a paper id we have no name for, e.g. `Paper 256` for a
+/// printer-specific size: it prints on Letter but is written back with its own id.
+const UNNAMED_PAPER: &str = "Paper ";
+
+/// The paper name for a file id. Id 0 is "not stated" (`None`); an id without a name in
+/// [`PAPERS`] is kept as `Paper N` so [`paper_id`] gives it back on save.
+pub fn paper_name(id: u32) -> Option<String> {
+    if id == 0 {
+        return None;
+    }
+    Some(PAPERS.iter().find(|(i, _)| *i == id).map_or_else(|| format!("{UNNAMED_PAPER}{id}"), |(_, n)| (*n).to_string()))
 }
 
 /// The file ID for a paper name. Spelling is loose like `known_paper`'s — spaces, hyphens,
@@ -106,7 +130,10 @@ pub fn paper_id(name: &str) -> Option<u32> {
         "kaku#3" => "japaneseenvelopekaku#3",
         other => other,
     };
-    PAPERS.iter().find(|(_, n)| norm(n) == alias).map(|(i, _)| *i)
+    PAPERS.iter().find(|(_, n)| norm(n) == alias).map(|(i, _)| *i).or_else(|| {
+        // `Paper N`, the name [`paper_name`] keeps for an id without a name.
+        name.trim().strip_prefix(UNNAMED_PAPER).and_then(|n| n.parse::<u32>().ok()).filter(|&id| id != 0)
+    })
 }
 
 /// Functions introduced after Excel 2007 that files store with the `_xlfn.` prefix. Entries with
@@ -389,16 +416,24 @@ mod tests {
         assert_eq!(builtin_format(14), Some("m/d/yyyy"));
         assert_eq!(builtin_id("0.00%"), Some(10));
         assert_eq!(builtin_id(builtin_format(5).unwrap()), None);
-        assert_eq!(paper_name(9), Some("A4"));
+        assert_eq!(paper_name(9).as_deref(), Some("A4"));
         assert_eq!(paper_id("a4"), Some(9));
         // 12/13 are the JIS B4/B5 Japanese Excel uses; 42 is ISO B4.
-        assert_eq!(paper_name(12), Some("B4"));
+        assert_eq!(paper_name(12).as_deref(), Some("B4"));
         assert_eq!(paper_id("b5"), Some(13));
         assert_eq!(paper_id("B5 (JIS)"), Some(13));
         assert_eq!(paper_id("B4 (ISO)"), Some(42));
         // The Japanese papers page setup names.
-        assert_eq!(paper_name(43), Some("Japanese Postcard"));
-        assert_eq!(paper_name(88), Some("B6"));
+        assert_eq!(paper_name(43).as_deref(), Some("Japanese Postcard"));
+        assert_eq!(paper_name(88).as_deref(), Some("B6"));
+        // Every id round-trips; one without a name is kept as `Paper N`; 0 is unstated.
+        for id in [1, 2, 10, 14, 15, 16, 17, 18, 24, 25, 26, 28, 30, 31, 66, 102, 256, u32::MAX] {
+            assert_eq!(paper_name(id).and_then(|n| paper_id(&n)), Some(id), "{id}");
+        }
+        assert_eq!(paper_name(185).as_deref(), Some("Paper 185"));
+        assert_eq!(paper_name(0), None);
+        assert_eq!(paper_id("Paper 0"), None);
+        assert_eq!(paper_id("Paper x"), None);
         for (name, id) in [
             ("Japanese Postcard", 43),
             ("japanese double postcard", 69),
