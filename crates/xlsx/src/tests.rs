@@ -131,6 +131,7 @@ mod xls_macro_sheet_tests;
 mod xls_office_art_presets_tests;
 mod xls_picture_tests;
 mod xls_pivot_tests;
+mod xls_print_object_tests;
 mod xls_print_tests;
 mod xls_protection_tests;
 mod xls_relative_name_tests;

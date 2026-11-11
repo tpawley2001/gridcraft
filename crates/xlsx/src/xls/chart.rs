@@ -588,6 +588,8 @@ pub(super) struct Embedded {
     art: ArtWalk,
     /// The anchor of the chart Obj whose substream comes next.
     pending: Option<Place>,
+    /// Whether that chart's Obj has FtCmo `fPrint` clear.
+    pending_no_print: bool,
     /// The shape of the text box Obj whose TxO record comes next.
     pending_text: Option<PendingTextBox>,
     /// The drawn shape whose TxO record (if any) comes next.
@@ -710,12 +712,20 @@ impl Embedded {
         let ot = u16_at(head, 4);
         // FtCmo: ft, cb, ot, id, then the flags.
         let flags = u16_at(head, 8).unwrap_or(0);
-        let anchor = self.anchor.take();
+        let mut anchor = self.anchor.take();
         if flags & F_UI_OBJ != 0 {
             return;
         }
+        // fPrint clear: "Print object" is off, so the object is left out of print and PDF.
+        let no_print = flags & F_PRINT == 0;
+        if let Some((_, props)) = anchor.as_mut() {
+            props.no_print = no_print;
+        }
         match ot {
-            Some(OT_CHART) => self.pending = anchor.map(|(a, _)| a),
+            Some(OT_CHART) => {
+                self.pending = anchor.map(|(a, _)| a);
+                self.pending_no_print = no_print;
+            }
             Some(OT_PICTURE) => {
                 if let Some(a) = anchor {
                     self.pictures.push(a);
@@ -814,7 +824,10 @@ impl Embedded {
                 self.shapes.push((Place::Cells(anchor), ShapeProps::default(), ShapeKind::Rectangle, None));
             }
             // The chart substream that follows is placed where the Obj says.
-            OT_CHART => self.pending = biff5_anchor(data).map(Place::Cells),
+            OT_CHART => {
+                self.pending = biff5_anchor(data).map(Place::Cells);
+                self.pending_no_print = false;
+            }
             // The picture's image is in the IMDATA record that follows its Obj.
             OT_PICTURE => {
                 if let Some(anchor) = biff5_anchor(data) {
@@ -891,8 +904,12 @@ impl Embedded {
         report: &mut ReadReport,
     ) -> Result<bool, IoError> {
         let anchor = self.pending.take();
+        let no_print = std::mem::take(&mut self.pending_no_print);
         match read(recs, budget, links, None, biff5, report)? {
-            Read::Chart(ch) => self.charts.push((anchor, *ch)),
+            Read::Chart(mut ch) => {
+                ch.no_print = no_print;
+                self.charts.push((anchor, *ch));
+            }
             Read::Skipped => {}
             Read::CutOff => return Ok(false),
         }
@@ -922,7 +939,7 @@ impl Embedded {
                 camera: None,
                 locks: None,
                 hidden: props.hidden,
-                no_print: false,
+                no_print: props.no_print,
                 hyperlink: None,
                 name: props.name,
                 id: 0,
@@ -969,7 +986,7 @@ impl Embedded {
             sheet.shapes.push(Shape {
                 alt: String::new(),
                 hidden: props.hidden,
-                no_print: false,
+                no_print: props.no_print,
                 hyperlink: None,
                 name: props.name,
                 id: 0,
@@ -1000,7 +1017,7 @@ impl Embedded {
             sheet.shapes.push(Shape {
                 alt: String::new(),
                 hidden: props.hidden,
-                no_print: false,
+                no_print: props.no_print,
                 hyperlink: None,
                 name: props.name,
                 id: 0,
