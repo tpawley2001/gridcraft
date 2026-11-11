@@ -538,6 +538,7 @@ fn chartex_parts_as_excel_expects_them() {
     sheet.charts.push(Chart {
         rounded_corners: false,
         lang: None,
+        print_settings: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,
@@ -611,6 +612,7 @@ fn doughnut_writes_every_series_as_a_ring_with_hole_and_angle() {
     sheet.charts.push(Chart {
         rounded_corners: false,
         lang: None,
+        print_settings: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,

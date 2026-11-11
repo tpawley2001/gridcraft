@@ -12,6 +12,7 @@ fn chart() -> Chart {
     Chart {
         rounded_corners: false,
         lang: None,
+        print_settings: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,

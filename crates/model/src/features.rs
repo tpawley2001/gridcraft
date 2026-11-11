@@ -841,6 +841,56 @@ pub struct Chart {
     /// `gapDepth` and `shape`, series in depth); `None` for a flat chart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view_3d: Option<Chart3d>,
+    /// The chart's own print settings (`c:printSettings`, ECMA-376 Part 1 §21.2.2.149), used when the
+    /// chart is printed on its own; `None` when the chart part had none (new charts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub print_settings: Option<ChartPrintSettings>,
+}
+
+/// A chart's print settings (`c:printSettings`, §21.2.2.149), kept as the file had them.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChartPrintSettings {
+    /// `c:headerFooter` (§21.2.2.79).
+    pub header_footer: Option<ChartHeaderFooter>,
+    /// `c:pageMargins` (§21.2.2.133) in inches: left, right, top, bottom, header, footer.
+    pub margins: Option<[f64; 6]>,
+    /// `c:pageSetup` (§21.2.2.135).
+    pub page_setup: Option<ChartPageSetup>,
+}
+
+/// A chart's header and footer (`c:headerFooter`, §21.2.2.79). Each field is `None` unless the file
+/// had it; texts keep their `&` formatting codes verbatim.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChartHeaderFooter {
+    pub align_with_margins: Option<bool>,
+    pub different_odd_even: Option<bool>,
+    pub different_first: Option<bool>,
+    pub odd_header: Option<String>,
+    pub odd_footer: Option<String>,
+    pub even_header: Option<String>,
+    pub even_footer: Option<String>,
+    pub first_header: Option<String>,
+    pub first_footer: Option<String>,
+}
+
+/// A chart's page setup (`c:pageSetup`, §21.2.2.135). Each attribute is `None` when not written.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChartPageSetup {
+    pub paper_size: Option<u32>,
+    pub paper_height: Option<String>,
+    pub paper_width: Option<String>,
+    pub first_page_number: Option<u32>,
+    /// `default`, `portrait` or `landscape` (ST_PageSetupOrientation, §21.2.3.31).
+    pub orientation: Option<String>,
+    pub black_and_white: Option<bool>,
+    pub draft: Option<bool>,
+    pub use_first_page_number: Option<bool>,
+    pub horizontal_dpi: Option<i32>,
+    pub vertical_dpi: Option<i32>,
+    pub copies: Option<u32>,
 }
 
 /// A 3-D chart's view (`c:view3D`) and group settings. Each view value is kept exactly as the file
@@ -2016,6 +2066,7 @@ mod tests {
         let chart = Chart {
             rounded_corners: false,
             lang: None,
+            print_settings: None,
             of_pie: None,
             alt: String::new(),
             theme_override: None,

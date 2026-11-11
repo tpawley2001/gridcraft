@@ -39,6 +39,7 @@ fn literal_category_with_separators_survives_save() {
     s.charts.push(Chart {
         rounded_corners: false,
         lang: None,
+        print_settings: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,

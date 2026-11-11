@@ -382,7 +382,169 @@ pub fn read_chart(root: &El) -> Option<Chart> {
             tick_mark_skip: if scatter { None } else { plot.child("catAx").and_then(|a| read_skip(a, "tickMarkSkip")) },
         },
         view_3d: if groups.len() == 1 { read_3d(chart, plot, first) } else { None },
+        print_settings: root.child("printSettings").map(read_print_settings),
     })
+}
+
+/// A chart's `c:printSettings` (§21.2.2.149). Damaged values are dropped, never an error.
+fn read_print_settings(ps: &El) -> gridcraft_model::ChartPrintSettings {
+    let header_footer = ps.child("headerFooter").map(|h| {
+        let text = |name: &str| h.child(name).map(|e| e.text.clone());
+        gridcraft_model::ChartHeaderFooter {
+            align_with_margins: h.attr_bool("alignWithMargins"),
+            different_odd_even: h.attr_bool("differentOddEven"),
+            different_first: h.attr_bool("differentFirst"),
+            odd_header: text("oddHeader"),
+            odd_footer: text("oddFooter"),
+            even_header: text("evenHeader"),
+            even_footer: text("evenFooter"),
+            first_header: text("firstHeader"),
+            first_footer: text("firstFooter"),
+        }
+    });
+    // All six margins are required (§21.2.2.133); any missing or damaged one leaves them unknown.
+    let margins = ps
+        .child("pageMargins")
+        .and_then(|m| Some([m.attr_f64("l")?, m.attr_f64("r")?, m.attr_f64("t")?, m.attr_f64("b")?, m.attr_f64("header")?, m.attr_f64("footer")?]));
+    let page_setup = ps.child("pageSetup").map(|p| {
+        let int = |k: &str| p.attr(k).and_then(|v| v.trim().parse::<i32>().ok());
+        gridcraft_model::ChartPageSetup {
+            paper_size: p.attr_u32("paperSize"),
+            paper_height: p.attr("paperHeight").map(str::to_string),
+            paper_width: p.attr("paperWidth").map(str::to_string),
+            first_page_number: p.attr_u32("firstPageNumber"),
+            orientation: p.attr("orientation").map(str::trim).filter(|o| matches!(*o, "default" | "portrait" | "landscape")).map(str::to_string),
+            black_and_white: p.attr_bool("blackAndWhite"),
+            draft: p.attr_bool("draft"),
+            use_first_page_number: p.attr_bool("useFirstPageNumber"),
+            horizontal_dpi: int("horizontalDpi"),
+            vertical_dpi: int("verticalDpi"),
+            copies: p.attr_u32("copies"),
+        }
+    });
+    gridcraft_model::ChartPrintSettings { header_footer, margins, page_setup }
+}
+
+/// A margin as Excel writes it: 15 significant digits when they give the value back, else 17
+/// (so `0.7` stays `0.7` and `0.75000000000000033` stays as read).
+fn margin_num(n: f64) -> String {
+    for digits in [15usize, 17] {
+        let e = format!("{:.*e}", digits - 1, n);
+        if (digits == 17 || e.parse::<f64>().ok() == Some(n))
+            && let Some(plain) = plain_decimal(&e)
+        {
+            return plain;
+        }
+    }
+    crate::xml::num(n)
+}
+
+/// `d.ddde±x` as a plain decimal without trailing zeros; `None` for very large or small exponents.
+fn plain_decimal(e: &str) -> Option<String> {
+    let (mant, exp) = e.split_once('e')?;
+    let exp: i32 = exp.parse().ok()?;
+    if !(-20..=20).contains(&exp) {
+        return None;
+    }
+    let neg = mant.starts_with('-');
+    let digits: Vec<char> = mant.chars().filter(char::is_ascii_digit).collect();
+    let (mut int, mut frac) = (String::new(), String::new());
+    if exp >= 0 {
+        let split = usize::try_from(exp).ok()?.saturating_add(1);
+        for (i, d) in digits.iter().enumerate() {
+            if i < split { int.push(*d) } else { frac.push(*d) }
+        }
+        while int.len() < split {
+            int.push('0');
+        }
+    } else {
+        int.push('0');
+        frac.extend(std::iter::repeat_n('0', usize::try_from(-exp - 1).ok()?));
+        frac.extend(digits.iter());
+    }
+    let frac = frac.trim_end_matches('0');
+    let mut out = String::new();
+    if neg && (int.chars().any(|c| c != '0') || !frac.is_empty()) {
+        out.push('-');
+    }
+    out.push_str(&int);
+    if !frac.is_empty() {
+        out.push('.');
+        out.push_str(frac);
+    }
+    Some(out)
+}
+
+/// Writes `c:printSettings` (§21.2.2.149) in schema order: headerFooter, pageMargins, pageSetup.
+fn write_print_settings(s: &mut String, ps: &gridcraft_model::ChartPrintSettings) {
+    let b = |v: bool| if v { "1" } else { "0" };
+    s.push_str("<c:printSettings>");
+    if let Some(h) = &ps.header_footer {
+        s.push_str("<c:headerFooter");
+        for (k, v) in [("alignWithMargins", h.align_with_margins), ("differentOddEven", h.different_odd_even), ("differentFirst", h.different_first)]
+        {
+            if let Some(v) = v {
+                let _ = write!(s, " {k}=\"{}\"", b(v));
+            }
+        }
+        let texts = [
+            ("oddHeader", &h.odd_header),
+            ("oddFooter", &h.odd_footer),
+            ("evenHeader", &h.even_header),
+            ("evenFooter", &h.even_footer),
+            ("firstHeader", &h.first_header),
+            ("firstFooter", &h.first_footer),
+        ];
+        if texts.iter().all(|(_, t)| t.is_none()) {
+            s.push_str("/>");
+        } else {
+            s.push('>');
+            for (k, t) in texts {
+                if let Some(t) = t {
+                    let _ = write!(s, "<c:{k}>");
+                    crate::xml::push_esc(s, t);
+                    let _ = write!(s, "</c:{k}>");
+                }
+            }
+            s.push_str("</c:headerFooter>");
+        }
+    }
+    if let Some([l, r, t, bm, h, f]) = ps.margins {
+        let n = margin_num;
+        let _ = write!(s, "<c:pageMargins b=\"{}\" l=\"{}\" r=\"{}\" t=\"{}\" header=\"{}\" footer=\"{}\"/>", n(bm), n(l), n(r), n(t), n(h), n(f));
+    }
+    if let Some(p) = &ps.page_setup {
+        s.push_str("<c:pageSetup");
+        if let Some(v) = p.paper_size {
+            let _ = write!(s, " paperSize=\"{v}\"");
+        }
+        for (k, v) in [("paperHeight", &p.paper_height), ("paperWidth", &p.paper_width)] {
+            if let Some(v) = v {
+                let _ = write!(s, " {k}=\"{}\"", crate::xml::esc_attr(v));
+            }
+        }
+        if let Some(v) = p.first_page_number {
+            let _ = write!(s, " firstPageNumber=\"{v}\"");
+        }
+        if let Some(v) = &p.orientation {
+            let _ = write!(s, " orientation=\"{}\"", crate::xml::esc_attr(v));
+        }
+        for (k, v) in [("blackAndWhite", p.black_and_white), ("draft", p.draft), ("useFirstPageNumber", p.use_first_page_number)] {
+            if let Some(v) = v {
+                let _ = write!(s, " {k}=\"{}\"", b(v));
+            }
+        }
+        for (k, v) in [("horizontalDpi", p.horizontal_dpi), ("verticalDpi", p.vertical_dpi)] {
+            if let Some(v) = v {
+                let _ = write!(s, " {k}=\"{v}\"");
+            }
+        }
+        if let Some(v) = p.copies {
+            let _ = write!(s, " copies=\"{v}\"");
+        }
+        s.push_str("/>");
+    }
+    s.push_str("</c:printSettings>");
 }
 
 /// The values `c:tickLblSkip` / `c:tickMarkSkip` may take (ST_Skip is >= 1; Excel's dialog stops at 31999).
@@ -1545,5 +1707,37 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
         let _ = write!(s, "<c:legend><c:legendPos val=\"{p}\"/><c:overlay val=\"0\"/></c:legend>");
     }
     s.push_str("<c:plotVisOnly val=\"1\"/><c:dispBlanksAs val=\"gap\"/></c:chart></c:chartSpace>");
+    // c:printSettings follows c:chart (CT_ChartSpace order, §21.2.2.29).
+    const CLOSE: &str = "</c:chartSpace>";
+    if let Some(ps) = &ch.print_settings
+        && s.ends_with(CLOSE)
+    {
+        s.truncate(s.len() - CLOSE.len());
+        write_print_settings(&mut s, ps);
+        s.push_str(CLOSE);
+    }
     s
+}
+
+#[cfg(test)]
+mod margin_num_tests {
+    use super::margin_num;
+
+    #[test]
+    fn margins_use_fifteen_digits_when_exact_else_seventeen() {
+        for (n, s) in [
+            (0.7, "0.7"),
+            (0.75, "0.75"),
+            (1.0, "1"),
+            (0.0, "0"),
+            (0.750_000_000_000_000_3, "0.75000000000000033"),
+            (0.000_5, "0.0005"),
+            (-0.25, "-0.25"),
+            (12.5, "12.5"),
+        ] {
+            assert_eq!(margin_num(n), s);
+            assert_eq!(margin_num(n).parse::<f64>().ok(), Some(n));
+        }
+        assert_eq!(margin_num(1e300).parse::<f64>().ok(), Some(1e300));
+    }
 }

@@ -27,6 +27,7 @@ fn smooth_line_setting_round_trips() {
     s.charts.push(Chart {
         rounded_corners: false,
         lang: None,
+        print_settings: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,
@@ -57,6 +58,7 @@ fn smooth_line_setting_round_trips() {
     s.charts.push(Chart {
         rounded_corners: false,
         lang: None,
+        print_settings: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,
