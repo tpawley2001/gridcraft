@@ -33,6 +33,7 @@ mod fill_multi_area;
 mod find_notes_comments;
 mod flash_fill_substrings;
 mod font_scheme_minor;
+mod form_control_print;
 mod format_as_table_restyle;
 mod go_to_special_options;
 mod go_to_special_same_rules;

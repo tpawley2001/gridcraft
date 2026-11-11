@@ -1052,3 +1052,35 @@ fn equations_print_with_the_symbol_font() {
     // A glyph no standard font has is a [?] box.
     assert!(contains(&pdf, "(?) Tj"));
 }
+
+#[test]
+fn every_form_control_kind_prints_and_tiny_or_empty_ones_do_not_crash() {
+    use gridcraft_model::{ControlKind, FormControl};
+    let kinds = [
+        ControlKind::Button,
+        ControlKind::Slider,
+        ControlKind::Spin,
+        ControlKind::CheckBox,
+        ControlKind::OptionButton,
+        ControlKind::ListBox,
+        ControlKind::DropDown,
+        ControlKind::GroupBox,
+        ControlKind::Label,
+    ];
+    let mut s = s();
+    let d = s.doc_mut().unwrap();
+    let sh = std::sync::Arc::make_mut(&mut d.wb).sheet_mut(0).unwrap();
+    for (i, kind) in kinds.into_iter().enumerate() {
+        for (j, (w, h, value)) in [(80.0, 20.0, 1), (0.5, 0.5, 2), (-3.0, 30.0, 0)].into_iter().enumerate() {
+            let cell = CellRef::new(i as u32 * 3 + j as u32, 1);
+            let anchor = Anchor { cell, width: w, height: h, ..Anchor::default() };
+            let text = format!("kind {i} size {j}");
+            sh.controls.push(FormControl { id: (i * 3 + j) as u32 + 1, kind, anchor, text, value, print: true, ..FormControl::default() });
+        }
+    }
+    let (pdf, pages) = pdf_of(&mut s, json!({}));
+    assert!(pages >= 1);
+    assert!(contains(&pdf, "(kind 0 size 0) Tj"), "button caption");
+    assert!(contains(&pdf, "(kind 3 size 0) Tj"), "check box caption");
+    assert!(contains(&pdf, "(kind 8 size 0) Tj"), "label caption");
+}
