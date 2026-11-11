@@ -14,7 +14,7 @@ mod surface;
 mod three_d;
 mod three_d_bar_shapes;
 
-const ALL_KINDS: [ChartKind; 32] = [
+const ALL_KINDS: [ChartKind; 33] = [
     ChartKind::ColumnClustered,
     ChartKind::ColumnStacked,
     ChartKind::ColumnStacked100,
