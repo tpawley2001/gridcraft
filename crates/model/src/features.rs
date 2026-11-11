@@ -782,6 +782,10 @@ pub struct Chart {
     /// Hidden drawing objects stay in the workbook but are not displayed or printed.
     #[serde(default)]
     pub hidden: bool,
+    /// "Print object" turned off (`xdr:clientData fPrintsWithSheet="0"`): the object still shows
+    /// on screen but is left out of print, print preview and PDF export.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_print: bool,
     /// Alternative text (`xdr:cNvPr descr`); empty when the chart has none.
     #[serde(default)]
     pub alt: String,
@@ -955,6 +959,10 @@ pub struct Image {
     /// Hidden drawing objects stay in the workbook but are not displayed or printed.
     #[serde(default)]
     pub hidden: bool,
+    /// "Print object" turned off (`xdr:clientData fPrintsWithSheet="0"`): the object still shows
+    /// on screen but is left out of print, print preview and PDF export.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_print: bool,
     #[serde(default)]
     pub hyperlink: Option<DrawingHyperlink>,
     /// Imported drawing object name (`xdr:cNvPr name`).
@@ -1134,6 +1142,10 @@ pub struct Shape {
     /// Hidden drawing objects stay in the workbook but are not displayed or printed.
     #[serde(default)]
     pub hidden: bool,
+    /// "Print object" turned off (`xdr:clientData fPrintsWithSheet="0"`): the object still shows
+    /// on screen but is left out of print, print preview and PDF export.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_print: bool,
     #[serde(default)]
     pub hyperlink: Option<DrawingHyperlink>,
     /// Imported drawing object name (`xdr:cNvPr name`).
@@ -1816,6 +1828,7 @@ mod tests {
             alt: String::new(),
             theme_override: None,
             hidden: false,
+            no_print: false,
             id: 1,
             kind: ChartKind::Doughnut,
             anchor: Anchor::default(),

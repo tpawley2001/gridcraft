@@ -14,6 +14,7 @@ fn chart(id: u32, kind: ChartKind, scale: ChartScale) -> Chart {
         alt: String::new(),
         theme_override: None,
         hidden: false,
+        no_print: false,
         id,
         kind,
         anchor: Anchor { cell: gridcraft_core::CellRef::new(0, 3), width: 480.0, height: 300.0, ..Anchor::default() },

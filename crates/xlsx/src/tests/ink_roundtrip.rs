@@ -57,6 +57,7 @@ fn exported_ink_has_a_visible_unfilled_path_and_correct_stroke() {
         sheet.shapes.push(Shape {
             alt: String::new(),
             hidden: false,
+            no_print: false,
             hyperlink: None,
             name: None,
             id,

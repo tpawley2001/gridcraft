@@ -336,6 +336,7 @@ pub fn read_chart(root: &El) -> Option<Chart> {
         alt: String::new(),
         theme_override: None,
         hidden: false,
+        no_print: false,
         id: 0,
         kind,
         anchor: Default::default(),

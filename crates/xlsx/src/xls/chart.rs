@@ -922,6 +922,7 @@ impl Embedded {
                 camera: None,
                 locks: None,
                 hidden: props.hidden,
+                no_print: false,
                 hyperlink: None,
                 name: props.name,
                 id: 0,
@@ -939,6 +940,7 @@ impl Embedded {
                 camera: None,
                 locks: None,
                 hidden: false,
+                no_print: false,
                 hyperlink: None,
                 name,
                 id: 0,
@@ -967,6 +969,7 @@ impl Embedded {
             sheet.shapes.push(Shape {
                 alt: String::new(),
                 hidden: props.hidden,
+                no_print: false,
                 hyperlink: None,
                 name: props.name,
                 id: 0,
@@ -997,6 +1000,7 @@ impl Embedded {
             sheet.shapes.push(Shape {
                 alt: String::new(),
                 hidden: props.hidden,
+                no_print: false,
                 hyperlink: None,
                 name: props.name,
                 id: 0,
@@ -1228,6 +1232,7 @@ fn biff5_polygon(data: &[u8], table: &[u32; 64]) -> Option<PendingPolygon> {
     let shape = Shape {
         alt: String::new(),
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         id: 0,
@@ -1898,6 +1903,7 @@ impl Parser {
             alt: String::new(),
             theme_override: None,
             hidden: false,
+            no_print: false,
             id: 0,
             kind,
             anchor: Anchor { width, height, ..Anchor::default() },

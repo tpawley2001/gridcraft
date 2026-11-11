@@ -898,6 +898,7 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
         alt: String::new(),
         theme_override: None,
         hidden: false,
+        no_print: false,
         id,
         kind,
         anchor: Anchor {
@@ -1202,6 +1203,7 @@ fn insert_picture(s: &mut Session, p: &Json) -> Result<Json> {
         camera: None,
         locks: None,
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         id,
@@ -1289,6 +1291,7 @@ fn insert_shape(s: &mut Session, p: &Json) -> Result<Json> {
     let shape = Shape {
         alt: String::new(),
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         math: Default::default(),
@@ -2005,6 +2008,7 @@ fn insert_icon(s: &mut Session, p: &Json) -> Result<Json> {
     let shape = Shape {
         alt: String::new(),
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         math: Default::default(),
@@ -2047,6 +2051,7 @@ mod tests {
             wb.sheet_mut(0).unwrap().images.push(gridcraft_model::Image {
                 locks: None,
                 hidden: false,
+                no_print: false,
                 hyperlink: None,
                 name: None,
                 id,

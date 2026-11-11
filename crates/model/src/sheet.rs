@@ -1005,6 +1005,7 @@ mod tests {
                 by_rows: false,
                 pivot: None,
                 hidden: false,
+                no_print: false,
                 scale: Default::default(),
                 view_3d: None,
             }),
@@ -1012,6 +1013,7 @@ mod tests {
                 camera: None,
                 locks: None,
                 hidden: false,
+                no_print: false,
                 hyperlink: None,
                 name: None,
                 id,
@@ -1025,6 +1027,7 @@ mod tests {
             ObjKind::Shape | ObjKind::Equation => s.shapes.push(Shape {
                 alt: String::new(),
                 hidden: false,
+                no_print: false,
                 hyperlink: None,
                 name: None,
                 id,

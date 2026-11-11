@@ -14,6 +14,7 @@ fn chart() -> Chart {
         alt: String::new(),
         theme_override: None,
         hidden: false,
+        no_print: false,
         id: 1,
         kind: ChartKind::Doughnut,
         anchor: Anchor::default(),

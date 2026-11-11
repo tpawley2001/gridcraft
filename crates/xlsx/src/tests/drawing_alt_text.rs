@@ -12,6 +12,7 @@ use crate::{read_xlsx, write_xlsx};
 fn shape(kind: ShapeKind, text: &str, alt: &str) -> Shape {
     Shape {
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         alt: alt.into(),
@@ -32,6 +33,7 @@ fn waterfall(alt: &str) -> Chart {
         of_pie: None,
         theme_override: None,
         hidden: false,
+        no_print: false,
         alt: alt.into(),
         id: 2,
         kind: ChartKind::Waterfall,

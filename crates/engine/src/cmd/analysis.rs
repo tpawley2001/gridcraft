@@ -1946,6 +1946,7 @@ fn report_charts(s: &Session, p: &Json, tool: &str, sheet_name: &str, rect: Rang
             id,
             theme_override: None,
             hidden: false,
+            no_print: false,
             kind: plan.kind,
             anchor: Anchor { cell: CellRef::new(row, chart_col), dx: 0.0, dy: 0.0, width: 480.0, height: 288.0, mode: Default::default() },
             title: Some(plan.title),

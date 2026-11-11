@@ -539,6 +539,7 @@ fn charts_and_images_are_drawn() {
         camera: None,
         locks: None,
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         id,

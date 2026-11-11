@@ -14,6 +14,7 @@ fn equation(id: u32, cell: &str, latex: &str, ink: Color) -> Shape {
     Shape {
         alt: String::new(),
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         id,
@@ -160,6 +161,7 @@ fn a_text_box_stays_a_text_box_and_hostile_sources_survive() {
     sh.shapes.push(Shape {
         alt: String::new(),
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         id: 3,

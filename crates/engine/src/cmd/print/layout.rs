@@ -139,13 +139,13 @@ pub fn print_range(sh: &Sheet) -> Option<RangeRef> {
         let ar = RangeRef::new(a.cell, end);
         r = Some(r.map_or(ar, |u| u.union(&ar)));
     };
-    for c in sh.charts.iter().filter(|o| !o.hidden) {
+    for c in sh.charts.iter().filter(|o| !o.hidden && !o.no_print) {
         grow(&c.anchor);
     }
-    for i in sh.images.iter().filter(|o| !o.hidden) {
+    for i in sh.images.iter().filter(|o| !o.hidden && !o.no_print) {
         grow(&i.anchor);
     }
-    for s in sh.shapes.iter().filter(|o| !o.hidden) {
+    for s in sh.shapes.iter().filter(|o| !o.hidden && !o.no_print) {
         grow(&s.anchor);
     }
     // Printing starts at A1 like Excel when the data starts nearby? Excel prints from the first

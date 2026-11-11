@@ -225,6 +225,8 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
     for (n, a) in x.children.iter().enumerate() {
         let Some(anchor) = read_anchor(a, sheet) else { continue };
         let n = n + 1;
+        // "Print object" off (ECMA-376 Part 1 §20.5.2.3, `fPrintsWithSheet`, default true).
+        let no_print = a.child("clientData").is_some_and(|c| !c.flag("fPrintsWithSheet", true));
         // Objects in markup-compatibility blocks: the first choice (chartex frames, or Office Math
         // that converts to LaTeX), else the fallback.
         let objs: Vec<&El> = a
@@ -309,6 +311,7 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                                 .unwrap_or_default()
                         }),
                         hidden: obj.path(&["nvPicPr", "cNvPr"]).is_some_and(|p| p.flag("hidden", false)),
+                        no_print,
                         hyperlink: read_hyperlink(obj.path(&["nvPicPr", "cNvPr"]), &rels),
                         name: obj.path(&["nvPicPr", "cNvPr"]).and_then(|p| p.attr("name")).map(str::to_string),
                         id,
@@ -339,6 +342,7 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                                     ch.id = cx.next_object_id();
                                     ch.anchor = anchor;
                                     ch.hidden = obj.path(&["nvGraphicFramePr", "cNvPr"]).is_some_and(|p| p.flag("hidden", false));
+                                    ch.no_print = no_print;
                                     ch.alt = obj.path(&["nvGraphicFramePr", "cNvPr"]).and_then(|p| p.attr("descr")).unwrap_or("").to_string();
                                     sheet.charts.push(ch);
                                 }
@@ -359,6 +363,7 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                     if let Some(mut s) = read_shape(obj, anchor) {
                         s.hidden =
                             obj.path(&["nvSpPr", "cNvPr"]).or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"])).is_some_and(|p| p.flag("hidden", false));
+                        s.no_print = no_print;
                         s.hyperlink = read_hyperlink(obj.path(&["nvSpPr", "cNvPr"]).or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"])), &rels);
                         s.name = obj
                             .path(&["nvSpPr", "cNvPr"])
@@ -580,6 +585,7 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
         let ink = obj.child("txBody").and_then(|tb| first_run_color(tb, 0)).unwrap_or_default();
         return Some(Shape {
             hidden: false,
+            no_print: false,
             hyperlink: None,
             name: None,
             alt: String::new(),
@@ -602,6 +608,7 @@ fn read_shape(obj: &El, anchor: Anchor) -> Option<Shape> {
     format.no_fill = sp.child("noFill").is_some();
     Some(Shape {
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         alt: String::new(),
@@ -905,6 +912,17 @@ fn write_picture_locks(locks: &Option<PictureLocks>, camera: Option<&CameraTool>
     if inner.is_empty() { "<xdr:cNvPicPr/>".to_string() } else { format!("<xdr:cNvPicPr>{inner}</xdr:cNvPicPr>") }
 }
 
+/// An anchor's `xdr:clientData`: `fPrintsWithSheet="0"` when "Print object" is off, else bare
+/// (the default, `true`, is not written).
+fn client_data(o: &Obj<'_>) -> &'static str {
+    let no_print = match o {
+        Obj::Image(i, ..) => i.no_print,
+        Obj::Chart(c, _) => c.no_print,
+        Obj::Shape(s) => s.no_print,
+    };
+    if no_print { "<xdr:clientData fPrintsWithSheet=\"0\"/>" } else { "<xdr:clientData/>" }
+}
+
 /// The `hidden` and `descr` attributes of an object's `cNvPr`, in schema order after `name`.
 /// Pictures write their own `descr`; an empty alternative text writes none.
 fn cnvpr_flags(o: &Obj<'_>) -> (&'static str, String) {
@@ -1003,7 +1021,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                 s.push_str(&open);
                 if let Some(xml) = ink::write(sh, theme, id, &link, &descr) {
                     s.push_str(&xml);
-                    s.push_str("<xdr:clientData/>");
+                    s.push_str(client_data(o));
                     s.push_str(close_tag);
                     continue;
                 }
@@ -1082,7 +1100,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                 s.push_str("</xdr:sp>");
             }
         }
-        s.push_str("<xdr:clientData/>");
+        s.push_str(client_data(o));
         s.push_str(close_tag);
     }
     for (_, x) in kept {
