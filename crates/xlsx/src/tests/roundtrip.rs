@@ -398,6 +398,7 @@ fn sample() -> Workbook {
         camera: None,
         locks: None,
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         id: 10,
@@ -412,6 +413,7 @@ fn sample() -> Workbook {
     s.shapes.push(Shape {
         alt: String::new(),
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         math: Default::default(),
@@ -427,6 +429,7 @@ fn sample() -> Workbook {
     s.shapes.push(Shape {
         alt: String::new(),
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         math: Default::default(),
@@ -442,6 +445,7 @@ fn sample() -> Workbook {
     s.shapes.push(Shape {
         alt: String::new(),
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         math: Default::default(),
@@ -472,6 +476,7 @@ fn sample() -> Workbook {
         alt: String::new(),
         theme_override: None,
         hidden: false,
+        no_print: false,
         id: 20,
         kind: ChartKind::ColumnClustered,
         anchor: Anchor { cell: at("J5"), dx: 0.0, dy: 0.0, width: 480.0, height: 288.0, ..Default::default() },

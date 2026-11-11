@@ -68,6 +68,7 @@ fn chart_names_are_written_qualified() {
         alt: String::new(),
         theme_override: None,
         hidden: false,
+        no_print: false,
         id: 1,
         kind: ChartKind::BarStacked,
         anchor: Anchor { cell: gridcraft_core::CellRef::new(0, 3), width: 480.0, height: 300.0, ..Anchor::default() },
@@ -179,6 +180,7 @@ fn chart_names_keep_spaces_around_a_quoted_sheet_name() {
         by_rows: false,
         pivot: None,
         hidden: false,
+        no_print: false,
         scale: Default::default(),
         view_3d: None,
     });

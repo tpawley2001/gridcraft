@@ -3782,6 +3782,7 @@ fn add_image(s: &mut Session, cell: &str, mode: gridcraft_model::AnchorMode) -> 
         camera: None,
         locks: None,
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         id,

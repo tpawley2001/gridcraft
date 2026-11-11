@@ -29,6 +29,7 @@ fn freeform() -> Shape {
         .collect();
     Shape {
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         alt: String::new(),

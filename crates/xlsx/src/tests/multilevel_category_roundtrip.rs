@@ -27,6 +27,7 @@ fn workbook(categories: &str, values: &str) -> Workbook {
         alt: String::new(),
         theme_override: None,
         hidden: false,
+        no_print: false,
         id: 1,
         kind: ChartKind::Line,
         anchor: Anchor { cell: CellRef::new(0, 4), width: 480.0, height: 300.0, ..Anchor::default() },

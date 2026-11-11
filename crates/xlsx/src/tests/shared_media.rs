@@ -22,6 +22,7 @@ fn sheet_with(name: &str, pictures: &[(u32, &[u8])]) -> Arc<Sheet> {
             camera: None,
             locks: None,
             hidden: false,
+            no_print: false,
             hyperlink: None,
             name: None,
             id: *id,

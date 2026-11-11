@@ -41,6 +41,7 @@ fn notes_share_or_split_picture_relationships() {
         camera: None,
         locks: None,
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         id: 1,

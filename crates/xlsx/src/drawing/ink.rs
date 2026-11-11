@@ -181,6 +181,7 @@ pub(super) fn read(obj: &El, anchor: Anchor) -> Option<Shape> {
     let text = parse_points(path, &anchor, w, h)?;
     Some(Shape {
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         alt: String::new(),

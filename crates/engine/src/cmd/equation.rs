@@ -89,6 +89,7 @@ fn insert_equation(s: &mut Session, p: &Json) -> Result<Json> {
     let mut shape = Shape {
         alt: String::new(),
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         id,

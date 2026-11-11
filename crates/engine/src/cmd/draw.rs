@@ -82,6 +82,7 @@ fn stroke(s: &mut Session, p: &Json) -> Result<Json> {
     let shape = Shape {
         alt: String::new(),
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         math: Default::default(),

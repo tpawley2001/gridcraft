@@ -40,6 +40,7 @@ fn text_box(text: &str, format: ShapeFormat) -> Workbook {
     sheet.shapes.push(Shape {
         alt: String::new(),
         hidden: false,
+        no_print: false,
         hyperlink: None,
         name: None,
         id: 1,

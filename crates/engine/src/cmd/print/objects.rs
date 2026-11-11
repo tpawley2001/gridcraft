@@ -81,7 +81,7 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
     pg.clip_rect(bx, by, bw, bh);
     draw_sparklines(pg, wb, si, sh, b, block);
     // A linked picture without a cached copy has no bytes to draw.
-    for (imi, im) in sh.images.iter().enumerate().filter(|(_, o)| !o.hidden && !o.data.is_empty()) {
+    for (imi, im) in sh.images.iter().enumerate().filter(|(_, o)| !o.hidden && !o.no_print && !o.data.is_empty()) {
         let r = anchor_rect(sh, &im.anchor);
         if !visible(r) {
             continue;
@@ -94,7 +94,7 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
             pg.image_rgba(Rect::new(x, y, w, h), px, [*pw, *ph]);
         }
     }
-    for shp in sh.shapes.iter().filter(|o| !o.hidden) {
+    for shp in sh.shapes.iter().filter(|o| !o.hidden && !o.no_print) {
         let r = anchor_rect(sh, &shp.anchor);
         if !visible(r) {
             continue;
@@ -121,7 +121,7 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
         }
         draw_shape(pg, wb, shp, b, (x, y, w, h));
     }
-    for ch in sh.charts.iter().filter(|o| !o.hidden) {
+    for ch in sh.charts.iter().filter(|o| !o.hidden && !o.no_print) {
         let r = anchor_rect(sh, &ch.anchor);
         if !visible(r) {
             continue;
