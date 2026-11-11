@@ -197,6 +197,8 @@ pub(super) struct ShapeProps {
     pub no_line: bool,
     /// lineStartArrowhead and lineEndArrowhead are not `none` (0).
     pub arrow: bool,
+    /// The Obj record's FtCmo `fPrint` is clear ("Print object" off): left out of print and PDF.
+    pub no_print: bool,
 }
 
 /// An OfficeArtCOLORREF as a model colour: bytes red, green, blue, flags. With `fSchemeIndex` the
