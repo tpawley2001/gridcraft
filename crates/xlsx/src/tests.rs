@@ -139,6 +139,7 @@ mod xls_shape_text_tests;
 mod xls_shapes_continue_tests;
 mod xls_shapes_tests;
 mod xls_sheet_name_tests;
+mod xls_sheet_zoom_view_tests;
 mod xls_style_tests;
 mod xls_table_tests;
 mod xls_tests;
