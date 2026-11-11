@@ -1107,7 +1107,13 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                 if sh.format.no_line {
                     s.push_str("<a:ln><a:noFill/></a:ln>");
                 } else if line_c.is_some() || sh.kind == ShapeKind::Arrow {
-                    let _ = write!(s, "<a:ln w=\"{}\">", sh.format.line_width_emu.unwrap_or(9525));
+                    // The width is written only when the shape has one, so a shape without it reads back the same.
+                    match sh.format.line_width_emu {
+                        Some(w) => {
+                            let _ = write!(s, "<a:ln w=\"{w}\">");
+                        }
+                        None => s.push_str("<a:ln>"),
+                    }
                     match line_c {
                         Some(c) => {
                             let _ = write!(s, "<a:solidFill>{c}</a:solidFill>");

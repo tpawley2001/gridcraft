@@ -73,6 +73,7 @@ mod richdata_tests;
 mod roundtrip;
 mod sensitivity_label;
 mod shape_block_arrow_tests;
+mod shape_outline_width_tests;
 mod shape_preset_geometry;
 mod shape_text_rtl;
 mod shared_media;
