@@ -1171,8 +1171,8 @@ fn shared_formulas_do_not_starve_a_later_sheets_text() {
     assert!(ftext(&wb, "B6").is_some());
 }
 
-/// Two readable worksheets with the same name are refused at import, as they were when each sheet
-/// was added to the workbook as it was read.
+/// Two readable worksheets with the same name open with the second renamed (`One`, `one (2)`), as
+/// the .xlsx reader repairs repeated sheet names, rather than refusing the file.
 #[test]
 fn xls_duplicate_sheet_names_are_refused() {
     let boundsheet = |name: &str| rec(0x0085, &cat(&[&0u32.to_le_bytes(), &[0, 0, name.len() as u8, 0], name.as_bytes()]));
@@ -1190,7 +1190,8 @@ fn xls_duplicate_sheet_names_are_refused() {
         g.extend(&sheet);
         compound("Workbook", &g)
     };
-    let err = crate::xls::read_xls_budgeted(&file("One", "one"), crate::xls::Budget::default(), Default::default()).unwrap_err().to_string();
-    assert!(err.contains("already taken"), "{err}");
+    let (wb, _) = crate::xls::read_xls_budgeted(&file("One", "one"), crate::xls::Budget::default(), Default::default()).unwrap();
+    let names: Vec<&str> = wb.sheets.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["One", "one (2)"]);
     assert!(crate::xls::read_xls_budgeted(&file("One", "Two"), crate::xls::Budget::default(), Default::default()).is_ok());
 }
