@@ -1282,7 +1282,7 @@ impl Groups {
         }
         let pending: Vec<Pending> = self.pending.iter().map(|&(pos, row)| Pending { pos, anchor: self.anchor(pos, row) }).collect();
         let mut target = Target { sheet, links, commands };
-        if resolve_pending(&mut target, &self.arrays, &self.shared, &pending) >= MAX_SHARED_ATTACHES {
+        if resolve_pending(&mut target, &mut crate::xls::Budget::default(), &self.arrays, &self.shared, &pending) >= MAX_SHARED_ATTACHES {
             report.warn("An XLSB sheet has more shared formulas than can be expanded; the rest kept their saved results.");
         }
         let sheet = target.sheet;

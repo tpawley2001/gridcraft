@@ -358,7 +358,12 @@ pub(crate) fn sheet_names_in(formula: &str) -> Vec<String> {
 /// exist under the same names (the chart is kept as it was, so a series on a deleted or renamed
 /// sheet would be left pointing at nothing), no worksheet may have taken its name, and a macro
 /// sheet goes only into a macro-enabled package (`macros`), like the VBA project.
-fn kept_sheet_usable(wb: &Workbook, p: &Preserved, s: &PreservedSheet, macros: bool) -> bool {
+///
+/// `usable` caches, by the normalized target of the sheet's relationship, whether its graph
+/// refers only to sheets that exist (`false` when the relationship is missing): entries sharing one
+/// graph, under the same or different relationship ids, are analysed once, and only the verdict is
+/// kept, not the references it came from.
+fn kept_sheet_usable(wb: &Workbook, p: &Preserved, s: &PreservedSheet, macros: bool, usable: &mut HashMap<String, bool>) -> bool {
     let same = |a: &str, b: &str| a.chars().take(31).collect::<String>().eq_ignore_ascii_case(&b.chars().take(31).collect::<String>());
     if wb.sheets.iter().any(|w| same(&w.name, &s.name)) {
         return false;
@@ -367,14 +372,16 @@ fn kept_sheet_usable(wb: &Workbook, p: &Preserved, s: &PreservedSheet, macros: b
     if !macros && is_kind(root, MACRO_SHEET_KINDS) {
         return false;
     }
-    let parts = reachable(p, root);
-    let mut formulas = vec![];
-    for q in p.parts.iter().filter(|q| parts.contains(&normalize(&q.name)) && q.content_type.contains("chart")) {
-        if let Ok(x) = xml::parse(&q.data) {
-            chart_formulas(&x, &mut formulas);
+    *usable.entry(normalize(&root.target)).or_insert_with(|| {
+        let parts = reachable(p, root);
+        let mut formulas = vec![];
+        for q in p.parts.iter().filter(|q| parts.contains(&normalize(&q.name)) && q.content_type.contains("chart")) {
+            if let Ok(x) = xml::parse(&q.data) {
+                chart_formulas(&x, &mut formulas);
+            }
         }
-    }
-    formulas.iter().flat_map(|f| sheet_names_in(f)).all(|n| wb.sheets.iter().any(|w| same(&w.name, &n)))
+        formulas.iter().flat_map(|f| sheet_names_in(f)).all(|n| wb.sheets.iter().any(|w| same(&w.name, &n)))
+    })
 }
 
 /// Writes the workbook's kept parts and relationships. Kept sheets that can't be written back
@@ -382,7 +389,10 @@ fn kept_sheet_usable(wb: &Workbook, p: &Preserved, s: &PreservedSheet, macros: b
 /// only they reach.
 pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out, macros: bool) -> WorkbookKept {
     let Some(p) = wb.preserved.as_deref() else { return WorkbookKept::default() };
-    let (live, dropped): (Vec<&PreservedSheet>, Vec<&PreservedSheet>) = p.sheets.iter().partition(|s| kept_sheet_usable(wb, p, s, macros));
+    let (live, dropped): (Vec<&PreservedSheet>, Vec<&PreservedSheet>) = {
+        let mut refs = HashMap::new();
+        p.sheets.iter().partition(|s| kept_sheet_usable(wb, p, s, macros, &mut refs))
+    };
     let root_of = |s: &PreservedSheet| p.rels.iter().find(|r| r.id == s.rel_id);
     // The revision history names sheets by id: it goes when the sheets changed.
     let stale = super::revisions::stale_roots(wb, p, dropped.is_empty());

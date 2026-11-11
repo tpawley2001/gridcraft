@@ -104,14 +104,19 @@ pub fn open_bytes_with(name: &str, bytes: &[u8], password: Option<&str>, csv_as_
 /// shows and prints the stored height and re-fits an automatic row only when a cell in it is
 /// edited or AutoFit runs, and our line-height estimate can differ from the one that wrote it.
 fn fit_imported_rows(wb: &mut Workbook) {
+    // The whole pass shares one budget of merge comparisons: later sheets keep their heights once it is spent.
+    let mut left = crate::cmd::MERGE_FIT_WORK;
     for si in 0..wb.sheets.len() {
         let Some(sh) = wb.sheet(si) else { continue };
         let mut rows: Vec<u32> = sh.cells.iter().map(|(c, _)| c.row).filter(|r| sh.rows.get(r).is_none_or(|i| i.size.is_none())).collect();
         rows.sort_unstable();
         rows.dedup();
+        // One sweep over the sheet's merges for all of its rows, in ascending order.
+        let mut sweep = crate::cmd::MergeSweep::new(left);
         for row in rows {
-            crate::cmd::auto_row_height(wb, si, row);
+            crate::cmd::fit_row_height(wb, si, row, &mut sweep);
         }
+        left = sweep.left();
     }
 }
 
@@ -910,8 +915,10 @@ pub fn to_html(wb: &Workbook, sheet: usize) -> Result<String> {
                 place(&im.anchor)
             );
         }
+        let mut svg_budget = crate::chart_svg::MAX_PAGE_SVG_BYTES;
         for ch in &sh.charts {
-            if let Some(svg) = crate::chart_svg::chart_svg(wb, sheet, ch, &place(&ch.anchor)) {
+            if let Some(svg) = crate::chart_svg::chart_svg(wb, sheet, ch, &place(&ch.anchor), svg_budget)? {
+                svg_budget -= svg.len();
                 out.push_str(&svg);
             }
         }

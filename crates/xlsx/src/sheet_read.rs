@@ -56,6 +56,9 @@ struct RowState {
     dynamic_cells: u64,
     /// Row-membership checks served so far, for the work cap above.
     dynamic_checks: u64,
+    /// The cell being read lost its shared formula to a copy limit: its cached value is kept, even
+    /// inside an array range (where a formula's cached values otherwise give way to the spill).
+    shared_copy_refused: bool,
     dropped: u64,
     rows: u64,
 }
@@ -622,6 +625,7 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
         return;
     }
     let dynamic = c.attr("cm").is_some();
+    st.shared_copy_refused = false;
     let f = c.child("f");
     // A What-If data table is one `<f t="dataTable">` on the top-left result cell; the other
     // cells of `ref` carry only values. It is kept as the sheet's record and written back,
@@ -654,7 +658,7 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
     if formula.as_ref().is_some_and(|f| !f.dynamic && f.array.is_none() && f.expr_arc().is_some()) {
         cx.legacy_formulas.push(pos);
     }
-    let spilled_from = if formula.is_none() && py.is_none() { dynamic_range(st, pos) } else { None };
+    let spilled_from = if formula.is_none() && py.is_none() && !st.shared_copy_refused { dynamic_range(st, pos) } else { None };
     let python_anchor = spilled_from.is_some_and(|r| sheet.cells.get(r.start).is_some_and(|a| a.py.is_some()));
     let value = match spilled_from {
         // A Python cell's spilled values are kept: they are its result until it runs again.
@@ -734,10 +738,12 @@ fn read_formula_text(cx: &mut Ctx<'_>, st: &mut RowState, f: &El, pos: CellRef, 
                         "a shared formula is longer than {} characters; kept the cached values of the cells that share it",
                         gridcraft_formula::MAX_FORMULA_LEN
                     ));
+                    st.shared_copy_refused = true;
                     return None;
                 }
                 if !charge(&mut cx.shared_formula_bytes, extra_shared_cost(sh.cost), MAX_SHARED_FORMULA_BYTES) {
                     cx.warn("shared formulas expand to too much data; kept the cached values of the remaining cells that share them");
+                    st.shared_copy_refused = true;
                     return None;
                 }
                 *unwrapped |= sh.unwrapped;
