@@ -461,7 +461,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
                     && let Some(sheet) = wb.sheet_mut(si)
                 {
                     if lname == "_xlnm.print_area" {
-                        sheet.print.print_area = parse_print_area(text);
+                        sheet.print.set_print_areas(parse_print_areas(text));
                     } else {
                         let (rows, cols) = parse_print_titles(text);
                         sheet.print.title_rows = rows;
@@ -671,10 +671,29 @@ fn strip_sheet(s: &str) -> &str {
     }
 }
 
-pub fn parse_print_area(text: &str) -> Option<RangeRef> {
-    let first = text.split(',').next()?;
-    let r = strip_sheet(first.trim()).replace('$', "");
-    RangeRef::parse(&r)
+/// Every range of a print area (`'S'!$A$1:$B$2,'S'!$D$3`) in order; parts that don't parse are
+/// skipped. Commas inside a quoted sheet name (`'a, b'!$A$1`) don't separate ranges.
+pub fn parse_print_areas(text: &str) -> Vec<RangeRef> {
+    split_outside_quotes(text).into_iter().filter_map(|part| RangeRef::parse(&strip_sheet(part.trim()).replace('$', ""))).collect()
+}
+
+/// Splits on commas that are not inside a single-quoted sheet name (`''` is a quote inside one).
+fn split_outside_quotes(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut quoted = false;
+    let mut start = 0;
+    for (i, ch) in text.char_indices() {
+        match ch {
+            '\'' => quoted = !quoted,
+            ',' if !quoted => {
+                out.push(text.get(start..i).unwrap_or(""));
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(text.get(start..).unwrap_or(""));
+    out
 }
 
 /// A print-titles span: the first and last row (or column) repeated on each page.

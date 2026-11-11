@@ -15,7 +15,12 @@ pub struct PrintSettings {
     pub paper: String,
     /// Margins in inches: left, right, top, bottom, header, footer.
     pub margins: [f32; 6],
+    /// The print area, or the first of its ranges when it has several.
     pub print_area: Option<RangeRef>,
+    /// The print area's ranges after the first, in file order (Excel prints each range of a
+    /// print area starting on a new page). Empty for a single-range print area.
+    #[serde(default)]
+    pub print_area_more: Vec<RangeRef>,
     pub title_rows: Option<(u32, u32)>,
     pub title_cols: Option<(u32, u32)>,
     /// Percent scale, or fit to pages (wide, tall).
@@ -253,6 +258,17 @@ impl PrintSettings {
     pub fn has_header_footer(&self) -> bool {
         [&self.header, &self.footer, &self.first_header, &self.first_footer, &self.even_header, &self.even_footer].iter().any(|t| !t.is_empty())
     }
+    /// Every range of the print area in order (empty when there is none).
+    pub fn print_areas(&self) -> Vec<RangeRef> {
+        self.print_area.iter().chain(self.print_area_more.iter()).copied().collect()
+    }
+    /// Sets the print area to `areas` in order: the first is `print_area`, the rest
+    /// `print_area_more`. An empty list clears it.
+    pub fn set_print_areas(&mut self, areas: Vec<RangeRef>) {
+        let mut it = areas.into_iter();
+        self.print_area = it.next();
+        self.print_area_more = it.collect();
+    }
 }
 
 impl Default for PrintSettings {
@@ -262,6 +278,7 @@ impl Default for PrintSettings {
             paper: "Letter".into(),
             margins: [0.7, 0.7, 0.75, 0.75, 0.3, 0.3],
             print_area: None,
+            print_area_more: Vec::new(),
             title_rows: None,
             title_cols: None,
             scale: 100,

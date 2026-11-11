@@ -333,7 +333,7 @@ fn print_area(s: &mut Session, p: &Json) -> Result<Json> {
     let r = target_range(s, p)?;
     edit(s, |cx| {
         let si = cx.sheet_index();
-        cx.sheet_mut(si)?.print.print_area = if clear { None } else { Some(r) };
+        cx.sheet_mut(si)?.print.set_print_areas(if clear { vec![] } else { vec![r] });
         Ok(Json::Null)
     })
 }

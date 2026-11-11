@@ -1084,3 +1084,25 @@ fn every_form_control_kind_prints_and_tiny_or_empty_ones_do_not_crash() {
     assert!(contains(&pdf, "(kind 3 size 0) Tj"), "check box caption");
     assert!(contains(&pdf, "(kind 8 size 0) Tj"), "label caption");
 }
+
+/// Deleting the rows of a print area's first range drops it; the next range becomes the first.
+/// Setting the print area through the command clears the extra ranges.
+#[test]
+fn deleting_a_whole_print_area_range_drops_it() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "D8", "input": "1"})).unwrap();
+    {
+        let wb = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb);
+        let sh = wb.sheet_mut(0).unwrap();
+        sh.print.set_print_areas(vec![RangeRef::parse("A1:B2").unwrap(), RangeRef::parse("D5:D8").unwrap()]);
+    }
+    s.execute("home.deleteRows", json!({"rows": "1:2"})).unwrap();
+    let pr = s.doc().unwrap().wb.active().unwrap().print.clone();
+    assert_eq!(pr.print_areas(), vec![RangeRef::parse("D3:D6").unwrap()]);
+    {
+        let wb = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb);
+        wb.sheet_mut(0).unwrap().print.print_area_more.push(RangeRef::parse("F1").unwrap());
+    }
+    s.execute("pageLayout.pageSetup", json!({"printArea": "A1:C3"})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.active().unwrap().print.print_areas(), vec![RangeRef::parse("A1:C3").unwrap()]);
+}

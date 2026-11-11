@@ -1774,7 +1774,7 @@ pub(crate) fn add_defined_names(
                 let Some(si) = scope else { continue };
                 let Some(sheet) = wb.sheet_mut(si) else { continue };
                 if lbl.builtin == Some(6) {
-                    sheet.print.print_area = crate::read::parse_print_area(&text);
+                    sheet.print.set_print_areas(crate::read::parse_print_areas(&text));
                 } else {
                     let (rows, cols) = crate::read::parse_print_titles(&text);
                     sheet.print.title_rows = rows;

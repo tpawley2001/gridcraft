@@ -202,9 +202,8 @@ fn shift_sheet_features(sh: &mut Sheet, axis: Axis, at: u32, count: u32, insert:
         None => false,
     });
     shift_data_tables(sh, map_range, map_cell);
-    if let Some(pa) = sh.print.print_area {
-        sh.print.print_area = map_range(pa);
-    }
+    let areas = sh.print.print_areas().into_iter().filter_map(&map_range).collect();
+    sh.print.set_print_areas(areas);
     // PivotTables follow their report cells. A deleted anchor line collapses onto the line that
     // takes its place; a report deleted entirely has no last area until the next refresh.
     for pt in sh.pivots.iter_mut() {
@@ -770,9 +769,8 @@ pub(super) fn shift_cell_features(sh: &mut Sheet, e: &Edit) {
         }
     }
     shift_data_tables(sh, |r| map_range(r, e), map_cell);
-    if let Some(pa) = sh.print.print_area {
-        sh.print.print_area = map_range(pa, e);
-    }
+    let areas = sh.print.print_areas().into_iter().filter_map(|pa| map_range(pa, e)).collect();
+    sh.print.set_print_areas(areas);
 }
 
 /// What-If data tables follow their result cells and input cells; a table whose result cells are

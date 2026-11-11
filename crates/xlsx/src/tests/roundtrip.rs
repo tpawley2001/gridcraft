@@ -304,6 +304,7 @@ fn sample() -> Workbook {
         paper: "A4".into(),
         margins: [0.5, 0.6, 0.7, 0.8, 0.2, 0.25],
         print_area: Some(rr("A1:H30")),
+        print_area_more: vec![rr("J1:K5"), rr("M2")],
         title_rows: Some((0, 1)),
         title_cols: Some((0, 0)),
         scale: 80,

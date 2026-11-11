@@ -724,13 +724,14 @@ fn write_defined_names(wb: &Workbook, kept: &crate::passthrough::WorkbookKept, c
     }
     for (i, sheet) in wb.sheets.iter().enumerate() {
         let q = quote_sheet(&sheet.name);
-        if let Some(pa) = &sheet.print.print_area {
+        let areas = sheet.print.print_areas();
+        if !areas.is_empty() {
+            let list: Vec<String> = areas.iter().map(|pa| format!("{q}!{}", abs_range(pa))).collect();
             let _ = write!(
                 names,
-                "<definedName name=\"_xlnm.Print_Area\" localSheetId=\"{}\">{}!{}</definedName>",
+                "<definedName name=\"_xlnm.Print_Area\" localSheetId=\"{}\">{}</definedName>",
                 kept.file_index(i),
-                esc(&q),
-                abs_range(pa)
+                esc(&list.join(","))
             );
         }
         let mut titles = vec![];
