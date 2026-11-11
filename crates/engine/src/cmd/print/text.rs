@@ -66,6 +66,23 @@ fn font_for(style: &Style) -> Font {
     Font::styled(Font::family_for(&style.font.name), style.font.bold, style.font.italic)
 }
 
+/// Space advance (em) of common Normal style fonts whose printed stand-in has a different space.
+const SPACE_EM: [(&str, f32); 3] = [("calibri", 0.2261), ("arial", 0.2778), ("times new roman", 0.25)];
+
+/// Width in points of one indent level: 3 spaces of the workbook's Normal style font at its size
+/// (ECMA-376 Part 1, 18.8.1 `alignment/@indent`).
+fn indent_level_pt(wb: &gridcraft_model::Workbook) -> f32 {
+    let normal = wb.styles.get(gridcraft_model::StyleId::DEFAULT);
+    let size = normal.font.size.clamp(1.0, 409.0);
+    let name = normal.font.name.trim();
+    let em = SPACE_EM
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .map(|&(_, em)| em)
+        .unwrap_or_else(|| gridcraft_pdf::text_width(font_for(normal), size, " ") / size);
+    3.0 * em * size
+}
+
 fn text_align(align: HAlign, value: &Value) -> HAlign {
     match align {
         HAlign::General => match value {
@@ -156,7 +173,8 @@ pub(super) fn draw_text(pg: &mut Page, b: &Block, placement: TextPlacement<'_>) 
     let mut size = st.font.size.clamp(1.0, 409.0) * b.scale;
     let font = font_for(st);
     let pad = PAD_PX * b.k;
-    let indent = st.align.indent as f32 * 9.0 * b.k;
+    // Indent is measured in the Normal style font and is not shrunk by page scaling.
+    let indent = f32::from(st.align.indent) * indent_level_pt(wb);
     let avail = (w - 2.0 * pad - indent).max(0.0);
     let code = st.num_fmt.as_str();
     let formatted = crate::display::format(&v, code, wb);
