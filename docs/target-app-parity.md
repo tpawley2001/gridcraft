@@ -1,6 +1,6 @@
 # Target-app parity: GridCraft vs Microsoft Excel
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-09 · **Change:** minor (G0218: Review row: Check Accessibility and opening encrypted files are in, saving with a password is missing; ToolPak tools that draw charts; no score change; earlier: G0213: File formats note matches file-format-parity.md; no score change; earlier: several windows: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0190: Remove Precedent / Dependent Arrows; catalog 285 / 300; no score change; earlier: G0175: freeform shapes and rounded rectangles print with their outlines; no score change; earlier: G0157: form check boxes and option buttons; catalog 283 / 298; earlier: G0141: Evolutionary Solver Population report; form controls; catalog 281 / 296; earlier: insert objects: equations; earlier: what-if and analysis: Solver Sensitivity report; no score change; earlier: chart resizing no longer listed as missing; no score change; earlier: what-if and analysis: Analysis ToolPak has all 19 tools; earlier: page layout and print: Page Setup's page order; no score change; earlier: charts: data tables with XLSX round-trip and print/PDF; no score change; earlier: what-if and analysis: Solver Options; the Insert Function dialog is named as in Excel; no score change; earlier: Solver Load/Save Model and Reset All; automation: macro interface; catalog count 276 / 292, as `cargo xtask parity` measures; automation: typed macros in the engine; several windows: a native window per workbook window, New Window on the same workbook, Arrange All; no score change) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-10 · **Change:** minor (rows no longer list fixed issues as open bugs; no score change; earlier: G0218: Review row: Check Accessibility and opening encrypted files are in, saving with a password is missing; ToolPak tools that draw charts; no score change; earlier: G0213: File formats note matches file-format-parity.md; no score change; earlier: several windows: View Side by Side, Synchronous Scrolling and Reset Window Position; earlier: G0190: Remove Precedent / Dependent Arrows; catalog 285 / 300; no score change; earlier: G0175: freeform shapes and rounded rectangles print with their outlines; no score change; earlier: G0157: form check boxes and option buttons; catalog 283 / 298; earlier: G0141: Evolutionary Solver Population report; form controls; catalog 281 / 296; earlier: insert objects: equations; earlier: what-if and analysis: Solver Sensitivity report; no score change; earlier: chart resizing no longer listed as missing; no score change; earlier: what-if and analysis: Analysis ToolPak has all 19 tools; earlier: page layout and print: Page Setup's page order; no score change; earlier: charts: data tables with XLSX round-trip and print/PDF; no score change; earlier: what-if and analysis: Solver Options; the Insert Function dialog is named as in Excel; no score change; earlier: Solver Load/Save Model and Reset All; automation: macro interface; catalog count 276 / 292, as `cargo xtask parity` measures; automation: typed macros in the engine; several windows: a native window per workbook window, New Window on the same workbook, Arrange All; no score change) · **Target:** Microsoft Excel (Microsoft 365)
 
 This is the authoritative parity assessment. [`ROADMAP.md`](../ROADMAP.md) summarizes it,
 [`gaps.md`](gaps.md) lists every shortfall, and the area checklists hold the detail:
@@ -80,11 +80,11 @@ performance 8, stability 8, localization 4, hardware 2, platforms 2, ecosystem 2
 
 | Area | Weight | Breadth | Ready | Hours | Evidence |
 |---|---|---|---|---|---|
-| Formula language and calculation | 18 | ~92% | ~72% | 20–30 | A1/R1C1 parser, reference adjustment, dependency-graph recalc, dynamic arrays and `#SPILL!`, `A1#`, LET/LAMBDA and helpers, structured references, names, 3-D references. Open correctness bugs: 15-digit equality (#57), stale spills after structural edits and cleared blockers (#133, #139), 3-D span endpoint deletion (#140), sheet rename and qualified names (#134). Single-threaded |
-| Worksheet functions | 12 | 98.1% (measured) | ~82% | 16–26 | 513 / 523 names, 504 working. Missing: GETPIVOTDATA, IMAGE plus cloud functions. No conformance suite against Excel-computed oracles; edge-case bugs keep surfacing (#137, #138). [function-parity.md](function-parity.md) |
-| Editing, navigation, clipboard, fill | 12 | ~90% | ~70% | 15–25 | Point mode, F4, AutoComplete, Paste Special, AutoFill, Flash Fill, Find/Replace, Go To Special. Bugs: rectangular drag-select (#28), monthly fill (#132), cut across sheets (#128), Insert Copied Cells missing (#21), key tips only on part of the Home tab (#43; #33, #49). [ui-parity.md](ui-parity.md) |
-| Cell formatting, styles, conditional formatting | 10 | ~95% | ~80% | 8–14 | Full number-format language, borders, 47 cell styles, 60 table styles, all CF rule kinds including data bars, colour scales and icon sets. Gaps: font weights beyond regular/bold (#168), system fonts list (#4), themes |
-| Sort, filter, tables, validation, outline | 8 | ~82% | ~70% | 10–16 | Multi-level sort, AutoFilter, Advanced Filter, tables with totals, validation, outline, subtotals, consolidate. Advanced Filter copy-to preserves cells outside its result and rejects worksheet overflow (#1031). Bugs: subtotal header (#131), validation edits (#129), table style panic caught (#130); no slicers on tables |
+| Formula language and calculation | 18 | ~92% | ~72% | 20–30 | A1/R1C1 parser, reference adjustment, dependency-graph recalc, dynamic arrays and `#SPILL!`, `A1#`, LET/LAMBDA and helpers, structured references, names, 3-D references. Single-threaded |
+| Worksheet functions | 12 | 98.1% (measured) | ~82% | 16–26 | 513 / 523 names, 504 working. Missing: GETPIVOTDATA, IMAGE plus cloud functions. No conformance suite against Excel-computed oracles. [function-parity.md](function-parity.md) |
+| Editing, navigation, clipboard, fill | 12 | ~90% | ~70% | 15–25 | Point mode, F4, AutoComplete, Paste Special, AutoFill, Flash Fill, Find/Replace, Go To Special. [ui-parity.md](ui-parity.md) |
+| Cell formatting, styles, conditional formatting | 10 | ~95% | ~80% | 8–14 | Full number-format language, borders, 47 cell styles, 60 table styles, all CF rule kinds including data bars, colour scales and icon sets. Gaps: font weights beyond regular/bold (#168), themes |
+| Sort, filter, tables, validation, outline | 8 | ~82% | ~70% | 10–16 | Multi-level sort, AutoFilter, Advanced Filter, tables with totals, validation, outline, subtotals, consolidate. Advanced Filter copy-to preserves cells outside its result and rejects worksheet overflow (#1031). No slicers on tables |
 | PivotTables | 7 | ~65% | ~45% | 25–40 | Insert/Recommended, field list, three layouts, values on rows or columns, date grouping, show-values-as, refresh, calculated fields, XLSX round-trip. Missing: slicers, timelines, calculated items, PivotCharts, value/label filters, number grouping, GETPIVOTDATA, data-model pivots. Round-trip never checked in Excel |
 | Charts and sparklines | 8 | ~50% | ~30% | 40–60 | 25 chart kinds, all 2-D. Doughnut charts draw every series as a concentric ring (first series innermost), with editable hole size and first slice angle. The chart model holds title, legend position, a data-labels flag, gridlines flag, axis titles and chart data tables (legend keys, borders, XLSX round-trip and print/PDF); no axis scaling, error bars, per-point formatting, chart sheets, 3-D, surface, map, Pareto. Kinds survive XLSX round trip (#158, #161), except stock charts: only 3–4 series are a stock chart, and any other count is written and reimported as a line chart. [chart-parity.md](chart-parity.md) |
 | Page layout, print, PDF | 5 | ~80% | ~55% | 12–20 | Page setup, print titles, breaks, page order, Page Break Preview, headers/footers, PDF export and printing. Freeform shapes and rounded rectangles print with their outlines. Paper sizes match Japanese Excel: B4/B5/B6 are the JIS sizes, ISO B4/B5/B6 stay reachable by name, and Japanese Postcard (はがき), Japanese Double Postcard (往復はがき), the chou/kaku envelopes and A6 are available. No true Page Layout view; the PDF writer uses only the 14 standard fonts without embedding (no CJK or other non-Latin text in PDF); web print only exports (#141, #143) |
@@ -128,7 +128,7 @@ functions, co-authoring and admin, specialist hardware, and languages beyond the
 | Area (weekly use) | Weight | Depth | Basis |
 |---|---|---|---|
 | Formula language and calculation | 20 | 72 | Feature-area table |
-| Common worksheet functions | 15 | 85 | Missing functions are niche (ETS, odd-period bonds, cloud); edge bugs in common ones (#137, #138, #57) |
+| Common worksheet functions | 15 | 85 | Missing functions are niche (ETS, odd-period bonds, cloud) |
 | Editing, navigation, clipboard, fill | 15 | 70 | Feature-area table |
 | Cell formatting, styles, conditional formatting | 13 | 80 | Feature-area table |
 | Sort, filter, tables, validation | 10 | 70 | Feature-area table |
@@ -143,7 +143,7 @@ Discounts for what still stops real work:
 
 | Discount | Factor | Evidence |
 |---|---|---|
-| Interaction fidelity | × 0.90 | 59 command shortcuts vs Excel's 200+; key tips only on part of the Home tab (#43); rectangular selection bug (#28); missing horizontal scrollbar report (#176) |
+| Interaction fidelity | × 0.90 | 59 command shortcuts vs Excel's 200+ |
 | Stability on real machines | × 0.92 | Never-crash lints, fuzzed commands and the `Session::execute` guard; but field reports of a startup crash on Intel UHD (#120), an error on close (#117), a freeze opening from Finder (#166) and screen flashing (#76) |
 | File exchange with Excel users | × 0.88 | Excel opening our output is unverified across features; unmodelled parts dropped on save; advanced chart kinds lose their type; 100 MB files fail (#175); `.xls` and encrypted files are refused with a clear message (#17) rather than opened. Harsher than a drawing app's discount because spreadsheets are exchanged constantly |
 
@@ -160,9 +160,9 @@ edge cases are left out, along with everything excluded from the mainstream numb
 
 | Core feature | Weight | Depth | Basis |
 |---|---|---|---|
-| Typing data, simple formulas, AutoSum (SUM, AVERAGE, arithmetic) | 20 | 88 | Solid; 15-digit equality (#57) is rare at this level |
+| Typing data, simple formulas, AutoSum (SUM, AVERAGE, arithmetic) | 20 | 88 | Solid |
 | Basic formatting: fonts, bold, fills, borders, currency/percent/date formats | 15 | 85 | |
-| Copy, paste, fill handle, undo/redo | 15 | 78 | Selection bug (#28), monthly fill (#132) |
+| Copy, paste, fill handle, undo/redo | 15 | 78 | No open bugs listed |
 | Rows and columns: insert, delete, widths, AutoFit | 10 | 82 | AutoFit fixed (#42, #88); rows auto-fit oversized fonts on open and row formatting (#833) |
 | Sort and filter | 10 | 82 | |
 | Save, Save As, reopen XLSX | 10 | 85 | |
@@ -174,7 +174,7 @@ edge cases are left out, along with everything excluded from the mainstream numb
 | Discount | Factor | Evidence |
 |---|---|---|
 | Launch and stability | × 0.92 | Startup crash on some Intel GPUs (#120), "Issue executing" (#59), error on close (#117) |
-| Discoverability and UI clarity | × 0.95 | The Excel-style ribbon is familiar and labelled; system language by default (#31); small gaps (#176 scrollbar, #170 macOS window controls) |
+| Discoverability and UI clarity | × 0.95 | The Excel-style ribbon is familiar and labelled; system language by default (#31); small gaps (#170 macOS window controls) |
 | Opening files people send them | × 0.90 | Double-clicking a workbook in Finder freezes or errors on macOS (#166, #69; drag-and-drop works; fixes in PRs #164, #167); `.xls` and encrypted files are refused with a message |
 
 **Essentials user: 80.2 × 0.92 × 0.95 × 0.90 = 63.1 → ~63%** (estimated).
@@ -334,6 +334,7 @@ The inventory carried over from the 2026-10-07 ROADMAP.md, updated for what land
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-10 | minor | Rows no longer list fixed issues (#21, #28, #43, #57, #128-#130, #132-#134, #138-#140) as open bugs; system fonts list (#4), subtotal header (#131), COUNTBLANK outside the used range (#137) and the grid scroll bars (#176) were checked fixed and dropped too (no score change) |
 | 2026-11-09 | minor | G0218: Review row lists Check Accessibility and opening password-encrypted `.xlsx` and `.xls` files; Missing now names saving with a password to open and RC4-encrypted `.xlsx`, as gaps.md §7 records. What-if row names the ToolPak tools that draw charts (no score change) |
 | 2026-11-09 | minor | Insert objects: shapes row now says over 20 Excel presets draw their own outline; Review row drops comment navigation and notes-to-comments conversion from Missing (no score change) |
 | 2026-11-09 | minor | G0213: File formats note now lists `.xls`/`.xlsb` formula and formatting import, XML Spreadsheet 2003 import and SYLK/DIF read/write, as in file-format-parity.md (no score change) |
