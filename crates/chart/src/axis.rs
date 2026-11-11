@@ -111,9 +111,61 @@ pub fn nice_scale(lo: f64, hi: f64, force_zero: bool) -> Scale {
 
 /// Excel's automatic scale for a radar chart's value axis: no headroom past the data, and the
 /// smallest 1-2-5 step whose rings are at least 1.1 label heights apart on a `radius`-long axis.
+///
+/// The axis always includes 0; its maximum is the smallest multiple of the step at or above the
+/// data maximum (and its minimum the largest multiple at or below the data minimum). When the room
+/// is unusable or too small for any step, one step covers the whole range.
 pub fn radar_scale(lo: f64, hi: f64, radius: f32, label_size: f32) -> Scale {
-    let _ = (radius, label_size);
-    nice_scale(lo, hi, true)
+    let (mut lo, mut hi) = (clean(lo), clean(hi));
+    if lo > hi {
+        std::mem::swap(&mut lo, &mut hi);
+    }
+    lo = lo.min(0.0);
+    hi = hi.max(0.0);
+    if lo == hi {
+        // Both zero.
+        return Scale { min: 0.0, max: 1.0, step: 0.2 };
+    }
+    let span = hi - lo;
+    if !span.is_finite() || span <= 0.0 {
+        return Scale { min: 0.0, max: 1.0, step: 0.2 };
+    }
+    let (radius, label) = (f64::from(radius), f64::from(label_size));
+    let room = radius.is_finite() && label.is_finite() && radius > 0.0 && label > 0.0;
+    // Fewest rings any step can give: one when the data is on one side of 0, else one per side.
+    let fewest = if lo < 0.0 && hi > 0.0 { 2.0 } else { 1.0 };
+    // Start at the power of ten that needs at most 50 intervals for the span.
+    let mut exp = (span / 50.0).log10().ceil() as i32;
+    let mut best: Option<Scale> = None;
+    for i in 0..60 {
+        if i > 0 && i % 3 == 0 {
+            exp = exp.saturating_add(1);
+        }
+        let m = [1.0, 2.0, 5.0][i % 3];
+        // `m / 10^k` keeps decimal steps exact (0.1, not 0.1000000000000001).
+        let unit = |k: f64| if exp >= 0 { k * m * 10f64.powi(exp) } else { k * m / 10f64.powi(exp.saturating_neg()) };
+        let step = unit(1.0);
+        if !(step.is_finite() && step > 0.0) {
+            continue;
+        }
+        let k_lo = (lo / step + 1e-9).floor();
+        let k_hi = (hi / step - 1e-9).ceil();
+        let n = k_hi - k_lo;
+        let (min, max) = (unit(k_lo), unit(k_hi));
+        if !(n >= 1.0 && min.is_finite() && max.is_finite() && max > min) {
+            continue;
+        }
+        let min = if min == 0.0 { 0.0 } else { min };
+        let sc = Scale { min, max, step };
+        if room && radius / n >= 1.1 * label {
+            return sc;
+        }
+        if n <= fewest {
+            return sc;
+        }
+        best = Some(sc);
+    }
+    best.unwrap_or(Scale { min: lo, max: hi, step: span })
 }
 
 /// `auto` with a chart's fixed bounds and major unit applied (Format Axis ▸ Bounds and Units).
@@ -172,7 +224,15 @@ fn general_text(v: f64, step: Option<f64>) -> String {
     }
     match step {
         Some(s) if s.is_finite() && s > 0.0 && v.abs() < 1e11 && v.abs() >= 1e-9 => {
-            let d = (-s.log10().floor()).clamp(0.0, 10.0) as usize;
+            // Enough decimals for the step itself: 0.2 needs one, and so does 2.5 (not "2", "8").
+            let mut d = (-s.log10().floor()).clamp(0.0, 10.0) as usize;
+            while d < 10 {
+                let scaled = s * 10f64.powi(d as i32);
+                if (scaled - scaled.round()).abs() <= scaled.abs() * 1e-9 {
+                    break;
+                }
+                d += 1;
+            }
             let t = format!("{:.*}", d, v);
             if t.trim_start_matches('-').chars().all(|c| c == '0' || c == '.') { "0".into() } else { t }
         }
