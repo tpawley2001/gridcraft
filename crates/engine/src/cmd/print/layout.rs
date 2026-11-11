@@ -22,9 +22,20 @@ pub(super) fn known_paper(name: &str) -> Option<(f32, f32)> {
     // are one name.
     let n = name.trim().to_ascii_lowercase().replace([' ', '-', '_', '(', ')'], "");
     Some(match n.as_str() {
-        "letter" | "usletter" => (612.0, 792.0),
+        // Letter Small and Note are Letter-sized (ECMA-376 Part 1 §18.3.1.63).
+        "letter" | "usletter" | "lettersmall" | "note" => (612.0, 792.0),
         "legal" | "uslegal" => (612.0, 1008.0),
-        "a4" => (595.28, 841.89),
+        "a4" | "a4small" => (595.28, 841.89),
+        "a2" => (1190.55, 1683.78),
+        "folio" => (612.0, 936.0),
+        "quarto" => (609.45, 779.53),
+        "10x14" => (720.0, 1008.0),
+        "csheet" => (1224.0, 1584.0),
+        "dsheet" => (1584.0, 2448.0),
+        "esheet" => (2448.0, 3168.0),
+        "envelopec4" => (649.13, 918.43),
+        "envelopec5" => (459.21, 649.13),
+        "envelopec6" => (323.15, 459.21),
         "a3" => (841.89, 1190.55),
         "a5" => (419.53, 595.28),
         "a6" => (297.64, 419.53),

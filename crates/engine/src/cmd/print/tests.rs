@@ -662,6 +662,64 @@ fn page_setup_paper_sizes_reach_the_pdf_page() {
     assert!(s.execute("pageLayout.pageSetup", json!({"paper": "Napkin"})).is_err());
 }
 
+/// A workbook opened with `<pageSetup paperSize="N">` prints on that paper: ECMA-376 ids get their
+/// size (10 A4 small, 17 11x17, 66 A2), and a printer-specific id (185) prints on Letter.
+#[test]
+fn opened_paper_size_ids_print_at_their_real_size() {
+    use std::io::{Read, Write};
+    // The names the file reader gives ECMA-376 §18.3.1.63 ids, portrait, in points.
+    for (name, w, h) in [
+        ("Letter Small", 612.0, 792.0),
+        ("A4 Small", 595.28, 841.89),
+        ("Folio", 612.0, 936.0),
+        ("Quarto", 609.45, 779.53),
+        ("10x14", 720.0, 1008.0),
+        ("11x17", 792.0, 1224.0),
+        ("Note", 612.0, 792.0),
+        ("C Sheet", 1224.0, 1584.0),
+        ("D Sheet", 1584.0, 2448.0),
+        ("E Sheet", 2448.0, 3168.0),
+        ("Envelope C5", 459.21, 649.13),
+        ("Envelope C4", 649.13, 918.43),
+        ("Envelope C6", 323.15, 459.21),
+        ("A2", 1190.55, 1683.78),
+        ("Paper 185", 612.0, 792.0),
+    ] {
+        assert_eq!(paper_size(name), (w, h), "{name}");
+    }
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["x"]]})).unwrap();
+    s.execute("pageLayout.pageSetup", json!({"paper": "A4", "orientation": "portrait"})).unwrap();
+    let bytes = crate::io::save_bytes(&s.doc().unwrap().wb, "book.xlsx").unwrap();
+    let close = |v: &Json, want: f64| (v.as_f64().unwrap() - want).abs() < 0.01;
+    for (id, w, h) in [(10, 595.28f64, 841.89f64), (17, 792.0, 1224.0), (66, 1190.55, 1683.78), (185, 612.0, 792.0)] {
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(&bytes[..])).unwrap();
+        let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for i in 0..z.len() {
+            let mut f = z.by_index(i).unwrap();
+            let name = f.name().to_string();
+            let mut data = Vec::new();
+            f.read_to_end(&mut data).unwrap();
+            if name == "xl/worksheets/sheet1.xml" {
+                let xml = String::from_utf8(data).unwrap();
+                assert!(xml.contains(r#"paperSize="9""#), "{xml}");
+                data = xml.replace(r#"paperSize="9""#, &format!(r#"paperSize="{id}""#)).into_bytes();
+            }
+            out.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            out.write_all(&data).unwrap();
+        }
+        let file = out.finish().unwrap().into_inner();
+        let mut t = Session::new();
+        t.execute("file.open", json!({"name": "book.xlsx", "base64": crate::io::base64_encode(&file)})).unwrap();
+        let pv = t.execute("file.printPreview", json!({})).unwrap();
+        let page = &pv["pageList"][0];
+        assert!(close(&page["width"], w) && close(&page["height"], h), "paperSize {id}: {page}");
+        let (pdf, _) = pdf_of(&mut t, json!({}));
+        let want = format!("/MediaBox [0 0 {w} {h}]");
+        assert!(contains(&pdf, &want), "paperSize {id}: wanted {want}");
+    }
+}
+
 #[test]
 fn hostile_settings_never_panic_and_cap_pages() {
     let mut s = s();

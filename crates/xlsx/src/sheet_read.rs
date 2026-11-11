@@ -924,7 +924,7 @@ pub(crate) fn read_paper(e: &El, pr: &mut gridcraft_model::PrintSettings) {
         pr.orientation = Orientation::Landscape;
     }
     if let Some(p) = e.attr_u32("paperSize").and_then(paper_name) {
-        pr.paper = p.to_string();
+        pr.paper = p;
     }
     pr.output = read_print_output(e);
 }

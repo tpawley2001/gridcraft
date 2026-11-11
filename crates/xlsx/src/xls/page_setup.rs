@@ -110,7 +110,7 @@ fn setup(c: &mut Cursor<'_, '_>, pr: &mut PrintSettings, page: &mut PageState) -
     // fNoPls: paper size, scale, resolution, orientation and copies are undefined.
     if !on(0x0004) {
         if let Some(p) = paper_name(u32::from(paper)) {
-            pr.paper = p.to_string();
+            pr.paper = p;
         }
         // Like `<pageSetup scale="0">`, a zero scale is unstated.
         if scale != 0 {
