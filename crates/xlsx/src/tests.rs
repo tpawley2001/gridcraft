@@ -180,6 +180,7 @@ mod xlsb_protection_tests;
 mod xlsb_rule_links_tests;
 mod xlsb_rules_tests;
 mod xlsb_selection_tests;
+mod xlsb_sheet_view_mode_tests;
 mod xlsb_smartart_tests;
 mod xlsb_sparkline_tests;
 mod xlsb_tables_tests;
