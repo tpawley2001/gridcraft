@@ -76,6 +76,7 @@ mod structural_edit_rewrite;
 mod tab_unlocked_cells;
 mod table_resize_overlap;
 mod table_total_row_last_row;
+mod text_excel_edges;
 mod trace_error;
 mod workbook_author;
 mod wrap_row_height;
