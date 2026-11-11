@@ -88,10 +88,11 @@ fn colours(pdf: &str, op: &str) -> Vec<[u8; 3]> {
             if let Some(v) = nums(l, 3) {
                 out.push([to(v[0]), to(v[1]), to(v[2])]);
             }
-        } else if l.ends_with(&format!(" {grey}")) && l.split_whitespace().count() == 2 {
-            if let Some(v) = nums(l, 1) {
-                out.push([to(v[0]); 3]);
-            }
+        } else if l.ends_with(&format!(" {grey}"))
+            && l.split_whitespace().count() == 2
+            && let Some(v) = nums(l, 1)
+        {
+            out.push([to(v[0]); 3]);
         }
     }
     out
