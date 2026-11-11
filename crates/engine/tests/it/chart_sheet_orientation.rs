@@ -65,9 +65,7 @@ fn package(setups: &[&str]) -> Vec<u8> {
         r#"<?xml version="1.0"?><workbook xmlns="{NS_MAIN}" xmlns:r="{NS_R}"><bookViews><workbookView activeTab="0"/></bookViews><sheets>{sheets}</sheets></workbook>"#
     );
     let wb_rels: Vec<(&str, &str, &str)> = wb_rels.iter().map(|(a, b, c)| (a.as_str(), *b, c.as_str())).collect();
-    let worksheet = format!(
-        r#"<?xml version="1.0"?><worksheet xmlns="{NS_MAIN}"><sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v>2</v></c></row><row r="3"><c r="A3"><v>3</v></c></row></sheetData></worksheet>"#
-    );
+    let worksheet = format!(r#"<?xml version="1.0"?><worksheet xmlns="{NS_MAIN}"><sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v>2</v></c></row><row r="3"><c r="A3"><v>3</v></c></row></sheetData></worksheet>"#);
     parts.splice(
         0..0,
         [
