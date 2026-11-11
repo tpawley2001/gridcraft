@@ -60,6 +60,7 @@ mod note_picture_fill_ids;
 mod note_picture_fill_tests;
 mod ods_floor_ceiling_mode_tests;
 mod ods_no_mimetype_tests;
+mod ods_page_setup_tests;
 mod ods_repeat_edge_tests;
 mod ods_tests;
 mod page_order;

@@ -1,5 +1,6 @@
-//! Data-only OpenDocument Spreadsheet import. Formula caches become constants; styles and
-//! other ODF features are deliberately not translated. All fixtures are authored in Rust.
+//! Data-only OpenDocument Spreadsheet import. Formula caches become constants; cell styles and
+//! other ODF features are deliberately not translated, except each sheet's page setup and
+//! header/footer from its master page (`ods_page`). All fixtures are authored in Rust.
 //! Format reference: ODF 1.3, part 3, sections 6.1 and 9.1:
 //! <https://docs.oasis-open.org/office/OpenDocument/v1.3/os/part3-schema/OpenDocument-v1.3-os-part3-schema.html>.
 
@@ -120,6 +121,15 @@ pub fn read_ods_with(bytes: &[u8], known_function: &dyn Fn(&str) -> bool) -> Res
     import.settle_formulas(known_function);
     if import.wb.sheets.is_empty() {
         return Err(IoError::Format("ODS contains no worksheets".into()));
+    }
+    // Page setup is optional: a missing styles.xml changes nothing, an unreadable one warns.
+    match package.read_optional_limited("styles.xml", crate::ods_page::MAX_STYLES_PART) {
+        Ok(Some(styles)) => {
+            let content_styles = crate::ods_page::content_table_styles(&content);
+            crate::ods_page::apply(&styles, &content_styles, &import.table_styles, &mut import.wb, &mut import.report);
+        }
+        Ok(None) => {}
+        Err(_) => crate::ods_page::warn(&mut import.report),
     }
     for part in package.checksum_failures() {
         import.report.warn(crate::package::checksum_warning(part));
@@ -258,6 +268,8 @@ struct SheetDraft {
     sheet: Sheet,
     depth: usize,
     row: u32,
+    /// The table's `table:style-name` (its table style names the master page).
+    style: Option<String>,
 }
 struct RowDraft {
     depth: usize,
@@ -304,6 +316,8 @@ struct Import {
     /// A sheet was renamed on import, so sheet references in formulas could point elsewhere.
     renamed: bool,
     shortened_row_repeat: bool,
+    /// Each imported sheet's `table:style-name`, in sheet order.
+    table_styles: Vec<Option<String>>,
 }
 
 impl Import {
@@ -326,6 +340,7 @@ impl Import {
             spreadsheet_seen: false,
             renamed: false,
             shortened_row_repeat: false,
+            table_styles: vec![],
         }
     }
 
@@ -410,7 +425,8 @@ impl Import {
                     self.renamed = true;
                     self.report.warn("Some ODS sheet names were shortened or renamed to valid, unique XLSX sheet names.");
                 }
-                self.sheet = Some(SheetDraft { sheet: Sheet::new(name), depth, row: 0 });
+                let style = attr(reader, e, TABLE, b"style-name")?;
+                self.sheet = Some(SheetDraft { sheet: Sheet::new(name), depth, row: 0, style });
             }
             Tag::Name if self.sheet.is_none() && self.stack.starts_with(&[Tag::Document, Tag::Body, Tag::Spreadsheet]) => {
                 let name = attr(reader, e, TABLE, b"name")?.unwrap_or_default();
@@ -554,6 +570,7 @@ impl Import {
             && let Some(sheet) = self.sheet.take()
         {
             self.wb.sheets.push(Arc::new(sheet.sheet));
+            self.table_styles.push(sheet.style);
         }
         Ok(())
     }
