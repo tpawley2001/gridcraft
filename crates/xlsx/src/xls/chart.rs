@@ -1916,6 +1916,8 @@ impl Parser {
             self.scale.x = AxisScale::default();
         }
         Ok(Chart {
+            rounded_corners: false,
+            lang: None,
             of_pie: None,
             alt: String::new(),
             theme_override: None,

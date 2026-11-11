@@ -988,6 +988,8 @@ mod tests {
     fn push_object(s: &mut Sheet, kind: ObjKind, id: u32, anchor: Anchor) {
         match kind {
             ObjKind::Chart => s.charts.push(Chart {
+                rounded_corners: false,
+                lang: None,
                 of_pie: None,
                 alt: String::new(),
                 theme_override: None,

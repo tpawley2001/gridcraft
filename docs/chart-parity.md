@@ -101,6 +101,10 @@ qualifier: with a bare name in `<c:f>` it draws the whole chart blank, without a
 (observed in Excel for Windows, Microsoft 365). External books (`[1]Sheet1!…`) are kept as they
 are (#1686). Such series get no `numCache`/`strCache` on save (#1690).
 
+Chart-space settings kept on save: rounded chart-area corners (`c:roundedCorners`; an absent element
+means rounded, as Excel re-saves it), the editing language (`c:lang`) and `c:date1904` from the
+workbook's date system. Rounded corners are not drawn yet.
+
 ## Work (40–60 h)
 
 1. Preserve unmodelled chart XML on round-trip (keep the original part, patch only edited fields): 6–10 h.
@@ -114,6 +118,7 @@ are (#1686). Such series get no `numCache`/`strCache` on save (#1690).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-11 | minor | G0293: chart parts keep rounded chart-area corners (`c:roundedCorners`, absent = rounded, §21.2.2.156) and the editing language (`c:lang`) on open and save, and write `c:date1904` from the workbook's date system, in CT_ChartSpace order; new charts stay square-cornered. Corners not drawn yet (`chart_space_settings.rs`). |
 | 2026-11-11 | minor | G0281: a chart's primary category axis stored as `c:dateAx` is written back as `c:dateAx` (was `c:catAx`) with `auto`, base/major/minor time units, major/minor units, its scaling bounds and its axis ids, in CT_DateAx order and without `lblAlgn`/`noMultiLvlLbl`; invalid values are dropped. Points are still drawn evenly spaced. No readiness score change. |
 | 2026-11-11 | minor | G0276: filled radar charts (`c:radarStyle val="filled"`, ST_RadarStyle) open as a filled radar, draw each series as a filled shape in its colour (later series over earlier ones, axis labels on top) on screen, print and PDF, and save back as `filled`; `insert.chart` takes `{"type":"radar","subtype":"filled"}`. Radar 2 of 3 subtypes. |
 | 2026-11-11 | minor | G0275: 3-D columns and bars draw each series with its own shape (`c:ser/c:shape`), falling back to the group shape for series without one, like Excel. No readiness score change. |

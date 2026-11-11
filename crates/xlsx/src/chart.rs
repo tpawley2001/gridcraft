@@ -3,7 +3,7 @@
 
 use std::fmt::Write as _;
 
-use gridcraft_core::{RangeRef, Value, category_levels};
+use gridcraft_core::{DateSystem, RangeRef, Value, category_levels};
 use gridcraft_formula::{Expr, SheetSel};
 use gridcraft_model::{
     AxisCrosses, AxisScale, Chart, Chart3d, ChartKind, ChartScale, Color, DateAxis, DefinedName, DisplayUnit, DisplayUnits, LegendPos, LineDash,
@@ -336,6 +336,9 @@ pub fn read_chart(root: &El) -> Option<Chart> {
     let first_slice_angle =
         plot.child("pieChart").or(doughnut).and_then(|g| g.child_val("firstSliceAng")).and_then(|v| v.trim().parse::<u16>().ok()).unwrap_or(0) % 360;
     Some(Chart {
+        // CT_Boolean: an absent element, or one without `val`, means rounded (§21.2.2.156).
+        rounded_corners: root.child("roundedCorners").is_none_or(|e| e.flag("val", true)),
+        lang: root.child_val("lang").map(str::trim).filter(|l| !l.is_empty()).map(str::to_string),
         alt: String::new(),
         theme_override: None,
         hidden: false,
@@ -1236,11 +1239,24 @@ fn strip_book(link: &str) -> &str {
     link.strip_prefix('[').and_then(|r| r.split_once(']')).map_or(link, |(_, rest)| rest)
 }
 
+/// The XML declaration, `<c:chartSpace>` and its leading children in CT_ChartSpace order
+/// (§21.2.2.29): `c:date1904` from the workbook's date system, `c:lang`, `c:roundedCorners`.
+fn chart_space_head(wb: &Workbook, ch: &Chart) -> String {
+    let mut s = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<c:chartSpace xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">",
+    );
+    let d1904 = u8::from(wb.date_system == DateSystem::D1904);
+    let _ = write!(s, "<c:date1904 val=\"{d1904}\"/>");
+    if let Some(lang) = ch.lang.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+        let _ = write!(s, "<c:lang val=\"{}\"/>", esc(lang));
+    }
+    let _ = write!(s, "<c:roundedCorners val=\"{}\"/>", u8::from(ch.rounded_corners));
+    s
+}
+
 /// Chart part XML for a model chart on sheet `si`.
 pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> String {
-    let mut s = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<c:chartSpace xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><c:roundedCorners val=\"0\"/>",
-    );
+    let mut s = chart_space_head(wb, ch);
     if (1..=48).contains(&ch.style) {
         let _ = write!(s, "<c:style val=\"{}\"/>", ch.style);
     }

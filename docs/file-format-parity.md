@@ -207,6 +207,7 @@ Wrong checksums. In an intact `.xlsx`, `.xlsm`, `.xlsb` or `.ods` package, a par
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-11 | minor | G0293: `.xlsx` chart parts keep `c:roundedCorners` (was always written square) and `c:lang`, and write `c:date1904` matching the workbook's date system (`chart_space_settings.rs`). |
 | 2026-11-11 | minor | G0279: `.xls` pictures, charts, text boxes and drawn shapes whose Obj record has FtCmo `fPrint` clear (Print object off) open with `no_print`, so they are left out of print and PDF, and keep the setting on Save As `.xlsx` (`xls_print_object_tests.rs`). |
 | 2026-11-10 | minor | G0272: a package part with a wrong ZIP CRC-32 but complete data opens with its content and a warning naming the part (`.xlsx`, `.xlsb`, `.ods`), instead of the file being refused as "more than 1 GB"; a part with a broken deflate stream reports its own error (`zip_bad_checksum_tests.rs`). |
 | 2026-11-10 | minor | G0267: an `.xlsb` worksheet part missing from the package (even without a content-type Override) opens as an empty sheet in its place with one warning naming the sheet, like `.xlsx`, instead of refusing the workbook (`xlsb_missing_sheet_part_tests.rs`). |

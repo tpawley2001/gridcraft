@@ -53,6 +53,8 @@ const ALL_KINDS: [ChartKind; 33] = [
 
 fn chart(kind: ChartKind) -> Chart {
     Chart {
+        rounded_corners: false,
+        lang: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,

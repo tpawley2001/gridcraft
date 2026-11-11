@@ -10,6 +10,8 @@ use crate::{read_xlsx, write_xlsx};
 
 fn chart(id: u32, kind: ChartKind, scale: ChartScale) -> Chart {
     Chart {
+        rounded_corners: false,
+        lang: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,

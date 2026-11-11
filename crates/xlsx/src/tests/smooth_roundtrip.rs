@@ -25,6 +25,8 @@ fn smooth_line_setting_round_trips() {
         bar_shape: None,
     };
     s.charts.push(Chart {
+        rounded_corners: false,
+        lang: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,
@@ -53,6 +55,8 @@ fn smooth_line_setting_round_trips() {
     let mut smooth_series = base_series.clone();
     smooth_series.smooth = true;
     s.charts.push(Chart {
+        rounded_corners: false,
+        lang: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,
