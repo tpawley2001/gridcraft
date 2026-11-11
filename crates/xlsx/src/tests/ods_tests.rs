@@ -338,3 +338,41 @@ fn ods_shortened_repeats_keep_single_row_merge_bounds() {
     let late = ods(&format!(r#"<table:table table:name="Data"><table:table-row table:number-rows-repeated="1048575"/>{repeated}</table:table>"#));
     assert!(matches!(read_ods(&late), Err(IoError::TooLarge(_))));
 }
+
+/// Matrix attributes make an array formula only on a single, formula-bearing cell; repeated
+/// cells, rows and dropped formulas keep today's behaviour, and the range is clipped to the sheet.
+#[test]
+fn ods_matrix_attributes_guards_and_clipping() {
+    let matrix = r#"table:number-matrix-columns-spanned="2" table:number-matrix-rows-spanned="2""#;
+    let cells = format!(
+        r#"<table:table-cell table:formula="of:=SIN({{1;2}})" {matrix} table:number-columns-repeated="2" office:value-type="float" office:value="0"/>
+        <table:table-cell table:formula="of:=UNKNOWN()" {matrix} office:value-type="float" office:value="5"/>
+        <table:table-cell office:value-type="float" office:value="6"/>
+        <table:table-cell table:number-columns-repeated="16377"/>
+        <table:table-cell table:formula="of:=SIN({{1;2}})" table:number-matrix-columns-spanned="9" office:value-type="float" office:value="0"/>
+        <table:table-cell office:value-type="float" office:value="7"/>"#
+    );
+    let (wb, _) = crate::read_ods_with(&row(&cells), &|f| f != "UNKNOWN").unwrap();
+    let sh = &wb.sheets[0];
+    for c in 0..2 {
+        let f = sh.cell(CellRef::new(0, c)).and_then(|c| c.formula.clone()).expect("repeated formula kept");
+        assert_eq!(f.array, None, "column {c}");
+    }
+    let dropped = sh.cell(CellRef::new(0, 2)).unwrap();
+    assert!(dropped.formula.is_none());
+    assert_eq!(dropped.value, Value::Number(5.0));
+    // A dropped matrix formula leaves the cached values of its range in place.
+    assert_eq!(sh.value(CellRef::new(0, 3)), Value::Number(6.0));
+    let edge = sh.cell(CellRef::new(0, 16_381)).and_then(|c| c.formula.clone()).expect("edge formula");
+    assert_eq!(edge.array, Some(RangeRef::new(CellRef::new(0, 16_381), CellRef::new(0, 16_383))));
+    // A kept one clears them, so recalculation fills the range.
+    assert!(sh.cell(CellRef::new(0, 16_382)).is_none());
+
+    let repeated_row = ods(&format!(
+        r#"<table:table table:name="Data"><table:table-row table:number-rows-repeated="2"><table:table-cell table:formula="of:=SIN({{1;2}})" {matrix} office:value-type="float" office:value="0"/></table:table-row></table:table>"#
+    ));
+    let (wb, _) = read_ods(&repeated_row).unwrap();
+    for r in 0..2 {
+        assert_eq!(wb.sheets[0].cell(CellRef::new(r, 0)).and_then(|c| c.formula.clone()).expect("formula").array, None);
+    }
+}
