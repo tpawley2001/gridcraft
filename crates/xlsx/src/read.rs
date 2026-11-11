@@ -207,7 +207,7 @@ fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], ke
     }
     if let Some(r) = find_rel(wb_rels, "styles").cloned() {
         if let Some(x) = cx.optional_xml(&r.target)? {
-            let StylesIn { xfs, dxfs, palette, named, named_ids, num_fmts } =
+            let StylesIn { xfs, dxfs, palette, named, named_ids, num_fmts, indexed_colors, mru_colors } =
                 read_styles(&x, &checkboxes, &wb.theme.minor_font, theme_fonts(&wb.theme, has_theme));
             cx.num_fmts = num_fmts;
             // Cell format 0 is the Normal cell format: everything on it (font, number format,
@@ -221,6 +221,8 @@ fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], ke
             cx.palette = palette;
             wb.cell_styles = named;
             wb.cell_style_ids = named_ids;
+            wb.indexed_colors = indexed_colors;
+            wb.mru_colors = mru_colors;
         }
     } else {
         cx.warn("no styles part");
