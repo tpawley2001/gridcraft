@@ -117,9 +117,8 @@ fn setup(c: &mut Cursor<'_, '_>, pr: &mut PrintSettings, page: &mut PageState) -
             pr.scale = scale.clamp(10, 400);
         }
         // fPortrait clear is landscape, unless fNoOrient says the orientation is the default.
-        if !on(0x0002) && !on(0x0040) {
-            pr.orientation = Orientation::Landscape;
-        }
+        // Portrait is set explicitly: a chart sheet starts landscape.
+        pr.orientation = if !on(0x0002) && !on(0x0040) { Orientation::Landscape } else { Orientation::Portrait };
     }
     page.fit = Some((fit_w.min(32767), fit_h.min(32767)));
     for (slot, v) in [(4, header), (5, footer)] {

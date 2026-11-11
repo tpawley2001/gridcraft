@@ -154,6 +154,11 @@ fn assert_default_xml(xml: &str) {
     assert!(element(xml, "drawing").is_some(), "{xml}");
 }
 
+/// A chart sheet's print settings when its file gives none: Excel's defaults, landscape.
+fn landscape_default() -> PrintSettings {
+    PrintSettings { orientation: Orientation::Landscape, ..PrintSettings::default() }
+}
+
 /// The chart sheet's print settings after saving as .xlsx and reading it back.
 fn via_xlsx(wb: &Workbook) -> PrintSettings {
     let (back, _) = read_xlsx(&write_xlsx(wb).unwrap()).unwrap();
@@ -171,7 +176,8 @@ fn xls_chart_sheet_keeps_its_page_setup() {
 #[test]
 fn xls_chart_sheet_without_page_records_has_default_print_settings() {
     let wb = read_xls_book(&[]);
-    assert_eq!(wb.chart_sheets[0].print, PrintSettings::default());
+    // Excel prints a chart sheet without an orientation in landscape.
+    assert_eq!(wb.chart_sheets[0].print, landscape_default());
     assert_default_xml(&saved_chart_sheet(&wb));
 }
 
@@ -194,7 +200,8 @@ fn xlsb_chart_sheet_keeps_its_page_setup() {
 #[test]
 fn xlsb_chart_sheet_without_page_records_has_default_print_settings() {
     let (wb, _) = read_xlsb_part(&xlsb_part(&[]));
-    assert_eq!(wb.chart_sheets[0].print, PrintSettings::default());
+    // Excel prints a chart sheet without BrtCsPageSetup in landscape.
+    assert_eq!(wb.chart_sheets[0].print, landscape_default());
     assert_default_xml(&saved_chart_sheet(&wb));
 }
 
@@ -229,4 +236,33 @@ fn xlsb_cs_page_setup_no_orient_keeps_portrait() {
     let (wb, _) = read_xlsb_part(&xlsb_part(&cs_page_setup(9, 0x0009)));
     let p = &wb.chart_sheets[0].print;
     assert_eq!((p.orientation, p.paper.as_str()), (Orientation::Portrait, "A4"));
+}
+
+/// Setup (0x00A1) with paper 1 (Letter) and fPortrait (grbit bit 1) set.
+fn xls_portrait_page() -> Vec<u8> {
+    let setup = cat(&[&super::xls_chart_tests::u16s(&[1, 100, 1, 1, 1, 0x0002, 600, 600]), &0.3f64.to_le_bytes(), &0.3f64.to_le_bytes(), &[1, 0]]);
+    rec(0x00A1, &setup)
+}
+
+#[test]
+fn portrait_chart_sheet_saves_orientation_portrait() {
+    // Excel reads a chart sheet part without `orientation` as landscape, so a portrait chart
+    // sheet has to say so when it is saved as .xlsx.
+    let wb = read_xls_book(&xls_portrait_page());
+    assert_eq!(wb.chart_sheets[0].print.orientation, Orientation::Portrait);
+    let xml = saved_chart_sheet(&wb);
+    let (_, setup) = element(&xml, "pageSetup").expect(&xml);
+    assert_eq!(attr(setup, "orientation"), Some("portrait"), "{xml}");
+    assert_eq!(via_xlsx(&wb).orientation, Orientation::Portrait);
+}
+
+#[test]
+fn xlsb_portrait_chart_sheet_saves_orientation_portrait() {
+    // BrtCsPageSetup with fLandscape clear and fNoOrient clear: portrait.
+    let (wb, _) = read_xlsb_part(&xlsb_part(&cs_page_setup(1, 0x0000)));
+    assert_eq!(wb.chart_sheets[0].print.orientation, Orientation::Portrait);
+    let xml = saved_chart_sheet(&wb);
+    let (_, setup) = element(&xml, "pageSetup").expect(&xml);
+    assert_eq!(attr(setup, "orientation"), Some("portrait"), "{xml}");
+    assert_eq!(via_xlsx(&wb).orientation, Orientation::Portrait);
 }

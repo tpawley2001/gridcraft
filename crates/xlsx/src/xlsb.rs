@@ -639,11 +639,15 @@ fn chart_sheet_drawing(
     check_type(types, path, CHARTSHEET).ok()?;
     let data = package.read_limited(path, MAX_META).ok()??;
     let mut records = Records::new(&data);
+    // Excel prints a chart sheet part without BrtCsPageSetup in landscape. A BrtCsPageSetup
+    // anywhere in the part (even unreadable, or only in a custom view) leaves portrait the default.
     let mut print = PrintSettings::default();
+    let mut cs_page_setup_seen = false;
     let mut drawing = None;
     let mut in_view = false;
     // Page records come before BrtDrawing; a part damaged after it still has its chart.
     while let Ok(Some((id, payload))) = records.next(report) {
+        cs_page_setup_seen |= id == CS_PAGE_SETUP;
         match id {
             BEGIN_USER_CS_VIEW => in_view = true,
             END_USER_CS_VIEW => in_view = false,
@@ -669,6 +673,9 @@ fn chart_sheet_drawing(
             550 if drawing.is_none() => drawing = Some(drawing_rel(Bytes::new(payload)).ok()??),
             _ => {}
         }
+    }
+    if !cs_page_setup_seen {
+        print.orientation = Orientation::Landscape;
     }
     let id = drawing?;
     let rels = package.read_limited(&rels_path(path), MAX_META).ok()??;

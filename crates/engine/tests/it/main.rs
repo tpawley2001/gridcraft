@@ -11,6 +11,7 @@ mod cf_formula_validate;
 mod chart_area_stacked100;
 mod chart_axis_options_render;
 mod chart_radar_filled;
+mod chart_sheet_orientation;
 mod chart_sheet_print;
 mod chart_surface_types;
 mod chart_workbook_names;

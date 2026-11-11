@@ -602,6 +602,8 @@ fn chart_sheet_parts(cx: &mut Ctx<'_>, part: &str) -> Result<Option<(Chart, Prin
         Err(_) => return Ok(None),
     }
     let Some(chart) = holder.charts.into_iter().next() else { return Ok(None) };
+    // Excel prints a chart sheet in landscape unless its `<pageSetup>` says portrait (a missing
+    // `<pageSetup>`, a missing `orientation` and `orientation="default"` are all landscape).
     let mut print = PrintSettings::default();
     for e in &x.children {
         match e.name.as_str() {
@@ -611,6 +613,8 @@ fn chart_sheet_parts(cx: &mut Ctx<'_>, part: &str) -> Result<Option<(Chart, Prin
             _ => {}
         }
     }
+    let portrait = x.child("pageSetup").and_then(|e| e.attr("orientation")) == Some("portrait");
+    print.orientation = if portrait { gridcraft_model::Orientation::Portrait } else { gridcraft_model::Orientation::Landscape };
     Ok(Some((chart, print)))
 }
 
