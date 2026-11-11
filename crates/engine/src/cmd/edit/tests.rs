@@ -581,16 +581,18 @@ fn find_and_replace_within_the_selection() {
     assert_eq!(all["count"], 3, "A1, A3 and A4 on the whole sheet");
 }
 
-/// Go To Special's data validation "Same" over a rule on whole columns refuses instead of listing
-/// millions of cells.
+/// Go To Special's data validation "Same" over a rule on whole columns selects the columns as one
+/// area instead of listing millions of cells.
 #[test]
 fn go_to_special_same_validation_on_whole_columns_is_bounded() {
     let mut s = Session::new();
     s.new_workbook();
     s.execute("data.validation", json!({"range": "A:D", "type": "whole", "operator": "between", "formula1": "1", "formula2": "9"})).unwrap();
     s.execute("selection.set", json!({"range": "B2"})).unwrap();
-    assert!(s.execute("edit.goToSpecial", json!({"kind": "dataValidation", "same": true})).is_err());
-    assert_eq!(s.doc().unwrap().selection.a1(), "B2", "the selection is unchanged");
+    let reply = s.execute("edit.goToSpecial", json!({"kind": "dataValidation", "same": true})).unwrap();
+    assert_eq!(reply["count"].as_u64(), Some(4 * 1_048_576), "{reply}");
+    let sel = &s.doc().unwrap().selection;
+    assert_eq!(sel.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>(), vec!["A:D".to_string()]);
 }
 
 #[test]
