@@ -55,6 +55,7 @@ mod regression_plots;
 mod row_autofit;
 mod shape_gallery;
 mod shape_gallery_excel_entries;
+mod shape_outline_print;
 mod sheet_copy_spill;
 mod sheet_name_quoting;
 mod side_by_side;
