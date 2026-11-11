@@ -133,9 +133,22 @@ impl PrintOptions {
 /// The range a sheet prints: its print area, else A1 to the end of the used range grown to cover
 /// visible drawing objects. `None` when there is nothing to print.
 pub fn print_range(sh: &Sheet) -> Option<RangeRef> {
-    if let Some(a) = sh.print.print_area {
-        return Some(trim_full(sh, a));
+    print_ranges(sh).into_iter().next()
+}
+
+/// Every range a sheet prints, in print order: each range of its print area (Excel starts each
+/// one on a new page), else the one range [`print_range`] describes. Empty when there is
+/// nothing to print.
+pub fn print_ranges(sh: &Sheet) -> Vec<RangeRef> {
+    let areas = sh.print.print_areas();
+    if !areas.is_empty() {
+        return areas.into_iter().map(|a| trim_full(sh, a)).collect();
     }
+    used_print_range(sh).into_iter().collect()
+}
+
+/// A1 to the end of the used range grown to cover visible drawing objects.
+fn used_print_range(sh: &Sheet) -> Option<RangeRef> {
     let mut r = sh.used_range();
     let mut grow = |a: &Anchor| {
         let x = sh.col_left(a.cell.col) + a.dx as f64;
@@ -411,14 +424,22 @@ pub fn layouts(wb: &Workbook, opts: &PrintOptions) -> Vec<SheetLayout> {
         let lay = match tab {
             Ok(si) => {
                 let ovr = if si == wb.active_sheet() { opts.range } else { None };
-                if opts.all_sheets && ovr.is_none() && wb.sheet(si).is_some_and(|s| print_range(s).is_none()) {
-                    continue;
+                if ovr.is_some() {
+                    layout_sheet(wb, si, opts, ovr).into_iter().collect()
+                } else {
+                    let ranges = wb.sheet(si).map(print_ranges).unwrap_or_default();
+                    if opts.all_sheets && ranges.is_empty() {
+                        continue;
+                    }
+                    sheet_layouts(wb, si, opts, &ranges)
                 }
-                layout_sheet(wb, si, opts, ovr)
             }
-            Err(ci) => layout_chart_sheet(wb, ci),
+            Err(ci) => layout_chart_sheet(wb, ci).into_iter().collect(),
         };
-        if let Some(mut l) = lay {
+        for mut l in lay {
+            if pages >= MAX_PAGES {
+                break;
+            }
             l.pages.truncate(MAX_PAGES - pages);
             pages += l.pages.len();
             out.push(l);
@@ -428,6 +449,15 @@ pub fn layouts(wb: &Workbook, opts: &PrintOptions) -> Vec<SheetLayout> {
         out.extend(layout_sheet(wb, wb.active_sheet(), opts, None));
     }
     out
+}
+
+/// One layout per range of a sheet's print area, in order (a print area of several ranges
+/// prints each range starting on a new page); the sheet's default layout when `ranges` is empty.
+fn sheet_layouts(wb: &Workbook, si: usize, opts: &PrintOptions, ranges: &[RangeRef]) -> Vec<SheetLayout> {
+    match ranges {
+        [] | [_] => layout_sheet(wb, si, opts, None).into_iter().collect(),
+        _ => ranges.iter().filter_map(|r| layout_sheet(wb, si, opts, Some(*r))).collect(),
+    }
 }
 
 /// Segments of a page along one axis: repeated titles (before the band) then the band.

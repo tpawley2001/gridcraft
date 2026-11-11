@@ -38,7 +38,7 @@ type PicCache = std::collections::HashMap<(usize, usize), Option<(Vec<u8>, u32, 
 #[cfg(test)]
 use layout::bands;
 pub(crate) use layout::split_bands;
-pub use layout::{PrintOptions, SheetLayout, layout_sheet, layouts, paper_size, print_range};
+pub use layout::{PrintOptions, SheetLayout, layout_sheet, layouts, paper_size, print_range, print_ranges};
 use layout::{known_paper, seg_size, segments};
 use objects::draw_objects;
 #[cfg(test)]
@@ -104,8 +104,12 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
     // Decoded pictures are reused across the pages their anchor covers: a floating picture
     // spanning 40 pages was decoded (and pushed into the PDF) 40 times (#2389).
     let mut pics = PicCache::new();
+    // The worksheet the previous layout printed: a print area's later ranges continue its sheet,
+    // so they don't get the first-page header and footer again.
+    let mut prev_sheet: Option<usize> = None;
     for lay in layouts {
         if let Some(cs) = lay.chart_sheet.and_then(|ci| wb.chart_sheets.get(ci)) {
+            prev_sheet = None;
             page_no += 1;
             let pg = doc.add_page(lay.page_w, lay.page_h);
             draw_chart_sheet(pg, wb, lay, &cs.chart);
@@ -125,6 +129,8 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
         let mut cf = if sh.cond_formats.is_empty() { None } else { Some(crate::cf::CfCache::new()) };
         let k = lay.k();
         let (aw, ah) = lay.avail();
+        let continues = prev_sheet == Some(lay.sheet);
+        prev_sheet = Some(lay.sheet);
         for (pi, (ri, ci)) in lay.pages.iter().enumerate() {
             page_no += 1;
             let (Some(rband), Some(cband)) = (lay.row_bands.get(*ri).copied(), lay.col_bands.get(*ci).copied()) else { continue };
@@ -172,7 +178,7 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
                 date: date.clone(),
                 time: time.clone(),
             };
-            draw_header_footer(pg, lay, lay.settings.hf_page(pi == 0, page_no), &cx);
+            draw_header_footer(pg, lay, lay.settings.hf_page(pi == 0 && !continues, page_no), &cx);
         }
     }
     for link in pending_links {
@@ -424,6 +430,7 @@ fn page_setup(s: &mut Session, p: &Json) -> Result<Json> {
         }
         if let Some(a) = print_area {
             pr.print_area = a;
+            pr.print_area_more.clear();
         }
         if let Some(t) = title_rows {
             pr.title_rows = t;
