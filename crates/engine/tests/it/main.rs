@@ -28,6 +28,7 @@ mod custom_view_freeze;
 mod data_table_dirty;
 mod data_table_recalc;
 mod data_table_shift;
+mod disc_family_basis;
 mod drawing_alt_text;
 mod drawing_print_object;
 mod dynamicmetadata;
