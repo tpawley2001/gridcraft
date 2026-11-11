@@ -24,6 +24,7 @@ mod chart_pie_explosion;
 mod chart_ref_offsets;
 mod chart_sheet_print_tests;
 mod chart_sheet_style_parts_tests;
+mod chart_space_settings;
 mod chart_surface;
 mod chart_theme_override_tests;
 mod code_name_tests;
