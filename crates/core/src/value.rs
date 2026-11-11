@@ -483,7 +483,7 @@ fn whole_number_digits(a: f64) -> Option<String> {
     let exp: usize = exp.parse().ok()?;
     let mut digits: String = mant.chars().filter(char::is_ascii_digit).collect();
     let zeros = exp.checked_sub(digits.len().checked_sub(1)?)?;
-    digits.extend(std::iter::repeat('0').take(zeros));
+    digits.extend(std::iter::repeat_n('0', zeros));
     Some(digits)
 }
 
