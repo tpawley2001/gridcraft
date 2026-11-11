@@ -71,9 +71,16 @@ fn group_kind(g: &El) -> Option<ChartKind> {
             }
         }
         "bubbleChart" => ChartKind::Bubble,
-        // ST_RadarStyle: `standard` (the default), `marker` or `filled`.
-        "radarChart" if g.child_val("radarStyle") == Some("filled") => ChartKind::RadarFilled,
-        "radarChart" => ChartKind::Radar,
+        // ST_RadarStyle: `standard` (lines only), `marker` or `filled`. With `marker` (or no
+        // radarStyle) the series' `c:marker` decides: `symbol none` on every series is a plain radar.
+        "radarChart" => match g.child_val("radarStyle") {
+            Some("filled") => ChartKind::RadarFilled,
+            Some("standard") => ChartKind::Radar,
+            _ => {
+                let all_none = g.kids("ser").all(|s| s.path(&["marker", "symbol"]).and_then(|m| m.attr("val")) == Some("none"));
+                if all_none && g.kids("ser").next().is_some() { ChartKind::Radar } else { ChartKind::RadarMarkers }
+            }
+        },
         "stockChart" => ChartKind::Stock,
         // A missing `c:wireframe` means filled (CT_SurfaceChart, CT_Surface3DChart).
         "surface3DChart" if bool_val(g, "wireframe") => ChartKind::SurfaceWireframe,
@@ -479,6 +486,7 @@ enum G {
     Bubble,
     Radar {
         filled: bool,
+        markers: bool,
     },
     Stock,
     /// `c:surface3DChart` (`three_d`) or `c:surfaceChart` (contour).
@@ -508,8 +516,9 @@ fn group_for(k: ChartKind) -> G {
         ChartKind::Scatter => G::Scatter { lines: false },
         ChartKind::ScatterLines => G::Scatter { lines: true },
         ChartKind::Bubble => G::Bubble,
-        ChartKind::Radar => G::Radar { filled: false },
-        ChartKind::RadarFilled => G::Radar { filled: true },
+        ChartKind::Radar => G::Radar { filled: false, markers: false },
+        ChartKind::RadarMarkers => G::Radar { filled: false, markers: true },
+        ChartKind::RadarFilled => G::Radar { filled: true, markers: false },
         ChartKind::Stock => G::Stock,
         ChartKind::Surface => G::Surface { three_d: true, wireframe: false },
         ChartKind::SurfaceWireframe => G::Surface { three_d: true, wireframe: true },
@@ -738,7 +747,7 @@ fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String 
     }
     let color = s.color.as_ref().and_then(|c: &Color| srgb(c, &wb.theme));
     // A filled radar series is a shape: its colour is the fill, like an area series.
-    let line_like = matches!(g, G::Line { .. } | G::Radar { filled: false } | G::Scatter { lines: true });
+    let line_like = matches!(g, G::Line { .. } | G::Radar { filled: false, .. } | G::Scatter { lines: true });
     match (&color, line_like) {
         (Some(c), true) => {
             let _ = write!(x, "<c:spPr><a:ln w=\"28575\" cap=\"rnd\"><a:solidFill>{c}</a:solidFill><a:round/></a:ln></c:spPr>");
@@ -757,7 +766,9 @@ fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String 
     }
     match g {
         G::Bar { .. } => x.push_str("<c:invertIfNegative val=\"0\"/>"),
-        G::Line { markers: false, .. } | G::Scatter { lines: true } | G::Stock => x.push_str("<c:marker><c:symbol val=\"none\"/></c:marker>"),
+        G::Line { markers: false, .. } | G::Radar { filled: false, markers: false } | G::Scatter { lines: true } | G::Stock => {
+            x.push_str("<c:marker><c:symbol val=\"none\"/></c:marker>")
+        }
         G::Bubble => x.push_str("<c:invertIfNegative val=\"0\"/>"),
         _ => {}
     }
@@ -911,7 +922,7 @@ fn group_xml(g: G, series: &[(usize, &Series)], ch: &Chart, axes: (u32, u32), wb
         G::Bubble => {
             format!("<c:bubbleChart><c:varyColors val=\"0\"/>{sers}{dl}<c:bubbleScale val=\"100\"/><c:showNegBubbles val=\"0\"/>{ax}</c:bubbleChart>")
         }
-        G::Radar { filled } => format!(
+        G::Radar { filled, .. } => format!(
             "<c:radarChart><c:radarStyle val=\"{}\"/><c:varyColors val=\"0\"/>{sers}{dl}{ax}</c:radarChart>",
             if filled { "filled" } else { "marker" }
         ),

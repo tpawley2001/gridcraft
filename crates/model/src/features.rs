@@ -555,6 +555,8 @@ pub enum ChartKind {
     ScatterLines,
     Bubble,
     Radar,
+    /// Radar with a marker at every data point (Excel's "Radar with Markers").
+    RadarMarkers,
     /// Filled radar (`c:radarChart` with `radarStyle val="filled"`): each series is a filled polygon.
     RadarFilled,
     Histogram,
