@@ -3,6 +3,7 @@
 //! - "Radar with Markers": no `c:marker` on the series -> Excel draws a marker at every data point;
 //! - "Radar": every series has `<c:marker><c:symbol val="none"/></c:marker>` -> lines only, and Excel keeps the
 //!   `symbol none` when it saves.
+//!
 //! Measured in Excel: a 3-series x 5-category "Radar with Markers" prints 15 markers; the plain radar prints none.
 
 use std::io::{Read, Write};
