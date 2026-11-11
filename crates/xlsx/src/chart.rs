@@ -425,6 +425,20 @@ fn read_print_settings(ps: &El) -> gridcraft_model::ChartPrintSettings {
     gridcraft_model::ChartPrintSettings { header_footer, margins, page_setup }
 }
 
+/// Puts `c:printSettings` just before the closing `</c:chartSpace>`: it follows `c:chart`
+/// (CT_ChartSpace order, §21.2.2.29). Nothing is written for a chart that had none.
+fn insert_print_settings(s: &mut String, ps: Option<&gridcraft_model::ChartPrintSettings>) {
+    const CLOSE: &str = "</c:chartSpace>";
+    if let Some(ps) = ps
+        && let Some(body) = s.strip_suffix(CLOSE)
+    {
+        let len = body.len();
+        s.truncate(len);
+        write_print_settings(s, ps);
+        s.push_str(CLOSE);
+    }
+}
+
 /// A margin as Excel writes it: 15 significant digits when they give the value back, else 17
 /// (so `0.7` stays `0.7` and `0.75000000000000033` stays as read).
 fn margin_num(n: f64) -> String {
@@ -1707,15 +1721,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
         let _ = write!(s, "<c:legend><c:legendPos val=\"{p}\"/><c:overlay val=\"0\"/></c:legend>");
     }
     s.push_str("<c:plotVisOnly val=\"1\"/><c:dispBlanksAs val=\"gap\"/></c:chart></c:chartSpace>");
-    // c:printSettings follows c:chart (CT_ChartSpace order, §21.2.2.29).
-    const CLOSE: &str = "</c:chartSpace>";
-    if let Some(ps) = &ch.print_settings
-        && s.ends_with(CLOSE)
-    {
-        s.truncate(s.len() - CLOSE.len());
-        write_print_settings(&mut s, ps);
-        s.push_str(CLOSE);
-    }
+    insert_print_settings(&mut s, ch.print_settings.as_ref());
     s
 }
 
