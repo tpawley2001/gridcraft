@@ -7,6 +7,7 @@ use crate::*;
 
 mod axis_options;
 mod budget;
+mod cat_label_skip;
 mod data_table;
 mod of_pie;
 mod pie_explosion;

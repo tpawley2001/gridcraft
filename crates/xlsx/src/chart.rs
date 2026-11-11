@@ -368,6 +368,8 @@ pub fn read_chart(root: &El) -> Option<Chart> {
             y: y_ax.map(read_scale).unwrap_or_default(),
             cat_crosses: if scatter { AxisCrosses::AutoZero } else { cat_ax.map(read_crosses).unwrap_or_default() },
             date_axis: if scatter { None } else { cat_ax.filter(|a| a.name == "dateAx").map(read_date_axis) },
+            tick_label_skip: None,
+            tick_mark_skip: None,
         },
         view_3d: if groups.len() == 1 { read_3d(chart, plot, first) } else { None },
     })
