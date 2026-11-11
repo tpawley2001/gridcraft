@@ -638,7 +638,17 @@ fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut O
     if let Some(af) = &sheet.autofilter
         && !sheet.tables.iter().any(|t| t.range.intersects(&af.range))
     {
-        s.push_str(&autofilter_xml(af.range, &af.criteria, out));
+        let mut xml = autofilter_xml(af.range, &af.criteria, out);
+        // A sort kept inside the AutoFilter only while that filter still covers the same range.
+        if let Some(sort) = sheet.sort_state.as_ref().filter(|t| t.in_autofilter && t.table_range == af.range) {
+            let sort = crate::table_sort::sort_state_xml(sort, out);
+            xml = crate::table_sort::nest_in_autofilter(&xml, &sort);
+        }
+        s.push_str(&xml);
+    }
+    // sortState as a direct child of <worksheet> (CT_Worksheet: after autoFilter).
+    if let Some(sort) = sheet.sort_state.as_ref().filter(|t| !t.in_autofilter) {
+        s.push_str(&crate::table_sort::sort_state_xml(sort, out));
     }
     let custom_views_at = s.len();
     if !sheet.merges.is_empty() {
