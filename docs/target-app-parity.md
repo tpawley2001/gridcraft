@@ -12,7 +12,6 @@ generated ribbon checklist is [`parity-checklist.md`](parity-checklist.md).
 
 | Number | Value | Kind |
 |---|---|---|
-| 2026-11-11 | minor | G0278: page layout, print, PDF: form controls with Print object on print with the sheet and extend the automatic print range; off leaves them out (no score change) |
 | Feature breadth (weighted by use) | **~75%** | estimated from the area table below; anchored on two measurements |
 | Ribbon and menu catalog | **285 / 300 (95.0%)** | measured: `cargo xtask parity` (`crates/engine/src/catalog.rs` ∩ registered command ids) |
 | Worksheet functions, by name | **513 / 523 (98.1%)** | measured: registered functions vs Microsoft's published function list (method below) |
@@ -335,6 +334,7 @@ The inventory carried over from the 2026-10-07 ROADMAP.md, updated for what land
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-11 | minor | G0278: page layout, print, PDF: form controls with Print object on print with the sheet and extend the automatic print range; off leaves them out (no score change) |
 | 2026-11-09 | minor | G0218: Review row lists Check Accessibility and opening password-encrypted `.xlsx` and `.xls` files; Missing now names saving with a password to open and RC4-encrypted `.xlsx`, as gaps.md §7 records. What-if row names the ToolPak tools that draw charts (no score change) |
 | 2026-11-09 | minor | Insert objects: shapes row now says over 20 Excel presets draw their own outline; Review row drops comment navigation and notes-to-comments conversion from Missing (no score change) |
 | 2026-11-09 | minor | G0213: File formats note now lists `.xls`/`.xlsb` formula and formatting import, XML Spreadsheet 2003 import and SYLK/DIF read/write, as in file-format-parity.md (no score change) |
