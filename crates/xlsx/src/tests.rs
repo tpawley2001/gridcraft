@@ -18,6 +18,7 @@ mod chart_bool_default;
 mod chart_combo_kinds;
 mod chart_combo_pie_doughnut;
 mod chart_data_table;
+mod chart_date_axis;
 mod chart_of_pie;
 mod chart_pie_explosion;
 mod chart_ref_offsets;

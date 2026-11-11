@@ -972,12 +972,72 @@ pub struct ChartScale {
     /// Where a category chart's category axis crosses the value axis (a value).
     #[serde(default, skip_serializing_if = "AxisCrosses::is_auto")]
     pub cat_crosses: AxisCrosses,
+    /// The primary category axis is a date axis (`c:dateAx`, ECMA-376 Part 1 §21.2.2) with these
+    /// options; `None` for a text (category) axis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date_axis: Option<DateAxis>,
 }
 
 impl ChartScale {
     pub fn is_auto(&self) -> bool {
-        self.x.is_auto() && self.y.is_auto() && self.cat_crosses.is_auto()
+        self.x.is_auto() && self.y.is_auto() && self.cat_crosses.is_auto() && self.date_axis.is_none()
     }
+}
+
+/// A time unit of a date axis (ST_TimeUnit, ECMA-376 Part 1 §21.2.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TimeUnit {
+    Days,
+    Months,
+    Years,
+}
+
+impl TimeUnit {
+    /// The ST_TimeUnit token (`days`, `months`, `years`).
+    pub fn token(self) -> &'static str {
+        match self {
+            TimeUnit::Days => "days",
+            TimeUnit::Months => "months",
+            TimeUnit::Years => "years",
+        }
+    }
+
+    /// Parses an ST_TimeUnit token; anything else is `None`.
+    pub fn from_token(s: &str) -> Option<TimeUnit> {
+        match s.trim() {
+            "days" => Some(TimeUnit::Days),
+            "months" => Some(TimeUnit::Months),
+            "years" => Some(TimeUnit::Years),
+            _ => None,
+        }
+    }
+}
+
+/// A date axis's options (CT_DateAx): automatic axis type, base/major/minor time units, its major
+/// and minor units (positive) and its bounds (date serials, `min` below `max`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DateAxis {
+    /// `c:auto`: Excel picks the axis type from the data.
+    #[serde(default)]
+    pub auto: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_time_unit: Option<TimeUnit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub major_unit: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub major_time_unit: Option<TimeUnit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minor_unit: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minor_time_unit: Option<TimeUnit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+    /// The file's axis ids (`c:axId` of the date axis, and of the value axis it crosses), kept on
+    /// save as Excel does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub axis_ids: Option<(u32, u32)>,
 }
 
 /// A drawing object's click hyperlink (DrawingML `a:hlinkClick`).

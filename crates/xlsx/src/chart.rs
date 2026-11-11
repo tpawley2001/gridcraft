@@ -6,8 +6,8 @@ use std::fmt::Write as _;
 use gridcraft_core::{RangeRef, Value, category_levels};
 use gridcraft_formula::{Expr, SheetSel};
 use gridcraft_model::{
-    AxisCrosses, AxisScale, Chart, Chart3d, ChartKind, ChartScale, Color, DefinedName, DisplayUnit, DisplayUnits, LegendPos, LineDash, OfPie,
-    OfPieSplit, Series, Trendline, TrendlineKind, Workbook,
+    AxisCrosses, AxisScale, Chart, Chart3d, ChartKind, ChartScale, Color, DateAxis, DefinedName, DisplayUnit, DisplayUnits, LegendPos, LineDash,
+    OfPie, OfPieSplit, Series, TimeUnit, Trendline, TrendlineKind, Workbook,
 };
 
 use crate::drawing::{dml_color, srgb};
@@ -367,6 +367,7 @@ pub fn read_chart(root: &El) -> Option<Chart> {
             x: if scatter { x_ax.map(read_scale).unwrap_or_default() } else { AxisScale::default() },
             y: y_ax.map(read_scale).unwrap_or_default(),
             cat_crosses: if scatter { AxisCrosses::AutoZero } else { cat_ax.map(read_crosses).unwrap_or_default() },
+            date_axis: if scatter { None } else { cat_ax.filter(|a| a.name == "dateAx").map(read_date_axis) },
         },
         view_3d: if groups.len() == 1 { read_3d(chart, plot, first) } else { None },
     })
@@ -422,6 +423,38 @@ fn read_scale(ax: &El) -> AxisScale {
         s.max = None;
     }
     s
+}
+
+/// A `c:dateAx`'s options (CT_DateAx, §21.2.2): values that aren't finite, units not above zero
+/// and unknown time units are dropped; a minimum not below the maximum drops both.
+fn read_date_axis(ax: &El) -> DateAxis {
+    let num = |e: Option<&El>| e.and_then(|e| e.attr("val")).and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite());
+    let unit = |tag: &str| ax.child_val(tag).and_then(TimeUnit::from_token);
+    let scaling = ax.child("scaling");
+    let mut d = DateAxis {
+        auto: bool_val(ax, "auto"),
+        base_time_unit: unit("baseTimeUnit"),
+        major_unit: num(ax.child("majorUnit")).filter(|u| *u > 0.0),
+        major_time_unit: unit("majorTimeUnit"),
+        minor_unit: num(ax.child("minorUnit")).filter(|u| *u > 0.0),
+        minor_time_unit: unit("minorTimeUnit"),
+        min: num(scaling.and_then(|x| x.child("min"))),
+        max: num(scaling.and_then(|x| x.child("max"))),
+        axis_ids: None,
+    };
+    let id = |tag: &str| ax.child_val(tag).and_then(|v| v.trim().parse::<u32>().ok()).filter(|v| *v != 0);
+    if let (Some(a), Some(b)) = (id("axId"), id("crossAx"))
+        && a != b
+    {
+        d.axis_ids = Some((a, b));
+    }
+    if let (Some(lo), Some(hi)) = (d.min, d.max)
+        && lo >= hi
+    {
+        d.min = None;
+        d.max = None;
+    }
+    d
 }
 
 /// Where an axis element crosses its `c:crossAx` (§21.2.2 `crosses` / `crossesAt`), in that
@@ -1075,16 +1108,37 @@ struct Ax<'a> {
     scale: AxisScale,
     /// `c:crossBetween val="midCat"` (surface charts) instead of `between`.
     mid_cat: bool,
+    /// A category axis written as `c:dateAx` with these options.
+    date: Option<DateAxis>,
 }
 
 fn axis_xml(a: &Ax<'_>) -> String {
+    let date = a.date.filter(|_| a.cat);
+    let scaling = match date {
+        Some(d) => {
+            // The bounds of a date axis are date serials, written like a value axis's.
+            let (min, max) = match (d.min, d.max) {
+                (Some(lo), Some(hi)) if lo >= hi => (None, None),
+                b => b,
+            };
+            let sc = AxisScale { min, max, log_base: None, ..a.scale };
+            scaling_xml(&sc, false)
+        }
+        None => scaling_xml(&a.scale, a.cat),
+    };
     let mut s = format!(
         "<c:{0}><c:axId val=\"{1}\"/><c:scaling>{4}</c:scaling><c:delete val=\"{2}\"/><c:axPos val=\"{3}\"/>",
-        if a.cat { "catAx" } else { "valAx" },
+        if date.is_some() {
+            "dateAx"
+        } else if a.cat {
+            "catAx"
+        } else {
+            "valAx"
+        },
         a.id,
         a.delete as u8,
         a.pos,
-        scaling_xml(&a.scale, a.cat),
+        scaling,
     );
     if a.grid {
         s.push_str("<c:majorGridlines/>");
@@ -1108,7 +1162,26 @@ fn axis_xml(a: &Ax<'_>) -> String {
         AxisCrosses::Max => s.push_str("<c:crosses val=\"max\"/>"),
         AxisCrosses::AutoZero | AxisCrosses::At(_) => s.push_str("<c:crosses val=\"autoZero\"/>"),
     }
-    if a.cat {
+    if let Some(d) = date {
+        // CT_DateAx has no lblAlgn / noMultiLvlLbl.
+        let _ = write!(s, "<c:auto val=\"{}\"/><c:lblOffset val=\"100\"/>", d.auto as u8);
+        let unit = |s: &mut String, tag: &str, u: Option<TimeUnit>| {
+            if let Some(u) = u {
+                let _ = write!(s, "<c:{tag} val=\"{}\"/>", u.token());
+            }
+        };
+        let num = |s: &mut String, tag: &str, v: Option<f64>| {
+            if let Some(v) = v.filter(|v| v.is_finite() && *v > 0.0) {
+                let _ = write!(s, "<c:{tag} val=\"{}\"/>", crate::xml::num(v));
+            }
+        };
+        unit(&mut s, "baseTimeUnit", d.base_time_unit);
+        num(&mut s, "majorUnit", d.major_unit);
+        unit(&mut s, "majorTimeUnit", d.major_time_unit);
+        num(&mut s, "minorUnit", d.minor_unit);
+        unit(&mut s, "minorTimeUnit", d.minor_time_unit);
+        s.push_str("</c:dateAx>");
+    } else if a.cat {
         s.push_str("<c:auto val=\"1\"/><c:lblAlgn val=\"ctr\"/><c:lblOffset val=\"100\"/><c:noMultiLvlLbl val=\"0\"/></c:catAx>");
     } else {
         let _ = write!(s, "<c:crossBetween val=\"{}\"/>", if a.mid_cat { "midCat" } else { "between" });
@@ -1202,6 +1275,15 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
     if let Some(v) = three_d {
         s.push_str(&view_3d_xml(v));
     }
+    // The primary category/value axis ids: a date axis keeps the file's, unless they would clash
+    // with the ids written for the secondary (3, 4) or series axes (3-D and surface charts keep 1, 2).
+    let (p1, p2) = ch
+        .scale
+        .date_axis
+        .and_then(|d| d.axis_ids)
+        .filter(|_| three_d.is_none() && surface.is_none())
+        .filter(|(a, b)| a != b && ![0, 3, 4, SER_AX].contains(a) && ![0, 3, 4, SER_AX].contains(b))
+        .unwrap_or((1, 2));
     s.push_str("<c:plotArea><c:layout/>");
     let all: Vec<(usize, &Series)> = ch.series.iter().enumerate().collect();
     let primary_g;
@@ -1231,13 +1313,13 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
         if all_round {
             for g in &rounds {
                 let group: Vec<(usize, &Series)> = all.iter().filter(|(i, x)| round(*i, x) == Some(*g)).copied().collect();
-                s.push_str(&group_xml(*g, &group, ch, (1, 2), wb, si));
+                s.push_str(&group_xml(*g, &group, ch, (p1, p2), wb, si));
             }
         } else if !bars.is_empty() || (lines.is_empty() && sec.is_empty()) {
-            s.push_str(&group_xml(primary_g, &bars, ch, (1, 2), wb, si));
+            s.push_str(&group_xml(primary_g, &bars, ch, (p1, p2), wb, si));
         }
         if !lines.is_empty() {
-            s.push_str(&group_xml(G::Line { stacked: false, markers: false }, &lines, ch, (1, 2), wb, si));
+            s.push_str(&group_xml(G::Line { stacked: false, markers: false }, &lines, ch, (p1, p2), wb, si));
         }
         if !sec.is_empty() {
             let g = match sec.first().and_then(|(_, x)| x.kind).map(group_for) {
@@ -1255,7 +1337,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
         };
         match three_d.and_then(|v| group_3d_xml(primary_g, v, &all, ch, wb, si)) {
             Some(x) => s.push_str(&x),
-            None => s.push_str(&group_xml(primary_g, &all, ch, (1, 2), wb, si)),
+            None => s.push_str(&group_xml(primary_g, &all, ch, (p1, p2), wb, si)),
         }
     }
     match primary_g {
@@ -1273,6 +1355,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 crosses: AxisCrosses::AutoZero,
                 scale: ch.scale.x,
                 mid_cat: false,
+                date: None,
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
@@ -1286,13 +1369,14 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 crosses: AxisCrosses::AutoZero,
                 scale: ch.scale.y,
                 mid_cat: false,
+                date: None,
             }));
         }
         G::Bar { bar: true, .. } => {
             s.push_str(&axis_xml(&Ax {
                 cat: true,
-                id: 1,
-                cross: 2,
+                id: p1,
+                cross: p2,
                 pos: "l",
                 delete: false,
                 grid: false,
@@ -1301,11 +1385,12 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 crosses: ch.scale.cat_crosses,
                 scale: AxisScale::default(),
                 mid_cat: false,
+                date: ch.scale.date_axis,
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
-                id: 2,
-                cross: 1,
+                id: p2,
+                cross: p1,
                 pos: "b",
                 delete: false,
                 grid: ch.gridlines,
@@ -1314,13 +1399,14 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 crosses: AxisCrosses::AutoZero,
                 scale: ch.scale.y,
                 mid_cat: false,
+                date: None,
             }));
         }
         _ => {
             s.push_str(&axis_xml(&Ax {
                 cat: true,
-                id: 1,
-                cross: 2,
+                id: p1,
+                cross: p2,
                 pos: "b",
                 delete: false,
                 grid: false,
@@ -1329,11 +1415,12 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 crosses: ch.scale.cat_crosses,
                 scale: AxisScale::default(),
                 mid_cat: false,
+                date: ch.scale.date_axis,
             }));
             s.push_str(&axis_xml(&Ax {
                 cat: false,
-                id: 2,
-                cross: 1,
+                id: p2,
+                cross: p1,
                 pos: "l",
                 delete: false,
                 grid: ch.gridlines,
@@ -1342,6 +1429,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
                 crosses: AxisCrosses::AutoZero,
                 scale: ch.scale.y,
                 mid_cat: surface.is_some(),
+                date: None,
             }));
             if surface.is_some() {
                 s.push_str(&ser_axis_xml());
@@ -1364,6 +1452,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
             crosses: AxisCrosses::AutoZero,
             scale: AxisScale::default(),
             mid_cat: false,
+            date: None,
         }));
         s.push_str(&axis_xml(&Ax {
             cat: false,
@@ -1377,6 +1466,7 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart, book_name: &str) -> Str
             crosses: AxisCrosses::AutoZero,
             scale: AxisScale::default(),
             mid_cat: false,
+            date: None,
         }));
     }
     if let Some(t) = &ch.data_table {
