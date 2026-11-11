@@ -149,17 +149,19 @@ fn vh_lookup(args: &[Arg], vertical: bool) -> R<Value> {
     let approx = opt_bool(args, 3, true)?;
     // Invalid index values become #REF! after the other argument errors are checked.
     let idx = num(args, 2).map_err(|_| CellError::Ref)?;
-    // NaN too: it would pass `idx < 1.0` and become index 0 (#2163).
-    if idx.is_nan() || idx < 1.0 {
-        return Err(CellError::Value);
-    }
+    // NaN too: it would pass `idx < 1.0` and become index 0 (#2163). Excel searches before it
+    // rejects an index below 1: a value that is not found gives #N/A whatever the index.
+    let below_one = idx.is_nan() || idx < 1.0;
     let idx = (idx.trunc() as usize).saturating_sub(1);
     let (keys, len) = if vertical { (column(&table, 0), table.cols) } else { (row(&table, 0), table.rows) };
-    if idx >= len {
+    if !below_one && idx >= len {
         return Err(CellError::Ref);
     }
     let pos = if approx { bsearch_last(&x, &keys, false) } else { find_exact(&x, &keys, true, false) };
     let pos = pos.ok_or(CellError::NA)?;
+    if below_one {
+        return Err(CellError::Value);
+    }
     let v = if vertical { table.get(pos, idx) } else { table.get(idx, pos) };
     Ok(cell_result(v.cloned().unwrap_or(Value::Empty)))
 }
@@ -628,7 +630,10 @@ mod tests {
             }
             is_text(ev(name, vec![n(0.0), rf(table.clone()), t("2"), b(false)]), "found");
             is_err(ev(name, vec![n(0.0), rf(table.clone()), empty(), b(true)]), CellError::Value);
-            is_err(ev(name, vec![n(0.0), rf(table), n(3.0), b(true)]), CellError::Ref);
+            is_err(ev(name, vec![n(0.0), rf(table.clone()), n(3.0), b(true)]), CellError::Ref);
+            // Not found wins over an index below 1.
+            is_err(ev(name, vec![n(-5.0), rf(table.clone()), n(0.0), b(true)]), CellError::NA);
+            is_err(ev(name, vec![n(7.0), rf(table), n(-2.0), b(false)]), CellError::NA);
         }
     }
 
