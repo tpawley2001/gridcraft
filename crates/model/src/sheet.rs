@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::cell::{Cell, CellPicture};
 use crate::features::{
     Anchor, AutoFilter, Chart, Comment, CondFormat, FormControl, Hyperlink, Image, LineInfo, ObjKind, ObjRef, PivotTable, PrintSettings, Shape,
-    ShapeKind, SheetProtection, Slicer, Sparkline, Table, Validation,
+    ShapeKind, SheetProtection, Slicer, Sparkline, Table, TableSort, Validation,
 };
 use crate::store::CellStore;
 use crate::style::{Color, StyleId};
@@ -151,6 +151,9 @@ pub struct Sheet {
     pub validation_settings: ValidationSettings,
     pub tables: Vec<Table>,
     pub autofilter: Option<AutoFilter>,
+    /// The sheet's saved sort settings (`<sortState>`), kept for the round trip.
+    #[serde(default)]
+    pub sort_state: Option<TableSort>,
     #[serde(with = "crate::cellmap")]
     pub comments: BTreeMap<CellRef, Comment>,
     #[serde(with = "crate::cellmap")]
@@ -252,6 +255,7 @@ impl Sheet {
             validation_settings: ValidationSettings::default(),
             tables: vec![],
             autofilter: None,
+            sort_state: None,
             comments: BTreeMap::new(),
             hyperlinks: BTreeMap::new(),
             charts: vec![],

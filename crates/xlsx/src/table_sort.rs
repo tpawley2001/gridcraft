@@ -18,6 +18,12 @@ pub(crate) fn read_table_sort(cx: &mut Ctx<'_>, x: &El, table_range: RangeRef) -
         Some(e) => (e, false),
         None => (x.child("autoFilter")?.child("sortState")?, true),
     };
+    read_sort_state(cx, e, table_range, in_autofilter)
+}
+
+/// Reads the `<sortState>` element `e` whose owner (table, sheet AutoFilter or the sort state
+/// itself) covers `owner_range`; `in_autofilter` says whether it sat inside an `<autoFilter>`.
+pub(crate) fn read_sort_state(cx: &mut Ctx<'_>, e: &El, owner_range: RangeRef, in_autofilter: bool) -> Option<TableSort> {
     let Some(range) = e.attr("ref").and_then(RangeRef::parse) else {
         cx.warn("a table's sort settings have no valid range and were dropped");
         return None;
@@ -55,7 +61,7 @@ pub(crate) fn read_table_sort(cx: &mut Ctx<'_>, x: &El, table_range: RangeRef) -
     }
     Some(TableSort {
         range,
-        table_range,
+        table_range: owner_range,
         in_autofilter,
         column_sort: e.flag("columnSort", false),
         case_sensitive: e.flag("caseSensitive", false),

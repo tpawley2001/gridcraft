@@ -260,7 +260,24 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
                 }
             }
             "hyperlinks" => read_hyperlinks(cx, name, e, &rels, &mut sheet, &mut link_budget),
-            "autoFilter" => sheet.autofilter = read_autofilter(cx, e),
+            "autoFilter" => {
+                sheet.autofilter = read_autofilter(cx, e);
+                // A sortState directly under <worksheet> wins over one nested in the AutoFilter.
+                if sheet.sort_state.is_none()
+                    && let Some(sort) = e.child("sortState")
+                    && let Some(af_range) = e.attr("ref").and_then(RangeRef::parse)
+                {
+                    sheet.sort_state = crate::table_sort::read_sort_state(cx, sort, af_range, true);
+                }
+            }
+            "sortState" => match e.attr("ref").and_then(RangeRef::parse) {
+                Some(r) => {
+                    if let Some(sort) = crate::table_sort::read_sort_state(cx, e, r, false) {
+                        sheet.sort_state = Some(sort);
+                    }
+                }
+                None => cx.warn("a sheet's sort settings have no valid range and were dropped"),
+            },
             "printOptions" => {
                 sheet.print.gridlines = e.flag("gridLines", false);
                 sheet.print.headings = e.flag("headings", false);
