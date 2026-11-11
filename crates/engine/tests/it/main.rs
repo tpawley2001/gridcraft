@@ -31,6 +31,7 @@ mod data_table_shift;
 mod drawing_alt_text;
 mod drawing_print_object;
 mod dynamicmetadata;
+mod error_precedence;
 mod extreme_selection_moves;
 mod fill_multi_area;
 mod find_notes_comments;
