@@ -17,6 +17,21 @@ const MAX_ITERATION_WORK: usize = 10_000_000;
 /// A block's results by last row: its sum and count, or `None` when it can't be summed from constants.
 type BlockSums = std::collections::BTreeMap<u32, Option<(f64, u64)>>;
 
+/// Whether `expr` calls a cube function anywhere. Without a cube connection such a formula keeps
+/// the value it shows (see `PassHost::compute`).
+fn calls_cube(expr: &Expr) -> bool {
+    let mut found = false;
+    expr.walk(&mut |e| {
+        if let Expr::Call(name, _) = e {
+            found |= matches!(
+                name.to_ascii_uppercase().as_str(),
+                "CUBEKPIMEMBER" | "CUBEMEMBER" | "CUBEMEMBERPROPERTY" | "CUBERANKEDMEMBER" | "CUBESET" | "CUBESETCOUNT" | "CUBEVALUE"
+            );
+        }
+    });
+    found
+}
+
 pub(super) struct PassHost<'a> {
     wb: &'a Workbook,
     exprs: &'a HashMap<Key, std::sync::Arc<Expr>>,
@@ -328,7 +343,14 @@ impl PassHost<'_> {
         self.stack.push(k);
         let expr = std::sync::Arc::clone(expr);
         let outer_out_of_stack = std::mem::replace(&mut self.out_of_stack, false);
-        let v = {
+        let v = if calls_cube(&expr) {
+            // No cube (OLAP) connection: the formula keeps the value it shows, as in Excel;
+            // a formula with nothing to keep (just entered) is #N/A.
+            match self.wb.sheet(k.0).map(|s| s.value(k.1)).unwrap_or_default() {
+                Value::Empty => Value::Error(CellError::NA),
+                shown => shown,
+            }
+        } else {
             let mut ev = Evaluator::new(self, k.0, k.1);
             ev.value(&expr)
         };
