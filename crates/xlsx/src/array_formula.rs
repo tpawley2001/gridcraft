@@ -13,8 +13,10 @@
 //! A range is harmless in SUM, but not in SQRT or arithmetic: `SUM(A1:A3*B1:B3)` intersects both
 //! operands. Legacy array-aware parameters such as SUMPRODUCT's evaluate what is inside as
 //! arrays, so nothing there is intersected, except IF's condition and IFERROR's and IFNA's
-//! arguments ([`Param::Single`]). This is file-format policy, not a second evaluator: unknown
-//! results are never calculated.
+//! arguments ([`Param::Single`]). Two kinds of array are reduced to their first element with
+//! `@`: the condition of an IF whose result is one value, and an array constant as a lookup
+//! value. This is file-format policy, not a second evaluator: unknown results are never
+//! calculated.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -316,6 +318,9 @@ struct Legacy<'a> {
     discarded: bool,
     /// Analysing a union that is a function's single-value argument (see [`Legacy::expr`]).
     union_arg: bool,
+    /// Analysing an argument that legacy Excel reduces to its first value when it is an array
+    /// (see [`Legacy::call`]).
+    first_of_array: bool,
     /// The kind of the whole formula, before any whole-formula `@`.
     top: Kind,
 }
@@ -343,6 +348,7 @@ impl<'a> Legacy<'a> {
             foreign: false,
             discarded: false,
             union_arg: false,
+            first_of_array: false,
             top: Kind::Scalar,
         }
     }
@@ -437,8 +443,17 @@ impl<'a> Legacy<'a> {
         // The flag reaches the union through parentheses and `@`, and not its operands.
         let union_arg = std::mem::take(&mut self.union_arg);
         self.union_arg = union_arg && matches!(e, Expr::Paren(_) | Expr::Unary(UnOp::At, _));
+        // The flag reaches the operand of an `@` the reader put on the argument.
+        let first_of_array = std::mem::take(&mut self.first_of_array);
+        self.first_of_array = first_of_array && matches!(e, Expr::Unary(UnOp::At, _));
         let (e, kind) = self.node(e, sheet, ctx, depth);
         self.union_arg = false;
+        self.first_of_array = false;
+        if first_of_array && ctx == Ctx::Value && kind == Kind::Array {
+            // Legacy Excel evaluates the argument once, with its first (top-left) value.
+            self.inserted += 1;
+            return (at(e), Kind::Scalar);
+        }
         if ctx == Ctx::Value && kind == Kind::Ref {
             if matches!(e, Expr::Binary(BinOp::Union, ..)) && !union_arg {
                 // A union, which only stands in parentheses, as an operand: Excel has no legacy
@@ -635,6 +650,18 @@ impl<'a> Legacy<'a> {
                 operand = x;
             }
             self.union_arg = arg_ctx == Ctx::Value && matches!(operand, Expr::Binary(BinOp::Union, ..));
+            // Value-class positions legacy Excel reduces to one value even when they hold an
+            // array ([MS-XLS] operand classes, observed): the condition of an IF whose result is
+            // itself one value (the cell's, or a single-value parameter's or operator's), and an
+            // array constant as a lookup value. Arrays elsewhere still lift the function.
+            self.first_of_array = !self.discarded
+                && arg_ctx == Ctx::Value
+                && i == 0
+                && match name.as_str() {
+                    "IF" => ctx == Ctx::Value,
+                    "VLOOKUP" | "HLOOKUP" | "MATCH" | "LOOKUP" => matches!(operand, Expr::Array(_)),
+                    _ => false,
+                };
             let (arg, kind) = self.expr(arg, sheet, arg_ctx, depth);
             // A value parameter given several values evaluates the function once per value.
             lifted |= match param {
