@@ -45,13 +45,19 @@ enum BarShape {
 
 impl BarShape {
     fn parse(s: Option<&str>) -> Self {
+        s.and_then(Self::known).unwrap_or(Self::Box)
+    }
+
+    /// The shape `s` names, or `None` when it names none.
+    fn known(s: &str) -> Option<Self> {
         match s {
-            Some("cylinder") => Self::Cylinder,
-            Some("cone") => Self::Cone,
-            Some("coneToMax") => Self::ConeToMax,
-            Some("pyramid") => Self::Pyramid,
-            Some("pyramidToMax") => Self::PyramidToMax,
-            _ => Self::Box,
+            "box" => Some(Self::Box),
+            "cylinder" => Some(Self::Cylinder),
+            "cone" => Some(Self::Cone),
+            "coneToMax" => Some(Self::ConeToMax),
+            "pyramid" => Some(Self::Pyramid),
+            "pyramidToMax" => Some(Self::PyramidToMax),
+            _ => None,
         }
     }
 }
@@ -441,7 +447,7 @@ pub(super) fn cartesian_3d(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area:
     let labels_on = chart.data_labels && ncat <= MAX_LABELS && nser.saturating_mul(ncat) <= MAX_LABELS * 4;
     match fam {
         Fam::Line | Fam::LineStack | Fam::Area | Fam::AreaStack | Fam::Area100 => surfaces(ctx, data, &lay, &spans, fam, labels_on),
-        _ => boxes(ctx, data, &lay, &spans, fam, nslots, labels_on),
+        _ => boxes(ctx, chart, data, &lay, &spans, fam, nslots, labels_on),
     }
 }
 
@@ -512,8 +518,8 @@ fn surfaces(ctx: &mut Ctx, data: &ChartData, lay: &Layout, spans: &[Vec<Option<(
 /// The footprint's scale at a segment's start `a` and end `z`: a cone or pyramid narrows to its
 /// apex at the segment's end; the `ToMax` kinds are slices of one solid from zero to the value
 /// axis end the segment points at.
-fn taper(lay: &Layout, a: f32, z: f32) -> (f32, f32) {
-    match lay.shape {
+fn taper(lay: &Layout, shape: BarShape, a: f32, z: f32) -> (f32, f32) {
+    match shape {
         BarShape::Box | BarShape::Cylinder => (1.0, 1.0),
         BarShape::Cone | BarShape::Pyramid => (1.0, 0.0),
         BarShape::ConeToMax | BarShape::PyramidToMax => {
@@ -526,23 +532,25 @@ fn taper(lay: &Layout, a: f32, z: f32) -> (f32, f32) {
     }
 }
 
-/// 3-D columns and bars: one box per value, drawn back to front.
-fn boxes(ctx: &mut Ctx, data: &ChartData, lay: &Layout, spans: &[Vec<Option<(f64, f64)>>], fam: Fam, nslots: usize, labels_on: bool) {
+/// 3-D columns and bars: one solid per value, drawn back to front. Each series is drawn with its
+/// own shape (`c:ser/c:shape`) when it names one, else with the group's.
+fn boxes(ctx: &mut Ctx, chart: &Chart, data: &ChartData, lay: &Layout, spans: &[Vec<Option<(f64, f64)>>], fam: Fam, nslots: usize, labels_on: bool) {
     let p = &lay.p;
     let bw = lay.cw / (nslots as f32 + 1.5);
-    let mut all: Vec<(Cuboid, usize, f64)> = Vec::new();
+    let mut all: Vec<(Cuboid, usize, f64, BarShape)> = Vec::new();
     for (i, s) in data.series.iter().enumerate() {
         let Some(row) = spans.get(i) else { continue };
+        let shape = chart.series.get(i).and_then(|m| m.bar_shape.as_deref()).and_then(BarShape::known).unwrap_or(lay.shape);
         let (w0, w1) = lay.row_w(lay.row_of(i));
         let k = if nslots > 1 { i as f32 } else { 0.0 };
         for (j, sp) in row.iter().enumerate() {
             let Some((lo, hi)) = sp else { continue };
             let u0 = j as f32 * lay.cw + (lay.cw - nslots as f32 * bw) / 2.0 + k * bw;
             let (a, z) = (lay.vpos(*lo), lay.vpos(*hi));
-            let (ka, kz) = taper(lay, a, z);
+            let (ka, kz) = taper(lay, shape, a, z);
             let (k0, k1) = if a <= z { (ka, kz) } else { (kz, ka) };
             let cub = Cuboid { u0, u1: u0 + bw, v0: a.min(z), v1: a.max(z), w0, w1, k0, k1, color: s.color };
-            all.push((cub, i, s.values.get(j).copied().flatten().unwrap_or(0.0)));
+            all.push((cub, i, s.values.get(j).copied().flatten().unwrap_or(0.0), shape));
         }
     }
     // Back to front: farther rows, then along the categories toward the visible side, then
@@ -553,13 +561,13 @@ fn boxes(ctx: &mut Ctx, data: &ChartData, lay: &Layout, spans: &[Vec<Option<(f64
             .then_with(|| if su >= 0.0 { a.u0.total_cmp(&b.u0) } else { b.u0.total_cmp(&a.u0) })
             .then_with(|| if sv >= 0.0 { a.v0.total_cmp(&b.v0) } else { b.v0.total_cmp(&a.v0) })
     });
-    for (cub, ..) in &all {
-        solid(ctx, p, cub, lay.shape);
+    for (cub, _, _, shape) in &all {
+        solid(ctx, p, cub, *shape);
     }
     if !labels_on {
         return;
     }
-    for (cub, i, val) in &all {
+    for (cub, i, val, _) in &all {
         let Some(s) = data.series.get(*i) else { continue };
         let t = Fmt::new(&s.number_format).format(*val, None);
         let um = (cub.u0 + cub.u1) / 2.0;
