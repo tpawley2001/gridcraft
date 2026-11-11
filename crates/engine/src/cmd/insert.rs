@@ -897,6 +897,8 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
         }
     });
     let chart = Chart {
+        rounded_corners: false,
+        lang: None,
         // A new pie of pie or bar of pie gets Excel's settings: auto split, gap 100, second plot 75%, series lines.
         of_pie: matches!(kind, ChartKind::PieOfPie | ChartKind::BarOfPie).then(gridcraft_model::OfPie::default),
         alt: String::new(),

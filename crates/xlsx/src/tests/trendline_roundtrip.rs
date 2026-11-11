@@ -35,6 +35,8 @@ fn all_trendlines() -> Vec<Trendline> {
 
 fn chart(id: u32, kind: ChartKind, trendlines: Vec<Trendline>) -> Chart {
     Chart {
+        rounded_corners: false,
+        lang: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,

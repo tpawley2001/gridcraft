@@ -211,6 +211,7 @@ Wrong checksums. In an intact `.xlsx`, `.xlsm`, `.xlsb` or `.ods` package, a par
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-11 | minor | G0293: `.xlsx` chart parts keep `c:roundedCorners` (was always written square) and `c:lang`, and write `c:date1904` matching the workbook's date system (`chart_space_settings.rs`). |
 | 2026-11-11 | minor | G0290: `.xls` charts whose group is a RadarArea record ([MS-XLS] 2.4.216) open as a filled radar and stay filled on Save As `.xlsx`, instead of a line radar (`xls_radar_area_tests.rs`). |
 | 2026-11-11 | minor | G0288: XLSX worksheet `<phoneticPr>` (ISO/IEC 29500-1 §18.4.3, the sheet's default furigana font, type and alignment) is read, stored on the sheet and written back after `<mergeCells>`, with `type`/`alignment` validated as for shared strings; a sheet without one gets none (`sheet_phonetic_pr_tests.rs`). |
 | 2026-11-11 | minor | G0285: chart sheets without an orientation print landscape, like Excel (no `<pageSetup>`, no `orientation`, no BrtCsPageSetup, no Setup record); a portrait chart sheet from `.xls`/`.xlsb` saves `orientation="portrait"` so it stays portrait (`chart_sheet_orientation.rs`, `chart_sheet_print_tests.rs`). |

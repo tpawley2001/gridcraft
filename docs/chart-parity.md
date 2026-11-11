@@ -102,6 +102,10 @@ qualifier: with a bare name in `<c:f>` it draws the whole chart blank, without a
 (observed in Excel for Windows, Microsoft 365). External books (`[1]Sheet1!…`) are kept as they
 are (#1686). Such series get no `numCache`/`strCache` on save (#1690).
 
+Chart-space settings kept on save: rounded chart-area corners (`c:roundedCorners`; an absent element
+means rounded, as Excel re-saves it), the editing language (`c:lang`) and `c:date1904` from the
+workbook's date system. Rounded corners are not drawn yet.
+
 ## Work (40–60 h)
 
 1. Preserve unmodelled chart XML on round-trip (keep the original part, patch only edited fields): 6–10 h.
@@ -115,6 +119,7 @@ are (#1686). Such series get no `numCache`/`strCache` on save (#1690).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-11 | minor | G0293: chart parts keep rounded chart-area corners (`c:roundedCorners`, absent = rounded, §21.2.2.156) and the editing language (`c:lang`) on open and save, and write `c:date1904` from the workbook's date system, in CT_ChartSpace order; new charts stay square-cornered. Corners not drawn yet (`chart_space_settings.rs`). |
 | 2026-11-11 | minor | G0291: radar with markers (`radarStyle val="marker"`, series without `c:marker`) opens as radar with markers, draws a marker on every data point and saves back unchanged; a plain radar (`symbol none` on every series, or `radarStyle val="standard"`) draws lines only and is saved with `<c:marker><c:symbol val="none"/></c:marker>` on every series, so Excel no longer shows markers on it; `insert.chart` takes `{"type":"radarMarkers"}`. Radar 3 of 3 subtypes. |
 | 2026-11-11 | minor | G0287: a category axis keeps its "Interval between labels" and "Interval between marks" (`c:tickLblSkip`, `c:tickMarkSkip`, 1–31999) on open and save, written after `c:lblOffset`; other values are dropped. 2-D column, line, area, bar and stock charts draw every n-th category label from the first instead of the automatic step. No readiness score change. |
 | 2026-11-11 | minor | G0281: a chart's primary category axis stored as `c:dateAx` is written back as `c:dateAx` (was `c:catAx`) with `auto`, base/major/minor time units, major/minor units, its scaling bounds and its axis ids, in CT_DateAx order and without `lblAlgn`/`noMultiLvlLbl`; invalid values are dropped. Points are still drawn evenly spaced. No readiness score change. |

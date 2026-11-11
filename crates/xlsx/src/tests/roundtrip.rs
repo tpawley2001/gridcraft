@@ -473,6 +473,8 @@ fn sample() -> Workbook {
         },
     });
     let base_chart = Chart {
+        rounded_corners: false,
+        lang: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,

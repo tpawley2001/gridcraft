@@ -64,6 +64,8 @@ fn chart_names_are_written_qualified() {
     let mut wb = Workbook::default();
     let mut s = Sheet::new("Data");
     s.charts.push(Chart {
+        rounded_corners: false,
+        lang: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,
@@ -159,6 +161,8 @@ fn chart_names_keep_spaces_around_a_quoted_sheet_name() {
     let mut wb = Workbook::default();
     let mut s = Sheet::new("Sales");
     s.charts.push(Chart {
+        rounded_corners: false,
+        lang: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,

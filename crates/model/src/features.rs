@@ -794,6 +794,13 @@ pub struct Chart {
     /// on screen but is left out of print, print preview and PDF export.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_print: bool,
+    /// Rounded chart-area corners (`c:roundedCorners`, ECMA-376 Part 1 §21.2.2.156). A chart part
+    /// without the element has rounded corners in Excel; new charts are square-cornered.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rounded_corners: bool,
+    /// The chart's editing language (`c:lang`, §21.2.2.82, e.g. `de-DE`), kept on save.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
     /// Alternative text (`xdr:cNvPr descr`); empty when the chart has none.
     #[serde(default)]
     pub alt: String,
@@ -1991,6 +1998,8 @@ mod tests {
     #[test]
     fn chart_without_hole_size_keeps_the_legacy_hole() {
         let chart = Chart {
+            rounded_corners: false,
+            lang: None,
             of_pie: None,
             alt: String::new(),
             theme_override: None,

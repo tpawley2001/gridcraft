@@ -30,6 +30,8 @@ fn shape(kind: ShapeKind, text: &str, alt: &str) -> Shape {
 
 fn waterfall(alt: &str) -> Chart {
     Chart {
+        rounded_corners: false,
+        lang: None,
         of_pie: None,
         theme_override: None,
         hidden: false,
