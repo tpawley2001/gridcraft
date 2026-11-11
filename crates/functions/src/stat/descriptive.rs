@@ -424,7 +424,11 @@ pub(super) fn percentrank_impl(a: &[Arg], exc: bool) -> R<Value> {
     } else {
         let lo = s.iter().copied().filter(|&y| y < x).fold(f64::NEG_INFINITY, f64::max);
         let hi = s.iter().copied().filter(|&y| y > x).fold(f64::INFINITY, f64::min);
-        let (rl, rh) = (rank_of(lo), rank_of(hi));
+        // Excel interpolates from the last occurrence of the lower value: its rank counts every
+        // value at or below it, while the upper value keeps the rank of its first occurrence.
+        let le = s.iter().filter(|&&y| y <= lo).count() as f64;
+        let rl = if exc { le / (n + 1.0) } else { (le - 1.0) / (n - 1.0) };
+        let rh = rank_of(hi);
         rl + (x - lo) / (hi - lo) * (rh - rl)
     };
     // From significance 15 up Excel returns 15 significant digits, rounded.

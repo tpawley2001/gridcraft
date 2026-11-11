@@ -247,7 +247,8 @@ fn parse_time(t: &str) -> Option<(f64, bool, bool)> {
     let mut h = plain_number(parts.first()?, false)?;
     let m = parts.get(1).map_or(Some(0.0), |p| plain_number(p, false))?;
     let s = parts.get(2).map_or(Some(0.0), |p| plain_number(p, true))?;
-    if m >= 60.0 || s >= 60.0 || h < 0.0 || m < 0.0 || s < 0.0 {
+    // A seconds field of 60 or more is accepted and carries over ("0:0:90" is 90 seconds).
+    if m >= 60.0 || h < 0.0 || m < 0.0 || s < 0.0 {
         return None;
     }
     if let Some(pm) = ampm {
@@ -425,6 +426,13 @@ mod tests {
         // Within the gate, times still work.
         assert_eq!(p("01:02:03").value, Value::number(3.0 / 86_400.0 + 1.0 / 24.0 + 2.0 / 1440.0));
         assert_eq!(parse_number_text("13:14:15"), Some(0.5515625));
+    }
+
+    #[test]
+    fn seconds_of_sixty_or_more_carry_over() {
+        assert_eq!(parse_number_text("0:0:90"), Some(90.0 / 86_400.0));
+        // The minutes field still stops at 59.
+        assert_eq!(parse_number_text("0:60:00"), None);
     }
 
     #[test]
