@@ -348,6 +348,11 @@ fn percentiles() {
     close(ev("PERCENTRANK.EXC", vec![e9.clone(), n(7.0)]), 0.7);
     close(ev("PERCENTRANK.EXC", vec![e9.clone(), n(5.43)]), 0.381);
     close(ev("PERCENTRANK.EXC", vec![e9, n(5.43), n(1.0)]), 0.3);
+    // Between two data values Excel interpolates from the last occurrence of the lower one.
+    let d = c(&[3.0, 5.0, 5.0, 8.0, 1.0, 9.0, 5.0, 2.0, 8.0, 4.0]);
+    close(ev("PERCENTRANK", vec![d.clone(), n(6.0)]), 0.703);
+    close(ev("PERCENTRANK.INC", vec![d.clone(), n(5.0)]), 0.444);
+    close(ev("PERCENTRANK.EXC", vec![d, n(6.0)]), 0.666);
     let t = c(&[1.0, 2.0, 3.0]);
     // Excel 16: significance 309 and up is #DIV/0!, 308 still works.
     for name in ["PERCENTRANK", "PERCENTRANK.INC", "PERCENTRANK.EXC"] {

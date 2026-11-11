@@ -53,6 +53,7 @@ mod long_operator_chains;
 mod ods_matrix_formulas;
 mod offset_overflow;
 mod outline_apply_styles;
+mod pctrank_timevalue;
 mod percent_entry;
 mod pivot_unknown_func;
 mod pivotchart_link;
