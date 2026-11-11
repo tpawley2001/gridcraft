@@ -659,6 +659,10 @@ fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut O
         }
         s.push_str("</mergeCells>");
     }
+    // phoneticPr (ISO/IEC 29500-1 §18.4.3): after mergeCells, before conditionalFormatting.
+    if let Some(pr) = &sheet.phonetic_props {
+        crate::xml::push_phonetic_pr(s, pr);
+    }
     // Conditional formats, priorities renumbered 1..n in priority order.
     let mut order: Vec<usize> = (0..sheet.cond_formats.len()).collect();
     order.sort_by_key(|&i| sheet.cond_formats.get(i).map(|c| c.priority).unwrap_or(0));

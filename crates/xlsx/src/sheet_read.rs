@@ -251,6 +251,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
                     }
                 }
             }
+            "phoneticPr" => sheet.phonetic_props = Some(crate::xml::phonetic_props(e)),
             "conditionalFormatting" => read_cf(cx, e, &mut sheet, &mut cf_kept_cells),
             "dataValidations" => {
                 sheet.validation_settings.disable_prompts = e.attr_bool("disablePrompts");

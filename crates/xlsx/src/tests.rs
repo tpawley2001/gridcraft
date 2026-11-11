@@ -83,6 +83,7 @@ mod shared_media;
 mod sheet_custom_properties;
 mod sheet_data_pin;
 mod sheet_names;
+mod sheet_phonetic_pr_tests;
 mod sheet_sort_state;
 mod signature_line_vml_tests;
 mod smartart_passthrough;
