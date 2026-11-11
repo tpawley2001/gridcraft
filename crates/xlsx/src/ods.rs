@@ -295,6 +295,9 @@ struct CellDraft {
     formula: bool,
     /// The `table:formula` text, when the cell has one.
     formula_text: Option<String>,
+    /// `table:number-matrix-columns-spanned` / `-rows-spanned` (columns, rows): the cell anchors
+    /// an array (matrix) formula over that range. `None` when neither attribute is present.
+    matrix: Option<(u32, u32)>,
     text: String,
     paragraph: Option<usize>,
     paragraphs: usize,
@@ -460,6 +463,13 @@ impl Import {
                     _ => b"value",
                 };
                 let formula_text = attr(reader, e, TABLE, b"formula")?;
+                let matrix_cols = attr(reader, e, TABLE, b"number-matrix-columns-spanned")?;
+                let matrix_rows = attr(reader, e, TABLE, b"number-matrix-rows-spanned")?;
+                let matrix = if matrix_cols.is_some() || matrix_rows.is_some() {
+                    Some((positive(matrix_cols, 1, MAX_COLS)?, positive(matrix_rows, 1, MAX_ROWS)?))
+                } else {
+                    None
+                };
                 self.cell = Some(CellDraft {
                     depth,
                     repeat: positive(attr(reader, e, TABLE, b"number-columns-repeated")?, 1, u32::MAX)?,
@@ -470,6 +480,7 @@ impl Import {
                     raw: attr(reader, e, OFFICE, key)?,
                     formula: formula_text.is_some(),
                     formula_text,
+                    matrix,
                     text: String::new(),
                     paragraph: None,
                     paragraphs: 0,
@@ -653,8 +664,26 @@ impl Import {
             .and_then(crate::ods_formula::to_excel)
             .map(|text| gridcraft_model::Formula::new(&text))
             .filter(|f| f.expr.is_some())
-            .map(Arc::new);
+            .map(|mut f| {
+                f.array = self.matrix_range(draft);
+                Arc::new(f)
+            });
         Cell { style, formula, ..Cell::value(value) }
+    }
+
+    /// The range of an array (matrix) formula anchored at the cell being read, clipped to the
+    /// sheet. Repeated cells or rows keep a plain formula: one range cannot cover every copy.
+    fn matrix_range(&self, draft: &CellDraft) -> Option<RangeRef> {
+        let (cols, rows) = draft.matrix?;
+        let row = self.row.as_ref().filter(|r| r.repeat == 1)?;
+        let sheet = self.sheet.as_ref()?;
+        if draft.repeat != 1 || draft.covered || row.col >= MAX_COLS || sheet.row >= MAX_ROWS {
+            return None;
+        }
+        let anchor = CellRef::new(sheet.row, row.col);
+        let last_col = row.col.saturating_add(cols.saturating_sub(1)).min(MAX_COLS - 1);
+        let last_row = sheet.row.saturating_add(rows.saturating_sub(1)).min(MAX_ROWS - 1);
+        Some(RangeRef::new(anchor, CellRef::new(last_row, last_col)))
     }
 
     /// Keeps a formula only where recalculating it can reproduce the saved result: functions this
@@ -663,6 +692,9 @@ impl Import {
         let names: Vec<String> = self.wb.names.iter().map(|n| n.name.to_ascii_uppercase()).collect();
         let renamed = self.renamed;
         let mut dropped = false;
+        let mut arrays: Vec<RangeRef> = Vec::new();
+        // Cells cleared inside array ranges, all sheets together (overlapping ranges repeat work).
+        let mut budget = MAX_CELLS;
         for sheet in &mut self.wb.sheets {
             let positions: Vec<CellRef> = sheet.cells.iter().filter(|(_, c)| c.formula.is_some()).map(|(p, _)| p).collect();
             for pos in positions {
@@ -673,6 +705,29 @@ impl Import {
                     let value = Cell { formula: None, ..cell.clone() };
                     Arc::make_mut(sheet).cells.set(pos, value);
                     dropped = true;
+                } else if let Some(range) = cell.formula.as_ref().and_then(|f| f.array).filter(|r| !r.is_single()) {
+                    arrays.push(range);
+                }
+            }
+            // The cached values inside a kept array formula's range give way to the formula, which
+            // fills them again (as the .xlsx reader does); a stored value there would block it.
+            for range in arrays.drain(..) {
+                let covered: Vec<CellRef> = sheet
+                    .cells
+                    .iter_range(range)
+                    .filter(|(p, c)| *p != range.start && c.formula.is_none())
+                    .take(usize::try_from(budget).unwrap_or(usize::MAX))
+                    .map(|(p, _)| p)
+                    .collect();
+                budget = budget.saturating_sub(covered.len() as u64);
+                for pos in covered {
+                    let Some(cell) = sheet.cells.get(pos) else { continue };
+                    let blank = Cell { style: cell.style, ..Cell::value(Value::Empty) };
+                    if blank.style == StyleId::DEFAULT {
+                        Arc::make_mut(sheet).cells.remove(pos);
+                    } else {
+                        Arc::make_mut(sheet).cells.set(pos, blank);
+                    }
                 }
             }
         }
