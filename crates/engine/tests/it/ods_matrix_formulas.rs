@@ -6,7 +6,7 @@
 
 use std::io::Write;
 
-use gridcraft_core::{CellRef, CellError, RangeRef, Value};
+use gridcraft_core::{CellError, CellRef, RangeRef, Value};
 use gridcraft_engine::{DocState, Session, io};
 use serde_json::json;
 
@@ -38,9 +38,7 @@ fn num(v: f64) -> String {
 
 /// A formula cell cached as 0; `matrix` = (columns, rows) spanned, if any.
 fn formula(f: &str, matrix: Option<(u32, u32)>) -> String {
-    let span = matrix.map_or(String::new(), |(c, r)| {
-        format!(r#" table:number-matrix-columns-spanned="{c}" table:number-matrix-rows-spanned="{r}""#)
-    });
+    let span = matrix.map_or(String::new(), |(c, r)| format!(r#" table:number-matrix-columns-spanned="{c}" table:number-matrix-rows-spanned="{r}""#));
     format!(r#"<table:table-cell table:formula="{f}"{span} office:value-type="float" office:value="0"/>"#)
 }
 
