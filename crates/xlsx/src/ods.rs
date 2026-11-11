@@ -121,6 +121,9 @@ pub fn read_ods_with(bytes: &[u8], known_function: &dyn Fn(&str) -> bool) -> Res
     if import.wb.sheets.is_empty() {
         return Err(IoError::Format("ODS contains no worksheets".into()));
     }
+    for part in package.checksum_failures() {
+        import.report.warn(crate::package::checksum_warning(part));
+    }
     Ok((import.wb, import.report))
 }
 

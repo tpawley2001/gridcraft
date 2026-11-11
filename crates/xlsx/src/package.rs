@@ -19,6 +19,11 @@ pub struct Package<'a> {
     /// Lower-case normalized part name → zip index (or index into the recovered parts).
     names: HashMap<String, usize>,
     total: u64,
+    /// Parts kept although their ZIP CRC-32 didn't match their data, in read order.
+    checksum_failures: Vec<String>,
+    /// The error of the failed read that ended the budget, when that (not an oversized part) is
+    /// why `total` is exhausted: later reads report it instead of a misleading package size.
+    failed: Option<String>,
 }
 
 enum Source<'a> {
@@ -55,7 +60,7 @@ impl<'a> Package<'a> {
                 names.entry(normalize(n)).or_insert(i);
             }
         }
-        Ok(Package { source: Source::Zip(zip), names, total: 0 })
+        Ok(Package { source: Source::Zip(zip), names, total: 0, checksum_failures: Vec::new(), failed: None })
     }
 
     /// [`Package::open`], and when the zip has no readable central directory (a truncated
@@ -71,9 +76,8 @@ impl<'a> Package<'a> {
     }
 
     /// Parts whose data was kept although their ZIP CRC-32 didn't match, in read order.
-    // TODO(P05-101): stub for the acceptance tests; record the parts as they are read.
     pub fn checksum_failures(&self) -> &[String] {
-        &[]
+        &self.checksum_failures
     }
 
     /// How many parts were recovered from local headers, when the package was repaired.
@@ -100,7 +104,7 @@ impl<'a> Package<'a> {
                 parts.push(data);
             }
         }
-        let mut pkg = Package { source: Source::Recovered(parts), names, total: 0 };
+        let mut pkg = Package { source: Source::Recovered(parts), names, total: 0, checksum_failures: Vec::new(), failed: None };
         // The essential parts: the content types and the workbook part the package names.
         let workbook = pkg.rels("").ok()?.into_iter().find(|r| r.kind == "officeDocument" && !r.external).map(|r| r.target);
         let workbook = workbook.unwrap_or_else(|| "xl/workbook.xml".into());
@@ -145,6 +149,10 @@ impl<'a> Package<'a> {
         let read = self.read_limited(part, maximum);
         if let Err(IoError::Zip(_)) = &read {
             self.total = before.saturating_add(maximum.min(MAX_PART).saturating_add(1)).min(MAX_TOTAL);
+            if before < MAX_TOTAL {
+                // The budget ends at this part's allowance, not at the failed read.
+                self.failed = None;
+            }
         }
         read
     }
@@ -171,6 +179,12 @@ impl<'a> Package<'a> {
                 return Ok(Some(data.clone()));
             }
         };
+        if self.total >= MAX_TOTAL
+            && let Some(failed) = &self.failed
+        {
+            // Nothing is decompressed: the budget went to a part whose data is broken.
+            return Err(IoError::Zip(format!("{part}: not read after a damaged part ({failed})")));
+        }
         let mut f = zip.by_index(idx).map_err(|e| IoError::Zip(format!("{part}: {e}")))?;
         if f.size() > maximum {
             return Err(IoError::TooLarge(format!("{part} expands to {} bytes", f.size())));
@@ -178,17 +192,33 @@ impl<'a> Package<'a> {
         let remaining = MAX_TOTAL.saturating_sub(self.total);
         let limit = maximum.min(remaining);
         let mut out = Vec::with_capacity(f.size().min(16 * 1024 * 1024) as usize);
-        let read = (&mut f).take(limit + 1).read_to_end(&mut out).map_err(|e| {
+        let read = (&mut f).take(limit + 1).read_to_end(&mut out);
+        // The zip reader checks the CRC-32 only once the whole stated size has been inflated. When
+        // that check is the only failure, the data is complete and its content is kept (Excel
+        // opens such a part too); the caller reports the damage from `checksum_failures`.
+        let read = match read {
+            Err(e) if is_checksum_error(&e) && out.len() as u64 == f.size() && out.len() as u64 <= limit => {
+                if !self.checksum_failures.iter().any(|p| p == part) {
+                    self.checksum_failures.push(part.to_string());
+                }
+                Ok(out.len())
+            }
+            other => other,
+        };
+        let read = read.map_err(|e| {
             // A read that fails partway has already spent decompression work and buffered data
             // the package budget never sees: count the allowance as spent, so a loop over many
             // broken parts can't decompress it over and over.
             self.total = MAX_TOTAL;
-            IoError::Zip(format!("{part}: {e}"))
+            let message = format!("{part}: {e}");
+            self.failed.get_or_insert_with(|| message.clone());
+            IoError::Zip(message)
         });
         if out.len() as u64 > limit {
             // The allowance was spent getting here; make the exhaustion terminal instead of
             // letting later reads pay the same decompression cost again.
             self.total = MAX_TOTAL;
+            self.failed = None;
             return Err(IoError::TooLarge(if remaining < maximum {
                 "package expands to more than 1 GB".into()
             } else {
@@ -246,6 +276,16 @@ impl<'a> Package<'a> {
 /// The load warning for a package opened by [`Package::open_repairing`] from `n` recovered parts.
 pub fn damaged_warning(n: usize) -> String {
     format!("The file was damaged (incomplete ZIP archive); {n} parts were recovered.")
+}
+
+/// The load warning for a part whose data was kept although its ZIP CRC-32 didn't match.
+pub fn checksum_warning(part: &str) -> String {
+    format!("The file was damaged: part '{part}' failed its checksum; its content was kept.")
+}
+
+/// Whether a read error is the zip reader's CRC-32 mismatch, reported after the data was read.
+fn is_checksum_error(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::InvalidData && e.to_string().contains("Invalid checksum")
 }
 
 /// The next entry at the cursor: `Some(Some((name, data)))` for a complete file,
@@ -371,14 +411,17 @@ mod tests {
     fn a_damaged_optional_part_costs_only_its_allowance() {
         use std::io::Write as _;
         let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-        w.start_file("a.xml", stored).unwrap();
+        // A deflated part whose compressed stream is broken (a wrong CRC alone is accepted).
+        let deflated = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        w.start_file("a.xml", deflated).unwrap();
         w.write_all(b"<a>damaged</a>").unwrap();
         w.start_file("b.xml", zip::write::SimpleFileOptions::default()).unwrap();
         w.write_all(b"hello").unwrap();
         let mut z = w.finish().unwrap().into_inner();
-        let at = z.windows(7).position(|x| x == b"damaged").unwrap();
-        z[at] ^= 0x20;
+        let data = 30 + usize::from(u16::from_le_bytes([z[26], z[27]])) + usize::from(u16::from_le_bytes([z[28], z[29]]));
+        for b in &mut z[data..data + 4] {
+            *b = 0xFF;
+        }
         let mut pkg = Package::open(&z).unwrap();
         assert!(matches!(pkg.read_optional_limited("a.xml", 1024), Err(IoError::Zip(_))));
         assert_eq!(pkg.total, 1025, "the failed read is charged its allowance");
@@ -386,6 +429,30 @@ mod tests {
         // An ordinary read of it still ends the package's budget.
         assert!(pkg.read("a.xml").is_err());
         assert_eq!(pkg.total, MAX_TOTAL);
+    }
+
+    /// After a part whose compressed data is broken ends the budget, later reads name that part
+    /// instead of claiming the (small) package expands past the limit.
+    #[test]
+    fn reads_after_a_broken_part_name_it() {
+        use std::io::Write as _;
+        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let deflated = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        w.start_file("a.xml", deflated).unwrap();
+        w.write_all(b"<a>broken</a>").unwrap();
+        w.start_file("b.xml", zip::write::SimpleFileOptions::default()).unwrap();
+        w.write_all(b"hello").unwrap();
+        let mut z = w.finish().unwrap().into_inner();
+        let data = 30 + usize::from(u16::from_le_bytes([z[26], z[27]])) + usize::from(u16::from_le_bytes([z[28], z[29]]));
+        for b in &mut z[data..data + 4] {
+            *b = 0xFF;
+        }
+        let mut pkg = Package::open(&z).unwrap();
+        assert!(matches!(pkg.read("a.xml"), Err(IoError::Zip(m)) if m.starts_with("a.xml: ")));
+        let later = pkg.read("b.xml").unwrap_err().to_string();
+        assert!(later.contains("a.xml") && !later.contains("1 GB"), "{later}");
+        assert_eq!(pkg.total, MAX_TOTAL, "the budget stays spent");
+        assert!(pkg.checksum_failures().is_empty());
     }
 
     /// Recovery from local headers stops at an entry written with a data descriptor (its size
