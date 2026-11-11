@@ -21,6 +21,7 @@ mod chart_data_table;
 mod chart_date_axis;
 mod chart_of_pie;
 mod chart_pie_explosion;
+mod chart_print_settings;
 mod chart_ref_offsets;
 mod chart_sheet_print_tests;
 mod chart_sheet_style_parts_tests;

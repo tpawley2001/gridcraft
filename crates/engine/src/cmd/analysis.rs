@@ -1969,6 +1969,7 @@ fn report_charts(s: &Session, p: &Json, tool: &str, sheet_name: &str, rect: Rang
         out.push(Chart {
             rounded_corners: false,
             lang: None,
+            print_settings: None,
             of_pie: None,
             alt: String::new(),
             id,

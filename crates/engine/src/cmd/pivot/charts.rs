@@ -53,6 +53,7 @@ pub(super) fn insert_pivot_chart(s: &mut Session, p: &Json) -> Result<Json> {
     let chart = Chart {
         rounded_corners: false,
         lang: None,
+        print_settings: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,

@@ -125,6 +125,7 @@ pub fn read_chartex(root: &El) -> Option<Chart> {
     Some(Chart {
         rounded_corners: false,
         lang: None,
+        print_settings: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,

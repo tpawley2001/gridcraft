@@ -66,6 +66,7 @@ fn chart_names_are_written_qualified() {
     s.charts.push(Chart {
         rounded_corners: false,
         lang: None,
+        print_settings: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,
@@ -163,6 +164,7 @@ fn chart_names_keep_spaces_around_a_quoted_sheet_name() {
     s.charts.push(Chart {
         rounded_corners: false,
         lang: None,
+        print_settings: None,
         of_pie: None,
         alt: String::new(),
         theme_override: None,
