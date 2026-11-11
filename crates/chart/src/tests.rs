@@ -538,6 +538,9 @@ fn axis_labels_use_number_format() {
     assert_eq!(format_number(40000.0, "$#,##0", Some(10000.0)), "$40,000");
     assert_eq!(format_number(0.30000000000000004, "General", Some(0.1)), "0.3");
     assert_eq!(format_number(1e-17, "General", Some(0.2)), "0");
+    // A step that is not a power-of-ten multiple keeps its decimals (major unit 2.5).
+    assert_eq!(format_number(7.5, "General", Some(2.5)), "7.5");
+    assert_eq!(format_number(10.0, "General", Some(2.5)), "10.0");
     let c = chart(ChartKind::ColumnClustered);
     let prims = render(&c, &sample(ChartKind::ColumnClustered), 640.0, 400.0, &ApproxMeasure);
     let t = texts(&prims);

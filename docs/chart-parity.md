@@ -21,6 +21,7 @@ Sources: `crates/model/src/features.rs` (`ChartKind`, `Chart`, `Series`), `crate
 
 | Excel type | Excel subtypes | GridCraft | Notes |
 |---|---|---|---|
+| 2026-11-11 | minor | G0295: radar value axes scale like Excel: the axis includes 0 and ends on the first step at or past the data maximum (no headroom), with the smallest 1-2-5 step whose rings are at least 1.1 ring-label heights apart; the chart's fixed minimum, maximum and major unit (`c:valAx/c:scaling`, `c:majorUnit`) are honoured. No readiness score change. |
 | Column | clustered, stacked, 100% stacked, 3-D clustered/stacked/100%, 3-D column | 3 of 7, + 4 3-D opened, drawn and saved | 3-D kept on open/save (`c:bar3DChart`, view angles, gap depth, group and per-series shape, series axis) and drawn as shaded boxes on a floor and walls; oblique projection, so perspective and `hPercent` are approximate; cylinder, cone and pyramid shapes drawn, the group shape (`c:bar3DChart/c:shape`) or a series' own (`c:ser/c:shape`) when it has one (per-series shape drawn); 3-D not yet in Insert ▸ Chart |
 | Bar | clustered, stacked, 100%, 3-D ×3 | 3 of 6, + 3 3-D opened, drawn and saved | 3-D drawn and kept as for Column; not yet in Insert ▸ Chart |
 | Line | line, stacked, 100% stacked, with markers ×3, 3-D line | 3 of 7 (line, with markers, stacked), + 3-D line opened, drawn and saved | no 100% stacked; smoothed lines landed (#62); 3-D line kept (`c:line3DChart` with its series axis) and drawn as ribbons, one row per series |
@@ -30,7 +31,7 @@ Sources: `crates/model/src/features.rs` (`ChartKind`, `Chart`, `Series`), `crate
 | Bubble | bubble, 3-D bubble | 1 of 2 | |
 | Stock | high-low-close, open-high-low-close, volume-HLC, volume-OHLC | 1 kind | |
 | Surface | 3-D surface, wireframe, contour, wireframe contour | 4 of 4 | read and written as `c:surface3DChart` / `c:surfaceChart` with series axis and view; contour bands and legend follow the value axis' major unit; the 3-D view is drawn at Excel's default angles (a file's own rotation is written back as the default) with one colour per cell, not split at band edges |
-| Radar | radar, with markers, filled | 3 of 3 | Filled radar opens, draws each series as a filled shape and saves as `radarStyle val="filled"`; radar with markers (no series `c:marker`) draws a marker on every point and saves without `c:marker`; a plain radar (`symbol none` on every series) draws lines only and saves with `symbol none` |
+| Radar | radar, with markers, filled | 3 of 3 | Filled radar opens, draws each series as a filled shape and saves as `radarStyle val="filled"`; radar with markers (no series `c:marker`) draws a marker on every point and saves without `c:marker`; a plain radar (`symbol none` on every series) draws lines only and saves with `symbol none`; the value axis picks its automatic scale like Excel (no headroom past the data maximum, the smallest 1-2-5 step whose rings are at least 1.1 label heights apart) and honours Format Axis bounds and major unit |
 | Treemap, Sunburst | 1 each | 2 of 2 | |
 | Histogram, Pareto | 2 | 1 of 2 | no Pareto |
 | Box & Whisker | 1 | 1 of 1 | exclusive (default) and inclusive quartiles per series; XLSX round-trip; `chart.set {quartiles}` changes all series |
