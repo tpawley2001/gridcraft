@@ -671,10 +671,6 @@ fn strip_sheet(s: &str) -> &str {
     }
 }
 
-pub fn parse_print_area(text: &str) -> Option<RangeRef> {
-    parse_print_areas(text).into_iter().next()
-}
-
 /// Every range of a print area (`'S'!$A$1:$B$2,'S'!$D$3`) in order; parts that don't parse are
 /// skipped. Commas inside a quoted sheet name (`'a, b'!$A$1`) don't separate ranges.
 pub fn parse_print_areas(text: &str) -> Vec<RangeRef> {
