@@ -148,6 +148,10 @@ pub fn print_range(sh: &Sheet) -> Option<RangeRef> {
     for s in sh.shapes.iter().filter(|o| !o.hidden) {
         grow(&s.anchor);
     }
+    // Form controls whose "Print object" setting is on print like any other drawing object.
+    for c in sh.controls.iter().filter(|o| o.print) {
+        grow(&c.anchor);
+    }
     // Without a print area Excel prints from A1: leading empty rows and columns print as blank
     // space, and pages that fall wholly inside them print as blank pages.
     r.map(|r| RangeRef::new(CellRef::new(0, 0), r.end))

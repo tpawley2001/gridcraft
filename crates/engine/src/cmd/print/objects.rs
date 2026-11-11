@@ -131,7 +131,93 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
         let prims = gridcraft_chart::render(ch, &data, r.2 as f32, r.3 as f32, &PdfMeasure);
         draw_prims(pg, &prims, Xf { ox: x, oy: y, k: b.k });
     }
+    // Form controls lie on top of charts, pictures and shapes.
+    for c in sh.controls.iter().filter(|o| o.print) {
+        let r = anchor_rect(sh, &c.anchor);
+        if !visible(r) {
+            continue;
+        }
+        draw_control(pg, c, b, place(r));
+    }
     pg.restore();
+}
+
+/// Draws a form control with "Print object" on: its box, mark and caption.
+fn draw_control(pg: &mut Page, c: &gridcraft_model::FormControl, b: &Block, (x, y, w, h): (f32, f32, f32, f32)) {
+    use gridcraft_model::ControlKind;
+    const INK: [u8; 3] = [0, 0, 0];
+    const EDGE: [u8; 3] = [0x80, 0x80, 0x80];
+    let thin = (0.5 * b.k).max(0.25);
+    let rect = |x: f32, y: f32, w: f32, h: f32| [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+    let size = 8.0 * b.scale;
+    let font = Font::Helvetica;
+    // The caption on one line, clipped to the control.
+    let caption = |pg: &mut Page, tx: f32, ty: f32| {
+        if c.text.is_empty() {
+            return;
+        }
+        let line = c.text.lines().next().unwrap_or("");
+        pg.save();
+        pg.clip_rect(x, y, w, h);
+        pg.text(tx, ty, size, font, INK, line);
+        pg.restore();
+    };
+    let mid = y + h / 2.0 + size * 0.35;
+    let mark = (9.0 * b.k).min(h.max(0.0)).min(w.max(0.0));
+    let (mx, my) = (x + 2.0 * b.k, y + (h - mark) / 2.0);
+    match c.kind {
+        ControlKind::CheckBox => {
+            pg.polygon(&rect(mx, my, mark, mark), Some([255, 255, 255]), Some((INK, thin)));
+            match c.value {
+                1 => pg.polyline(
+                    &[[mx + mark * 0.2, my + mark * 0.5], [mx + mark * 0.42, my + mark * 0.75], [mx + mark * 0.8, my + mark * 0.25]],
+                    (1.0 * b.k).max(0.3),
+                    INK,
+                    &[],
+                ),
+                2 => pg.polygon(&rect(mx + mark * 0.25, my + mark * 0.25, mark * 0.5, mark * 0.5), Some(EDGE), None),
+                _ => {}
+            }
+            caption(pg, mx + mark + 3.0 * b.k, mid);
+        }
+        ControlKind::OptionButton => {
+            let circle = |cx: f32, cy: f32, r: f32| -> Vec<[f32; 2]> {
+                (0..36)
+                    .map(|i| {
+                        let a = i as f32 / 36.0 * std::f32::consts::TAU;
+                        [cx + r * a.cos(), cy + r * a.sin()]
+                    })
+                    .collect()
+            };
+            let (cx, cy, r) = (mx + mark / 2.0, my + mark / 2.0, mark / 2.0);
+            pg.polygon(&circle(cx, cy, r), Some([255, 255, 255]), Some((INK, thin)));
+            if c.value == 1 {
+                pg.polygon(&circle(cx, cy, r * 0.45), Some(INK), None);
+            }
+            caption(pg, mx + mark + 3.0 * b.k, mid);
+        }
+        ControlKind::Button => {
+            pg.polygon(&rect(x, y, w, h), Some([0xE6, 0xE6, 0xE6]), Some((EDGE, thin)));
+            let tw = gridcraft_pdf::text_width(font, size, c.text.lines().next().unwrap_or(""));
+            caption(pg, x + (w - tw) / 2.0, mid);
+        }
+        ControlKind::Label => caption(pg, x + 2.0 * b.k, y + size),
+        ControlKind::GroupBox => {
+            pg.polygon(&rect(x, y + size / 2.0, w, (h - size / 2.0).max(0.0)), None, Some((EDGE, thin)));
+            caption(pg, x + 6.0 * b.k, y + size * 0.85);
+        }
+        ControlKind::DropDown => {
+            pg.polygon(&rect(x, y, w, h), Some([255, 255, 255]), Some((EDGE, thin)));
+            let aw = h.min(w).max(0.0);
+            let ax = x + w - aw;
+            pg.polygon(&rect(ax, y, aw, h), Some([0xE6, 0xE6, 0xE6]), Some((EDGE, thin)));
+            let (cx, cy, s) = (ax + aw / 2.0, y + h / 2.0, aw * 0.2);
+            pg.polygon(&[[cx - s, cy - s / 2.0], [cx + s, cy - s / 2.0], [cx, cy + s / 2.0]], Some(INK), None);
+        }
+        ControlKind::ListBox | ControlKind::Slider | ControlKind::Spin => {
+            pg.polygon(&rect(x, y, w, h), Some([255, 255, 255]), Some((EDGE, thin)));
+        }
+    }
 }
 
 fn draw_sparklines(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, b: &Block, block: RangeRef) {
