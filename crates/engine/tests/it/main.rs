@@ -53,6 +53,7 @@ mod pivot_unknown_func;
 mod pivotchart_link;
 mod print_from_a1;
 mod print_long_text;
+mod print_multi_area;
 mod range_fill_formats;
 mod recently_used;
 mod regression_plots;
