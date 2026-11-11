@@ -75,8 +75,9 @@ pub(super) fn axis_titles(ctx: &mut Ctx, chart: &Chart, mut area: Bx) -> Bx {
 
 pub(super) enum CatAxis<'a> {
     /// Category labels and, for a multi-level axis, the outer levels (nearest the labels first;
-    /// one entry per category, non-empty where a group starts).
-    Labels(&'a [String], &'a [Vec<String>]),
+    /// one entry per category, non-empty where a group starts), and the interval between labels
+    /// (`c:tickLblSkip`; `None` picks a step from the label widths).
+    Labels(&'a [String], &'a [Vec<String>], Option<u32>),
     /// A data table supplies the labels below a vertical chart. Its stub must clear the plot.
     Table(&'a [String], f32),
     Numeric(Scale, &'a Fmt),
@@ -146,7 +147,7 @@ pub(super) fn cross_slot(c: AxisCrosses, n: usize) -> Option<f32> {
 fn at_frac(cat: &CatAxis, at: AxisCrosses) -> Option<f32> {
     match cat {
         CatAxis::Numeric(s, _) => cross_value(at, s).map(|v| s.frac(v)),
-        CatAxis::Labels(l, _) | CatAxis::Table(l, _) => {
+        CatAxis::Labels(l, _, _) | CatAxis::Table(l, _) => {
             let n = l.len().max(1);
             cross_slot(at, n).map(|k| k / n as f32)
         }
@@ -163,6 +164,12 @@ fn display_unit_label(u: DisplayUnit) -> String {
         DisplayUnit::Trillions => "Trillions".into(),
         u => format!("x {}", number_to_text(u.factor())),
     }
+}
+
+/// The step between drawn category labels for a set interval `skip` (`c:tickLblSkip`) on `n`
+/// categories: every `skip`-th label from the first, at least 1 and at most `n` (only the first).
+fn label_step(skip: u32, n: usize) -> usize {
+    usize::try_from(skip).unwrap_or(usize::MAX).clamp(1, n.max(1))
 }
 
 /// Draws gridlines, axis labels and the category axis line; returns the plot rectangle.
@@ -209,7 +216,7 @@ fn frame_vertical(ctx: &mut Ctx, area: Bx, cat: CatAxis, y: &ValAxis, y2: Option
         std::mem::swap(&mut left, &mut right);
     }
     let levels = match &cat {
-        CatAxis::Labels(_, o) => o.len() as f32,
+        CatAxis::Labels(_, o, _) => o.len() as f32,
         CatAxis::Numeric(..) | CatAxis::Table(..) => 0.0,
     };
     let below = lh + 4.0 + lh * levels;
@@ -279,11 +286,16 @@ fn vertical_cat_labels(ctx: &mut Ctx, cat: CatAxis, plot: Bx, base: f32, far: bo
     let (dir, cvalign) = if far { (-1.0, VAlign::Bottom) } else { (1.0, VAlign::Top) };
     match cat {
         CatAxis::Table(..) => {}
-        CatAxis::Labels(l, outer) => {
+        CatAxis::Labels(l, outer, skip) => {
             let n = l.len().max(1);
             let cw = plot.w / n as f32;
-            let lw = l.iter().take(2000).map(|t| ctx.tw(t, ls)).fold(0.0f32, f32::max);
-            let k = (((lw + 6.0) / cw.max(1e-3)).ceil() as usize).clamp(1, n);
+            let k = match skip {
+                Some(s) => label_step(s, n),
+                None => {
+                    let lw = l.iter().take(2000).map(|t| ctx.tw(t, ls)).fold(0.0f32, f32::max);
+                    (((lw + 6.0) / cw.max(1e-3)).ceil() as usize).clamp(1, n)
+                }
+            };
             for (j, t) in l.iter().enumerate().step_by(k) {
                 let t = ctx.fit(t, ls, cw * k as f32 - 2.0);
                 ctx.text(plot.x + (j as f32 + 0.5) * cw, base + dir * 3.0, &t, ls, TEXT, (HAlign::Center, cvalign));
@@ -335,10 +347,10 @@ fn frame_horizontal(ctx: &mut Ctx, area: Bx, cat: CatAxis, y: &ValAxis, grid: bo
     let cat_far = y.cross == AxisCrosses::Max;
     let val_far = y.at == AxisCrosses::Max;
     let stub = stub_w(&cat);
-    let (labels, outer): (Vec<String>, &[Vec<String>]) = match cat {
-        CatAxis::Labels(l, o) => (l.to_vec(), o),
-        CatAxis::Table(l, _) => (l.to_vec(), &[]),
-        CatAxis::Numeric(..) => (vec![], &[]),
+    let (labels, outer, skip): (Vec<String>, &[Vec<String>], Option<u32>) = match cat {
+        CatAxis::Labels(l, o, s) => (l.to_vec(), o, s),
+        CatAxis::Table(l, _) => (l.to_vec(), &[], None),
+        CatAxis::Numeric(..) => (vec![], &[], None),
     };
     let lw = (labels.iter().take(2000).map(|t| ctx.tw(t, ls)).fold(0.0f32, f32::max) + 6.0).min(area.w * 0.35);
     // Outer levels stand in columns beside the labels, each as wide as its longest name.
@@ -365,7 +377,10 @@ fn frame_horizontal(ctx: &mut Ctx, area: Bx, cat: CatAxis, y: &ValAxis, grid: bo
     // Category labels beside the moved category axis (left of it, right at the far end).
     let base = if moved { x0 } else { plot.x };
     let (dir, calign) = if cat_far { (1.0, HAlign::Left) } else { (-1.0, HAlign::Right) };
-    let k = ((lh / ch.max(1e-3)).ceil() as usize).clamp(1, n);
+    let k = match skip {
+        Some(s) => label_step(s, n),
+        None => ((lh / ch.max(1e-3)).ceil() as usize).clamp(1, n),
+    };
     for (j, t) in labels.iter().enumerate().step_by(k) {
         let t = ctx.fit(t, ls, lw - 6.0);
         ctx.text(base + dir * 4.0, plot.bottom() - (j as f32 + 0.5) * ch, &t, ls, TEXT, (calign, VAlign::Middle));

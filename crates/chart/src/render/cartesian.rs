@@ -330,7 +330,7 @@ pub(super) fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx
     let outer: Vec<Vec<String>> =
         data.category_levels.iter().map(|l| (0..ncat_slots).map(|j| l.get(j).cloned().unwrap_or_default()).collect()).collect();
     let (area, table) = super::table::reserve(ctx, chart, data, area, ncat_slots);
-    let category_axis = super::table::category_axis(&table, &labels, &outer);
+    let category_axis = super::table::category_axis(&table, &labels, &outer, chart.scale.tick_label_skip);
     let plot = frame(ctx, area, category_axis, &y1, y2.as_ref(), horizontal, chart.gridlines);
     if !plot.ok() {
         return;

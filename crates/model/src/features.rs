@@ -976,11 +976,22 @@ pub struct ChartScale {
     /// options; `None` for a text (category) axis.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub date_axis: Option<DateAxis>,
+    /// Category axis "Interval between labels" (`c:tickLblSkip`); `None` = automatic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tick_label_skip: Option<u32>,
+    /// Category axis "Interval between marks" (`c:tickMarkSkip`); `None` = automatic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tick_mark_skip: Option<u32>,
 }
 
 impl ChartScale {
     pub fn is_auto(&self) -> bool {
-        self.x.is_auto() && self.y.is_auto() && self.cat_crosses.is_auto() && self.date_axis.is_none()
+        self.x.is_auto()
+            && self.y.is_auto()
+            && self.cat_crosses.is_auto()
+            && self.date_axis.is_none()
+            && self.tick_label_skip.is_none()
+            && self.tick_mark_skip.is_none()
     }
 }
 

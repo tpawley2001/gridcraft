@@ -26,6 +26,7 @@ mod chart_sheet_print_tests;
 mod chart_sheet_style_parts_tests;
 mod chart_surface;
 mod chart_theme_override_tests;
+mod chart_tick_skip;
 mod code_name_tests;
 mod controls_tests;
 mod csv_tests;
