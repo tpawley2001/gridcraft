@@ -312,6 +312,28 @@ pub(super) fn go_to_special(s: &mut Session, p: &Json) -> Result<Json> {
     };
     let active = d.selection.active;
     let same = bool_param(p, "same") == Some(true);
+    if same && (kind == "dataValidation" || kind == "conditionalFormats") {
+        // Excel looks at the whole sheet for "Same": the rules that hold the active cell. Their
+        // ranges become the selection's areas as they are, so whole columns are not enumerated.
+        let mut ranges: Vec<RangeRef> = Vec::new();
+        let mut add = |rs: &[RangeRef]| {
+            for r in rs {
+                if !ranges.contains(r) {
+                    ranges.push(*r);
+                }
+            }
+        };
+        if kind == "dataValidation" {
+            if let Some(dv) = sheet.validations.iter().find(|dv| dv.ranges.iter().any(|r| r.contains(active))) {
+                add(&dv.ranges);
+            }
+        } else {
+            for cf in sheet.cond_formats.iter().filter(|cf| cf.ranges.iter().any(|r| r.contains(active))) {
+                add(&cf.ranges);
+            }
+        }
+        return select_rule_ranges(s, ranges);
+    }
     let mut hits: Vec<CellRef> = Vec::new();
     if scope.count() > 4_000_000 {
         return Err(bad("edit.goToSpecial", "range too large"));
@@ -319,18 +341,6 @@ pub(super) fn go_to_special(s: &mut Session, p: &Json) -> Result<Json> {
     if kind == "rowDifferences" || kind == "columnDifferences" {
         if !d.selection.is_single_cell() {
             hits = differences(sheet, scope, active, kind == "rowDifferences");
-        }
-    } else if kind == "dataValidation" && same {
-        // Excel looks at the whole sheet for "Same": the rule that holds the active cell.
-        let rule = sheet.validations.iter().find(|dv| dv.ranges.iter().any(|r| r.contains(active)));
-        if let Some(dv) = rule {
-            // A rule over whole columns would list millions of cells: refuse it like a huge scope.
-            if dv.ranges.iter().fold(0u64, |n, r| n.saturating_add(r.count())) > 4_000_000 {
-                return Err(bad("edit.goToSpecial", "range too large"));
-            }
-            for r in &dv.ranges {
-                hits.extend(r.iter());
-            }
         }
     } else {
         for c in scope.iter() {
@@ -361,4 +371,15 @@ pub(super) fn go_to_special(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc_mut()?;
     d.selection = crate::Selection { active: hits[0], anchor: hits[0], ranges };
     Ok(json!({"selection": d.selection.a1(), "count": hits.len()}))
+}
+
+/// Selects a rule's ranges as areas, the active cell at the top-left of the first one. No range
+/// means the active cell is under no rule.
+fn select_rule_ranges(s: &mut Session, ranges: Vec<RangeRef>) -> Result<Json> {
+    let Some(first) = ranges.first() else { return Err(EngineError::Other("No cells were found.".into())) };
+    let start = first.start;
+    let count = ranges.iter().fold(0u64, |n, r| n.saturating_add(r.count()));
+    let d = s.doc_mut()?;
+    d.selection = crate::Selection { active: start, anchor: start, ranges };
+    Ok(json!({"selection": d.selection.a1(), "count": count}))
 }
