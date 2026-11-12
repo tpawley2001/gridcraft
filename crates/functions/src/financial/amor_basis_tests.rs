@@ -20,3 +20,20 @@ fn amor_basis_2_is_num_error() {
         }
     }
 }
+
+/// In bases 1 and 3 a purchase on 29 February has the same first period as one on 28 February (Excel).
+#[test]
+fn amor_feb_29_purchase_counts_as_feb_28() {
+    for name in ["AMORLINC", "AMORDEGRC"] {
+        for basis in [1.0, 3.0] {
+            let args = |dd: i64| vec![n(2400.0), d(2024, 2, dd), d(2024, 12, 31), n(300.0), n(0.0), n(0.15), n(basis)];
+            let (Value::Number(a), Value::Number(b)) = (ev(name, args(29)), ev(name, args(28))) else {
+                panic!("{name} basis {basis} not a number");
+            };
+            assert_eq!(a, b, "{name} basis {basis}");
+        }
+    }
+    // A zero-length first period stays zero.
+    let same = vec![n(2400.0), d(2024, 2, 29), d(2024, 2, 29), n(300.0), n(0.0), n(0.15), n(1.0)];
+    assert!(matches!(ev("AMORLINC", same), Value::Number(x) if x == 0.0));
+}

@@ -1,4 +1,4 @@
-use super::day_count::{basis_arg, date, year_frac};
+use super::day_count::{basis_arg, date, year_frac, ymd};
 use super::{Arg, CellError, Ctx, R, Value, num, num_val, opt_bool, opt_num};
 
 // ---------------------------------------------------------------------------------------------
@@ -126,6 +126,21 @@ fn amor_basis_arg(a: &[Arg], i: usize) -> R<u32> {
     }
 }
 
+/// Fraction of a year in the first AMORLINC / AMORDEGRC period. In the actual-day bases (1 and 3) Excel counts a
+/// purchase on 29 February as if it were made on 28 February, so the first period is one day longer than the
+/// actual day count (measured: a purchase on 29 February gives the same first period as one on 28 February).
+fn amor_first_frac(c: &dyn Ctx, purchased: f64, first: f64, basis: u32) -> R<f64> {
+    let sys = c.date_system();
+    let mut start = purchased;
+    if matches!(basis, 1 | 3) && first > purchased && purchased >= 1.0 {
+        let (_, m, d) = ymd(sys, purchased)?;
+        if m == 2 && d == 29 {
+            start = purchased - 1.0;
+        }
+    }
+    year_frac(sys, start, first, basis)
+}
+
 pub(super) fn amorlinc(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     let (cost, purchased, first, salvage) = (num(a, 0)?, date(a, 1)?, date(a, 2)?, num(a, 3)?);
     let (period, rate, basis) = (num(a, 4)?.trunc(), num(a, 5)?, amor_basis_arg(a, 6)?);
@@ -134,7 +149,7 @@ pub(super) fn amorlinc(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     }
     let full = cost * rate;
     let limit = cost - salvage;
-    let dep0 = (full * year_frac(c.date_system(), purchased, first, basis)?).min(limit);
+    let dep0 = (full * amor_first_frac(c, purchased, first, basis)?).min(limit);
     if period == 0.0 {
         return num_val(dep0);
     }
@@ -160,7 +175,7 @@ pub(super) fn amordegrc(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     };
     let r = rate * coef;
     let mut book = cost;
-    let mut dep = (year_frac(c.date_system(), purchased, first, basis)? * r * cost).round();
+    let mut dep = (amor_first_frac(c, purchased, first, basis)? * r * cost).round();
     if period == 0.0 {
         return num_val(dep);
     }
