@@ -79,6 +79,7 @@ mod paper_size_ids;
 mod passthrough_tests;
 mod per_view_zoom_tests;
 mod phonetic_tests;
+mod picture_border_kept_tests;
 mod picture_effects;
 mod picture_locks_tests;
 mod pivot_tests;
