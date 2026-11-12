@@ -1,6 +1,6 @@
 # Function parity: worksheet functions and formulas
 
-> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-11 · **Change:** minor (MID, REPLACE, FIND and SEARCH count UTF-16 positions; earlier: TEXT rejects two elapsed-time codes in one section; earlier: G0306: PRICE, YIELD, DURATION, MDURATION and COUPDAYSNC count days to the next coupon like Excel)
+> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-12 · **Change:** minor (RTD, DATESTRING and NUMBERSTRING answer `#N/A` instead of `#NAME?`; earlier: MID, REPLACE, FIND and SEARCH count UTF-16 positions; earlier: TEXT rejects two elapsed-time codes in one section; earlier: G0306: PRICE, YIELD, DURATION, MDURATION and COUPDAYSNC count days to the next coupon like Excel)
 
 Excel's worksheet functions, category by category, against GridCraft's function library. Part of
 [target-app-parity.md](target-app-parity.md); gaps feed [gaps.md](gaps.md).
@@ -12,21 +12,23 @@ Excel's worksheet functions, category by category, against GridCraft's function 
   them), plus 14 text functions the page lists under combined entries (FIND/FINDB, LEFT/LEFTB,
   LEN/LENB, MID/MIDB, REPLACE/REPLACEB, RIGHT/RIGHTB, SEARCH/SEARCHB), BETA.INV, and COPILOT and
   PY (Microsoft 365 functions not on that page when fetched).
-- **Ours (513):** names from `gridcraft-cli functions --json`: the function specs in
+- **Ours (514):** names from `gridcraft-cli functions --json`: the function specs in
   `crates/functions/src/*.rs` plus the
   evaluator's special forms in `crates/calc/src/eval.rs` (`SPECIAL_FUNCTIONS`: IF, IFS, CHOOSE,
   OFFSET, INDIRECT, INDEX, SUBTOTAL, AGGREGATE, TEXT, LET, LAMBDA, MAP, REDUCE, SCAN, BYROW, BYCOL,
   MAKEARRAY…), excluding the test-only `ADD2`. Every one is an Excel name.
 - **Not on Microsoft's list:** USDOLLAR and ECMA.CEILING, legacy functions Excel still evaluates (like DOLLAR),
-  are in our library as Compatibility functions for files that use them. They are not counted above.
+  are in our library as Compatibility functions for files that use them. DATESTRING and NUMBERSTRING,
+  hidden functions that only produce text in East Asian editions of Excel, answer `#N/A` as other
+  editions do. None of these is counted above.
 - **Working** excludes stubs that return an error by design: the 7 CUBE functions (`#N/A`, no
-  cube connections) and WEBSERVICE and FILTERXML (`#VALUE!`). Excel for Mac also lacks
+  cube connections), RTD (`#N/A`, no real-time data servers) and WEBSERVICE and FILTERXML (`#VALUE!`). Excel for Mac also lacks
   WEBSERVICE and FILTERXML; Excel for Windows has them.
 - The measurement is **presence**. Depth (edge cases matching Excel) is estimated below.
 
 ## Coverage
 
-**Measured: 513 / 523 by name (98.1%); 504 / 523 working (96.4%).**
+**Measured: 514 / 523 by name (98.3%); 504 / 523 working (96.4%).**
 
 | Category | Excel | Ours | Working | % working | Missing |
 |---|---|---|---|---|---|
@@ -35,7 +37,7 @@ Excel's worksheet functions, category by category, against GridCraft's function 
 | Financial | 55 | 55 | 55 | 100% | — |
 | Engineering | 54 | 54 | 54 | 100% | — |
 | Text | 50 | 48 | 48 | 96% | DETECTLANGUAGE, TRANSLATE |
-| Lookup and reference | 40 | 37 | 37 | 93% | GETPIVOTDATA, IMAGE, RTD |
+| Lookup and reference | 40 | 38 | 37 | 93% | GETPIVOTDATA, IMAGE (RTD is a `#N/A` stub) |
 | Compatibility | 40 | 40 | 40 | 100% | — |
 | Date and time | 25 | 25 | 25 | 100% | — |
 | Information | 22 | 21 | 21 | 95% | STOCKHISTORY |
@@ -45,7 +47,7 @@ Excel's worksheet functions, category by category, against GridCraft's function 
 | Web | 3 | 3 | 1 | 33% | (WEBSERVICE, FILTERXML are stubs; ENCODEURL works) |
 | Add-in and Automation | 3 | 1 | 1 | 33% | CALL, REGISTER.ID |
 | AI and Python | 2 | 0 | 0 | 0% | COPILOT, PY |
-| **Total** | **523** | **513** | **504** | **96.4%** | 10 missing, 9 stubs |
+| **Total** | **523** | **514** | **504** | **96.4%** | 9 missing, 10 stubs |
 
 By the Excel version that introduced them (working / total): before 2010 346 / 360, 2010
 56 / 56, 2013 49 / 51, 2016 1 / 5, 2019 6 / 6, 2021 11 / 11, 2024 22 / 23, Microsoft 365 5 / 11.
@@ -61,8 +63,8 @@ This improves series preparation; it does not change the model-fitting or season
 
 ### Scope of what's missing
 
-PERCENTOF and TRIMRANGE are implemented. The CLI lists 513 Excel names (excluding
-USDOLLAR and ECMA.CEILING); excluding the 9 stubs leaves 504 working functions.
+PERCENTOF and TRIMRANGE are implemented. The CLI lists 514 Excel names (excluding
+USDOLLAR, ECMA.CEILING, DATESTRING and NUMBERSTRING); excluding the 10 stubs leaves 504 working functions.
 Category counts use Excel's categories: HYPERLINK is Lookup and reference, and
 FORECAST is Statistical.
 
@@ -72,7 +74,7 @@ FORECAST is Statistical.
 | IMAGE | yes | 3–5 h | Pictures in cells (see PR #105); fetching URLs needs a privacy decision |
 | CUBE* (7), WEBSERVICE, FILTERXML | partly | 4–8 h | FILTERXML can work offline; CUBE needs an OLAP/data-model source |
 | TRANSLATE, DETECTLANGUAGE, STOCKHISTORY, COPILOT, PY | no (cloud) | — | Microsoft cloud services; open equivalents only by owner decision |
-| CALL, REGISTER.ID, RTD | no | — | Native DLL/COM calls; not portable or safe |
+| CALL, REGISTER.ID, RTD | no | — | Native DLL/COM calls; not portable or safe (RTD answers `#N/A`, as Excel does with no server) |
 
 ## Formula language
 
@@ -206,6 +208,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 | 2026-11-10 | minor | Legacy formulas: an IF whose result is one value (`AVERAGE(ABS(IF(FREQUENCY(…)>0,1)))`) tests the first value of an array condition, and an array constant as a lookup value (`VLOOKUP({"a","b"},…)`) takes its first element, as Excel does (`legacy_array_value_positions.rs`) |
 | 2026-11-10 | minor | Legacy formulas: T over a multi-cell reference reads its top-left cell instead of implicit intersection (`T(H12:J12)` is `""` when H12 is a number), and SUMPRODUCT counts text in a one-cell range as zero (`SUMPRODUCT(G30:G30,I30:I30)` with G30 = "4" is 0) |
 | 2026-11-11 | minor | TEXT rejects time formats with two elapsed codes (`[h]:[mm]`) or a larger plain unit before the elapsed code (`h [m]`) with `#VALUE!`, like Excel |
+| 2026-11-12 | minor | RTD, DATESTRING and NUMBERSTRING are known functions answering `#N/A` (no real-time data servers; East Asian text only), as English Excel does, instead of `#NAME?`; by name 514 / 523 |
 | 2026-10-31 | minor | WEIBULL.DIST returns zero at x=0 in both density and cumulative modes, including shape below one; negative x remains `#NUM!` |
 | 2026-10-31 | minor | BINOM.DIST and BINOM.DIST.RANGE reject trial counts above 2,147,483,646 after truncation |
 | 2026-10-31 | minor | BETA.DIST density returns `#NUM!` at the lower endpoint with alpha less than or equal to 1 and upper endpoint with beta less than or equal to 1; cumulative behavior is unchanged |
