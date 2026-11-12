@@ -134,8 +134,8 @@ pub(super) fn shift_months(sys: DateSystem, anchor: (i32, u32, u32), months: i64
 }
 
 pub(super) struct Coupon {
-    pcd: f64,
-    ncd: f64,
+    pub(super) pcd: f64,
+    pub(super) ncd: f64,
     pub(super) num: f64,
 }
 
@@ -176,7 +176,9 @@ pub(super) fn coup_daybs(sys: DateSystem, c: &Coupon, settle: f64, basis: u32) -
 
 pub(super) fn coup_daysnc(sys: DateSystem, c: &Coupon, settle: f64, freq: f64, basis: u32) -> R<f64> {
     match basis {
-        0 | 4 => Ok(coup_days(c, freq, basis) - coup_daybs(sys, c, settle, basis)?),
+        0 => Ok(coup_days(c, freq, basis) - coup_daybs(sys, c, settle, basis)?),
+        // 30E/360 counts settlement to the next coupon date directly (Excel).
+        4 => day_count(sys, settle, c.ncd, basis),
         _ => Ok(c.ncd - settle),
     }
 }

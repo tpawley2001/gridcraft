@@ -482,4 +482,6 @@ pub(crate) fn specs() -> Vec<FnSpec> {
 }
 
 #[cfg(test)]
+mod bond_dsc_tests;
+#[cfg(test)]
 mod tests;
