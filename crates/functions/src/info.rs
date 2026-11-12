@@ -339,6 +339,12 @@ fn value_err(_a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     Err(CellError::Value)
 }
 
+/// Functions Excel knows but that cannot produce a value here (no real-time data server; East
+/// Asian-only text): `#N/A` whatever the arguments are.
+fn na_err(_a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    Err(CellError::NA)
+}
+
 pub(crate) fn specs() -> Vec<FnSpec> {
     vec![
         f!("ISBLANK", 1, 1, Information, S, "ISBLANK(value)", "TRUE when the value refers to an empty cell.", is_blank),
@@ -435,6 +441,27 @@ pub(crate) fn specs() -> Vec<FnSpec> {
         f!("ENCODEURL", 1, 1, Web, S, "ENCODEURL(text)", "Percent-encodes text for use in a URL.", encodeurl),
         f!("WEBSERVICE", 1, 1, Web, S, "WEBSERVICE(url)", "Fetches data from a web service (not available; returns #VALUE!).", value_err),
         f!("FILTERXML", 2, 2, Web, S, "FILTERXML(xml, xpath)", "Extracts data from XML with an XPath (not available; returns #VALUE!).", value_err),
+        f!(
+            "RTD",
+            3,
+            255,
+            Lookup,
+            A,
+            "RTD(prog_id, server, topic1, [topic2], ...)",
+            "Gets a value from a real-time data server (not available; returns #N/A).",
+            na_err
+        ),
+        f!("DATESTRING", 1, 1, DateTime, A, "DATESTRING(date)", "Converts a date to East Asian date text (not available; returns #N/A).", na_err),
+        f!(
+            "NUMBERSTRING",
+            2,
+            2,
+            Text,
+            A,
+            "NUMBERSTRING(number, type)",
+            "Converts a number to East Asian number text (not available; returns #N/A).",
+            na_err
+        ),
         f!(
             "CUBEKPIMEMBER",
             3,
@@ -627,6 +654,9 @@ mod tests {
         is_text(ev("ENCODEURL", vec![t("a b&c/é")]), "a%20b%26c%2F%C3%A9");
         is_err(ev("WEBSERVICE", vec![t("http://x")]), CellError::Value);
         is_err(ev("FILTERXML", vec![t("<a/>"), t("//a")]), CellError::Value);
+        is_err(ev("RTD", vec![t("my.server"), t(""), t("topic")]), CellError::NA);
+        is_err(ev("DATESTRING", vec![n(45000.0)]), CellError::NA);
+        is_err(ev("NUMBERSTRING", vec![n(12.0), n(1.0)]), CellError::NA);
         is_err(ev("CUBEVALUE", vec![t("conn")]), CellError::NA);
         is_err(ev("CUBESETCOUNT", vec![t("set")]), CellError::NA);
     }

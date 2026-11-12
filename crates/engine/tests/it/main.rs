@@ -98,6 +98,7 @@ mod text_excel_edges;
 mod text_positions_utf16_excel;
 mod trace_error;
 mod typed_apostrophe_quote_prefix;
+mod unavailable_functions_na;
 mod view_zoom_per_view;
 mod workbook_author;
 mod wrap_row_height;
