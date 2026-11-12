@@ -99,6 +99,7 @@ mod sheet_custom_properties;
 mod sheet_data_pin;
 mod sheet_names;
 mod sheet_phonetic_pr_tests;
+mod sheet_pr_flags_tests;
 mod sheet_sort_state;
 mod sheet_view_flags_tests;
 mod signature_line_vml_tests;

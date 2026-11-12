@@ -1,5 +1,6 @@
 # File-format parity
 
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0338: `sheetPr published="0"` and `outlinePr showOutlineSymbols="0"` kept on XLSX open + save)
 > **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0334: a sheet's `sheetView` `showRuler`, `showWhiteSpace` and `windowProtection` and its `printOptions gridLinesSet` are kept through open + save; earlier: see the lines below.)
 > **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0333: a shape's theme style (`xdr:style`) is kept through open + save and drawn; earlier: G0321: cached `#SPILL!`/`#CALC!` rich error values open as themselves; earlier: G0308: a drawing's `com14:compatSp` placeholder (an OLE object or control) is saved only with the VML shape it names; earlier: see the lines below.)
 > **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0332: row `thickTop`/`thickBot` flags kept through open + save; earlier: G0321: cached `#SPILL!`/`#CALC!` rich error values open as themselves; earlier: G0308: a drawing's `com14:compatSp` placeholder (an OLE object or control) is saved only with the VML shape it names; earlier: see the lines below.)
@@ -228,6 +229,7 @@ Wrong checksums. In an intact `.xlsx`, `.xlsm`, `.xlsb` or `.ods` package, a par
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | G0338: XLSX `sheetPr published="0"` (ECMA-376 Part 1 §18.3.1.82) and `outlinePr showOutlineSymbols="0"` (§18.3.1.31) are read and written back, with `sheetPr`/`outlinePr` written for either alone; defaults are never written, and `outlinePr showOutlineSymbols` stays independent of `sheetView showOutlineSymbols`. No UI yet (`sheet_pr_flags_tests.rs`) |
 | 2026-11-12 | minor | G0334: `.xlsx` `sheetView` `showRuler`, `showWhiteSpace` and `windowProtection` (ECMA-376 Part 1 §18.3.1.87) and `printOptions gridLinesSet` (§18.3.1.70) are read and written back when not the default; Page Layout view does not yet hide the ruler or white space. |
 | 2026-11-12 | minor | G0327: `.xlsx` `cellXfs/xf` `quotePrefix` (ECMA-376 Part 1 §18.8.45) is read into the cell format and written back as `quotePrefix="1"` after `xfId`; formats without it write nothing, and named cell styles and dxfs never carry it (`quote_prefix_tests.rs`). |
 | 2026-11-12 | minor | G0326: XLSX custom table and PivotTable styles (`tableStyles`, ECMA-376 Part 1 §18.8.40-§18.8.42) are kept through open + save: each style's name, `pivot` / `table` flags and elements (type as written, `size`, and the differential format, renumbered into the saved `dxfs`), plus `defaultTableStyle` / `defaultPivotStyle` as written. A `dxfId` past the end of `dxfs` keeps the element without a format. Not drawn yet (`custom_table_styles_tests.rs`) |
