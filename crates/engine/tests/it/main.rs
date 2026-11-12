@@ -28,6 +28,7 @@ mod ctrl_shift_arrow_active_line;
 mod cube_keeps_saved_value;
 mod cumipmt_fractional_excel;
 mod custom_filter_blanks;
+mod custom_table_style_draw;
 mod custom_view_freeze;
 mod data_table_dirty;
 mod data_table_recalc;
