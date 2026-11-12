@@ -1909,6 +1909,99 @@ pub struct Sparkline {
     pub kind: SparklineKind,
     pub color: Color,
     pub markers: bool,
+    /// The settings of the sparkline group this sparkline belongs to, kept from files.
+    #[serde(default)]
+    pub group: SparklineGroup,
+}
+
+/// How a sparkline shows empty cells (`displayEmptyCellsAs`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SparklineEmpty {
+    /// A gap: what the app's own Insert Sparkline uses.
+    #[default]
+    Gap,
+    /// As zero: the file format's default when the attribute is absent.
+    Zero,
+    /// Connect the points on either side with a line.
+    Span,
+}
+
+/// How a sparkline's vertical axis minimum or maximum is chosen (`minAxisType`, `maxAxisType`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SparklineAxis {
+    /// Each sparkline scales on its own.
+    #[default]
+    Individual,
+    /// All sparklines of the group share the value.
+    Group,
+    /// The group's manual value (`manualMin` / `manualMax`).
+    Custom,
+}
+
+/// Group settings of a sparkline ([MS-XLSX] `CT_SparklineGroup`) beyond its type, series colour
+/// and markers. Sparklines with the same non-zero `id` (and equal settings) were read from one
+/// group and are saved as one group; `id` 0 is a sparkline in a group of its own.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SparklineGroup {
+    pub id: u32,
+    pub display_empty: SparklineEmpty,
+    pub high: bool,
+    pub low: bool,
+    pub first: bool,
+    pub last: bool,
+    pub negative: bool,
+    pub display_x_axis: bool,
+    pub display_hidden: bool,
+    pub right_to_left: bool,
+    pub date_axis: bool,
+    /// Line weight in points.
+    pub line_weight: f64,
+    pub min_axis: SparklineAxis,
+    pub max_axis: SparklineAxis,
+    pub manual_min: Option<f64>,
+    pub manual_max: Option<f64>,
+    /// Point colours; `None` where the file had no colour element.
+    pub color_negative: Option<Color>,
+    pub color_axis: Option<Color>,
+    pub color_markers: Option<Color>,
+    pub color_first: Option<Color>,
+    pub color_last: Option<Color>,
+    pub color_high: Option<Color>,
+    pub color_low: Option<Color>,
+    /// The date-axis range (`xm:f` of the group), used with `date_axis`.
+    pub date_range: Option<String>,
+}
+
+impl Default for SparklineGroup {
+    fn default() -> Self {
+        SparklineGroup {
+            id: 0,
+            display_empty: SparklineEmpty::default(),
+            high: false,
+            low: false,
+            first: false,
+            last: false,
+            negative: false,
+            display_x_axis: false,
+            display_hidden: false,
+            right_to_left: false,
+            date_axis: false,
+            line_weight: 0.75,
+            min_axis: SparklineAxis::default(),
+            max_axis: SparklineAxis::default(),
+            manual_min: None,
+            manual_max: None,
+            color_negative: None,
+            color_axis: None,
+            color_markers: None,
+            color_first: None,
+            color_last: None,
+            color_high: None,
+            color_low: None,
+            date_range: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------- filter & sort

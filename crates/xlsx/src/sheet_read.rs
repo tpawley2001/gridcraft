@@ -8,8 +8,8 @@ use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRe
 use gridcraft_formula::Expr;
 use gridcraft_model::{
     AutoFilter, Cell, CfOperator, CfRule, CfValueKind, Comment, CondFormat, EditRange, ErrorStyle, FilterCriterion, Formula, Hyperlink, LineInfo,
-    NoteBox, NoteCorner, Orientation, PageOrder, PasswordHash, Sheet, SheetProtection, Sparkline, SparklineKind, Table, TableColumn, TotalsFn,
-    Validation, ValidationKind, XmlColumnPr,
+    NoteBox, NoteCorner, Orientation, PageOrder, PasswordHash, Sheet, SheetProtection, Sparkline, SparklineAxis, SparklineEmpty, SparklineGroup,
+    SparklineKind, Table, TableColumn, TotalsFn, Validation, ValidationKind, XmlColumnPr,
 };
 
 use crate::IoError;
@@ -857,8 +857,51 @@ pub fn parse_sqref(s: Option<&str>) -> Vec<RangeRef> {
     s.unwrap_or("").split_whitespace().filter_map(RangeRef::parse).collect()
 }
 
+/// The settings of one `<x14:sparklineGroup>` beyond its type, series colour and markers.
+fn read_sparkline_group(g: &El, id: u32, palette: &[u32]) -> SparklineGroup {
+    let axis = |name: &str| match g.attr(name) {
+        Some("group") => SparklineAxis::Group,
+        Some("custom") => SparklineAxis::Custom,
+        _ => SparklineAxis::Individual,
+    };
+    let color = |name: &str| g.child(name).map(|c| read_color(c, palette));
+    let finite = |name: &str| g.attr_f64(name).filter(|v| v.is_finite());
+    SparklineGroup {
+        id,
+        display_empty: match g.attr("displayEmptyCellsAs") {
+            Some("gap") => SparklineEmpty::Gap,
+            Some("span") => SparklineEmpty::Span,
+            _ => SparklineEmpty::Zero,
+        },
+        high: g.flag("high", false),
+        low: g.flag("low", false),
+        first: g.flag("first", false),
+        last: g.flag("last", false),
+        negative: g.flag("negative", false),
+        display_x_axis: g.flag("displayXAxis", false),
+        display_hidden: g.flag("displayHidden", false),
+        right_to_left: g.flag("rightToLeft", false),
+        date_axis: g.flag("dateAxis", false),
+        line_weight: finite("lineWeight").unwrap_or(0.75),
+        min_axis: axis("minAxisType"),
+        max_axis: axis("maxAxisType"),
+        manual_min: finite("manualMin"),
+        manual_max: finite("manualMax"),
+        color_negative: color("colorNegative"),
+        color_axis: color("colorAxis"),
+        color_markers: color("colorMarkers"),
+        color_first: color("colorFirst"),
+        color_last: color("colorLast"),
+        color_high: color("colorHigh"),
+        color_low: color("colorLow"),
+        date_range: g.child("f").map(|f| f.text.trim().to_string()).filter(|t| !t.is_empty()),
+    }
+}
+
 /// Worksheet extensions: x14 data validations and sparklines.
 fn read_ext(cx: &mut Ctx<'_>, e: &El, sheet: &mut Sheet) {
+    // Sparkline groups of several sparklines are numbered from 1 per sheet; 0 is a group of one.
+    let mut group_id = sheet.sparklines.iter().map(|sp| sp.group.id).max().unwrap_or(0);
     for ext in e.kids("ext") {
         for c in &ext.children {
             match c.name.as_str() {
@@ -878,10 +921,19 @@ fn read_ext(cx: &mut Ctx<'_>, e: &El, sheet: &mut Sheet) {
                         };
                         let color = g.child("colorSeries").map(|c| read_color(c, &cx.palette)).unwrap_or_default();
                         let markers = g.flag("markers", false);
-                        for s in g.child("sparklines").map(|s| s.kids("sparkline").collect::<Vec<_>>()).unwrap_or_default() {
+                        let list = g.child("sparklines").map(|s| s.kids("sparkline").collect::<Vec<_>>()).unwrap_or_default();
+                        // A group of one needs no id: it is saved as its own group anyway.
+                        let id = if list.len() > 1 {
+                            group_id = group_id.saturating_add(1);
+                            group_id
+                        } else {
+                            0
+                        };
+                        let group = read_sparkline_group(g, id, &cx.palette);
+                        for s in list {
                             let source = s.child("f").map(|f| f.text.trim().to_string()).unwrap_or_default();
                             if let Some(cell) = s.child("sqref").and_then(|q| CellRef::parse(q.text.trim())) {
-                                sheet.sparklines.push(Sparkline { cell, source, kind, color, markers });
+                                sheet.sparklines.push(Sparkline { cell, source, kind, color, markers, group: group.clone() });
                             }
                         }
                     }

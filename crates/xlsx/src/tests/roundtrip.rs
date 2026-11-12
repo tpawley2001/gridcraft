@@ -328,7 +328,14 @@ fn sample() -> Workbook {
         page_order: PageOrder::OverThenDown,
         output: Default::default(),
     };
-    s.sparklines.push(Sparkline { cell: at("J2"), source: "B2:B3".into(), kind: SparklineKind::WinLoss, color: Color::Rgb(0x112233), markers: true });
+    s.sparklines.push(Sparkline {
+        cell: at("J2"),
+        source: "B2:B3".into(),
+        kind: SparklineKind::WinLoss,
+        color: Color::Rgb(0x112233),
+        markers: true,
+        group: Default::default(),
+    });
     s.tables.push(Table {
         id: 1,
         name: "Sales Table".into(),
@@ -1821,7 +1828,14 @@ fn solid_data_bar_survives_with_sparklines_and_gradient_neighbours() {
     for (i, (gradient, range, max)) in rules.into_iter().enumerate() {
         s.cond_formats.push(CondFormat { ranges: vec![rr(range)], rule: bar(gradient, max), priority: i as u32 + 1, stop_if_true: false });
     }
-    s.sparklines.push(Sparkline { cell: at("F1"), source: "A1:C1".into(), kind: SparklineKind::Line, color: Color::Rgb(0x376092), markers: false });
+    s.sparklines.push(Sparkline {
+        cell: at("F1"),
+        source: "A1:C1".into(),
+        kind: SparklineKind::Line,
+        color: Color::Rgb(0x376092),
+        markers: false,
+        group: Default::default(),
+    });
     let bytes = write_xlsx(&wb).unwrap();
     // x14 cfvo values are `xm:f` children; a `val` attribute there is not valid x14.
     let (xml, _) = sheet1_xml(&bytes);

@@ -232,6 +232,9 @@ pub(super) fn rewrite(cx: &mut Ctx, target: &str, e: &Edit) -> Result<()> {
         };
         for sp in sh.sparklines.iter_mut() {
             sp.source = fix(&sp.source);
+            if let Some(range) = sp.group.date_range.as_mut() {
+                *range = fix(range);
+            }
         }
         // PivotTable sources (a range, table or defined name) are only rewritten when the edit
         // moves them, so table and name sources keep their text.
