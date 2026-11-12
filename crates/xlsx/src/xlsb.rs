@@ -137,8 +137,6 @@ pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
 /// [`read_xlsb`] with the function library's facts, which decide where the legacy formulas get
 /// Excel's implicit `@` (as [`crate::read_xls_with`] does for `.xls`).
 pub fn read_xlsb_with(bytes: &[u8], functions: crate::FunctionInfo) -> Result<(Workbook, ReadReport), IoError> {
-    // Stub from the acceptance-test commit: `functions` is not used yet.
-    let _ = functions;
     let mut package = Package::open_repairing(bytes)?;
     let types = content_types(&mut package)?;
     let root_rels = relationships(&mut package, "")?;
@@ -399,6 +397,10 @@ pub fn read_xlsb_with(bytes: &[u8], functions: crate::FunctionInfo) -> Result<(W
     add_defined_names(&names, &model_index, &mut wb, &mut report, |l| {
         decode_xlsb(&l.rgce, &l.rgcb, CellRef::new(0, 0), Mode::Name, &links).map(|e| gridcraft_formula::print(&e))
     });
+    // Legacy formulas read as dynamic-array formulas with Excel's implicit `@`, as from an .xlsx
+    // without `cm` or an .xls, once names and tables are loaded.
+    let legacy = wb.sheets.iter_mut().enumerate().map(|(si, s)| (si, take_legacy(Arc::make_mut(s)))).collect();
+    crate::array_formula::apply_legacy(&mut wb, legacy, functions);
     if budget.formulas_kept > 0 {
         report.warn(format!(
             "{} XLSB formula(s) use features that can't be imported yet (including links to other workbooks); they were kept as their saved results and will not recalculate.",
@@ -1312,6 +1314,20 @@ impl Groups {
         blank_array_followers(&mut Target { sheet, links, commands }, &pending);
         spill_dynamic(sheet, &self.dynamic);
     }
+}
+
+/// The cells of `sheet` whose formula is a legacy one (neither dynamic nor a Ctrl+Shift+Enter
+/// array). Their `legacy` mark is cleared: after the implicit-`@` reading they are what the .xlsx
+/// and .xls readers produce, and the writer drops the implied `@` again.
+fn take_legacy(sheet: &mut Sheet) -> Vec<CellRef> {
+    let cells: Vec<CellRef> =
+        sheet.cells.iter().filter(|(_, c)| c.formula.as_ref().is_some_and(|f| f.legacy && f.array.is_none())).map(|(at, _)| at).collect();
+    for &at in &cells {
+        if let Some(f) = sheet.cells.get_mut(at).and_then(|c| c.formula.as_mut()) {
+            Arc::make_mut(f).legacy = false;
+        }
+    }
+    cells
 }
 
 /// Turns the array formulas whose anchors carry dynamic-array cell metadata into dynamic-array

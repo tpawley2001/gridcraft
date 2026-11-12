@@ -1,7 +1,7 @@
 # Importing Excel binary workbooks
 
-Last updated: 2026-11-02.
-> **Last updated:** 2026-11-02 · **Change:** minor (calculated PivotTable fields imported; pictures, shapes, text boxes and charts imported; PivotTables imported; workbook themes and theme tab colours imported)
+Last updated: 2026-11-12.
+> **Last updated:** 2026-11-12 · **Change:** minor (legacy formulas read with Excel's implicit `@`; calculated PivotTable fields imported; pictures, shapes, text boxes and charts imported; PivotTables imported; workbook themes and theme tab colours imported)
 
 Open an `.xlsb` file with File → Open, drag it onto GridCraft, or pass it to the CLI.
 GridCraft imports worksheet data into a new workbook and shows the conversion limits.
@@ -18,6 +18,9 @@ zero display, right-to-left, zoom and RGB or indexed tab colours (theme tab colo
 panes are not imported). Supported cell, shared, array and defined-name formulas stay live,
 including array constants (numbers, strings, booleans and errors) and range intersections
 preceded by a memory cache. Their saved results are retained until recalculation.
+Formulas without dynamic-array cell metadata are legacy formulas: they read with the implicit
+intersection operator `@` where Excel shows it (`@INDEX(…)`, VBA and add-in functions), exactly
+as from an `.xlsx`, and are saved as `.xlsx` without dynamic-array metadata.
 Unsupported or malformed formulas keep only their last saved results with a warning; these
 zero display, right-to-left, zoom and RGB, indexed or theme tab colours, including theme tints
 (split panes are not imported). Formula cells become their **last saved results**, not live formulas. Those results
@@ -97,6 +100,7 @@ identifiers are 677 (workbook) and 678 (sheet).
 
 | Date | Change |
 |---|---|
+| 2026-11-12 | Legacy formulas (no dynamic-array cell metadata) read with Excel's implicit `@`, as from `.xlsx`. |
 | 2026-11-02 | Calculated PivotTable fields: `fldFmla` of `BrtBeginPCDField` decoded with its `PtgSxName` field references (PNAMES); they refresh and save to XLSX. |
 | 2026-11-01 | Import pictures, shapes, text boxes and charts from each sheet's drawing part (BrtDrawing). |
 | 2026-11-01 | Array constants and PtgMemArea caches decode in cell, shared, array and defined-name formulas; malformed payloads retain saved results. Layouts follow [MS-XLSB] PtgArray, PtgExtraArray, SerAr and PtgExtraMem. |
