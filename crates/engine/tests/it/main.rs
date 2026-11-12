@@ -1,6 +1,7 @@
 //! The crate's integration tests, one module per file, built as one test binary.
 
 mod accrint_excel;
+mod amor_feb_end_excel;
 mod analysis_chart_output;
 mod auto_outline;
 mod auto_row_height_on_open;
