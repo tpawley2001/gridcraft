@@ -215,6 +215,7 @@ mod xlsb_external_link_tests;
 mod xlsb_filter_tests;
 mod xlsb_gradient_fill_tests;
 mod xlsb_layout_tests;
+mod xlsb_legacy_at_tests;
 mod xlsb_links_tests;
 mod xlsb_list_tests;
 mod xlsb_macro_sheet_tests;

@@ -35,35 +35,25 @@ fn sum_array() -> Vec<u8> {
 #[test]
 fn xlsb_array_constants_keep_all_value_types_and_formula_text() {
     let cases = [
-        (sum_array(), array(1, 3, &[num(1.0), num(2.0), num(3.0)]), "SUM({1,2,3})", "SUM({1,2,3})"),
-        (
-            [array_ptg(), ptg_int(2), vec![0x22, 2, 29, 0]].concat(),
-            array(1, 3, &[num(10.0), num(20.0), num(30.0)]),
-            "INDEX({10,20,30},2)",
-            "@INDEX({10,20,30},2)",
-        ),
+        (sum_array(), array(1, 3, &[num(1.0), num(2.0), num(3.0)]), "SUM({1,2,3})"),
+        ([array_ptg(), ptg_int(2), vec![0x22, 2, 29, 0]].concat(), array(1, 3, &[num(10.0), num(20.0), num(30.0)]), "@INDEX({10,20,30},2)"),
         (
             [vec![0x17, 1, 0, b'b', 0], array_ptg(), ptg_int(2), vec![0x1D, 0, 0x22, 4, 102, 0]].concat(),
             array(2, 2, &[string("a"), num(1.0), string("b"), num(2.0)]),
             "VLOOKUP(\"b\",{\"a\",1;\"b\",2},2,FALSE)",
-            "VLOOKUP(\"b\",{\"a\",1;\"b\",2},2,FALSE)",
         ),
-        ([array_ptg(), vec![0x22, 1, 36, 0]].concat(), array(1, 2, &[vec![2, 1], vec![2, 0]]), "AND({TRUE,FALSE})", "AND({TRUE,FALSE})"),
-        (
-            [array_ptg(), ptg_int(1), vec![0x22, 2, 29, 0, 0x21, 2, 0]].concat(),
-            array(1, 1, &[vec![4, 0x2A, 0, 0, 0]]),
-            "ISNA(INDEX({#N/A},1))",
-            "ISNA(@INDEX({#N/A},1))",
-        ),
+        ([array_ptg(), vec![0x22, 1, 36, 0]].concat(), array(1, 2, &[vec![2, 1], vec![2, 0]]), "AND({TRUE,FALSE})"),
+        ([array_ptg(), ptg_int(1), vec![0x22, 2, 29, 0, 0x21, 2, 0]].concat(), array(1, 1, &[vec![4, 0x2A, 0, 0, 0]]), "ISNA(@INDEX({#N/A},1))"),
     ];
-    for (rgce, rgcb, text, shown) in cases {
+    for (rgce, rgcb, shown) in cases {
         let data = [row(0), fmla(0, &rgce, &rgcb)].concat();
         let (wb, report) = read_xlsb(&file(&worksheet(&data, &[]))).unwrap();
-        assert_eq!(ftext(&wb, "A1").as_deref(), Some(text));
+        // Read with the implicit intersection Excel shows for a function that can return a
+        // reference (`@INDEX`), as the same legacy formula reads from an .xlsx.
+        assert_eq!(ftext(&wb, "A1").as_deref(), Some(shown));
         assert!(!report.warnings.iter().any(|w| w.contains("kept as their saved results")));
         let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
-        // Saved as the legacy formula it was read as; reading that .xlsx back shows the implicit
-        // intersection Excel applies to a function that can return a reference (`@INDEX`).
+        // Saved as a legacy formula (without dynamic-array metadata): it reads back the same.
         assert_eq!(ftext(&back, "A1").as_deref(), Some(shown));
     }
 }

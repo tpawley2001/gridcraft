@@ -329,7 +329,7 @@ fn read_plain(name: &str, bytes: &[u8], password: Option<&str>, csv_as_text: boo
         let read = if import == FileKind::Ods {
             gridcraft_xlsx::read_ods_with(bytes, &gridcraft_calc::is_known_function)
         } else {
-            gridcraft_xlsx::read_xlsb(bytes)
+            gridcraft_xlsx::read_xlsb_with(bytes, XLSX_FUNCTIONS)
         };
         let (wb, report) = read.map_err(|e| EngineError::Other(format!("We can't import '{name}': {e}")))?;
         return Ok((wb, report.warnings));

@@ -76,7 +76,7 @@ pub use passthrough::rebase_links;
 pub use spreadsheetml::{is_spreadsheetml, read_spreadsheetml};
 pub use sylk::{is_sylk, read_sylk, write_sylk};
 pub use xls::{XlsOpenError, read_xls, read_xls_with, read_xls_with_password, read_xls_with_password_using};
-pub use xlsb::read_xlsb;
+pub use xlsb::{read_xlsb, read_xlsb_with};
 
 /// Errors from reading or writing files.
 #[derive(Debug, thiserror::Error)]
