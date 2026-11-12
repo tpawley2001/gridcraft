@@ -328,10 +328,44 @@ pub(super) fn comments_xml(sheet: &Sheet, ids: &BTreeMap<CellRef, Vec<String>>) 
             Some(id) => format!(" shapeId=\"0\" xr:uid=\"{id}\""),
             None => String::new(),
         };
-        let _ = write!(s, "<comment ref=\"{}\" authorId=\"{aid}\"{link}><text><r>{}</r></text></comment>", cell.a1(), crate::xml::t_el(&text));
+        let _ = write!(s, "<comment ref=\"{}\" authorId=\"{aid}\"{link}><text>", cell.a1());
+        match c.note_runs.as_ref().filter(|nr| c.replies.is_empty() && nr.text == c.text && !nr.runs.is_empty()) {
+            Some(nr) => {
+                for run in &nr.runs {
+                    s.push_str("<r>");
+                    write_run_props(&mut s, &run.props);
+                    s.push_str(&crate::xml::t_el(&run.text));
+                    s.push_str("</r>");
+                }
+            }
+            None => {
+                let _ = write!(s, "<r>{}</r>", crate::xml::t_el(&text));
+            }
+        }
+        s.push_str("</text></comment>");
     }
     s.push_str("</commentList></comments>");
     s
+}
+
+/// A note run's `<rPr>` with the kept properties in the schema order of `CT_RPrElt`
+/// (ECMA-376 Part 1 §18.4.7); nothing when the run has none.
+fn write_run_props(s: &mut String, props: &[(String, Vec<(String, String)>)]) {
+    if props.is_empty() {
+        return;
+    }
+    s.push_str("<rPr>");
+    for (name, keys) in crate::sheet_read::NOTE_RUN_PROPS {
+        let Some((_, attrs)) = props.iter().find(|(n, _)| n == name) else { continue };
+        let _ = write!(s, "<{name}");
+        for k in *keys {
+            if let Some((_, v)) = attrs.iter().find(|(a, _)| a == k) {
+                let _ = write!(s, " {k}=\"{}\"", esc(v));
+            }
+        }
+        s.push_str("/>");
+    }
+    s.push_str("</rPr>");
 }
 
 /// `2024-05-01T09:30:00` with optional fraction and zone: what `dT` (xsd:dateTime) accepts.

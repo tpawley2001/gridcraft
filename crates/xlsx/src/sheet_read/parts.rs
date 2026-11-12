@@ -3,7 +3,7 @@ use super::{
     MAX_HYPERLINK_TARGET, MAX_ROWS, MAX_TOOLTIP_CHARS, NoteBox, NoteCorner, RangeRef, Rel, Sheet, Table, TableColumn, TotalsFn, XmlColumnPr,
     from_file, truncate_chars, xml,
 };
-use gridcraft_model::{DateGroup, DateGrouping, NotePictureFill, NoteShape};
+use gridcraft_model::{DateGroup, DateGrouping, NotePictureFill, NoteRun, NoteRuns, NoteShape};
 
 /// `budget` counts the cells and bytes this sheet's hyperlinks have copied so far, across
 /// `<hyperlinks>` blocks.
@@ -288,6 +288,7 @@ pub(super) fn read_comments(x: &El, sheet: &mut Sheet) {
         {
             text = rest.strip_prefix('\n').unwrap_or(rest).to_string();
         }
+        let note_runs = c.child("text").and_then(note_runs).map(|runs| NoteRuns { text: text.clone(), runs });
         sheet.comments.insert(
             cell,
             Comment {
@@ -301,9 +302,72 @@ pub(super) fn read_comments(x: &El, sheet: &mut Sheet) {
                 note_box: None,
                 picture_fill: None,
                 note_shape: None,
+                note_runs,
             },
         );
     }
+}
+
+/// Most runs one note keeps; a note with more is kept as plain text.
+const MAX_NOTE_RUNS: usize = 4096;
+
+/// The `<rPr>` children a note run keeps (`CT_RPrElt`, ECMA-376 Part 1 §18.4.7), with the
+/// attributes each may carry.
+pub(crate) const NOTE_RUN_PROPS: &[(&str, &[&str])] = &[
+    ("rFont", &["val"]),
+    ("charset", &["val"]),
+    ("family", &["val"]),
+    ("b", &["val"]),
+    ("i", &["val"]),
+    ("strike", &["val"]),
+    ("outline", &["val"]),
+    ("shadow", &["val"]),
+    ("condense", &["val"]),
+    ("extend", &["val"]),
+    ("color", &["auto", "indexed", "rgb", "theme", "tint"]),
+    ("sz", &["val"]),
+    ("u", &["val"]),
+    ("vertAlign", &["val"]),
+    ("scheme", &["val"]),
+];
+
+/// A note's formatted runs (`<text>` = `CT_Rst`, §18.7.7): `None` unless at least one `<r>` has
+/// an `<rPr>`. A leading bare `<t>` becomes an unformatted run; phonetic children are skipped.
+fn note_runs(text: &El) -> Option<Vec<NoteRun>> {
+    if !text.kids("r").any(|r| r.child("rPr").is_some()) {
+        return None;
+    }
+    let mut runs = Vec::new();
+    for c in &text.children {
+        let run = match c.name.as_str() {
+            "t" => NoteRun { text: xml::decode_xstring(&c.text), props: vec![] },
+            "r" => {
+                let raw: String = c.kids("t").map(|t| t.text.as_str()).collect();
+                let props = c.child("rPr").map(run_props).unwrap_or_default();
+                NoteRun { text: xml::decode_xstring(&raw), props }
+            }
+            _ => continue,
+        };
+        if runs.len() >= MAX_NOTE_RUNS {
+            return None;
+        }
+        runs.push(run);
+    }
+    Some(runs)
+}
+
+/// The known properties of one `<rPr>`, first occurrence of each, with their known attributes.
+fn run_props(rpr: &El) -> Vec<(String, Vec<(String, String)>)> {
+    let mut out: Vec<(String, Vec<(String, String)>)> = Vec::new();
+    for e in &rpr.children {
+        let Some((name, keys)) = NOTE_RUN_PROPS.iter().find(|(n, _)| *n == e.name) else { continue };
+        if out.iter().any(|(n, _)| n == name) {
+            continue;
+        }
+        let attrs = keys.iter().filter_map(|k| Some((k.to_string(), e.attr(k)?.to_string()))).collect();
+        out.push((name.to_string(), attrs));
+    }
+    out
 }
 
 /// Reads the notes' VML shapes: a shape carrying `<x:Visible/>` marks its note as shown, and its
@@ -514,6 +578,7 @@ pub(crate) fn read_threaded(persons: &HashMap<String, String>, x: &El, sheet: &m
                         note_box: None,
                         picture_fill: None,
                         note_shape: None,
+                        note_runs: None,
                     },
                 );
             }

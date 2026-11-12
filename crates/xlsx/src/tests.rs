@@ -63,6 +63,7 @@ mod multilevel_category_roundtrip;
 mod note_box;
 mod note_picture_fill_ids;
 mod note_picture_fill_tests;
+mod note_run_formatting_tests;
 mod ods_floor_ceiling_mode_tests;
 mod ods_no_mimetype_tests;
 mod ods_page_setup_tests;

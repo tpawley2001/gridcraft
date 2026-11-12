@@ -409,6 +409,30 @@ pub struct Comment {
     /// (a note made here, or one with the default look) writes the default shape.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note_shape: Option<NoteShape>,
+    /// A note's formatted text runs as read from the file (bold author line, font, size, colour),
+    /// with the plain text they were derived from; `None` for a plain note or one made here.
+    /// `text` stays the source of truth: the runs are only written back while it is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_runs: Option<NoteRuns>,
+}
+
+/// A note's formatted text (`<comment><text>` runs, ECMA-376 Part 1 §18.7.7 and §18.4.4).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NoteRuns {
+    /// The note's plain text ([`Comment::text`]) as derived from these runs when they were read.
+    pub text: String,
+    /// The runs in order, including Excel's leading author line.
+    pub runs: Vec<NoteRun>,
+}
+
+/// One formatted run of a note's text.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NoteRun {
+    pub text: String,
+    /// The run properties (`<rPr>` children, §18.4.7) as element name and attributes, e.g.
+    /// `("sz", [("val", "9")])` or `("color", [("indexed", "81")])`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub props: Vec<(String, Vec<(String, String)>)>,
 }
 
 /// A note shape's VML appearance and placement, kept from the file so a save doesn't reset them.
