@@ -141,6 +141,13 @@ fn merge_suffix(acc: Option<char>, s: Option<char>) -> R<Option<char>> {
     }
 }
 
+/// A real or imaginary part as text. Complex results write parts below 1E-9 in E notation
+/// (`IMSQRT("-1E10")` is `6.1257422745431E-12+100000i`), unlike the `&` operator, which writes
+/// fixed decimals down to 1E-15.
+fn part_text(x: f64) -> String {
+    if x != 0.0 && x.abs() < 1e-9 { gridcraft_core::number_to_short_text(x) } else { number_to_text(x) }
+}
+
 fn fmt_complex(z: Cx, suffix: char) -> R<Value> {
     if !z.re.is_finite() || !z.im.is_finite() {
         return Err(CellError::Num);
@@ -149,11 +156,11 @@ fn fmt_complex(z: Cx, suffix: char) -> R<Value> {
     let im = clean(z.im);
     let mut s = String::new();
     if im == 0.0 {
-        s.push_str(&number_to_text(re));
+        s.push_str(&part_text(re));
         return text_val(s);
     }
     if re != 0.0 {
-        s.push_str(&number_to_text(re));
+        s.push_str(&part_text(re));
         if im > 0.0 {
             s.push('+');
         }
@@ -161,7 +168,7 @@ fn fmt_complex(z: Cx, suffix: char) -> R<Value> {
     if im == -1.0 {
         s.push('-');
     } else if im != 1.0 {
-        s.push_str(&number_to_text(im));
+        s.push_str(&part_text(im));
     }
     s.push(suffix);
     text_val(s)

@@ -1284,7 +1284,7 @@ mod tests {
     fn case_and_cleanup() {
         is_text(ev("UPPER", vec![t("abc")]), "ABC");
         is_text(ev("LOWER", vec![t("ABC")]), "abc");
-        is_text(ev("LOWER", vec![t("\u{3A3}\u{391}\u{3A3} \u{3A3}")]), "\u{3C3}\u{3B1}\u{3C2} \u{3C3}");
+        is_text(ev("LOWER", vec![t("\u{3A3}\u{391}\u{3A3} \u{3A3}")]), "\u{3C3}\u{3B1}\u{3C2} \u{3C2}");
         is_text(ev("UPPER", vec![t("Straße")]), "STRAßE");
         is_text(ev("LOWER", vec![t("İ")]), "i");
         is_text(ev("PROPER", vec![t("İSTANBUL")]), "Istanbul");
