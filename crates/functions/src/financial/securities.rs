@@ -240,7 +240,9 @@ struct Bond {
 
 fn bond(sys: DateSystem, settle: f64, mat: f64, freq: f64, basis: u32) -> R<Bond> {
     let c = coupons(sys, settle, mat, freq)?;
-    let e = coup_days(&c, freq, basis);
+    // Under actual/actual, PRICE/YIELD/DURATION/MDURATION take E as COUPNCD - COUPPCD, which for a month-end
+    // maturity can differ from what COUPDAYS reports (both measured in Excel, `bond_dsc_tests.rs`).
+    let e = if basis == 1 { c.ncd - c.pcd } else { coup_days(&c, freq, basis) };
     let a = coup_daybs(sys, &c, settle, basis)?;
     // Inside PRICE/YIELD/DURATION/MDURATION, DSC is the actual day count under actual/actual and
     // E - A under every other basis (actual/360 and actual/365 included), as Excel computes it.

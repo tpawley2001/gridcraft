@@ -159,6 +159,23 @@ fn coupons() {
 }
 
 #[test]
+fn coupons_month_end_maturity_actual_days() {
+    // Values observed in Excel. Basis 1 period length steps back from maturity clamping the day each period.
+    close(ev("COUPDAYS", vec![d(2024, 2, 29), d(2030, 8, 31), n(2.0), n(1.0)]), 182.0);
+    close(ev("COUPDAYS", vec![d(2024, 2, 28), d(2030, 8, 31), n(4.0), n(1.0)]), 90.0);
+    close(ev("COUPDAYS", vec![d(2023, 2, 28), d(2025, 8, 31), n(4.0), n(1.0)]), 89.0);
+    close(ev("COUPDAYS", vec![d(2024, 8, 31), d(2027, 2, 28), n(4.0), n(1.0)]), 92.0);
+    close(ev("COUPDAYS", vec![d(2024, 8, 31), d(2027, 2, 28), n(2.0), n(1.0)]), 181.0);
+    close(ev("COUPDAYS", vec![d(2023, 8, 31), d(2028, 2, 29), n(1.0), n(1.0)]), 365.0);
+    close(ev("COUPDAYS", vec![d(2024, 1, 31), d(2026, 7, 31), n(4.0), n(1.0)]), 90.0);
+    // 30/360: an end-of-February coupon date to the 31st keeps the 31st.
+    close(ev("COUPDAYBS", vec![d(2024, 8, 31), d(2027, 2, 28), n(1.0), n(0.0)]), 181.0);
+    close(ev("COUPDAYSNC", vec![d(2024, 8, 31), d(2027, 2, 28), n(1.0), n(0.0)]), 179.0);
+    // Far-apart dates finish quickly (the stepped day stops falling at 30 here).
+    close(ev("COUPDAYS", vec![d(1900, 3, 31), d(9999, 12, 31), n(4.0), n(1.0)]), 91.0);
+}
+
+#[test]
 fn securities() {
     close_tol(ev("DISC", vec![d(2007, 1, 25), d(2007, 6, 15), n(97.975), n(100.0), n(1.0)]), 0.052420213, 1e-8);
     close_tol(ev("PRICEDISC", vec![d(2008, 2, 16), d(2008, 3, 1), n(0.0525), n(100.0), n(2.0)]), 99.79583333, 1e-9);
