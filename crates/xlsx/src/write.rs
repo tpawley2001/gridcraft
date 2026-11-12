@@ -359,6 +359,9 @@ fn workbook_view_attrs(wb: &Workbook) -> String {
     if tab_ratio != 600 {
         let _ = write!(attrs, " tabRatio=\"{tab_ratio}\"");
     }
+    if let Some(r) = wb.view.window {
+        let _ = write!(attrs, " xWindow=\"{}\" yWindow=\"{}\" windowWidth=\"{}\" windowHeight=\"{}\"", r.x, r.y, r.width, r.height);
+    }
     attrs
 }
 

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use gridcraft_core::{DateSystem, RangeRef};
 use gridcraft_model::{
     CalcMode, Chart, ChartSheetPrint, DefinedName, PhoneticString, PrintSettings, Sheet, ShowObjects, Style, StyleId, StyleTable, UpdateLinks,
-    Visibility, Workbook, WorkbookOptions, WorkbookView,
+    Visibility, WindowRect, Workbook, WorkbookOptions, WorkbookView,
 };
 
 use crate::package::{Package, Rel};
@@ -325,6 +325,17 @@ fn read_workbook_properties(cx: &mut Ctx<'_>, wb: &mut Workbook, xml: &El) {
     }
 }
 
+/// The window position and size a `<workbookView>` stores (`xWindow`, `yWindow`, `windowWidth`,
+/// `windowHeight`, twips; ECMA-376 Part 1 §18.2.30). `None` unless all four are present and valid.
+fn workbook_window_rect(v: &El) -> Option<WindowRect> {
+    Some(WindowRect {
+        x: v.attr("xWindow")?.trim().parse().ok()?,
+        y: v.attr("yWindow")?.trim().parse().ok()?,
+        width: v.attr("windowWidth")?.trim().parse().ok()?,
+        height: v.attr("windowHeight")?.trim().parse().ok()?,
+    })
+}
+
 /// The single window modelled by GridCraft: prefer the first visible window,
 /// including the format's default visibility, and otherwise retain the first one.
 fn selected_workbook_view(workbook: &El) -> Option<&El> {
@@ -384,6 +395,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
             show_horizontal_scroll: v.flag("showHorizontalScroll", true),
             show_vertical_scroll: v.flag("showVerticalScroll", true),
             tab_ratio: v.attr_u32("tabRatio").unwrap_or(600).min(WorkbookView::MAX_TAB_RATIO),
+            window: workbook_window_rect(v),
         };
     }
 
