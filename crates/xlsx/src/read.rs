@@ -50,6 +50,8 @@ pub struct Ctx<'a> {
     /// The workbook theme's colours (lt1, dk1, lt2, dk2, accent1..6, hlink, folHlink), for
     /// drawing colours whose transforms resolve them to RGB.
     pub theme_colors: [u32; 12],
+    /// The workbook theme's format scheme, for shapes styled by reference to it.
+    pub format_scheme: crate::drawing::shape_style::FormatScheme,
 }
 
 impl<'a> Ctx<'a> {
@@ -75,6 +77,7 @@ impl<'a> Ctx<'a> {
             known_function: None,
             python: Default::default(),
             theme_colors: gridcraft_model::Theme::default().colors,
+            format_scheme: Default::default(),
         }
     }
 }
@@ -196,6 +199,9 @@ fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], ke
         }
         wb.theme.preserved = kept.theme(cx, &r.target);
         cx.theme_colors = wb.theme.colors;
+        if let Some(fs) = x.path(&["themeElements", "fmtScheme"]) {
+            cx.format_scheme = crate::drawing::shape_style::FormatScheme::read(fs, &cx.theme_colors);
+        }
         has_theme = true;
     }
     // Cell checkboxes live in the feature property bags, which styles refer to.

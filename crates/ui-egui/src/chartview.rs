@@ -202,7 +202,7 @@ fn paint_shape_text(p: &Painter, wb: &Workbook, sp: &gridcraft_engine::model::Sh
     let align = f.align.unwrap_or(if text_box { ShapeTextAlign::Left } else { ShapeTextAlign::Center });
     let anchor = f.anchor.unwrap_or(if text_box { ShapeTextAnchor::Top } else { ShapeTextAnchor::Middle });
     let default_color = if text_box { Color32::BLACK } else { Color32::WHITE };
-    let color = f.text_color.and_then(|c| c.resolve(&wb.theme)).map(theme::color32).unwrap_or(default_color);
+    let color = sp.drawn_text_color().and_then(|c| c.resolve(&wb.theme)).map(theme::color32).unwrap_or(default_color);
     // Default 14 px (as before); a set size is in points.
     let size = f.font_size.map_or(14.0, |pt| pt * 96.0 / 72.0).clamp(1.0, 2000.0) * z;
     let family = theme::cell_family(f.font.as_deref().unwrap_or(""), f.bold, f.italic);
@@ -328,9 +328,13 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
         }
         let start = p.add(egui::Shape::Noop);
         let mut label = true;
-        let fill = sp.fill.resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::TRANSPARENT);
-        let line =
-            if sp.format.no_line { Color32::TRANSPARENT } else { sp.line.resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::DARK_GRAY) };
+        // The shape's own fill and outline, else what its theme style gives them.
+        let fill = sp.drawn_fill().resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::TRANSPARENT);
+        let line = if sp.format.no_line || sp.style_hides_line() {
+            Color32::TRANSPARENT
+        } else {
+            sp.drawn_line().resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::DARK_GRAY)
+        };
         // A preset kept from the file (block arrows, chevron, diamond, …) draws its own outline,
         // at a resolution of the box in hundredths of a point, whatever its kind.
         let res = |v: f32| (v.abs() / geo.z.max(0.01) * 100.0).round().min(1.0e9) as i64;
