@@ -161,6 +161,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-11 | minor | G0314: a LAMBDA that is not called is a value of its own kind: TYPE gives 128, ERROR.TYPE `#N/A`, ISERROR/ISERR FALSE (a cell left holding one still shows `#CALC!`); GROUPBY and PIVOTBY take PERCENTOF (each group's sum over the total of the filtered values) and `HSTACK`/`VSTACK` of functions (one value column per function, headed by its name), as Excel does (`lambda_value_groupby_excel.rs`) |
 | 2026-11-11 | minor | Number to text (`&`, CONCATENATE, LEN, EXACT) rounds to 15 significant digits (an exact tie goes toward zero) and writes plain digits below 1E+20 (`2^53` → `9007199254740990`, `1E+20` → `1E+20`) and fixed decimals down to 1E-15 (`1E-15` → `0.000000000000001`); LOWER and PROPER lowercase Σ to ς unless a letter or digit follows (`LOWER("ΑΣ1")` → `ασ1`, `LOWER("Σ")` → `ς`), as Excel does (`number_text_sigma_excel.rs`) |
 | 2026-11-11 | minor | CUMIPMT and CUMPRINC round a fractional start period up and end period down (an empty span gives 0) and keep a fractional nper for the payment and balances, as Excel does (`cumipmt_fractional_excel.rs`) |
 | 2026-11-11 | minor | DISC, INTRATE, RECEIVED, PRICEDISC and YIELDDISC with basis 1 over at most a year divide by 366 when the span holds a 29 February (or lies in one leap year), else 365, like YEARFRAC(settlement, maturity, 1), instead of the settlement year's length, as Excel does (`disc_family_basis1_excel.rs`) |

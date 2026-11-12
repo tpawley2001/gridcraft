@@ -2,9 +2,10 @@
 //! TOROW, TOCOL, WRAPROWS, WRAPCOLS, TAKE, DROP, CHOOSEROWS, CHOOSECOLS, EXPAND, GROUPBY,
 //! PIVOTBY.
 //!
-//! GROUPBY / PIVOTBY take their aggregation as a function name ("SUM", "AVERAGE"…) or a
-//! SUBTOTAL-style code (1–11): the host resolves eta-reduced lambdas such as `SUM` to the name
-//! text before calling. Custom LAMBDA aggregations are not supported here.
+//! GROUPBY / PIVOTBY take their aggregation as a function name ("SUM", "AVERAGE", "PERCENTOF"…)
+//! or a SUBTOTAL-style code (1–11), or an array of them (one value column per function): the host
+//! resolves eta-reduced lambdas such as `SUM` or `HSTACK(SUM,MAX)` to the name text before calling.
+//! A LAMBDA aggregation is called through the context.
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -536,6 +537,29 @@ enum Agg {
     StdevP,
     VarS,
     VarP,
+    /// The group's sum as a fraction of the sum of all the (filtered) values.
+    PercentOf,
+}
+
+impl Agg {
+    /// The function's name, which heads its value column when several functions are given.
+    fn name(self) -> &'static str {
+        match self {
+            Agg::Sum => "SUM",
+            Agg::Average => "AVERAGE",
+            Agg::Count => "COUNT",
+            Agg::CountA => "COUNTA",
+            Agg::Max => "MAX",
+            Agg::Min => "MIN",
+            Agg::Product => "PRODUCT",
+            Agg::Median => "MEDIAN",
+            Agg::StdevS => "STDEV.S",
+            Agg::StdevP => "STDEV.P",
+            Agg::VarS => "VAR.S",
+            Agg::VarP => "VAR.P",
+            Agg::PercentOf => "PERCENTOF",
+        }
+    }
 }
 
 fn parse_agg(v: &Value) -> R<Agg> {
@@ -572,6 +596,7 @@ fn parse_agg(v: &Value) -> R<Agg> {
                 "STDEV.P" | "STDEVP" => Agg::StdevP,
                 "VAR.S" | "VAR" => Agg::VarS,
                 "VAR.P" | "VARP" => Agg::VarP,
+                "PERCENTOF" => Agg::PercentOf,
                 _ => return Err(CellError::Value),
             })
         }
@@ -580,15 +605,50 @@ fn parse_agg(v: &Value) -> R<Agg> {
     }
 }
 
-/// The function argument of GROUPBY/PIVOTBY: a built-in aggregation, or `None` for a LAMBDA (called
-/// through the context).
-fn agg_arg(args: &[Arg], i: usize, c: &dyn Ctx) -> R<Option<Agg>> {
-    if c.has_lambda() { Ok(None) } else { parse_agg(&arg(args, i)?.value).map(Some) }
+/// The function argument of GROUPBY/PIVOTBY, one entry per function (an array of names gives one
+/// value column each, in order): a built-in aggregation, or `None` for a LAMBDA (called through the
+/// context).
+fn agg_arg(args: &[Arg], i: usize, c: &dyn Ctx) -> R<Vec<Option<Agg>>> {
+    if c.has_lambda() {
+        return Ok(vec![None]);
+    }
+    match &arg(args, i)?.value {
+        Value::Array(a) if a.data.len() > 1 => a.data.iter().map(|v| parse_agg(v).map(Some)).collect(),
+        v => parse_agg(v).map(|f| vec![Some(f)]),
+    }
+}
+
+/// The value column headers: one per value column and function. With several functions each
+/// column is headed by its function's name (after the value's header when there are several values).
+fn agg_headers(value_headers: &[Value], fs: &[Option<Agg>]) -> Vec<Value> {
+    if fs.len() < 2 {
+        return value_headers.to_vec();
+    }
+    let mut out = Vec::with_capacity(value_headers.len().saturating_mul(fs.len()));
+    for h in value_headers {
+        for f in fs {
+            let name = f.map_or("LAMBDA", Agg::name);
+            out.push(if value_headers.len() == 1 { Value::from(name) } else { Value::from(format!("{} {name}", h.to_text().unwrap_or_default())) });
+        }
+    }
+    out
 }
 
 /// Aggregates one group with `f`, or with the LAMBDA (given the group's values as a column) when `None`.
-fn aggregate_with(f: Option<Agg>, vals: &[&Value], c: &mut dyn Ctx) -> Value {
+/// `all` is every (filtered) value of the column, which PERCENTOF divides by.
+fn aggregate_with(f: Option<Agg>, vals: &[&Value], all: &[&Value], c: &mut dyn Ctx) -> Value {
     match f {
+        Some(Agg::PercentOf) => match (aggregate(Agg::Sum, vals), aggregate(Agg::Sum, all)) {
+            (Value::Number(part), Value::Number(total)) => {
+                if total == 0.0 {
+                    Value::Error(CellError::Div0)
+                } else {
+                    Value::number(part / total)
+                }
+            }
+            (Value::Error(e), _) | (_, Value::Error(e)) => Value::Error(e),
+            _ => Value::Error(CellError::Value),
+        },
         Some(f) => aggregate(f, vals),
         None => {
             let col = Value::from(Array::column(vals.iter().map(|v| (*v).clone()).collect()));
@@ -654,7 +714,7 @@ fn aggregate(f: Agg, vals: &[&Value]) -> Value {
             Value::Number(x) => Value::number(x.sqrt()),
             o => o,
         },
-        Agg::CountA => Value::Number(0.0),
+        Agg::CountA | Agg::PercentOf => Value::Number(0.0),
     }
 }
 
@@ -759,7 +819,7 @@ fn opt_arr(args: &[Arg], i: usize) -> R<Option<Array>> {
 fn groupby(args: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     let rf = arr_arg(args, 0)?;
     let vals = arr_arg(args, 1)?;
-    let f = agg_arg(args, 2, c)?;
+    let fs = agg_arg(args, 2, c)?;
     let fh = opt_count(args, 3)?;
     let total = opt_count(args, 4)?.unwrap_or(1);
     let sort = opt_count(args, 5)?.unwrap_or(1);
@@ -779,13 +839,16 @@ fn groupby(args: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     }
     let sort_in_keys = if sort.unsigned_abs() as usize <= rf.cols { sort } else { 0 };
     let mut ordered = distinct_keys(&keys, sort_in_keys);
+    let all: Vec<Vec<&Value>> = (0..vals.cols).map(|col| p.rows.iter().filter_map(|&r| vals.get(r, col)).collect()).collect();
     let mut agg_row = |rows: &[usize]| -> Vec<Value> {
-        (0..vals.cols)
-            .map(|col| {
-                let vs: Vec<&Value> = rows.iter().filter_map(|&r| vals.get(r, col)).collect();
-                aggregate_with(f, &vs, c)
-            })
-            .collect()
+        let mut out = Vec::with_capacity(vals.cols.saturating_mul(fs.len()));
+        for (col, all) in all.iter().enumerate() {
+            let vs: Vec<&Value> = rows.iter().filter_map(|&r| vals.get(r, col)).collect();
+            for f in &fs {
+                out.push(aggregate_with(*f, &vs, all, c));
+            }
+        }
+        out
     };
     let mut lines: Vec<Vec<Value>> = ordered
         .drain(..)
@@ -806,14 +869,14 @@ fn groupby(args: &[Arg], c: &mut dyn Ctx) -> R<Value> {
         let mut rows_of = |keys: &[Value]| groups.get(&row_key(keys)).cloned().unwrap_or_default();
         // The header and total lines count too, so the whole result is checked before it is built.
         let around = usize::from(p.show_headers) + usize::from(total != 0);
-        let width = rf.cols.saturating_add(vals.cols);
+        let width = rf.cols.saturating_add(vals.cols.saturating_mul(fs.len()));
         let fits = |n: usize| check_output_size(n.saturating_add(around), width);
         lines = with_subtotals(lines, depth, rf.cols, total < 0, &fits, &mut rows_of, &mut agg_row)?;
     }
     let mut out = Vec::new();
     if p.show_headers {
         let mut h = p.field_headers.clone();
-        h.extend(p.value_headers.iter().cloned());
+        h.extend(agg_headers(&p.value_headers, &fs));
         out.push(h);
     }
     // With subtotals Excel calls the last line "Grand Total".
@@ -920,7 +983,7 @@ fn pivotby(args: &[Arg], ctx: &mut dyn Ctx) -> R<Value> {
     let rf = arr_arg(args, 0)?;
     let cf = arr_arg(args, 1)?;
     let vals = arr_arg(args, 2)?;
-    let f = agg_arg(args, 3, ctx)?;
+    let fs = agg_arg(args, 3, ctx)?;
     let fh = opt_count(args, 4)?;
     let row_total = opt_count(args, 5)?.unwrap_or(1);
     let row_sort = opt_count(args, 6)?.unwrap_or(1);
@@ -943,13 +1006,16 @@ fn pivotby(args: &[Arg], ctx: &mut dyn Ctx) -> R<Value> {
         by_col.entry(c.clone()).or_default().push(i);
         cell.entry((r, c)).or_default().push(i);
     }
-    let mut agg = |rows: &[usize], c: usize| -> Value {
+    let all: Vec<Vec<&Value>> = (0..vals.cols).map(|col| p.rows.iter().filter_map(|&r| vals.get(r, col)).collect()).collect();
+    let mut agg = |rows: &[usize], c: usize, f: Option<Agg>| -> Value {
         if rows.is_empty() {
             return Value::Empty;
         }
         let vs: Vec<&Value> = rows.iter().filter_map(|&r| vals.get(r, c)).collect();
-        aggregate_with(f, &vs, ctx)
+        aggregate_with(f, &vs, all.get(c).map(Vec::as_slice).unwrap_or_default(), ctx)
     };
+    let value_headers = agg_headers(&p.value_headers, &fs);
+    let value_cols = value_headers.len();
     let rows_for = |r: Option<&Vec<Value>>, c: Option<&Vec<Value>>| -> Vec<usize> {
         match (r, c) {
             (Some(r), Some(c)) => cell.get(&(row_key(r), row_key(c))).cloned().unwrap_or_default(),
@@ -965,11 +1031,11 @@ fn pivotby(args: &[Arg], ctx: &mut dyn Ctx) -> R<Value> {
         cols.insert(0, None);
     }
     let lead = rf.cols;
-    let value_row = vals.cols > 1 || p.show_headers;
+    let value_row = value_cols > 1 || p.show_headers;
     let header_rows = cf.cols.saturating_add(usize::from(value_row));
     let body_rows = rk.len().saturating_add(usize::from(row_total != 0));
     // Reject before building any header or body row: every column-field header row is as wide as the whole grid.
-    let (height, width) = pivot_dims(header_rows, body_rows, cols.len(), vals.cols, lead);
+    let (height, width) = pivot_dims(header_rows, body_rows, cols.len(), value_cols, lead);
     if height.saturating_mul(width) > MAX_CELLS {
         return Err(CellError::Num);
     }
@@ -978,7 +1044,7 @@ fn pivotby(args: &[Arg], ctx: &mut dyn Ctx) -> R<Value> {
     for level in 0..cf.cols {
         let mut line = vec![Value::Empty; lead];
         for c in &cols {
-            for _ in 0..vals.cols {
+            for _ in 0..value_cols {
                 line.push(match c {
                     Some(k) => k.get(level).cloned().unwrap_or(Value::Empty),
                     None if level == 0 => Value::from("Total"),
@@ -992,7 +1058,7 @@ fn pivotby(args: &[Arg], ctx: &mut dyn Ctx) -> R<Value> {
         let mut line: Vec<Value> = if p.show_headers { p.field_headers.iter().take(lead).cloned().collect() } else { vec![Value::Empty; lead] };
         line.resize(lead, Value::Empty);
         for _ in &cols {
-            line.extend(p.value_headers.iter().cloned());
+            line.extend(value_headers.iter().cloned());
         }
         out.push(line);
     }
@@ -1008,7 +1074,9 @@ fn pivotby(args: &[Arg], ctx: &mut dyn Ctx) -> R<Value> {
         for c in &cols {
             let rows = rows_for(r, *c);
             for vc in 0..vals.cols {
-                line.push(agg(&rows, vc));
+                for f in &fs {
+                    line.push(agg(&rows, vc, *f));
+                }
             }
         }
         line
@@ -1346,6 +1414,28 @@ mod tests {
         let item = arr(vec![vec![tv("Item")], vec![tv("A")], vec![tv("A")], vec![tv("B")], vec![tv("B")], vec![tv("A")]]);
         let amt = arr(vec![vec![tv("Amount")], vec![nv(10.0)], vec![nv(20.0)], vec![nv(5.0)], vec![nv(7.0)], vec![nv(1.0)]]);
         (region, item, amt)
+    }
+
+    #[test]
+    fn groupby_percentof_and_several_functions() {
+        let (region, _, amt) = sales();
+        // Headers detected and hidden: 43 in all; each group's share of it.
+        let r = ev("GROUPBY", vec![rf(region.clone()), rf(amt.clone()), t("PERCENTOF"), empty(), n(0.0)]);
+        let got = rows_of(&r);
+        assert_eq!(got.len(), 3);
+        assert_eq!(got[0][0], tv("East"));
+        let Value::Number(east) = got[0][1] else { panic!("{got:?}") };
+        assert!((east - 15.0 / 43.0).abs() < 1e-12);
+        // One value column per function, in order, headed by the function's name.
+        let both = av(arr(vec![vec![tv("SUM"), tv("MAX")]]));
+        let r = ev("GROUPBY", vec![rf(region.clone()), rf(amt.clone()), both.clone(), n(3.0)]);
+        let got = rows_of(&r);
+        assert_eq!(got[0], vec![tv("Region"), tv("SUM"), tv("MAX")]);
+        assert_eq!(got[1], vec![tv("East"), nv(15.0), nv(10.0)]);
+        assert_eq!(got.last().unwrap(), &vec![tv("Total"), nv(43.0), nv(20.0)]);
+        let (_, item, _) = sales();
+        let r = ev("PIVOTBY", vec![rf(region), rf(item), rf(amt), both]);
+        assert_eq!(rows_of(&r)[0].len(), 1 + 3 * 2);
     }
 
     #[test]
