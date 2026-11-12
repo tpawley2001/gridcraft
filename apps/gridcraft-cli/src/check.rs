@@ -382,9 +382,11 @@ fn check_inner(path: &str, bytes: &[u8], opts: &Options) -> FileReport {
     calc.recalc_all(&mut fresh);
     let trust_cache = !full_calc_on_load(bytes);
     report.calc = oracle(&cached, &fresh, &calc, trust_cache, opts);
-    report.round_trip = round_trip_as(&fresh, bytes, round_trip_name(path), opts);
+    report.round_trip = round_trip_as(&fresh, bytes, round_trip_name(path, &fresh), opts);
     report
 }
 
+#[cfg(test)]
+mod macro_source_tests;
 #[cfg(test)]
 mod tests;
