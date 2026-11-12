@@ -610,6 +610,8 @@ pub struct ReadControls {
     /// hold (a check box only the drawing has): the drawing is kept for it even when no
     /// `<controls>` element is left to keep.
     pub vml_only_unmodelled: bool,
+    /// The sheet has a `<dataConsolidate>` (Data > Consolidate settings), which pass-through keeps.
+    pub data_consolidate: bool,
 }
 
 /// Whether a VML shape the sheet doesn't list is a control that only pass-through can keep: it
@@ -740,7 +742,7 @@ pub fn read(cx: &mut Ctx<'_>, controls: Option<&El>, vml_rid: Option<&str>, rels
             vml_only_unmodelled = true;
         }
     }
-    ReadControls { modelled: read, vml_only_unmodelled }
+    ReadControls { modelled: read, vml_only_unmodelled, data_consolidate: false }
 }
 
 fn anchor_from_markers(a: &El, sheet: &Sheet) -> Option<Anchor> {

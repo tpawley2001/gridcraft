@@ -102,6 +102,12 @@ impl<'a> SheetKept<'a> {
         self.slots(SHEET_SLOTS_EARLY).replace(&format!(" xmlns:r=\"{NS_REL}\""), "")
     }
 
+    /// The kept `<dataConsolidate>` (after `<sortState>`, before `<customSheetViews>`), its
+    /// relationship ids rewritten; empty without one.
+    pub fn data_consolidate(&self) -> String {
+        self.slots(&[SHEET_SLOT_CONSOLIDATE]).replace(&format!(" xmlns:r=\"{NS_REL}\""), "")
+    }
+
     /// The kept `<customSheetViews>` (after `<autoFilter>`, before `<mergeCells>`) with only the
     /// views whose guid is in `guids` (lower case); empty when none remains.
     pub fn custom_sheet_views(&self, guids: &HashSet<String>) -> String {

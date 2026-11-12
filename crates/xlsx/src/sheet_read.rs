@@ -365,7 +365,8 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
             _ => {}
         }
     }
-    let read_controls = read_form_controls(cx, &root, &rels, &mut sheet);
+    let mut read_controls = read_form_controls(cx, &root, &rels, &mut sheet);
+    read_controls.data_consolidate = root.child("dataConsolidate").is_some();
     // Comments are related to the sheet without an element in it.
     for rel in rels.iter().filter(|r| r.kind == "comments") {
         if let Some(x) = cx.optional_xml(&rel.target)? {
