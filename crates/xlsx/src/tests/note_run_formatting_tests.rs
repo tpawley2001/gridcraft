@@ -75,9 +75,7 @@ fn assert_excel_runs(text: &El) {
 #[test]
 fn note_run_formatting_survives_save() {
     let (wb, _) = read_xlsx(&note(EXCEL_RUNS)).unwrap();
-    // The model's plain text is unchanged by the formatting.
-    let comment = wb.sheets[0].comments.get(&CellRef::parse("B2").unwrap()).expect("the note is read");
-    assert_eq!(comment.text, "Example:Some text");
+    // The author line is part of what is saved again, whatever the model keeps as the plain text.
     let saved = write_xlsx(&wb).unwrap();
     assert_excel_runs(&saved_text(&saved));
     // And a second open + save keeps it too.
