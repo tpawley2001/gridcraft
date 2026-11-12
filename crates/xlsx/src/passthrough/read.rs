@@ -471,6 +471,7 @@ impl KeptReader {
         {
             self.sheet_elements(cx, part, name, &rels, &mut p, &mut seen, controls);
         }
+        drop_orphan_compat_sp(cx, name, &mut p);
         (!p.is_empty()).then(|| Arc::new(p))
     }
 
@@ -493,6 +494,8 @@ impl KeptReader {
         if let Some(r) = rels.iter().find(|r| !r.external && is_kind(r, &["drawing"])) {
             self.drawing_anchors(cx, name, r, &mut p, &mut seen);
         }
+        // No VML drawing is kept for a binary sheet, so its OLE and control placeholders go.
+        drop_orphan_compat_sp(cx, name, &mut p);
         (!p.is_empty()).then(|| Arc::new(p))
     }
 
@@ -905,6 +908,113 @@ fn scan_sheet(bytes: &[u8]) -> Option<SheetScan> {
         }
     }
     Some(out)
+}
+
+/// The namespace of `com14:compatSp` ([MS-ODRAWXML] 2.3.1), the DrawingML placeholder of an OLE
+/// object or control drawn by a legacy VML shape.
+const NS_COMPAT: &[u8] = b"http://schemas.microsoft.com/office/drawing/2010/compatibility";
+
+/// The `spid` values of the `compatSp` elements of an anchor fragment (namespace declarations
+/// included). `None` when the XML is damaged.
+fn compat_sp_ids(frag: &str) -> Option<Vec<String>> {
+    if !frag.contains("compatSp") {
+        return Some(vec![]);
+    }
+    let mut reader = quick_xml::NsReader::from_reader(frag.as_bytes());
+    let mut out = vec![];
+    loop {
+        match reader.read_event().ok()? {
+            Event::Eof => return Some(out),
+            Event::Start(e) | Event::Empty(e) => {
+                let (ns, local) = reader.resolver().resolve_element(e.name());
+                if local.as_ref() == b"compatSp" && matches!(ns, quick_xml::name::ResolveResult::Bound(n) if n.as_ref() == NS_COMPAT) {
+                    let spid = e
+                        .attributes()
+                        .with_checks(false)
+                        .flatten()
+                        .find(|a| a.key.as_ref() == b"spid")
+                        .and_then(|a| String::from_utf8(a.value.to_vec()).ok())
+                        .unwrap_or_default();
+                    out.push(spid);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The shape numbers a VML drawing's shapes go by: each shape's `id` (`_x0000_s1025`) and `o:spid`.
+fn vml_shape_numbers(vml: &str) -> HashSet<u64> {
+    let mut out = HashSet::new();
+    for (a, b) in shape_spans(vml) {
+        if let Some(shape) = xml::first_start(vml.get(a..b).unwrap_or("").as_bytes(), "shape") {
+            out.extend(shape.attr("id").and_then(crate::controls::shape_number));
+            out.extend(shape.attr("spid").and_then(crate::controls::shape_number));
+        }
+    }
+    out
+}
+
+/// Drops the kept drawing anchors whose `compatSp` names a shape the kept VML drawing (`p.vml`,
+/// the one written for the sheet) doesn't have: the placeholder's object is not saved, and a
+/// placeholder naming a missing shape makes Excel repair the file. The relationships only those
+/// anchors used, and the parts only those reach, go with them. Call once the sheet's kept content
+/// is settled.
+fn drop_orphan_compat_sp(cx: &mut Ctx<'_>, name: &str, p: &mut Preserved) {
+    if !p.anchors.iter().any(|a| a.xml.contains("compatSp")) {
+        return;
+    }
+    let shapes = p.vml.as_ref().map(|v| vml_shape_numbers(&String::from_utf8_lossy(&v.data))).unwrap_or_default();
+    let orphan = |a: &PreservedAnchor| match compat_sp_ids(&a.xml) {
+        Some(ids) => ids.iter().any(|id| crate::controls::shape_number(id).is_none_or(|n| !shapes.contains(&n))),
+        None => true,
+    };
+    let (dropped, kept): (Vec<PreservedAnchor>, Vec<PreservedAnchor>) = std::mem::take(&mut p.anchors).into_iter().partition(|a| orphan(a));
+    p.anchors = kept;
+    if dropped.is_empty() {
+        return;
+    }
+    cx.warn(format!("sheet \"{name}\": a drawing object in a markup-compatibility block was dropped: its object is not kept"));
+    let rel_ids = |anchors: &[PreservedAnchor]| {
+        let mut ids = HashSet::new();
+        for a in anchors {
+            let _ = map_rel_ids(&a.xml, &mut |id| {
+                ids.insert(id.to_string());
+                Some(id.to_string())
+            });
+        }
+        ids
+    };
+    let still_used = rel_ids(&p.anchors);
+    let gone: HashSet<String> = rel_ids(&dropped).into_iter().filter(|id| !still_used.contains(id)).collect();
+    if gone.is_empty() {
+        return;
+    }
+    let (removed, drawing_rels): (Vec<PreservedRel>, Vec<PreservedRel>) =
+        std::mem::take(&mut p.drawing_rels).into_iter().partition(|r| gone.contains(&r.id));
+    p.drawing_rels = drawing_rels;
+    // Parts reachable from the removed relationships but not from anything still kept.
+    let reach = |roots: Vec<&PreservedRel>, parts: &[PreservedPart]| {
+        let mut found: HashSet<String> = HashSet::new();
+        let mut queue: VecDeque<String> = roots.into_iter().filter(|r| !r.external).map(|r| normalize(&r.target)).collect();
+        while let Some(n) = queue.pop_front() {
+            if !found.insert(n.clone()) {
+                continue;
+            }
+            if let Some(part) = parts.iter().find(|q| normalize(&q.name) == n) {
+                queue.extend(part.rels.iter().filter(|r| !r.external).map(|r| normalize(&r.target)));
+            }
+        }
+        found
+    };
+    let orphaned = reach(removed.iter().collect(), &p.parts);
+    let live_roots: Vec<&PreservedRel> =
+        p.package_rels.iter().chain(&p.rels).chain(&p.drawing_rels).chain(p.vml.iter().flat_map(|v| v.rels.iter())).collect();
+    let live = reach(live_roots, &p.parts);
+    p.parts.retain(|q| {
+        let n = normalize(&q.name);
+        !orphaned.contains(&n) || live.contains(&n)
+    });
 }
 
 /// What a kept drawing anchor holds.
