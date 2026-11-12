@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use gridcraft_core::{DateSystem, RangeRef};
 use gridcraft_model::{
-    CalcMode, CellPicture, Chart, ChartSheetPrint, DefinedName, PhoneticString, PrintSettings, Sheet, ShowObjects, Style, StyleId, StyleTable,
-    UpdateLinks, Visibility, Workbook, WorkbookOptions, WorkbookView,
+    CalcMode, Chart, ChartSheetPrint, DefinedName, PhoneticString, PrintSettings, Sheet, ShowObjects, Style, StyleId, StyleTable, UpdateLinks,
+    Visibility, Workbook, WorkbookOptions, WorkbookView,
 };
 
 use crate::package::{Package, Rel};
@@ -33,7 +33,7 @@ pub struct Ctx<'a> {
     /// Custom number formats from the styles part, by id.
     pub num_fmts: std::collections::HashMap<u32, String>,
     /// Value metadata blocks, indexed by the worksheet's one-based `vm` attribute.
-    pub cell_pictures: Vec<Option<Arc<CellPicture>>>,
+    pub cell_pictures: Vec<Option<crate::richdata::RichCell>>,
     /// x14 conditional-format ids of the current sheet's data bars, with the index of the rule in `cond_formats`.
     pub cf_ext_ids: Vec<(String, usize)>,
     /// Cells of the worksheet being read whose formulas lack dynamic-array metadata (legacy
