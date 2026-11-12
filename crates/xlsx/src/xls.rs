@@ -361,14 +361,7 @@ fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>, functions: F
     let mut parsed = Vec::new();
     // Names of the readable sheets so far: `wb.sheets` is only filled once every sheet is parsed.
     let mut names: Vec<&str> = Vec::new();
-    // Cells whose text was cut to fit, and the first of them as `Sheet!A1`.
-    let mut cut_text = (0usize, None::<String>);
-    let mut count_cut = |st: &SheetState<'_>, sheet: &str| {
-        cut_text.0 += st.cut_text;
-        if let (None, Some(at)) = (&cut_text.1, st.first_cut) {
-            cut_text.1 = Some(format!("{}!{}", gridcraft_core::quote_sheet(sheet), at.a1()));
-        }
-    };
+    let mut cut_text = CutText::default();
     for (bound, bs) in g.sheets.iter().enumerate() {
         if bs.kind == 2 {
             match chart::chart_sheet(&stream, bs.pos, &mut budget, &g.links, g.biff5.as_ref(), &mut report)? {
@@ -385,7 +378,7 @@ fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>, functions: F
             // An Excel 4.0 macro sheet: its cells are kept for a macro-enabled save, never evaluated.
             let read = match worksheet(&stream, bs, None, &g, &styles, &mut budget, &mut report, true)? {
                 Some((st, filter)) => {
-                    count_cut(&st, &bs.name);
+                    cut_text.sheet(&st, &bs.name);
                     Some(finish_sheet(st, filter, &g, &mut budget, &mut report)?)
                 }
                 None => None,
@@ -422,18 +415,12 @@ fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>, functions: F
             model_index.push(None);
             continue;
         };
-        count_cut(&st, &bs.name);
+        cut_text.sheet(&st, &bs.name);
         names.push(&bs.name);
         model_index.push(Some(parsed.len()));
         parsed.push((bs.visibility, st, filter));
     }
-    if let (n @ 1.., Some(first)) = cut_text {
-        report.warn(if n == 1 {
-            format!("1 cell held more text than Excel's 32,767 characters and was cut to fit (first: {first}).")
-        } else {
-            format!("{n} cells held more text than Excel's 32,767 characters and were cut to fit (first: {first}).")
-        });
-    }
+    cut_text.warn(&mut report);
     // Every sheet's mandatory text is charged by now; shared formulas take what is left.
     for (visibility, st, filter) in parsed {
         let (mut sheet, calc, views, queries) = finish_sheet(st, filter, &g, &mut budget, &mut report)?;
@@ -1154,6 +1141,32 @@ fn fit_cell_value(value: Value) -> (Value, bool) {
     match cut {
         Some(t) => (Value::Text(t), true),
         None => (value, false),
+    }
+}
+
+/// Cells whose text was cut to fit, across the workbook, and the first of them as `Sheet!A1`.
+#[derive(Default)]
+struct CutText {
+    cells: usize,
+    first: Option<String>,
+}
+
+impl CutText {
+    fn sheet(&mut self, st: &SheetState<'_>, name: &str) {
+        self.cells += st.cut_text;
+        if let (None, Some(at)) = (&self.first, st.first_cut) {
+            self.first = Some(format!("{}!{}", gridcraft_core::quote_sheet(name), at.a1()));
+        }
+    }
+
+    /// One warning when any cell was cut.
+    fn warn(self, report: &mut ReadReport) {
+        let Some(first) = self.first else { return };
+        report.warn(if self.cells == 1 {
+            format!("1 cell held more text than Excel's 32,767 characters and was cut to fit (first: {first}).")
+        } else {
+            format!("{} cells held more text than Excel's 32,767 characters and were cut to fit (first: {first}).", self.cells)
+        });
     }
 }
 
