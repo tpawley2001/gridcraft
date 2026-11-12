@@ -42,6 +42,7 @@ mod error_precedence;
 mod extreme_selection_moves;
 mod fill_multi_area;
 mod find_notes_comments;
+mod fit_to_stored_counts;
 mod flash_fill_substrings;
 mod font_scheme_minor;
 mod form_control_print;

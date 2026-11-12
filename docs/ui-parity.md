@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-11-12 · **Change:** minor (G0337: typing a leading apostrophe marks the cell with the quote prefix, and the editor shows it again; earlier: G0300: imported snip-and-round rectangle, left-right ribbon and multidocument flowchart outlines; earlier: Go To Special Same selects a rule's ranges as areas, whole columns too, and works for conditional formats)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-11-12 · **Change:** minor (G0341: Page Setup Fit To starts from the sheet's stored page counts and keeps them when switched off; earlier: G0300: imported snip-and-round rectangle, left-right ribbon and multidocument flowchart outlines; earlier: Go To Special Same selects a rule's ranges as areas, whole columns too, and works for conditional formats)
 
 Interaction, controls and feel, against Excel. Part of [target-app-parity.md](target-app-parity.md).
 **UI/UX fidelity: ~55% ready, 50–80 h** (estimated). Ribbon command coverage is measured
@@ -282,6 +282,7 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | G0341: `pageLayout.pageSetup` `fitToPage` starts from the page counts the sheet keeps while Fit To is off (such as 2 wide by 3 tall), a single `fitWidth`/`fitHeight` takes the other count from them, and switching to a scale or `fitToPage: false` keeps the counts, as Excel does; `pageLayout.scaleToFit` keeps them too. |
 | 2026-11-12 | minor | G0337: a typed entry (`cell.set`, the cell editor, Ctrl+Enter fill) starting with `'` stores the text after it and sets the cell format's quote prefix (saved as `xf quotePrefix`); an entry without one clears it. The editor and formula bar show `'` for any text cell with the mark. |
 | 2026-11-11 | minor | G0300: imported snip-and-round rectangle, left-right ribbon and multidocument flowchart presets draw and print with their own outline. |
 | 2026-11-11 | minor | Go To Special `same: true` selects the active cell's rule ranges as areas (whole columns no longer refused) and works for Conditional formats too. |
