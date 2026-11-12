@@ -76,7 +76,8 @@ exactly. Skipped, and counted separately:
 - *no oracle*: formulas saved without a value, and every formula of a file whose producer asked for a full
   recalculation on load (`fullCalcOnLoad`: libraries that don't calculate, such as xlsxwriter, store 0 or nothing).
 - *volatile*: `RAND`, `RANDARRAY`, `RANDBETWEEN`, `NOW`, `TODAY`, `INFO`, `CELL("filename")`, names that use them, and
-  every formula that reads such a cell (through the dependency graph).
+  every formula that reads such a cell (through the dependency graph or a defined name that refers to it, alone or
+  inside a range).
 
 A logical result the producer cached as the number 1 or 0, without `t="b"` (Business Central's "Open in Excel"
 exports write `<c><f>TRUE()</f><v>1</v></c>`), holds the same value: it matches GridCraft's TRUE or FALSE and is also
