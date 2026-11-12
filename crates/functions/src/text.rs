@@ -134,7 +134,20 @@ fn mid(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     }
     let n = count_arg(a, 2, 0.0)?;
     let start = if start > 1e9 { 1_000_000_000 } else { start as usize };
-    text_val(s.chars().skip(start - 1).take(n).collect::<String>())
+    if !has_astral(&s) {
+        return text_val(s.chars().skip(start - 1).take(n).collect::<String>());
+    }
+    // Positions count UTF-16 code units, as Excel does; half a surrogate pair becomes U+FFFD.
+    let units: Vec<u16> = s.encode_utf16().collect();
+    let from = (start - 1).min(units.len());
+    let to = from.saturating_add(n).min(units.len());
+    text_val(String::from_utf16_lossy(units.get(from..to).unwrap_or_default()))
+}
+
+/// True when `s` holds a character outside the Basic Multilingual Plane (two UTF-16 code units).
+/// Without one, UTF-16 positions equal character positions.
+fn has_astral(s: &str) -> bool {
+    s.chars().any(|c| c.len_utf16() > 1)
 }
 
 fn len(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
@@ -235,18 +248,30 @@ fn substitute(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
 }
 
 fn replace(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    let s = chars(&text(a, 0)?);
+    let old = text(a, 0)?;
     let start = num(a, 1)?;
     if start.is_nan() || start < 1.0 {
         return Err(CellError::Value);
     }
     let n = count_arg(a, 2, 0.0)?;
     let new = text(a, 3)?;
-    let start = (if start > 1e9 { 1_000_000_000 } else { start as usize } - 1).min(s.len());
+    let start = if start > 1e9 { 1_000_000_000 } else { start as usize } - 1;
+    if has_astral(&old) {
+        // Positions count UTF-16 code units, as Excel does; half a surrogate pair becomes U+FFFD.
+        let units: Vec<u16> = old.encode_utf16().collect();
+        let start = start.min(units.len());
+        let end = start.saturating_add(n).min(units.len());
+        let mut out = String::from_utf16_lossy(units.get(..start).unwrap_or_default());
+        out.push_str(&new);
+        out.push_str(&String::from_utf16_lossy(units.get(end..).unwrap_or_default()));
+        return check_len(out);
+    }
+    let s = chars(&old);
+    let start = start.min(s.len());
     let end = start.saturating_add(n).min(s.len());
-    let mut out: String = s[..start].iter().collect();
+    let mut out: String = s.get(..start).unwrap_or_default().iter().collect();
     out.push_str(&new);
-    out.extend(s[end..].iter());
+    out.extend(s.get(end..).unwrap_or_default().iter());
     check_len(out)
 }
 
@@ -269,18 +294,39 @@ fn find_impl(a: &[Arg], wild: bool) -> R<Value> {
     let hay = text(a, 1)?;
     let start = opt_num(a, 2, 1.0)?;
     let hc = chars(&hay);
-    if (start.is_nan() || start < 1.0) || start > hc.len().max(1) as f64 {
+    // Positions count UTF-16 code units, as Excel does: `unit_at[i]` is where character `i` starts.
+    let unit_at: Option<Vec<usize>> = has_astral(&hay).then(|| {
+        hc.iter()
+            .scan(0usize, |u, c| {
+                let at = *u;
+                *u += c.len_utf16();
+                Some(at)
+            })
+            .collect()
+    });
+    let units = if unit_at.is_some() { hay.encode_utf16().count() } else { hc.len() };
+    if (start.is_nan() || start < 1.0) || start > units.max(1) as f64 {
         return Err(CellError::Value);
     }
     let start = start as usize - 1;
     if needle.is_empty() {
         return num_val((start + 1) as f64);
     }
+    // A start inside a surrogate pair begins at the next character: half a pair matches nothing.
+    let start_unit = start;
+    let start = match &unit_at {
+        Some(at) => at.partition_point(|&u| u < start_unit),
+        None => start,
+    };
     let pos = if wild {
         wildcard_find(&needle, &hay, start)
     } else {
         let nc = chars(&needle);
         (start..hc.len()).find(|&i| hc.get(i..i + nc.len()).is_some_and(|w| w == nc.as_slice()))
+    };
+    let pos = match (&unit_at, pos) {
+        (Some(at), Some(p)) => Some(at.get(p).copied().unwrap_or(units)),
+        (_, pos) => pos,
     };
     match pos {
         Some(p) => num_val((p + 1) as f64),
@@ -1175,6 +1221,23 @@ mod tests {
         close(ev("NUMBERVALUE", vec![t("1,5%"), t(","), t(".")]), 0.015);
         let many = format!("1{}", "%".repeat(32_000));
         close(ev("NUMBERVALUE", vec![t(&many)]), 0.0);
+    }
+
+    /// FIND/SEARCH take and return UTF-16 positions, so a result passed back as start_num finds the
+    /// next match; a start inside a surrogate pair skips to the next character; bounds count units.
+    #[test]
+    fn find_positions_count_utf16_units() {
+        close(ev("FIND", vec![t("b"), t("😀b😀b"), n(2.0)]), 3.0);
+        close(ev("FIND", vec![t("b"), t("😀b😀b"), n(5.0)]), 6.0);
+        close(ev("SEARCH", vec![t("B"), t("😀b😀b"), n(4.0)]), 6.0);
+        close(ev("FIND", vec![t("😀"), t("a😀"), n(2.0)]), 2.0);
+        close(ev("FIND", vec![t(""), t("a😀"), n(3.0)]), 3.0);
+        close(ev("SEARCH", vec![t("?b"), t("a😀b"), n(2.0)]), 2.0);
+        assert_eq!(ev("FIND", vec![t("😀"), t("a😀"), n(3.0)]), Value::Error(CellError::Value));
+        assert_eq!(ev("FIND", vec![t(""), t("a😀"), n(4.0)]), Value::Error(CellError::Value));
+        is_text(ev("MID", vec![t("😀😀"), n(2.0), n(2.0)]), "\u{FFFD}\u{FFFD}");
+        is_text(ev("MID", vec![t("a😀"), n(9.0), n(2.0)]), "");
+        is_text(ev("REPLACE", vec![t("a😀"), n(9.0), n(1.0), t("x")]), "a😀x");
     }
 
     #[test]
