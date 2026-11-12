@@ -47,7 +47,7 @@ mod tests {
                 note_runs: None,
             },
         );
-        s.hyperlinks.insert(c3, Hyperlink { target: "Sheet1!A1".into(), tooltip: Some("jump".into()), external: false });
+        s.hyperlinks.insert(c3, Hyperlink { target: "Sheet1!A1".into(), tooltip: Some("jump".into()), external: false, display: None });
         let json = serde_json::to_string(&s)?;
         let back: Sheet = serde_json::from_str(&json)?;
         assert_eq!(back.comments, s.comments);

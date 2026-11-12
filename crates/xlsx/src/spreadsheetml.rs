@@ -236,7 +236,7 @@ impl Import {
                     Some(location) => (location, false),
                     None => (target, true),
                 };
-                let link = Hyperlink { target: target.to_string(), tooltip: cell.attr("HRefScreenTip").map(str::to_string), external };
+                let link = Hyperlink { target: target.to_string(), tooltip: cell.attr("HRefScreenTip").map(str::to_string), external, display: None };
                 sheet.hyperlinks.insert(at, link);
             }
             if let Some(note) = cell.child("Comment") {

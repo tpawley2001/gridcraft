@@ -92,7 +92,7 @@ fn xlsb_external_hyperlink_matches_the_xlsx_reader() {
     let bytes = package_with_sheet_rels(&sheet(&hlink(1, 1, Some("rId1"), "", "Open it")), &rels(&[("rId1", HLINK, url, true)]), None);
     let (wb, _) = read_xlsb(&bytes).unwrap();
     let got = wb.sheets[0].hyperlinks.get(&at("B2")).unwrap();
-    assert_eq!(got, &Hyperlink { target: url.into(), tooltip: Some("Open it".into()), external: true });
+    assert_eq!(got, &Hyperlink { target: url.into(), tooltip: Some("Open it".into()), external: true, display: None });
 
     let body = r#"<sheetData/><hyperlinks><hyperlink ref="B2" r:id="rId1" tooltip="Open it"/></hyperlinks>"#;
     let xml_rels = rels(&[("rId1", HLINK, url, true)]);
@@ -104,7 +104,10 @@ fn xlsb_external_hyperlink_matches_the_xlsx_reader() {
 #[test]
 fn xlsb_internal_hyperlink_uses_its_location() {
     let (wb, _) = read_xlsb(&package_with_sheet_rels(&sheet(&hlink(2, 2, None, "Sheet2!A1", "")), &rels(&[]), None)).unwrap();
-    assert_eq!(wb.sheets[0].hyperlinks.get(&at("C3")), Some(&Hyperlink { target: "Sheet2!A1".into(), tooltip: None, external: false }));
+    assert_eq!(
+        wb.sheets[0].hyperlinks.get(&at("C3")),
+        Some(&Hyperlink { target: "Sheet2!A1".into(), tooltip: None, external: false, display: None })
+    );
 }
 
 #[test]
