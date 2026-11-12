@@ -1384,6 +1384,38 @@ pub struct Image {
     /// A picture inserted in GridCraft has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blip_ext: Vec<KeptExtension>,
+    /// Picture Border (`xdr:spPr/a:ln` with a solid fill, ECMA-376 Part 1 §20.1.2.2.24). `None`
+    /// is no border.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border: Option<PictureBorder>,
+}
+
+/// A picture's border: a solid line around the picture's rectangle.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PictureBorder {
+    /// The resolved line colour.
+    pub color: Color,
+    /// The colour as the file wrote it, when that is more than a plain RGB (a theme colour, colour
+    /// transforms); written back while `color` is unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<KeptDmlColor>,
+    /// Line width in EMU (`a:ln w`, 0..=20116800); `None` is the default 9525 EMU (0.75 pt).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width_emu: Option<i32>,
+    /// Preset dash (`a:prstDash`), kept for the round trip; `None` is solid.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dash: Option<LineDash>,
+}
+
+impl PictureBorder {
+    /// ST_LineWidth's default when `w` is absent (0.75 pt).
+    pub const DEFAULT_WIDTH_EMU: i32 = 9525;
+
+    /// The stroke width in points.
+    pub fn width_pt(&self) -> f32 {
+        self.width_emu.unwrap_or(Self::DEFAULT_WIDTH_EMU) as f32 / 12_700.0
+    }
 }
 
 impl Image {

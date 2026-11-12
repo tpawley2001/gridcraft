@@ -848,6 +848,7 @@ mod tests {
             mime: String::new(),
             alt: String::new(),
             blip_ext: vec![],
+            border: None,
             link: None,
         };
         assert_eq!(wb.next_object_id(), 1);
@@ -909,6 +910,7 @@ mod tests {
             mime: String::new(),
             alt: String::new(),
             blip_ext: vec![],
+            border: None,
             link: None,
         };
         if let Some(sh) = wb.sheet_mut(0) {

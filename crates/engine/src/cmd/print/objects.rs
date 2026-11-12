@@ -49,6 +49,15 @@ pub(super) fn fallback_lines(text: &str, h: f32, line_h: f32) -> impl Iterator<I
     text.lines().take(n)
 }
 
+/// A picture's border (Picture Border) for print: its colour and a solid stroke width in points
+/// (`w` / 12700, 0.75 pt without one), scaled like every other printed length. The stroke is centred
+/// on the picture's edge; dashes are not drawn.
+pub(super) fn picture_border_stroke(wb: &Workbook, im: &gridcraft_model::Image, scale: f32) -> Option<(super::Rgb, f32)> {
+    let b = im.border.as_ref()?;
+    let c = rgb_of(b.color, wb)?;
+    Some((c, (b.width_pt().max(0.0) * scale).clamp(0.0, 1600.0)))
+}
+
 fn anchor_rect(sh: &Sheet, a: &Anchor) -> (f64, f64, f64, f64) {
     (sh.col_left(a.cell.col) + a.dx as f64, sh.row_top(a.cell.row) + a.dy as f64, a.width.max(0.0) as f64, a.height.max(0.0) as f64)
 }
@@ -97,6 +106,9 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
                 pics.image_bytes += bytes;
                 pg.image_rgba(Rect::new(x, y, w, h), px, [*pw, *ph]);
             }
+        }
+        if let Some((c, width)) = picture_border_stroke(wb, im, b.scale) {
+            pg.rect_stroke(x, y, w, h, width, c);
         }
     }
     for shp in sh.shapes.iter().filter(|o| !o.hidden && !o.no_print) {

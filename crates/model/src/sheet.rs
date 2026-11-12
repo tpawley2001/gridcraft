@@ -1116,6 +1116,7 @@ mod tests {
                 mime: String::new(),
                 alt: String::new(),
                 blip_ext: vec![],
+                border: None,
                 link: None,
             }),
             ObjKind::Shape | ObjKind::Equation => s.shapes.push(Shape {
