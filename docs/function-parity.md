@@ -159,6 +159,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | Formulas from files without dynamic-array metadata: GROUPBY's row_fields, values and filter_array (and PIVOTBY's row_fields, col_fields, values and filter_array) take arrays, not implicit intersection, so a filter such as `E1:E10>3` works as in Excel (`legacy_groupby_filter_array.rs`) |
 | 2026-11-11 | minor | CUMIPMT and CUMPRINC round a fractional start period up and end period down (an empty span gives 0) and keep a fractional nper for the payment and balances, as Excel does (`cumipmt_fractional_excel.rs`) |
 | 2026-11-11 | minor | DISC, INTRATE, RECEIVED, PRICEDISC and YIELDDISC with basis 1 over at most a year divide by 366 when the span holds a 29 February (or lies in one leap year), else 365, like YEARFRAC(settlement, maturity, 1), instead of the settlement year's length, as Excel does (`disc_family_basis1_excel.rs`) |
 | 2026-11-11 | minor | PRICEMAT and YIELDMAT with basis 1 use one year length for all three fractions, the one YEARFRAC(issue, settlement, 1) divides by (365 or 366 within a year, else the average of the calendar years spanned), as Excel does (`pricemat_yieldmat_excel.rs`) |

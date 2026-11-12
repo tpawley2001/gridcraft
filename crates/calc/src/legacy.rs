@@ -97,6 +97,9 @@ fn value_param(name: &str, i: usize) -> bool {
         "AGGREGATE" => i < 2,
         "ROW" | "COLUMN" | "ROWS" | "COLUMNS" | "AREAS" | "ISREF" | "ISFORMULA" | "FORMULATEXT" | "SHEET" | "SHEETS" | "TRIMRANGE" | "LET"
         | "LAMBDA" | "ISOMITTED" | "MAP" | "REDUCE" | "SCAN" | "BYROW" | "BYCOL" | "MAKEARRAY" => false,
+        // The grouping fields, the values and the filter are arrays; the other parameters follow the registry.
+        "GROUPBY" if matches!(i, 0 | 1 | 6) => false,
+        "PIVOTBY" if matches!(i, 0 | 1 | 2 | 9) => false,
         _ => gridcraft_functions::lookup(name).is_some_and(|spec| spec.is_scalar_arg(i)),
     }
 }
@@ -124,6 +127,15 @@ mod tests {
         // The intersection operator builds a reference, which is then intersected as a whole.
         let e = gridcraft_formula::parse("A:A B:B").map(|e| legacy_expr(&e));
         assert!(matches!(e, Ok(Expr::Unary(UnOp::At, x)) if matches!(*x, Expr::Binary(BinOp::Intersect, _, _))));
+    }
+
+    #[test]
+    fn groupby_and_pivotby_take_their_fields_values_and_filter_as_arrays() {
+        assert_eq!(
+            rewritten("TEXTJOIN(\",\",FALSE,GROUPBY(H1:H10,E1:E10,SUM,0,0,,E1:E10>3))"),
+            "@TEXTJOIN(\",\",FALSE,GROUPBY(H1:H10,E1:E10,SUM,0,0,,E1:E10>3))"
+        );
+        assert_eq!(rewritten("PIVOTBY(A1:A9,B1:B9,C1:C9,SUM,0,0,,0,,C1:C9>3)"), "@PIVOTBY(A1:A9,B1:B9,C1:C9,SUM,0,0,,0,,C1:C9>3)");
     }
 
     #[test]
