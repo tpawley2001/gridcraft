@@ -481,7 +481,8 @@ pub fn read_styles(root: &El, checkboxes: &[bool], minor_font: &str, theme_fonts
     }
     // Inline dxf format codes are interned: a code repeated by many dxfs is one allocation.
     let mut inline_fmts = HashMap::new();
-    let dxfs: Vec<Style> = root.child("dxfs").map(|d| d.kids("dxf").map(|x| read_dxf(x, &palette, &shared_fmts, &mut inline_fmts)).collect()).unwrap_or_default();
+    let dxfs: Vec<Style> =
+        root.child("dxfs").map(|d| d.kids("dxf").map(|x| read_dxf(x, &palette, &shared_fmts, &mut inline_fmts)).collect()).unwrap_or_default();
     let table_styles = root.child("tableStyles").map(|t| read_table_styles(t, &dxfs)).unwrap_or_default();
     StylesIn { xfs, dxfs, palette, named, named_ids, num_fmts: fmts, indexed_colors, mru_colors, table_styles }
 }
