@@ -18,6 +18,8 @@ mod sparkline;
 mod trend;
 
 #[cfg(test)]
+mod sparkline_group_tests;
+#[cfg(test)]
 mod sparkline_style_tests;
 #[cfg(test)]
 mod tests;
@@ -29,7 +31,7 @@ pub use axis::{Scale, format_number, nice_scale, radar_scale, with_fixed};
 pub use raster::rasterize;
 pub use render::{Swatch, legend_entries, render, supports_trendline};
 pub use resolve::{default_palette, resolve, series_color, series_plot_kind};
-pub use sparkline::{SparklineStyle, render_sparkline, render_sparkline_styled};
+pub use sparkline::{SparklineGroupLimits, SparklineStyle, render_sparkline, render_sparkline_styled, sparkline_style};
 
 /// Straight (non-premultiplied) RGBA colour.
 pub type Rgba = [u8; 4];
