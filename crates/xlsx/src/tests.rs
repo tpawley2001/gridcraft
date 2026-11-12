@@ -111,6 +111,7 @@ mod table_dxfs;
 mod table_header_space_tests;
 mod table_ids;
 mod theme_fmt_scheme_tests;
+mod thick_row_flags_tests;
 mod third_party_workbook_parts;
 mod trendline_roundtrip;
 mod vml_html_br_tests;

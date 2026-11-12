@@ -389,6 +389,13 @@ pub struct LineInfo {
     /// The size was set by the user (rows): automatic heights follow the content.
     #[serde(default)]
     pub custom: bool,
+    /// Rows: the row or the one above has a medium/thick border between them (`<row thickTop>`,
+    /// ECMA-376 §18.3.1.73). Kept as read so Excel re-fits the height the same way; never set on columns.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub thick_top: bool,
+    /// Rows: the same for the bottom edge (`<row thickBot>`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub thick_bottom: bool,
 }
 
 /// What printing needs of a chart sheet (`xl/chartsheets/sheetN.xml`) read from a file. Chart

@@ -547,6 +547,8 @@ fn read_row(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, row: &El) {
     info.hidden = row.flag("hidden", false);
     info.outline = row.attr_u32("outlineLevel").unwrap_or(0).min(7) as u8;
     info.collapsed = row.flag("collapsed", false);
+    info.thick_top = row.flag("thickTop", false);
+    info.thick_bottom = row.flag("thickBot", false);
     if row.flag("customFormat", false)
         && let Some(s) = row.attr_u32("s")
     {
