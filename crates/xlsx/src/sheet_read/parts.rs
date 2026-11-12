@@ -32,7 +32,8 @@ pub(super) fn read_hyperlinks(cx: &mut Ctx<'_>, name: &str, e: &El, rels: &[Rel]
         }
         let tooltip = h.attr("tooltip").map(|t| truncate_chars(t, MAX_TOOLTIP_CHARS));
         // The stored display string (Excel's "Text to display"), kept as written for the next save.
-        let display = h.attr("display").filter(|d| !d.is_empty()).map(|d| truncate_chars(d, MAX_HYPERLINK_TARGET));
+        // A link inside the workbook whose display is its location is written that way anyway.
+        let display = h.attr("display").filter(|d| !d.is_empty() && (external || *d != target)).map(|d| truncate_chars(d, MAX_HYPERLINK_TARGET));
         let link_bytes = (target.len() + tooltip.as_ref().map_or(0, String::len) + display.as_ref().map_or(0, String::len)) as u64;
         let link = Hyperlink { target, tooltip, external, display };
         for c in range.iter() {
