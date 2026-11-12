@@ -821,6 +821,9 @@ fn shift_table_columns(t: &mut gridcraft_model::Table, at: u32, count: u32, inse
                     header_row_dxf: None,
                     data_dxf: None,
                     totals_row_dxf: None,
+                    header_row_cell_style: None,
+                    data_cell_style: None,
+                    totals_row_cell_style: None,
                 };
                 t.columns.insert((idx + k).min(t.columns.len()), col);
             }
@@ -887,6 +890,9 @@ mod table_column_dxf_tests {
                 s
             }),
             totals_row_dxf: None,
+            header_row_cell_style: None,
+            data_cell_style: None,
+            totals_row_cell_style: None,
         }
     }
 
@@ -911,6 +917,9 @@ mod table_column_dxf_tests {
             header_row_dxf: None,
             data_dxf: None,
             totals_row_dxf: None,
+            header_row_cell_style: None,
+            data_cell_style: None,
+            totals_row_cell_style: None,
             header_row_border_dxf: None,
             table_border_dxf: None,
             totals_row_border_dxf: None,

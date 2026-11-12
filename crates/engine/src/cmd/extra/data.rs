@@ -36,6 +36,9 @@ pub(super) fn table_resize(s: &mut Session, p: &Json) -> Result<Json> {
                 header_row_dxf: None,
                 data_dxf: None,
                 totals_row_dxf: None,
+                header_row_cell_style: None,
+                data_cell_style: None,
+                totals_row_cell_style: None,
             }));
         }
         t.columns = cols;

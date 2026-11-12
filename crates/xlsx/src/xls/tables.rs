@@ -202,6 +202,9 @@ fn table(raw: Raw, sheet: &Sheet, budget: &mut Budget) -> Result<Option<Table>, 
         header_row_dxf: None,
         data_dxf: None,
         totals_row_dxf: None,
+        header_row_cell_style: None,
+        data_cell_style: None,
+        totals_row_cell_style: None,
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,
@@ -263,6 +266,9 @@ fn column(name: String) -> TableColumn {
         header_row_dxf: None,
         data_dxf: None,
         totals_row_dxf: None,
+        header_row_cell_style: None,
+        data_cell_style: None,
+        totals_row_cell_style: None,
     }
 }
 

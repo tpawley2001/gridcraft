@@ -232,6 +232,9 @@ pub fn read_table(cx: &mut Ctx<'_>, x: &El) -> Option<Table> {
                         header_row_dxf: table_dxf(cx, c, "headerRowDxfId"),
                         data_dxf: table_dxf(cx, c, "dataDxfId"),
                         totals_row_dxf: table_dxf(cx, c, "totalsRowDxfId"),
+                        header_row_cell_style: table_cell_style(c, "headerRowCellStyle"),
+                        data_cell_style: table_cell_style(c, "dataCellStyle"),
+                        totals_row_cell_style: table_cell_style(c, "totalsRowCellStyle"),
                     }
                 })
                 .collect()
@@ -260,6 +263,9 @@ pub fn read_table(cx: &mut Ctx<'_>, x: &El) -> Option<Table> {
         header_row_dxf: table_dxf(cx, x, "headerRowDxfId"),
         data_dxf: table_dxf(cx, x, "dataDxfId"),
         totals_row_dxf: table_dxf(cx, x, "totalsRowDxfId"),
+        header_row_cell_style: table_cell_style(x, "headerRowCellStyle"),
+        data_cell_style: table_cell_style(x, "dataCellStyle"),
+        totals_row_cell_style: table_cell_style(x, "totalsRowCellStyle"),
         header_row_border_dxf: table_dxf(cx, x, "headerRowBorderDxfId"),
         table_border_dxf: table_dxf(cx, x, "tableBorderDxfId"),
         totals_row_border_dxf: table_dxf(cx, x, "totalsRowBorderDxfId"),
@@ -270,6 +276,14 @@ pub fn read_table(cx: &mut Ctx<'_>, x: &El) -> Option<Table> {
         insert_row_shift: x.attr_bool("insertRowShift"),
         published: x.attr_bool("published"),
     })
+}
+
+/// Longest cell style name Excel accepts.
+const CELL_STYLE_NAME_MAX: usize = 255;
+
+/// The named cell style a table or table column attribute names; empty or overlong reads as none.
+fn table_cell_style(x: &El, attr: &str) -> Option<String> {
+    x.attr(attr).map(xml::decode_xstring).filter(|n| !n.is_empty() && n.chars().count() <= CELL_STYLE_NAME_MAX)
 }
 
 /// The differential format a table or table column attribute points at; an index outside

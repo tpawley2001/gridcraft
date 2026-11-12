@@ -307,6 +307,9 @@ fn list_col(payload: &[u8]) -> Result<TableColumn, IoError> {
         header_row_dxf: None,
         data_dxf: None,
         totals_row_dxf: None,
+        header_row_cell_style: None,
+        data_cell_style: None,
+        totals_row_cell_style: None,
     })
 }
 
@@ -368,6 +371,9 @@ fn table(bytes: &[u8], ctx: Context<'_>, dxfs: &[Style], report: &mut ReadReport
         header_row_dxf: None,
         data_dxf: None,
         totals_row_dxf: None,
+        header_row_cell_style: None,
+        data_cell_style: None,
+        totals_row_cell_style: None,
         header_row_border_dxf: None,
         table_border_dxf: None,
         totals_row_border_dxf: None,

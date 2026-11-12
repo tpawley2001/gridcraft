@@ -76,6 +76,14 @@ pub struct TableColumn {
     pub data_dxf: Option<Style>,
     #[serde(default)]
     pub totals_row_dxf: Option<Style>,
+    /// Named cell styles (`headerRowCellStyle`, `dataCellStyle`, `totalsRowCellStyle`) of this
+    /// column's header cell, data cells and totals cell, by name. They move with the column.
+    #[serde(default)]
+    pub header_row_cell_style: Option<String>,
+    #[serde(default)]
+    pub data_cell_style: Option<String>,
+    #[serde(default)]
+    pub totals_row_cell_style: Option<String>,
 }
 
 /// A table column's binding to an XML map (`<xmlColumnPr>`).
@@ -122,6 +130,14 @@ pub struct Table {
     pub data_dxf: Option<Style>,
     #[serde(default)]
     pub totals_row_dxf: Option<Style>,
+    /// Named cell styles of the header row, data area and totals row (`headerRowCellStyle`,
+    /// `dataCellStyle`, `totalsRowCellStyle`), by name.
+    #[serde(default)]
+    pub header_row_cell_style: Option<String>,
+    #[serde(default)]
+    pub data_cell_style: Option<String>,
+    #[serde(default)]
+    pub totals_row_cell_style: Option<String>,
     /// Border formats of the header row, the whole table and the totals row
     /// (`headerRowBorderDxfId`, `tableBorderDxfId`, `totalsRowBorderDxfId`).
     #[serde(default)]
