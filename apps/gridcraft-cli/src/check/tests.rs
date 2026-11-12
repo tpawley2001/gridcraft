@@ -556,3 +556,58 @@ fn fragment_only_relationship_target_is_not_a_missing_part() {
     ]);
     assert_eq!(validate_package(&bytes).unwrap(), Vec::<String>::new());
 }
+
+fn oracle_name(name: &str, formula: &str) -> gridcraft_engine::model::DefinedName {
+    gridcraft_engine::model::DefinedName { name: name.into(), scope: None, formula: formula.into(), comment: String::new(), hidden: false }
+}
+
+#[test]
+fn oracle_names_pointing_at_a_volatile_cell_make_their_users_volatile() {
+    // A2 is volatile; DATE_CELL points at it, so B2's cached value depends on the day too and
+    // must not be compared (it holds a "wrong" value here on purpose). C2 is downstream of B2.
+    let mut wb = book(&[("A2", "=TODAY()", n(1.0)), ("B2", "=EDATE(DATE_CELL,INCREMENT)", n(2.0)), ("C2", "=B2+1", n(3.0)), ("D2", "=1+1", n(2.0))]);
+    let sheet = wb.sheets[0].name.clone();
+    wb.names.push(oracle_name("DATE_CELL", &format!("{sheet}!$A$2")));
+    wb.names.push(oracle_name("INCREMENT", "1"));
+    let r = check(&wb, &Options::default());
+    assert_eq!((r.calc.formula_cells, r.calc.volatile, r.calc.checked, r.calc.matched, r.calc.mismatched), (4, 3, 1, 1, 0));
+}
+
+#[test]
+fn oracle_names_reach_a_fixpoint_over_ranges_names_and_dependents() {
+    let mut wb = book(&[
+        ("A2", "=NOW()", n(1.0)),
+        ("B2", "=DATE_CELL+1", n(2.0)), // name -> volatile cell
+        ("C2", "=B2+1", n(3.0)),        // downstream of B2
+        ("D2", "=1+1", n(2.0)),         // checked
+        ("E2", "=VIA_B+1", n(5.0)),     // name -> a cell that is volatile only through a name
+        ("F2", "=SUM(BLOCK)", n(6.0)),  // name -> a range containing the volatile cell
+        ("G2", "=OUTER*2", n(7.0)),     // name -> name -> volatile cell
+        ("H2", "=STATIC+1", n(3.0)),    // name -> ordinary cell: checked
+        ("I2", "=VIA_E+1", n(9.0)),     // third round: name -> E2
+    ]);
+    let sheet = wb.sheets[0].name.clone();
+    for (name, formula) in [
+        ("VIA_E", format!("{sheet}!$E$2")),
+        ("OUTER", "DATE_CELL+0".to_string()),
+        ("BLOCK", format!("{sheet}!$A$1:$A$3")),
+        ("VIA_B", format!("{sheet}!$B$2")),
+        ("DATE_CELL", format!("{sheet}!$A$2")),
+        ("STATIC", format!("{sheet}!$D$2")),
+    ] {
+        wb.names.push(oracle_name(name, &formula));
+    }
+    let r = check(&wb, &Options::default());
+    assert_eq!((r.calc.formula_cells, r.calc.volatile, r.calc.checked, r.calc.matched, r.calc.mismatched), (9, 7, 2, 2, 0));
+}
+
+#[test]
+fn oracle_names_pointing_at_ordinary_cells_are_still_checked() {
+    // No volatile cell anywhere: names change nothing, and a wrong cached value is still reported.
+    let mut wb = book(&[("A2", "=40+2", n(42.0)), ("B2", "=ANSWER+1", n(43.0)), ("C2", "=SUM(BLOCK)", n(99.0))]);
+    let sheet = wb.sheets[0].name.clone();
+    wb.names.push(oracle_name("ANSWER", &format!("{sheet}!$A$2")));
+    wb.names.push(oracle_name("BLOCK", &format!("{sheet}!$A$1:$A$3")));
+    let r = check(&wb, &Options::default());
+    assert_eq!((r.calc.formula_cells, r.calc.volatile, r.calc.checked, r.calc.matched, r.calc.mismatched), (3, 0, 3, 2, 1));
+}
