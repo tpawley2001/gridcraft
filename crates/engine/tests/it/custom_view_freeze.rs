@@ -26,3 +26,32 @@ fn showing_an_unfrozen_custom_view_clears_current_panes() {
     s.execute("view.customViews", json!({"show": "Plain"})).unwrap();
     assert_eq!(freeze(&s), None);
 }
+
+fn mark_was_split(s: &mut Session) {
+    let sh = std::sync::Arc::make_mut(&mut s.active_mut().unwrap().wb).sheet_mut(0).unwrap();
+    sh.freeze = Some((3, 6));
+    sh.freeze_was_split = true;
+}
+
+fn was_split(s: &Session) -> bool {
+    s.doc().unwrap().wb.active().unwrap().freeze_was_split
+}
+
+#[test]
+fn freezing_or_unfreezing_in_the_app_is_a_plain_freeze() {
+    let mut s = Session::new();
+    s.new_workbook();
+    mark_was_split(&mut s);
+    s.execute("view.freezePanes", json!({"cell": "B2"})).unwrap();
+    assert!(!was_split(&s));
+    mark_was_split(&mut s);
+    s.execute("view.unfreezePanes", json!({})).unwrap();
+    assert!(!was_split(&s));
+    mark_was_split(&mut s);
+    s.execute("view.freezeTopRow", json!({})).unwrap();
+    assert!(!was_split(&s));
+    s.execute("view.customViews", json!({"save": "Top"})).unwrap();
+    mark_was_split(&mut s);
+    s.execute("view.customViews", json!({"show": "Top"})).unwrap();
+    assert!(!was_split(&s));
+}

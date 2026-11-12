@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0354: workbooks with pictures in cells are saved with the rich value types part; earlier: G0346: a picture's border (colour, weight, dash) is kept on XLSX open + save and drawn and printed; earlier: G0345: a shape's outline dash (`a:prstDash`), line cap and join and its outer shadow or empty effect list (`a:effectLst`) are kept on XLSX open + save; dashed outlines are drawn and printed dashed)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0352: frozen panes that were a split before freezing (`state="frozenSplit"`) stay `frozenSplit` through open + save; earlier: G0344: a split window (`pane` not frozen) is kept through open + save; earlier: G0334: a sheet's `sheetView` `showRuler`, `showWhiteSpace` and `windowProtection` and its `printOptions gridLinesSet` are kept through open + save)
 
 
 Legacy VML captions accept HTML-style `br` line breaks, preserving buttons, macro assignments and shown notes through open + save (`vml_html_br_tests.rs`).
@@ -213,6 +213,7 @@ Wrong checksums. In an intact `.xlsx`, `.xlsm`, `.xlsb` or `.ods` package, a par
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | G0352: `.xlsx` frozen panes that were a split before freezing (`pane state="frozenSplit"`, ECMA-376 Part 1 §18.18.53) are written back as `frozenSplit` instead of `frozen`, so unfreezing in Excel restores the split; freezing or unfreezing in the app makes a plain freeze (`pane_frozen_split_kept_tests.rs`). |
 | 2026-11-12 | minor | G0351: shapes and charts keep "Locked" off (`xdr:clientData fLocksWithSheet="0"`, ECMA-376 Part 1 §20.5.2.3) and their alt-text title (`xdr:cNvPr title`, §20.5.2.8) through open + save (`drawing_locked_title_kept_tests.rs`). |
 | 2026-11-12 | minor | G0348: `.xlsx` table columns keep `totalsRowFunction`, `totalsRowLabel` and `<totalsRowFormula>` (ECMA-376 Part 1 §18.5.1.3) on save while the table's Total Row is off (`totalsRowShown="0"`, no `totalsRowCount`), as Excel writes them; columns with neither get nothing (`table_hidden_totals_tests.rs`). |
 | 2026-11-12 | minor | G0346: XLSX picture borders (`xdr:pic/xdr:spPr/a:ln`, ECMA-376 Part 1 §20.1.2.2.24) are read and written back: a solid-fill colour (theme colours and transforms as written), `w` when in 0..=20116800 EMU and a non-solid `a:prstDash`; `a:noFill` or no fill is no border. The border is drawn on screen and printed as a solid stroke centred on the picture's edge (dashes are kept for the round trip only). |

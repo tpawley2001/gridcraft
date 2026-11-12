@@ -102,6 +102,8 @@ pub(super) fn custom_views(s: &mut Session, p: &Json) -> Result<Json> {
                 let si = cx.sheet_index();
                 let sh = cx.sheet_mut(si)?;
                 sh.freeze = freeze;
+                // Panes frozen or unfrozen in the app are a plain freeze.
+                sh.freeze_was_split = false;
                 if freeze.is_some() {
                     sh.split = None;
                 }

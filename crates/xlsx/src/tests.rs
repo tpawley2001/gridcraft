@@ -76,6 +76,7 @@ mod ods_repeat_edge_tests;
 mod ods_tests;
 mod page_order;
 mod page_setup_scale_zero;
+mod pane_frozen_split_kept_tests;
 mod paper_size_ids;
 mod passthrough_tests;
 mod per_view_zoom_tests;

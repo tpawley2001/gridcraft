@@ -189,6 +189,8 @@ fn set_freeze(s: &mut Session, si: usize, f: Option<(u32, u32)>) -> Result<Json>
     edit(s, |cx| {
         let sh = cx.sheet_mut(si)?;
         sh.freeze = f;
+        // Panes frozen or unfrozen in the app are a plain freeze.
+        sh.freeze_was_split = false;
         // Frozen panes replace a window split.
         if f.is_some() {
             sh.split = None;
