@@ -103,7 +103,8 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
     // sheetPr
     let fit = sheet.print.fit_to.is_some();
     let summary = sheet.outline_apply_styles || !sheet.summary_below || !sheet.summary_right;
-    if sheet.tab_color.is_some() || fit || summary || sheet.code_name.is_some() {
+    let page_breaks_off = !sheet.print.auto_page_breaks;
+    if sheet.tab_color.is_some() || fit || page_breaks_off || summary || sheet.code_name.is_some() {
         s.push_str("<sheetPr");
         if let Some(name) = &sheet.code_name {
             let _ = write!(s, " codeName=\"{}\"", crate::xml::esc_attr(name));
@@ -124,8 +125,16 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
             }
             s.push_str("/>");
         }
-        if fit {
-            s.push_str("<pageSetUpPr fitToPage=\"1\"/>");
+        if fit || page_breaks_off {
+            // Schema order (ECMA-376 §18.3.1.65): autoPageBreaks, then fitToPage.
+            s.push_str("<pageSetUpPr");
+            if page_breaks_off {
+                s.push_str(" autoPageBreaks=\"0\"");
+            }
+            if fit {
+                s.push_str(" fitToPage=\"1\"");
+            }
+            s.push_str("/>");
         }
         s.push_str("</sheetPr>");
     }
@@ -512,6 +521,14 @@ fn write_sheet_printing<'a>(s: &mut String, sheet: &'a Sheet, part: &str, rels: 
     }
     if let Some((w, h)) = p.fit_to {
         let _ = write!(s, " fitToWidth=\"{w}\" fitToHeight=\"{h}\"");
+    } else if let Some((w, h)) = p.fit_to_stored {
+        // Counts kept while Fit To is off; 1 is the schema default and is left out.
+        if w != 1 {
+            let _ = write!(s, " fitToWidth=\"{w}\"");
+        }
+        if h != 1 {
+            let _ = write!(s, " fitToHeight=\"{h}\"");
+        }
     }
     // Only "over, then down" is written, as Excel does: `downThenOver` is the schema default.
     if p.page_order != PageOrder::DownThenOver {
