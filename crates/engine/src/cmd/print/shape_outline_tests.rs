@@ -300,3 +300,40 @@ fn cloud_callout_prints_its_bubbles_below_the_box() {
     let lowest = p[1].iter().map(|v| v.1).fold(f32::INFINITY, f32::min);
     assert!(lowest < bottom - 1.0, "box bottom {bottom}, bubbles {lowest}: {p:?}");
 }
+
+/// A shape's preset dash (`a:prstDash`) prints as a PDF dash array in units of the outline width.
+#[test]
+fn a_dashed_outline_prints_its_dash_pattern_scaled_by_the_width() {
+    let mut s = shape_session(ShapeKind::Rectangle, None);
+    let sh = s.doc().unwrap().wb.sheet(0).unwrap().shapes.last().unwrap().clone();
+    let mut dashed = sh.clone();
+    dashed.format.line_dash = Some(gridcraft_model::LineDash::SysDash);
+    assert_eq!(objects::outline_dash(&dashed, 1.0), vec![3.0, 1.0], "1 pt sysDash: 3 pt on, 1 pt off");
+    assert_eq!(objects::outline_dash(&dashed, 2.0), vec![6.0, 2.0]);
+    assert!(objects::outline_dash(&sh, 1.0).is_empty(), "an unstated dash is solid");
+
+    {
+        let d = s.doc_mut().unwrap();
+        let shp = std::sync::Arc::make_mut(&mut d.wb).sheet_mut(0).unwrap().shapes.last_mut().unwrap();
+        shp.format.line_width_emu = Some(25400);
+        shp.format.line_dash = Some(gridcraft_model::LineDash::SysDash);
+    }
+    let text = page_stream(&mut s);
+    // The blue outline is stroked with a [3w 1w] dash array.
+    let part = text.split("0 0 1 RG\n").nth(1).expect("the outline is stroked in blue");
+    let toks: Vec<&str> = part.split_whitespace().take(6).collect();
+    assert_eq!(toks.get(1), Some(&"w"), "{part}");
+    let w: f32 = toks[0].parse().unwrap();
+    let on: f32 = toks[2].trim_start_matches('[').parse().unwrap();
+    let off: f32 = toks[3].trim_end_matches(']').parse().unwrap();
+    assert!(w > 0.0 && (on - 3.0 * w).abs() < 0.01 && (off - w).abs() < 0.01, "{part}");
+}
+
+/// Without a dash the outline prints solid, as before.
+#[test]
+fn an_undashed_outline_prints_solid() {
+    let mut s = shape_session(ShapeKind::Rectangle, None);
+    let text = page_stream(&mut s);
+    let part = text.split("0 0 1 RG\n").nth(1).expect("the outline is stroked in blue");
+    assert!(part.split_whitespace().nth(2) == Some("[]"), "{part}");
+}

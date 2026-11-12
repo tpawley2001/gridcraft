@@ -192,7 +192,7 @@ fn explosion_val(e: &El) -> Option<u32> {
     Some(u32::try_from(n.min(u64::from(Series::MAX_EXPLOSION))).unwrap_or(Series::MAX_EXPLOSION))
 }
 
-const DASHES: [(LineDash, &str); 11] = [
+pub(crate) const DASHES: [(LineDash, &str); 11] = [
     (LineDash::Solid, "solid"),
     (LineDash::Dot, "dot"),
     (LineDash::Dash, "dash"),

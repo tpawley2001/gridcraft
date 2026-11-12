@@ -25,6 +25,7 @@ use crate::xml::{El, esc, esc_attr};
 mod blip_ext;
 pub use blip_ext::write as write_blip_ext;
 mod ink;
+mod line_effects;
 pub(crate) mod shape_style;
 
 /// The chart's own theme is optional and stays opaque (ECMA-376 Part 1 §14.2.8).
@@ -738,6 +739,7 @@ fn read_shape(obj: &El, anchor: Anchor, theme: &[u32; 12], scheme: &shape_style:
     format.no_fill = sp.child("noFill").is_some();
     // ST_LineWidth: 0..=20116800 EMU; anything else keeps the default width.
     format.line_width_emu = ln.and_then(|l| l.attr("w")).and_then(|w| w.parse::<i32>().ok()).filter(|w| (0..=20_116_800).contains(w));
+    line_effects::read(sp, ln, &mut format);
     format.style = obj.child("style").map(|st| shape_style::read(st, sp, ln, theme, scheme));
     Some(Shape {
         hidden: false,
@@ -1230,11 +1232,14 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                     s.push_str("<a:ln><a:noFill/></a:ln>");
                 } else if line_c.is_some() || sh.kind == ShapeKind::Arrow {
                     // The width is written only when the shape has one, so a shape without it reads back the same.
+                    let cap = line_effects::cap_attr(&sh.format);
                     match sh.format.line_width_emu {
                         Some(w) => {
-                            let _ = write!(s, "<a:ln w=\"{w}\">");
+                            let _ = write!(s, "<a:ln w=\"{w}\"{cap}>");
                         }
-                        None => s.push_str("<a:ln>"),
+                        None => {
+                            let _ = write!(s, "<a:ln{cap}>");
+                        }
                     }
                     match line_c {
                         Some(c) => {
@@ -1242,11 +1247,13 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                         }
                         None => s.push_str("<a:solidFill><a:srgbClr val=\"000000\"/></a:solidFill>"),
                     }
+                    line_effects::write_dash_join(&mut s, &sh.format);
                     if sh.kind == ShapeKind::Arrow {
                         s.push_str("<a:tailEnd type=\"triangle\"/>");
                     }
                     s.push_str("</a:ln>");
                 }
+                line_effects::write_effects(&mut s, &sh.format);
                 s.push_str("</xdr:spPr>");
                 if let Some(st) = &sh.format.style {
                     shape_style::write(&mut s, st);

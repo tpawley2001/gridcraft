@@ -733,6 +733,139 @@ pub enum LineDash {
     SysDashDotDot,
 }
 
+impl LineDash {
+    /// The dash's on/off runs in units of the line width (ECMA-376 Part 1 §20.1.10.48), starting
+    /// with an on-run; empty for a solid line.
+    pub fn pattern(self) -> &'static [f32] {
+        match self {
+            LineDash::Solid => &[],
+            LineDash::Dot => &[1.0, 3.0],
+            LineDash::Dash => &[4.0, 3.0],
+            LineDash::LgDash => &[8.0, 3.0],
+            LineDash::DashDot => &[4.0, 3.0, 1.0, 3.0],
+            LineDash::LgDashDot => &[8.0, 3.0, 1.0, 3.0],
+            LineDash::LgDashDotDot => &[8.0, 3.0, 1.0, 3.0, 1.0, 3.0],
+            LineDash::SysDash => &[3.0, 1.0],
+            LineDash::SysDot => &[1.0, 1.0],
+            LineDash::SysDashDot => &[3.0, 1.0, 1.0, 1.0],
+            LineDash::SysDashDotDot => &[3.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        }
+    }
+}
+
+/// Most dashes [`dash_polyline`] cuts one outline into, so a tiny dash on a huge outline cannot
+/// exhaust memory; past it the rest of the outline is left undrawn.
+pub const MAX_DASHES: usize = 100_000;
+
+/// The on-runs of `pattern` (alternating on and off lengths, starting with on, in the units of
+/// `pts`) along the polyline `pts`, closed back to its first point when `closed`. An empty
+/// pattern, or one without a positive finite length, gives the whole polyline as one run.
+pub fn dash_polyline(pts: &[[f32; 2]], closed: bool, pattern: &[f32]) -> Vec<Vec<[f32; 2]>> {
+    let mut path: Vec<[f32; 2]> = pts.iter().copied().filter(|p| p[0].is_finite() && p[1].is_finite()).collect();
+    if closed && let Some(&first) = path.first() {
+        path.push(first);
+    }
+    let pattern: Vec<f32> = pattern.iter().map(|v| if v.is_finite() { v.max(0.0) } else { 0.0 }).collect();
+    let period: f32 = pattern.iter().sum();
+    if path.len() < 2 || pattern.is_empty() || !(period > 0.0 && period.is_finite()) {
+        return if path.len() >= 2 { vec![path] } else { Vec::new() };
+    }
+    let mut out: Vec<Vec<[f32; 2]>> = Vec::new();
+    let (mut idx, mut left) = (0usize, pattern.first().copied().unwrap_or(0.0));
+    let mut cur: Vec<[f32; 2]> = Vec::new();
+    let on = |i: usize| i.is_multiple_of(2);
+    // Every step ends a run or a segment; the cap also stops a run that rounding never ends.
+    let mut steps = 0usize;
+    for w in path.windows(2) {
+        let (Some(&a), Some(&b)) = (w.first(), w.get(1)) else { continue };
+        let len = (b[0] - a[0]).hypot(b[1] - a[1]);
+        let mut t = 0.0f32;
+        while len - t > 0.0 {
+            steps += 1;
+            if out.len() >= MAX_DASHES || steps > MAX_DASHES.saturating_mul(8) {
+                return out;
+            }
+            let at = |d: f32| {
+                let f = if len > 0.0 { d / len } else { 0.0 };
+                [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]
+            };
+            if on(idx) && cur.is_empty() {
+                cur.push(at(t));
+            }
+            let step = left.min(len - t);
+            t += step;
+            left -= step;
+            if left <= 0.0 {
+                if on(idx) {
+                    cur.push(at(t));
+                    if cur.len() >= 2 {
+                        out.push(std::mem::take(&mut cur));
+                    }
+                    cur.clear();
+                }
+                idx = (idx + 1) % pattern.len();
+                left = pattern.get(idx).copied().unwrap_or(0.0);
+            } else if on(idx) {
+                cur.push(b);
+            }
+        }
+    }
+    if cur.len() >= 2 {
+        out.push(cur);
+    }
+    out
+}
+
+/// A line's end cap (`a:ln cap`, ST_LineCap, ECMA-376 Part 1 §20.1.10.31).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LineCap {
+    Round,
+    Square,
+    Flat,
+}
+
+/// How a line's segments join (`a:round`, `a:bevel`, `a:miter`, ECMA-376 Part 1 §20.1.2.2.24).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LineJoin {
+    Round,
+    Bevel,
+    /// A miter join with its limit (`lim`, in thousandths of a percent) when the file gave one.
+    Miter(Option<i32>),
+}
+
+/// A shape's effect list (`a:effectLst`, ECMA-376 Part 1 §20.1.8.26) as far as it is kept.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ShapeEffects {
+    /// `<a:effectLst/>`: no effects, whatever the shape's style would give.
+    None,
+    /// One outer shadow and nothing else.
+    OuterShadow(OuterShadow),
+}
+
+/// An outer shadow (`a:outerShdw`, ECMA-376 Part 1 §20.1.8.45): each attribute as the file
+/// stated it, `None` when it left it to the default.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OuterShadow {
+    /// Blur radius in EMU.
+    pub blur_rad: Option<i64>,
+    /// Distance from the shape in EMU.
+    pub dist: Option<i64>,
+    /// Direction in 60000ths of a degree.
+    pub dir: Option<i32>,
+    /// Horizontal and vertical scale, in thousandths of a percent.
+    pub sx: Option<i32>,
+    pub sy: Option<i32>,
+    /// Horizontal and vertical skew, in 60000ths of a degree.
+    pub kx: Option<i32>,
+    pub ky: Option<i32>,
+    /// Alignment (ST_RectAlignment: `tl`, `t`, `tr`, `l`, `ctr`, `r`, `bl`, `b`, `br`).
+    pub algn: Option<String>,
+    pub rot_with_shape: Option<bool>,
+    /// The colour element (with its transforms) as the file gave it.
+    pub color: Option<KeptDmlColor>,
+}
+
 /// A chart trendline (Add Chart Element ▸ Trendline, Format Trendline pane).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Trendline {
@@ -1900,6 +2033,19 @@ pub struct ShapeFormat {
     /// The outline's DrawingML colour as the file gave it, like [`ShapeFormat::fill_source`]
     /// for `Shape::line`.
     pub line_source: Option<KeptDmlColor>,
+    /// The outline's preset dash (`a:ln/a:prstDash`); `None` when the file stated none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_dash: Option<LineDash>,
+    /// The outline's end cap (`a:ln cap`) as the file stated it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_cap: Option<LineCap>,
+    /// The outline's join (`a:round`, `a:bevel`, `a:miter`) as the file stated it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_join: Option<LineJoin>,
+    /// The shape's effect list (`xdr:spPr/a:effectLst`); `None` when the file stated none (or
+    /// one this model doesn't keep).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effects: Option<ShapeEffects>,
     /// The shape's style (`xdr:style`): references into the theme's format scheme that give the
     /// fill, outline, effects and text colour the shape's own properties leave unset.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2660,5 +2806,67 @@ mod shape_style_drawn_tests {
         let plain = shape(None);
         assert_eq!((plain.drawn_fill(), plain.drawn_line(), plain.drawn_text_color()), (Color::Auto, Color::Auto, None));
         assert!(!plain.style_hides_line(), "a shape without a style keeps the application's default outline");
+    }
+}
+
+#[cfg(test)]
+mod line_dash_tests {
+    use super::*;
+
+    #[test]
+    fn every_preset_dash_has_the_standard_pattern() {
+        let table: [(LineDash, &[f32]); 11] = [
+            (LineDash::Solid, &[]),
+            (LineDash::Dot, &[1.0, 3.0]),
+            (LineDash::Dash, &[4.0, 3.0]),
+            (LineDash::LgDash, &[8.0, 3.0]),
+            (LineDash::DashDot, &[4.0, 3.0, 1.0, 3.0]),
+            (LineDash::LgDashDot, &[8.0, 3.0, 1.0, 3.0]),
+            (LineDash::LgDashDotDot, &[8.0, 3.0, 1.0, 3.0, 1.0, 3.0]),
+            (LineDash::SysDash, &[3.0, 1.0]),
+            (LineDash::SysDot, &[1.0, 1.0]),
+            (LineDash::SysDashDot, &[3.0, 1.0, 1.0, 1.0]),
+            (LineDash::SysDashDotDot, &[3.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
+        ];
+        for (d, want) in table {
+            assert_eq!(d.pattern(), want, "{d:?}");
+        }
+    }
+
+    fn length(run: &[[f32; 2]]) -> f32 {
+        run.windows(2).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).sum()
+    }
+
+    /// A 1 pt `sysDash` outline of a 12 x 8 pt rectangle: 3 pt dashes with 1 pt gaps, running
+    /// round the corners.
+    #[test]
+    fn a_sys_dash_rectangle_is_cut_into_3_pt_dashes_and_1_pt_gaps() {
+        let width = 1.0;
+        let pattern: Vec<f32> = LineDash::SysDash.pattern().iter().map(|v| v * width).collect();
+        let rect = [[0.0, 0.0], [12.0, 0.0], [12.0, 8.0], [0.0, 8.0]];
+        let runs = dash_polyline(&rect, true, &pattern);
+        // A perimeter of 40 pt is 10 periods of 4 pt.
+        assert_eq!(runs.len(), 10);
+        for r in &runs {
+            assert!((length(r) - 3.0).abs() < 1e-4, "{r:?}");
+        }
+        for w in runs.windows(2) {
+            let (end, start) = (w[0][w[0].len() - 1], w[1][0]);
+            assert!(((start[0] - end[0]).hypot(start[1] - end[1]) - 1.0).abs() < 1e-4, "{w:?}");
+        }
+        // The dash that crosses the top-right corner (at 13 pt along) keeps the corner.
+        let corner = dash_polyline(&[[0.0, 0.0], [13.0, 0.0], [13.0, 7.0], [0.0, 7.0]], true, &pattern);
+        assert_eq!(corner.len(), 10);
+        assert_eq!(corner[3], vec![[12.0, 0.0], [13.0, 0.0], [13.0, 2.0]]);
+    }
+
+    #[test]
+    fn a_solid_or_degenerate_pattern_is_one_run() {
+        let line = [[0.0, 0.0], [10.0, 0.0]];
+        assert_eq!(dash_polyline(&line, false, &[]), vec![line.to_vec()]);
+        assert_eq!(dash_polyline(&line, false, &[0.0, 0.0]), vec![line.to_vec()]);
+        assert!(dash_polyline(&line, false, &[f32::NAN, 1.0]).iter().all(|r| length(r) < 1e-4));
+        assert!(dash_polyline(&[[0.0, 0.0]], false, &[1.0, 1.0]).is_empty());
+        assert!(dash_polyline(&[[0.0, 0.0], [1.0e9, 0.0]], false, &[1.0e-3, 1.0e-3]).len() <= MAX_DASHES);
     }
 }

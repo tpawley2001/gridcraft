@@ -264,6 +264,8 @@ fn draw_shape(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Bl
         None => (0.75 * b.k).max(0.25),
     };
     let line = rgb_of(shp.drawn_line(), wb).filter(|_| !shp.format.no_line && !shp.style_hides_line()).map(|c| (c, width));
+    let dash = outline_dash(shp, width);
+    let dash = dash.as_slice();
     match shp.kind {
         ShapeKind::Ellipse => {
             let pts: Vec<[f32; 2]> = (0..72)
@@ -272,12 +274,14 @@ fn draw_shape(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Bl
                     [x + w / 2.0 + w / 2.0 * a.cos(), y + h / 2.0 + h / 2.0 * a.sin()]
                 })
                 .collect();
-            pg.polygon(&pts, fill, line);
+            outline(pg, &pts, fill, line, dash);
         }
-        ShapeKind::Triangle => pg.polygon(&[[x + w / 2.0, y], [x + w, y + h], [x, y + h]], fill, line),
+        ShapeKind::Triangle => outline(pg, &[[x + w / 2.0, y], [x + w, y + h], [x, y + h]], fill, line, dash),
         ShapeKind::Line | ShapeKind::Arrow => {
             let c = line.map(|l| l.0).or(fill).unwrap_or([0, 0, 0]);
-            pg.stroke_line(x, y, x + w, y + h, (1.0 * b.k).max(0.3), c);
+            let lw = (1.0 * b.k).max(0.3);
+            let d = outline_dash(shp, lw);
+            pg.stroke_line_dashed(gridcraft_pdf::Point::new(x, y), gridcraft_pdf::Point::new(x + w, y + h), lw, c, &d);
             if shp.kind == ShapeKind::Arrow {
                 let ang = h.atan2(w);
                 let al = 8.0 * b.k;
@@ -285,11 +289,11 @@ fn draw_shape(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Bl
                 pg.polygon(&[[x + w, y + h], p(0.4), p(-0.4)], Some(c), None);
             }
         }
-        ShapeKind::RoundedRectangle => pg.polygon(&rounded_rect_points((x, y, w, h)), fill, line),
-        ShapeKind::Freeform if draw_freeform(pg, shp, b, (x, y, w, h), fill, line) => {}
-        _ if draw_preset(pg, shp, b, (x, y, w, h), fill, line) => {}
+        ShapeKind::RoundedRectangle => outline(pg, &rounded_rect_points((x, y, w, h)), fill, line, dash),
+        ShapeKind::Freeform if draw_freeform(pg, shp, b, (x, y, w, h), fill, line, dash) => {}
+        _ if draw_preset(pg, shp, b, (x, y, w, h), fill, line, dash) => {}
         _ => {
-            pg.polygon(&[[x, y], [x + w, y], [x + w, y + h], [x, y + h]], fill, line);
+            outline(pg, &[[x, y], [x + w, y], [x + w, y + h], [x, y + h]], fill, line, dash);
         }
     }
     if shp.text.is_empty() {
@@ -326,6 +330,29 @@ fn draw_shape(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Bl
     }
 }
 
+/// The PDF dash array of a shape's outline stroked `width` wide: its preset dash
+/// (`a:prstDash`, ECMA-376 Part 1 §20.1.10.48) in units of the width; empty for a solid outline.
+pub(super) fn outline_dash(shp: &gridcraft_model::Shape, width: f32) -> Vec<f32> {
+    let width = if width.is_finite() { width.max(0.0) } else { 0.0 };
+    shp.format.line_dash.map(|d| d.pattern().iter().map(|v| v * width).collect()).unwrap_or_default()
+}
+
+/// A closed polygon, filled with `fill` and outlined with `line`, dashed by `dash` (a PDF dash
+/// array; empty for a solid outline).
+fn outline(pg: &mut Page, pts: &[[f32; 2]], fill: Option<[u8; 3]>, line: Option<([u8; 3], f32)>, dash: &[f32]) {
+    match line {
+        Some((c, lw)) if !dash.is_empty() => {
+            pg.polygon(pts, fill, None);
+            let mut closed = pts.to_vec();
+            if let Some(&first) = pts.first() {
+                closed.push(first);
+            }
+            pg.polyline(&closed, lw, c, dash);
+        }
+        _ => pg.polygon(pts, fill, line),
+    }
+}
+
 /// Most points one shape's outline flattens into, so a hostile path can't exhaust memory.
 const MAX_OUTLINE_POINTS: usize = 200_000;
 
@@ -355,9 +382,10 @@ fn draw_freeform(
     rect: (f32, f32, f32, f32),
     fill: Option<[u8; 3]>,
     line: Option<([u8; 3], f32)>,
+    dash: &[f32],
 ) -> bool {
     let Some(geom) = shp.geometry.as_ref() else { return false };
-    draw_paths(pg, &geom.paths, b, rect, fill, line)
+    draw_paths(pg, &geom.paths, b, rect, fill, line, dash)
 }
 
 /// Draws a preset shape kept in `geometry` (block arrows, chevron, diamond, …) by its own outline
@@ -370,11 +398,12 @@ fn draw_preset(
     rect: (f32, f32, f32, f32),
     fill: Option<[u8; 3]>,
     line: Option<([u8; 3], f32)>,
+    dash: &[f32],
 ) -> bool {
     let Some(geom) = shp.geometry.as_ref() else { return false };
     let res = |v: f32| (v.abs() * 100.0).round().min(1.0e9) as i64;
     let Some(paths) = gridcraft_model::preset_paths(geom, res(rect.2), res(rect.3)) else { return false };
-    draw_paths(pg, &paths, b, rect, fill, line)
+    draw_paths(pg, &paths, b, rect, fill, line, dash)
 }
 
 /// Draws geometry paths flattened into polygons and polylines on the shape box; false when there
@@ -386,6 +415,7 @@ fn draw_paths(
     rect: (f32, f32, f32, f32),
     fill: Option<[u8; 3]>,
     line: Option<([u8; 3], f32)>,
+    dash: &[f32],
 ) -> bool {
     let mut budget = MAX_OUTLINE_POINTS;
     let mut drew = false;
@@ -401,10 +431,18 @@ fn draw_paths(
                 if sub.closed {
                     rings.push(sub.points);
                 } else if let Some((c, lw)) = line {
-                    pg.polyline(&sub.points, lw, c, &[]);
+                    pg.polyline(&sub.points, lw, c, dash);
                 }
             }
-            pg.polygons_even_odd(&rings, fill.map(|c| path.shade.apply(c)), line);
+            match line {
+                Some((c, lw)) if !dash.is_empty() => {
+                    pg.polygons_even_odd(&rings, fill.map(|c| path.shade.apply(c)), None);
+                    for ring in &rings {
+                        outline(pg, ring, None, Some((c, lw)), dash);
+                    }
+                }
+                _ => pg.polygons_even_odd(&rings, fill.map(|c| path.shade.apply(c)), line),
+            }
             continue;
         }
         for sub in subs {
@@ -413,12 +451,12 @@ fn draw_paths(
             }
             drew = true;
             if path.fill {
-                pg.polygon(&sub.points, fill.map(|c| path.shade.apply(c)), line);
+                outline(pg, &sub.points, fill.map(|c| path.shade.apply(c)), line, dash);
             } else if let Some((c, lw)) = line {
                 if sub.closed {
-                    pg.polygon(&sub.points, None, Some((c, lw)));
+                    outline(pg, &sub.points, None, Some((c, lw)), dash);
                 } else {
-                    pg.polyline(&sub.points, lw, c, &[]);
+                    pg.polyline(&sub.points, lw, c, dash);
                 }
             }
         }
