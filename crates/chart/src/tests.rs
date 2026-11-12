@@ -63,6 +63,8 @@ fn chart(kind: ChartKind) -> Chart {
         theme_override: None,
         hidden: false,
         no_print: false,
+        unlocked: false,
+        alt_title: String::new(),
         id: 1,
         kind,
         anchor: Anchor::default(),

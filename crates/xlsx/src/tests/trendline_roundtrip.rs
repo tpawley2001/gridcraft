@@ -43,6 +43,8 @@ fn chart(id: u32, kind: ChartKind, trendlines: Vec<Trendline>) -> Chart {
         theme_override: None,
         hidden: false,
         no_print: false,
+        unlocked: false,
+        alt_title: String::new(),
         id,
         kind,
         anchor: Anchor { cell: CellRef::new(id * 16, 3), width: 480.0, height: 300.0, ..Anchor::default() },

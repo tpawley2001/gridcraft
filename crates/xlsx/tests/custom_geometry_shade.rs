@@ -30,6 +30,8 @@ fn freeform() -> Shape {
     Shape {
         hidden: false,
         no_print: false,
+        unlocked: false,
+        alt_title: String::new(),
         hyperlink: None,
         name: None,
         alt: String::new(),

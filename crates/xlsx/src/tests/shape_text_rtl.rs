@@ -41,6 +41,8 @@ fn text_box(text: &str, format: ShapeFormat) -> Workbook {
         alt: String::new(),
         hidden: false,
         no_print: false,
+        unlocked: false,
+        alt_title: String::new(),
         hyperlink: None,
         name: None,
         id: 1,

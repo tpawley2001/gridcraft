@@ -356,6 +356,8 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
         let n = n + 1;
         // "Print object" off (ECMA-376 Part 1 §20.5.2.3, `fPrintsWithSheet`, default true).
         let no_print = a.child("clientData").is_some_and(|c| !c.flag("fPrintsWithSheet", true));
+        // "Locked" off (the same element, `fLocksWithSheet`, default true).
+        let unlocked = a.child("clientData").is_some_and(|c| !c.flag("fLocksWithSheet", true));
         // Objects in markup-compatibility blocks: the first choice (chartex frames, or Office Math
         // that converts to LaTeX), else the fallback.
         let objs: Vec<&El> = a
@@ -473,7 +475,10 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                                     ch.anchor = anchor;
                                     ch.hidden = obj.path(&["nvGraphicFramePr", "cNvPr"]).is_some_and(|p| p.flag("hidden", false));
                                     ch.no_print = no_print;
-                                    ch.alt = obj.path(&["nvGraphicFramePr", "cNvPr"]).and_then(|p| p.attr("descr")).unwrap_or("").to_string();
+                                    ch.unlocked = unlocked;
+                                    let cnvpr = obj.path(&["nvGraphicFramePr", "cNvPr"]);
+                                    ch.alt = cnvpr.and_then(|p| p.attr("descr")).unwrap_or("").to_string();
+                                    ch.alt_title = cnvpr.and_then(|p| p.attr("title")).unwrap_or("").to_string();
                                     sheet.charts.push(ch);
                                 }
                                 None => cx.warn(format!("chart {target} has no supported plot and was skipped")),
@@ -494,6 +499,13 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                         s.hidden =
                             obj.path(&["nvSpPr", "cNvPr"]).or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"])).is_some_and(|p| p.flag("hidden", false));
                         s.no_print = no_print;
+                        s.unlocked = unlocked;
+                        s.alt_title = obj
+                            .path(&["nvSpPr", "cNvPr"])
+                            .or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"]))
+                            .and_then(|p| p.attr("title"))
+                            .unwrap_or("")
+                            .to_string();
                         s.hyperlink = read_hyperlink(obj.path(&["nvSpPr", "cNvPr"]).or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"])), &rels);
                         s.name = obj
                             .path(&["nvSpPr", "cNvPr"])
@@ -746,6 +758,8 @@ fn read_shape(obj: &El, anchor: Anchor, theme: &[u32; 12], scheme: &shape_style:
         return Some(Shape {
             hidden: false,
             no_print: false,
+            unlocked: false,
+            alt_title: String::new(),
             hyperlink: None,
             name: None,
             alt: String::new(),
@@ -775,6 +789,8 @@ fn read_shape(obj: &El, anchor: Anchor, theme: &[u32; 12], scheme: &shape_style:
     Some(Shape {
         hidden: false,
         no_print: false,
+        unlocked: false,
+        alt_title: String::new(),
         hyperlink: None,
         name: None,
         alt: String::new(),
@@ -1123,28 +1139,40 @@ fn write_picture_locks(locks: &Option<PictureLocks>, camera: Option<&CameraTool>
     if inner.is_empty() { "<xdr:cNvPicPr/>".to_string() } else { format!("<xdr:cNvPicPr>{inner}</xdr:cNvPicPr>") }
 }
 
-/// An anchor's `xdr:clientData`: `fPrintsWithSheet="0"` when "Print object" is off, else bare
-/// (the default, `true`, is not written).
+/// An anchor's `xdr:clientData`: `fLocksWithSheet="0"` when "Locked" is off and
+/// `fPrintsWithSheet="0"` when "Print object" is off, in schema order; bare when both are at
+/// their default, `true`, which is not written. Pictures keep no "Locked" setting yet.
 fn client_data(o: &Obj<'_>) -> &'static str {
-    let no_print = match o {
-        Obj::Image(i, ..) => i.no_print,
-        Obj::Chart(c, _) => c.no_print,
-        Obj::Shape(s) => s.no_print,
+    let (unlocked, no_print) = match o {
+        Obj::Image(i, ..) => (false, i.no_print),
+        Obj::Chart(c, _) => (c.unlocked, c.no_print),
+        Obj::Shape(s) => (s.unlocked, s.no_print),
     };
-    if no_print { "<xdr:clientData fPrintsWithSheet=\"0\"/>" } else { "<xdr:clientData/>" }
+    match (unlocked, no_print) {
+        (true, true) => "<xdr:clientData fLocksWithSheet=\"0\" fPrintsWithSheet=\"0\"/>",
+        (true, false) => "<xdr:clientData fLocksWithSheet=\"0\"/>",
+        (false, true) => "<xdr:clientData fPrintsWithSheet=\"0\"/>",
+        (false, false) => "<xdr:clientData/>",
+    }
 }
 
-/// The `hidden` and `descr` attributes of an object's `cNvPr`, in schema order after `name`.
-/// Pictures write their own `descr`; an empty alternative text writes none.
+/// The `hidden` attribute of an object's `cNvPr`, and its `descr` followed by its alt-text
+/// `title`. Pictures write their own `descr`; an empty description or title writes none.
 fn cnvpr_flags(o: &Obj<'_>) -> (&'static str, String) {
-    let (hidden, descr) = match o {
-        Obj::Image(i, ..) => (i.hidden, ""),
-        Obj::Chart(c, _) => (c.hidden, c.alt.as_str()),
-        Obj::Shape(s) => (s.hidden, s.alt.as_str()),
+    let (hidden, descr, title) = match o {
+        Obj::Image(i, ..) => (i.hidden, "", ""),
+        Obj::Chart(c, _) => (c.hidden, c.alt.as_str(), c.alt_title.as_str()),
+        Obj::Shape(s) => (s.hidden, s.alt.as_str(), s.alt_title.as_str()),
     };
     let hidden = if hidden { " hidden=\"1\"" } else { "" };
-    let descr = if descr.is_empty() { String::new() } else { format!(" descr=\"{}\"", esc_attr(descr)) };
-    (hidden, descr)
+    let mut text = String::new();
+    if !descr.is_empty() {
+        let _ = write!(text, " descr=\"{}\"", esc_attr(descr));
+    }
+    if !title.is_empty() {
+        let _ = write!(text, " title=\"{}\"", esc_attr(title));
+    }
+    (hidden, text)
 }
 
 /// The drawing part for a sheet's objects (relationship ids already assigned), with the kept

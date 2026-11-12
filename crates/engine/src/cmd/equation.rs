@@ -90,6 +90,8 @@ fn insert_equation(s: &mut Session, p: &Json) -> Result<Json> {
         alt: String::new(),
         hidden: false,
         no_print: false,
+        unlocked: false,
+        alt_title: String::new(),
         hyperlink: None,
         name: None,
         id,

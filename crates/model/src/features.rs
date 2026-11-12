@@ -971,6 +971,13 @@ pub struct Chart {
     /// on screen but is left out of print, print preview and PDF export.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_print: bool,
+    /// "Locked" turned off (`xdr:clientData fLocksWithSheet="0"`, Format Shape > Properties): the
+    /// object can still be selected and changed on a protected sheet.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unlocked: bool,
+    /// The title of the object's alternative text (`xdr:cNvPr title`); empty when it has none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub alt_title: String,
     /// Rounded chart-area corners (`c:roundedCorners`, ECMA-376 Part 1 §21.2.2.156). A chart part
     /// without the element has rounded corners in Excel; new charts are square-cornered.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1577,6 +1584,13 @@ pub struct Shape {
     /// on screen but is left out of print, print preview and PDF export.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_print: bool,
+    /// "Locked" turned off (`xdr:clientData fLocksWithSheet="0"`, Format Shape > Properties): the
+    /// object can still be selected and changed on a protected sheet.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unlocked: bool,
+    /// The title of the object's alternative text (`xdr:cNvPr title`); empty when it has none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub alt_title: String,
     #[serde(default)]
     pub hyperlink: Option<DrawingHyperlink>,
     /// Imported drawing object name (`xdr:cNvPr name`).
@@ -2636,6 +2650,8 @@ mod tests {
             theme_override: None,
             hidden: false,
             no_print: false,
+            unlocked: false,
+            alt_title: String::new(),
             id: 1,
             kind: ChartKind::Doughnut,
             anchor: Anchor::default(),
@@ -2770,6 +2786,8 @@ mod shape_style_drawn_tests {
         Shape {
             hidden: false,
             no_print: false,
+            unlocked: false,
+            alt_title: String::new(),
             hyperlink: None,
             name: None,
             alt: String::new(),

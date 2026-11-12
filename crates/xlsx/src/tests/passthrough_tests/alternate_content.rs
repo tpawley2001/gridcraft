@@ -233,6 +233,8 @@ fn added_chart_keeps_control_anchor() {
         theme_override: None,
         hidden: false,
         no_print: false,
+        unlocked: false,
+        alt_title: String::new(),
         id: 99,
         kind: ChartKind::Line,
         anchor: Anchor { cell: CellRef::new(4, 4), width: 480.0, height: 300.0, ..Anchor::default() },

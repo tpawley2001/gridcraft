@@ -131,6 +131,8 @@ pub fn read_chartex(root: &El) -> Option<Chart> {
         theme_override: None,
         hidden: false,
         no_print: false,
+        unlocked: false,
+        alt_title: String::new(),
         id: 0,
         kind: kind?,
         anchor: Default::default(),
