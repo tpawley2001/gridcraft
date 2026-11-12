@@ -1,4 +1,6 @@
 use super::*;
+use gridcraft_engine::core::RangeRef;
+use gridcraft_engine::formula::SheetSel;
 
 /// Functions whose result depends on the clock, a random generator or the environment.
 const VOLATILE: [&str; 6] = ["RAND", "RANDARRAY", "RANDBETWEEN", "NOW", "TODAY", "INFO"];
@@ -36,39 +38,125 @@ fn is_volatile(e: &Expr, volatile_names: &HashSet<String>) -> bool {
 /// worklist carries volatility from a name to the names that use it. Rescanning every name until
 /// nothing changes was quadratic: a file listing its names so that each pass marked only one more
 /// did one full pass per name.
+#[cfg(test)]
 pub(super) fn volatile_names(wb: &Workbook) -> HashSet<String> {
-    let mut set = HashSet::new();
-    // Upper-cased name -> the names whose formulas refer to it.
-    let mut users: HashMap<String, Vec<String>> = HashMap::new();
-    let mut queue = Vec::new();
-    let none = HashSet::new();
-    for n in &wb.names {
-        let name = n.name.to_ascii_uppercase();
-        let Ok(e) = gridcraft_engine::formula::parse(&n.formula) else { continue };
-        if is_volatile(&e, &none) {
-            if set.insert(name.clone()) {
-                queue.push(name.clone());
+    NameGraph::new(wb).function_volatile()
+}
+
+/// The defined names of a workbook, parsed once: which call a volatile function, which names use
+/// which, and which cells each name refers to.
+struct NameGraph {
+    /// Upper-cased names whose own formula calls a volatile function.
+    seeds: Vec<String>,
+    /// Upper-cased name -> the names whose formulas refer to it.
+    users: HashMap<String, Vec<String>>,
+    /// Names that are not volatile by their own formula, with the (sheet, range) areas they refer to.
+    refs: Vec<(String, Vec<(usize, RangeRef)>)>,
+}
+
+impl NameGraph {
+    fn new(wb: &Workbook) -> NameGraph {
+        let mut g = NameGraph { seeds: Vec::new(), users: HashMap::new(), refs: Vec::new() };
+        let none = HashSet::new();
+        for n in &wb.names {
+            let name = n.name.to_ascii_uppercase();
+            let Ok(e) = gridcraft_engine::formula::parse(&n.formula) else { continue };
+            if is_volatile(&e, &none) {
+                g.seeds.push(name);
+                continue;
             }
-            continue;
+            let mut used = BTreeSet::new();
+            let mut areas = Vec::new();
+            e.walk(&mut |x| match x {
+                Expr::Name(r) => {
+                    used.insert(r.to_ascii_uppercase());
+                }
+                Expr::Ref(r) => areas.extend(ref_sheets(wb, &r.sheet, n.scope).map(|s| (s, r.range()))),
+                _ => {}
+            });
+            for r in used {
+                g.users.entry(r).or_default().push(name.clone());
+            }
+            if !areas.is_empty() {
+                g.refs.push((name, areas));
+            }
         }
-        let mut used = BTreeSet::new();
-        e.walk(&mut |x| {
-            if let Expr::Name(r) = x {
-                used.insert(r.to_ascii_uppercase());
+        g
+    }
+
+    /// The names volatile through their own formulas or the names they use (consumes the seeds).
+    fn function_volatile(&mut self) -> HashSet<String> {
+        let seeds = std::mem::take(&mut self.seeds);
+        let mut set = HashSet::new();
+        self.mark(seeds, &mut set);
+        set
+    }
+
+    /// Adds `seeds` and every name using them (transitively) to `set`; returns the names added.
+    fn mark(&mut self, seeds: Vec<String>, set: &mut HashSet<String>) -> Vec<String> {
+        let mut added = Vec::new();
+        let mut queue: Vec<String> = seeds.into_iter().filter(|s| set.insert(s.clone())).collect();
+        while let Some(v) = queue.pop() {
+            for user in self.users.remove(&v).unwrap_or_default() {
+                if set.insert(user.clone()) {
+                    queue.push(user);
+                }
             }
+            added.push(v);
+        }
+        added
+    }
+
+    /// Names (not yet in `set`) whose references contain one of the cells in `cells`; each name
+    /// is returned at most once over the graph's lifetime.
+    fn pointing_at(&mut self, cells: &[Key], set: &HashSet<String>) -> Vec<String> {
+        let mut hit = Vec::new();
+        self.refs.retain(|(name, areas)| {
+            if set.contains(name) {
+                return false;
+            }
+            let found = areas.iter().any(|(s, range)| cells.iter().any(|&(cs, c)| cs == *s && range.contains(c)));
+            if found {
+                hit.push(name.clone());
+            }
+            !found
         });
-        for r in used {
-            users.entry(r).or_default().push(name.clone());
-        }
+        hit
     }
-    while let Some(v) = queue.pop() {
-        for user in users.remove(&v).unwrap_or_default() {
-            if set.insert(user.clone()) {
-                queue.push(user);
+}
+
+/// The sheet indexes a name's reference covers: its named sheet, every sheet of a 3-D span, or the
+/// name's own sheet when unqualified (a workbook-scoped name has none, so it covers nothing).
+fn ref_sheets(wb: &Workbook, sel: &SheetSel, scope: Option<usize>) -> std::ops::Range<usize> {
+    let found = match sel {
+        SheetSel::Current => scope.map(|s| (s, s)),
+        SheetSel::Named(n) => wb.sheet_index(n).map(|s| (s, s)),
+        SheetSel::Span(a, b) => wb.sheet_index(a).zip(wb.sheet_index(b)),
+    };
+    match found {
+        Some((a, b)) => a.min(b)..a.max(b).saturating_add(1),
+        None => 0..0,
+    }
+}
+
+/// Marks everything downstream of `stack` volatile; each key is pushed once. Returns the added keys.
+fn spread_downstream(fresh: &Workbook, calc: &Calc, volatile: &mut HashSet<Key>, mut stack: Vec<Key>) -> Vec<Key> {
+    let mut added = Vec::new();
+    let mut deps = Vec::new();
+    while let Some((s, c)) = stack.pop() {
+        deps.clear();
+        calc.graph.dependents(s, c, &mut deps);
+        if let Some(range) = fresh.sheet(s).and_then(|sh| sh.spill_ranges.get(&c)) {
+            calc.graph.dependents_of_range(s, *range, &mut deps);
+        }
+        for k in deps.drain(..) {
+            if volatile.insert(k) {
+                stack.push(k);
+                added.push(k);
             }
         }
     }
-    set
+    added
 }
 
 /// The formula as the formula bar shows it.
@@ -150,32 +238,45 @@ impl MismatchIndex {
 /// by GridCraft). Without `trust_cache` nothing is compared (see [`CalcReport::stale_cache`]).
 pub fn oracle(cached: &Workbook, fresh: &Workbook, calc: &Calc, trust_cache: bool, opts: &Options) -> CalcReport {
     let mut r = CalcReport { stale_cache: !trust_cache, ..Default::default() };
-    let vnames = volatile_names(cached);
+    let mut graph = NameGraph::new(cached);
+    let mut vnames = graph.function_volatile();
     let mut volatile: HashSet<Key> = HashSet::new();
+    // Upper-cased name -> the formula cells using it, for cells not already volatile.
+    let mut name_users: HashMap<String, Vec<Key>> = HashMap::new();
     for (si, sh) in cached.sheets.iter().enumerate() {
         for (c, cell) in sh.cells.iter() {
             if let Some(f) = &cell.formula {
                 r.formula_cells += 1;
-                if f.expr_arc().is_some_and(|e| is_volatile(&e, &vnames)) {
+                let Some(e) = f.expr_arc() else { continue };
+                if is_volatile(&e, &vnames) {
                     volatile.insert((si, c));
+                } else if !graph.refs.is_empty() {
+                    let mut used = BTreeSet::new();
+                    e.walk(&mut |x| {
+                        if let Expr::Name(n) = x {
+                            used.insert(n.to_ascii_uppercase());
+                        }
+                    });
+                    for n in used {
+                        name_users.entry(n).or_default().push((si, c));
+                    }
                 }
             }
         }
     }
-    // Everything downstream of a volatile formula is volatile too; each key is pushed once.
-    let mut stack: Vec<Key> = volatile.iter().copied().collect();
-    let mut deps = Vec::new();
-    while let Some((s, c)) = stack.pop() {
-        deps.clear();
-        calc.graph.dependents(s, c, &mut deps);
-        if let Some(range) = fresh.sheet(s).and_then(|sh| sh.spill_ranges.get(&c)) {
-            calc.graph.dependents_of_range(s, *range, &mut deps);
-        }
-        for k in deps.drain(..) {
-            if volatile.insert(k) {
-                stack.push(k);
-            }
-        }
+    // Everything downstream of a volatile formula is volatile too. Formulas using a name are not
+    // dependents of the cells the name points at, so a name referring to a volatile cell (or a
+    // range containing one) makes its users volatile; repeat until nothing is added.
+    let mut fresh_keys: Vec<Key> = volatile.iter().copied().collect();
+    let added = spread_downstream(fresh, calc, &mut volatile, fresh_keys.clone());
+    fresh_keys.extend(added);
+    while !fresh_keys.is_empty() && !graph.refs.is_empty() {
+        let hit = graph.pointing_at(&fresh_keys, &vnames);
+        let new_names = graph.mark(hit, &mut vnames);
+        let new_cells: Vec<Key> = new_names.iter().filter_map(|n| name_users.remove(n)).flatten().filter(|k| volatile.insert(*k)).collect();
+        let added = spread_downstream(fresh, calc, &mut volatile, new_cells.clone());
+        fresh_keys = new_cells;
+        fresh_keys.extend(added);
     }
 
     let mut bad: Vec<(Key, Vec<String>)> = Vec::new();
