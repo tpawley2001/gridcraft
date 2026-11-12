@@ -228,6 +228,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
     for e in &root.children {
         match e.name.as_str() {
             "sheetPr" => {
+                sheet.published = e.flag("published", true);
                 sheet.code_name = e.attr("codeName").filter(|n| !n.is_empty()).map(str::to_string);
                 if let Some(t) = e.child("tabColor") {
                     sheet.tab_color = Some(read_color(t, &cx.palette));
@@ -236,6 +237,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
                     sheet.summary_below = o.flag("summaryBelow", true);
                     sheet.summary_right = o.flag("summaryRight", true);
                     sheet.outline_apply_styles = o.flag("applyStyles", false);
+                    sheet.outline_pr_show_symbols = o.flag("showOutlineSymbols", true);
                 }
                 fit_to_page = e.child("pageSetUpPr").is_some_and(|p| p.flag("fitToPage", false));
                 sheet.print.auto_page_breaks = e.child("pageSetUpPr").is_none_or(|p| p.flag("autoPageBreaks", true));

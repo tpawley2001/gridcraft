@@ -147,6 +147,14 @@ pub struct Sheet {
     /// Outline ▸ Settings ▸ Automatic styles, saved as `outlinePr applyStyles`.
     #[serde(default)]
     pub outline_apply_styles: bool,
+    /// `outlinePr showOutlineSymbols` (ECMA-376 §18.3.1.31): kept for the round trip. Separate
+    /// from [`Sheet::show_outline_symbols`], which mirrors `sheetView showOutlineSymbols`.
+    #[serde(default = "yes")]
+    pub outline_pr_show_symbols: bool,
+    /// `sheetPr published` (§18.3.1.82): off leaves the sheet out when the workbook is published
+    /// by a server. Kept for the round trip.
+    #[serde(default = "yes")]
+    pub published: bool,
     pub right_to_left: bool,
     pub zoom: u16,
     /// Each view's own zoom as stated in the file (`zoomScaleNormal`, `zoomScaleSheetLayoutView`
@@ -259,6 +267,8 @@ impl Sheet {
             summary_below: true,
             summary_right: true,
             outline_apply_styles: false,
+            outline_pr_show_symbols: true,
+            published: true,
             show_headings: true,
             show_formulas: false,
             show_zeros: true,
