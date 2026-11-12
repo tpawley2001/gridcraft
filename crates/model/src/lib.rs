@@ -25,7 +25,9 @@ pub use macros::*;
 pub use password::PasswordHash;
 pub use preserved::{Preserved, PreservedAnchor, PreservedPart, PreservedRel, PreservedSheet, PreservedXml};
 pub use python::{PyCode, PyOutput};
-pub use sheet::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, DataTable, LineIndex, Sheet, SheetUid, SheetViewMode, Visibility, points_to_chars};
+pub use sheet::{
+    DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, DataTable, LineIndex, Sheet, SheetSplit, SheetUid, SheetViewMode, Visibility, points_to_chars,
+};
 pub use store::CellStore;
 pub use style::{
     Alignment, BorderLine, BorderStyle, Borders, Color, Fill, Font, HAlign, NumFmt, PatternType, ReadingOrder, Style, StyleId, StyleTable, Theme,

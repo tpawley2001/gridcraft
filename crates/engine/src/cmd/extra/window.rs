@@ -100,7 +100,11 @@ pub(super) fn custom_views(s: &mut Session, p: &Json) -> Result<Json> {
             };
             edit(s, |cx| {
                 let si = cx.sheet_index();
-                cx.sheet_mut(si)?.freeze = freeze;
+                let sh = cx.sheet_mut(si)?;
+                sh.freeze = freeze;
+                if freeze.is_some() {
+                    sh.split = None;
+                }
                 Ok(())
             })?;
         }

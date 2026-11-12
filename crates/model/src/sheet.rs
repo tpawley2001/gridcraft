@@ -85,6 +85,24 @@ impl PartialEq for SheetUid {
     }
 }
 
+/// A window split that is not frozen (View › Split; ECMA-376 Part 1 §18.3.1.66 `pane` without
+/// `state="frozen"`). Kept so a file reopens split; the grid does not show it yet.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SheetSplit {
+    /// Horizontal position of the vertical split bar in twentieths of a point; 0 = none.
+    #[serde(default)]
+    pub x: f64,
+    /// Vertical position of the horizontal split bar in twentieths of a point; 0 = none.
+    #[serde(default)]
+    pub y: f64,
+    /// Top-left cell of the bottom-right pane, when stated.
+    #[serde(default)]
+    pub top_left: Option<CellRef>,
+    /// The active pane (`topLeft`, `topRight`, `bottomLeft`, `bottomRight`), when stated.
+    #[serde(default)]
+    pub active_pane: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sheet {
     pub name: String,
@@ -123,6 +141,9 @@ pub struct Sheet {
     pub phonetic_props: Option<crate::PhoneticProps>,
     /// Frozen rows and columns (top/left).
     pub freeze: Option<(u32, u32)>,
+    /// A split window that is not frozen; `None` whenever `freeze` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split: Option<SheetSplit>,
     pub tab_color: Option<Color>,
     /// VBA code name (`Sheet1`, or one set in the VBA editor) that binds the sheet's document
     /// module to it. Kept across a rename; a copy of the sheet gets none. `None` = not stored.
@@ -294,6 +315,7 @@ impl Sheet {
             merges: vec![],
             phonetic_props: None,
             freeze: None,
+            split: None,
             tab_color: None,
             code_name: None,
             visibility: Visibility::Visible,

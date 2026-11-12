@@ -478,6 +478,21 @@ fn read_views(e: &El, sheet: &mut Sheet) {
                     sheet.view_top_left = c;
                 }
             }
+        } else if matches!(p.attr("state"), None | Some("split")) {
+            // Split positions are twentieths of a point; anything unusable counts as no split.
+            let pos = |a: &str| p.attr_f64(a).filter(|v| *v > 0.0 && *v <= 1_000_000_000.0).unwrap_or(0.0);
+            let (x, y) = (pos("xSplit"), pos("ySplit"));
+            if x > 0.0 || y > 0.0 {
+                sheet.split = Some(gridcraft_model::SheetSplit {
+                    x,
+                    y,
+                    top_left: p.attr("topLeftCell").and_then(CellRef::parse),
+                    active_pane: p
+                        .attr("activePane")
+                        .filter(|a| matches!(*a, "topLeft" | "topRight" | "bottomLeft" | "bottomRight"))
+                        .map(str::to_string),
+                });
+            }
         }
         active_pane = p.attr("activePane");
     }

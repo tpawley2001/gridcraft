@@ -1130,7 +1130,36 @@ fn write_sheet_views(s: &mut String, sheet: &Sheet, selected: bool) {
             let _ = write!(s, "<selection pane=\"{pane}\" activeCell=\"{active}\" sqref=\"{active}\"/>");
         }
         _ => {
-            let _ = write!(s, "<selection activeCell=\"{active}\" sqref=\"{active}\"/>");
+            let mut pane = None;
+            if let Some(split) = sheet.split.as_ref().filter(|_| sheet.freeze.is_none()) {
+                let pos = |v: f64| (v.is_finite() && v > 0.0 && v <= 1_000_000_000.0).then_some(v);
+                let (x, y) = (pos(split.x), pos(split.y));
+                if x.is_some() || y.is_some() {
+                    s.push_str("<pane");
+                    if let Some(x) = x {
+                        let _ = write!(s, " xSplit=\"{x}\"");
+                    }
+                    if let Some(y) = y {
+                        let _ = write!(s, " ySplit=\"{y}\"");
+                    }
+                    if let Some(c) = split.top_left {
+                        let _ = write!(s, " topLeftCell=\"{}\"", c.a1());
+                    }
+                    pane = split.active_pane.as_deref().filter(|a| matches!(*a, "topLeft" | "topRight" | "bottomLeft" | "bottomRight"));
+                    if let Some(a) = pane {
+                        let _ = write!(s, " activePane=\"{a}\"");
+                    }
+                    s.push_str("/>");
+                }
+            }
+            match pane {
+                Some(a) => {
+                    let _ = write!(s, "<selection pane=\"{a}\" activeCell=\"{active}\" sqref=\"{active}\"/>");
+                }
+                None => {
+                    let _ = write!(s, "<selection activeCell=\"{active}\" sqref=\"{active}\"/>");
+                }
+            }
         }
     }
     s.push_str("</sheetView></sheetViews>");

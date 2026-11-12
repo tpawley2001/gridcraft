@@ -4658,6 +4658,19 @@ fn row_height_and_column_width_take_a_list_of_areas() {
     assert_eq!(s.doc().unwrap().wb.active().unwrap().col_width(1), 120.0, "a bad list changes nothing");
 }
 
+/// Frozen panes set in the app replace a window split read from a file.
+#[test]
+fn freezing_panes_replaces_a_split() {
+    let mut s = s();
+    let split = gridcraft_model::SheetSplit { x: 12540.0, y: 0.0, top_left: None, active_pane: None };
+    std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(0).unwrap().split = Some(split.clone());
+    s.execute("view.unfreezePanes", json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.sheets[0].split, Some(split), "unfreezing leaves a split alone");
+    s.execute("view.freezeTopRow", json!({})).unwrap();
+    let sh = &s.doc().unwrap().wb.sheets[0];
+    assert_eq!((sh.freeze, sh.split.clone()), (Some((1, 0)), None));
+}
+
 /// Programmatic callers lay out a sheet that isn't the active one: `sheet` (or a `Sheet!` prefix on
 /// `rows`, `cols` or `cell`) picks it, instead of being ignored in favour of the active sheet.
 #[test]
