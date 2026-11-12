@@ -121,6 +121,7 @@ mod trendline_roundtrip;
 mod vml_html_br_tests;
 mod volatile_dependencies;
 mod webextension_passthrough;
+mod workbook_window_rect_tests;
 mod xlm_names_tests;
 mod xls_autofilter_tests;
 mod xls_biff5_chart_extern_tests;

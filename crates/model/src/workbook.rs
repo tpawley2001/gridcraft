@@ -201,6 +201,19 @@ pub struct WorkbookView {
     pub show_vertical_scroll: bool,
     #[serde(default = "default_tab_ratio")]
     pub tab_ratio: u32,
+    /// Where the workbook's window was and how big it was when the file was saved
+    /// (`xWindow`, `yWindow`, `windowWidth`, `windowHeight`); `None` when the file stores none.
+    #[serde(default)]
+    pub window: Option<WindowRect>,
+}
+
+/// A workbook window's stored position and size, in twips (ECMA-376 Part 1 §18.2.30).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowRect {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
 }
 
 fn yes() -> bool {
@@ -213,7 +226,7 @@ fn default_tab_ratio() -> u32 {
 
 impl Default for WorkbookView {
     fn default() -> Self {
-        WorkbookView { show_sheet_tabs: true, show_horizontal_scroll: true, show_vertical_scroll: true, tab_ratio: default_tab_ratio() }
+        WorkbookView { show_sheet_tabs: true, show_horizontal_scroll: true, show_vertical_scroll: true, tab_ratio: default_tab_ratio(), window: None }
     }
 }
 

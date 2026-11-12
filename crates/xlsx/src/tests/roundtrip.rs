@@ -2116,7 +2116,7 @@ fn workbook_view_settings_survive_a_round_trip() {
     let (wb, _) = read_xlsx(&bytes).unwrap();
     assert_eq!(
         wb.view,
-        WorkbookView { show_sheet_tabs: false, show_horizontal_scroll: false, show_vertical_scroll: false, tab_ratio: 250 },
+        WorkbookView { show_sheet_tabs: false, show_horizontal_scroll: false, show_vertical_scroll: false, tab_ratio: 250, window: None },
         "the reader takes the view settings from <workbookView>"
     );
 
@@ -2196,7 +2196,7 @@ fn workbook_view_selects_first_visible_window_consistently() {
         (
             r#"<workbookView visibility="hidden" activeTab="0" showSheetTabs="0" showHorizontalScroll="0" showVerticalScroll="0" tabRatio="111"/><workbookView visibility="veryHidden" activeTab="1" tabRatio="222"/><workbookView visibility="visible" activeTab="2" showSheetTabs="1" showHorizontalScroll="0" showVerticalScroll="1" tabRatio="750"/><workbookView visibility="visible" activeTab="0" tabRatio="250"/>"#,
             2,
-            WorkbookView { show_sheet_tabs: true, show_horizontal_scroll: false, show_vertical_scroll: true, tab_ratio: 750 },
+            WorkbookView { show_sheet_tabs: true, show_horizontal_scroll: false, show_vertical_scroll: true, tab_ratio: 750, window: None },
         ),
         // Visibility defaults to visible, so this view takes precedence over a later explicit one.
         (

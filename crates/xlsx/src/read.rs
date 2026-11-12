@@ -384,6 +384,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
             show_horizontal_scroll: v.flag("showHorizontalScroll", true),
             show_vertical_scroll: v.flag("showVerticalScroll", true),
             tab_ratio: v.attr_u32("tabRatio").unwrap_or(600).min(WorkbookView::MAX_TAB_RATIO),
+            window: None,
         };
     }
 

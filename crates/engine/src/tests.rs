@@ -2514,7 +2514,13 @@ fn deleting_a_3d_span_end_sheet_keeps_the_rest() {
 
 #[test]
 fn workbook_view_roundtrips_after_sheet_deletion_and_reordering() {
-    let view = gridcraft_model::WorkbookView { show_sheet_tabs: false, show_horizontal_scroll: true, show_vertical_scroll: false, tab_ratio: 350 };
+    let view = gridcraft_model::WorkbookView {
+        show_sheet_tabs: false,
+        show_horizontal_scroll: true,
+        show_vertical_scroll: false,
+        tab_ratio: 350,
+        window: None,
+    };
     for (initial_active, command, params, expected_order, expected_active) in [
         ("Third", "home.deleteSheet", json!({"sheet": "First"}), vec!["Second", "Third"], 1),
         ("Third", "home.deleteSheet", json!({"sheet": "Third"}), vec!["First", "Second"], 1),
