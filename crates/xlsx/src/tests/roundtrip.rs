@@ -317,6 +317,7 @@ fn sample() -> Workbook {
         fit_to_stored: None,
         auto_page_breaks: false,
         gridlines: true,
+        gridlines_set: true,
         headings: true,
         center_h: true,
         center_v: false,

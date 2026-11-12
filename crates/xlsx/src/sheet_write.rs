@@ -596,12 +596,15 @@ pub(crate) fn write_header_footer(s: &mut String, p: &PrintSettings) {
 fn write_sheet_printing<'a>(s: &mut String, sheet: &'a Sheet, part: &str, rels: &mut Rels, out: &mut Out) -> crate::passthrough::SheetKept<'a> {
     // Printing.
     let p = &sheet.print;
-    if p.gridlines || p.headings || p.center_h || p.center_v {
+    if p.gridlines || p.headings || p.center_h || p.center_v || !p.gridlines_set {
         s.push_str("<printOptions");
         for (a, v) in [("horizontalCentered", p.center_h), ("verticalCentered", p.center_v), ("headings", p.headings), ("gridLines", p.gridlines)] {
             if v {
                 let _ = write!(s, " {a}=\"1\"");
             }
+        }
+        if !p.gridlines_set {
+            s.push_str(" gridLinesSet=\"0\"");
         }
         s.push_str("/>");
     }
@@ -1062,6 +1065,15 @@ fn write_sheet_views(s: &mut String, sheet: &Sheet, selected: bool) {
     }
     if sheet.right_to_left {
         s.push_str(" rightToLeft=\"1\"");
+    }
+    if !sheet.show_ruler {
+        s.push_str(" showRuler=\"0\"");
+    }
+    if !sheet.show_white_space {
+        s.push_str(" showWhiteSpace=\"0\"");
+    }
+    if sheet.window_protection {
+        s.push_str(" windowProtection=\"1\"");
     }
     if sheet.view != gridcraft_model::SheetViewMode::Normal {
         let _ = write!(s, " view=\"{}\"", sheet.view.as_str());

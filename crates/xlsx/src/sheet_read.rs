@@ -285,6 +285,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
             },
             "printOptions" => {
                 sheet.print.gridlines = e.flag("gridLines", false);
+                sheet.print.gridlines_set = e.flag("gridLinesSet", true);
                 sheet.print.headings = e.flag("headings", false);
                 sheet.print.center_h = e.flag("horizontalCentered", false);
                 sheet.print.center_v = e.flag("verticalCentered", false);
@@ -448,6 +449,9 @@ fn read_views(e: &El, sheet: &mut Sheet) {
     sheet.show_zeros = v.flag("showZeros", true);
     sheet.show_outline_symbols = v.flag("showOutlineSymbols", true);
     sheet.right_to_left = v.flag("rightToLeft", false);
+    sheet.show_ruler = v.flag("showRuler", true);
+    sheet.show_white_space = v.flag("showWhiteSpace", true);
+    sheet.window_protection = v.flag("windowProtection", false);
     sheet.view = v.attr("view").and_then(gridcraft_model::SheetViewMode::parse).unwrap_or_default();
     if let Some(z) = v.attr_u32("zoomScale") {
         sheet.zoom = z.clamp(10, 400) as u16;

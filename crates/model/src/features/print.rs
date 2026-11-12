@@ -36,6 +36,9 @@ pub struct PrintSettings {
     #[serde(default = "yes")]
     pub auto_page_breaks: bool,
     pub gridlines: bool,
+    /// `printOptions gridLinesSet` (on unless a file turned it off), kept for the round trip.
+    #[serde(default = "yes")]
+    pub gridlines_set: bool,
     pub headings: bool,
     pub center_h: bool,
     pub center_v: bool,
@@ -295,6 +298,7 @@ impl Default for PrintSettings {
             fit_to_stored: None,
             auto_page_breaks: true,
             gridlines: false,
+            gridlines_set: true,
             headings: false,
             center_h: false,
             center_v: false,
