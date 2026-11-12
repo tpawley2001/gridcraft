@@ -266,6 +266,37 @@ fn draw_shape(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Bl
     let line = rgb_of(shp.drawn_line(), wb).filter(|_| !shp.format.no_line && !shp.style_hides_line()).map(|c| (c, width));
     let dash = outline_dash(shp, width);
     let dash = dash.as_slice();
+    // The outer shadow first, under the shape: its outline moved, filled with the shadow colour
+    // (a shape without a fill strokes it instead, as does a line).
+    if let Some(((dx, dy), c)) = shape_shadow(wb, shp, b.scale) {
+        let line_kind = matches!(shp.kind, ShapeKind::Line | ShapeKind::Arrow);
+        let (sf, sl) = match (fill, line) {
+            (Some(_), _) if !line_kind => (Some(c), None),
+            (_, Some((_, lw))) => (None, Some((c, lw))),
+            _ => (None, None),
+        };
+        if sf.is_some() || sl.is_some() {
+            let sdash = if sf.is_some() { &[][..] } else { dash };
+            draw_geometry(pg, shp, b, (x + dx, y + dy, w, h), sf, sl, sdash);
+        }
+    }
+    draw_geometry(pg, shp, b, (x, y, w, h), fill, line, dash);
+    if shp.text.is_empty() {
+        return;
+    }
+    draw_shape_text(pg, wb, shp, b, (x, y, w, h));
+}
+
+/// Draws a shape's outline at `(x, y, w, h)`, filled with `fill` and stroked with `line`.
+fn draw_geometry(
+    pg: &mut Page,
+    shp: &gridcraft_model::Shape,
+    b: &Block,
+    (x, y, w, h): (f32, f32, f32, f32),
+    fill: Option<[u8; 3]>,
+    line: Option<([u8; 3], f32)>,
+    dash: &[f32],
+) {
     match shp.kind {
         ShapeKind::Ellipse => {
             let pts: Vec<[f32; 2]> = (0..72)
@@ -296,9 +327,10 @@ fn draw_shape(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Bl
             outline(pg, &[[x, y], [x + w, y], [x + w, y + h], [x, y + h]], fill, line, dash);
         }
     }
-    if shp.text.is_empty() {
-        return;
-    }
+}
+
+/// Prints a shape's text in its box.
+fn draw_shape_text(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Block, (x, y, w, h): (f32, f32, f32, f32)) {
     use gridcraft_model::{ShapeTextAlign, ShapeTextAnchor};
     let fm = &shp.format;
     let text_box = shp.kind == ShapeKind::TextBox;
@@ -559,10 +591,13 @@ fn flatten_path(path: &gridcraft_model::GeometryPath, (x, y, w, h): (f32, f32, f
 }
 
 /// A shape's outer shadow for print: its offset in points times `scale` (x to the right, y down the
-/// page) and its colour blended over white; `None` when the shape has no outer shadow to draw.
-/// Stub: not implemented yet (drop the `allow` once the shape printing code calls it).
-#[allow(dead_code)]
+/// page) and its colour blended over white (PDF output has no transparency); `None` when the shape
+/// has no outer shadow to draw.
 pub(super) fn shape_shadow(wb: &gridcraft_model::Workbook, shp: &gridcraft_model::Shape, scale: f32) -> Option<((f32, f32), [u8; 3])> {
-    let _ = (wb, shp, scale);
-    None
+    let Some(gridcraft_model::ShapeEffects::OuterShadow(sh)) = shp.format.effects.as_ref() else { return None };
+    let (dx, dy) = sh.offset_pt()?;
+    let (rgb, alpha) = sh.rgba(&wb.theme)?;
+    let scale = if scale.is_finite() { scale } else { 1.0 };
+    let over_white = |c: u8| (255.0 - alpha * (255.0 - f32::from(c))).round().clamp(0.0, 255.0) as u8;
+    Some(((dx * scale, dy * scale), rgb.map(over_white)))
 }
