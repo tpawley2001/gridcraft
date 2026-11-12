@@ -748,9 +748,6 @@ impl KeptReader {
         Ok(())
     }
 
-    /// A sheet's `<customSheetViews>` as kept: each view must have a `guid`. The printer settings
-    /// parts its `<pageSetup r:id>`s name are kept with it; when they can't be, the (optional)
-    /// `r:id`s are removed rather than left naming nothing.
     /// The sheet's `<dataConsolidate>`, with the external relationships its `<dataRef r:id>`s
     /// name kept. An id that names no external workbook path is dropped from its `<dataRef>`.
     fn data_consolidate(
@@ -782,6 +779,9 @@ impl KeptReader {
         Ok(x)
     }
 
+    /// A sheet's `<customSheetViews>` as kept: each view must have a `guid`. The printer settings
+    /// parts its `<pageSetup r:id>`s name are kept with it; when they can't be, the (optional)
+    /// `r:id`s are removed rather than left naming nothing.
     fn custom_sheet_views(
         &mut self,
         cx: &mut Ctx<'_>,
