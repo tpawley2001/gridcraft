@@ -727,10 +727,20 @@ fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut O
                     let _ = write!(s, " location=\"{}\"", esc_attr(l));
                 }
             } else {
-                let _ = write!(s, " location=\"{}\" display=\"{}\"", esc_attr(t.trim_start_matches('#')), esc_attr(t.trim_start_matches('#')));
+                let _ = write!(s, " location=\"{}\"", esc_attr(t.trim_start_matches('#')));
             }
             if let Some(tt) = &h.tooltip {
                 let _ = write!(s, " tooltip=\"{}\"", esc_attr(tt));
+            }
+            // The display string the file came with; a link inside the workbook made here shows its location.
+            match h.display.as_deref() {
+                Some(d) => {
+                    let _ = write!(s, " display=\"{}\"", esc_attr(d));
+                }
+                None if !external => {
+                    let _ = write!(s, " display=\"{}\"", esc_attr(t.trim_start_matches('#')));
+                }
+                None => {}
             }
             s.push_str("/>");
         }

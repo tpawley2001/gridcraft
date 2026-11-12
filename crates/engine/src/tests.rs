@@ -5302,8 +5302,10 @@ fn filtered_rows_with_links() -> Session {
     s.execute("range.setValues", json!({"range": "E1", "values": [["X"]]})).unwrap();
     let sh = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(0).unwrap();
     for r in 2..=11u32 {
-        sh.hyperlinks
-            .insert(CellRef::new(r - 1, 0), gridcraft_model::Hyperlink { target: format!("https://example.com/{r}"), tooltip: None, external: true });
+        sh.hyperlinks.insert(
+            CellRef::new(r - 1, 0),
+            gridcraft_model::Hyperlink { target: format!("https://example.com/{r}"), tooltip: None, external: true, display: None },
+        );
     }
     s.execute("selection.set", json!({"range": "A1:B1"})).unwrap();
     s.execute("data.filter", json!({})).unwrap();
@@ -6437,7 +6439,7 @@ fn workbook_display_options_are_commands() {
 fn clear_hyperlinks_removes_links_on_cells_with_nothing_stored() {
     let mut s = s();
     s.execute("cell.set", json!({"cell": "A1", "input": "x"})).unwrap();
-    let link = || gridcraft_model::Hyperlink { target: "https://example.com".into(), tooltip: None, external: true };
+    let link = || gridcraft_model::Hyperlink { target: "https://example.com".into(), tooltip: None, external: true, display: None };
     let (a1, c5) = (CellRef::parse("A1").unwrap(), CellRef::parse("C5").unwrap());
     std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(0).unwrap().hyperlinks.insert(c5, link());
     s.execute("edit.clearHyperlinks", json!({"range": "C5"})).unwrap();
@@ -6457,7 +6459,7 @@ fn clear_hyperlinks_removes_links_on_cells_with_nothing_stored() {
 fn clearing_links_and_notes_respects_sheet_protection() {
     let mut s = s();
     s.execute("cell.set", json!({"cell": "A1", "input": "x"})).unwrap();
-    let link = || gridcraft_model::Hyperlink { target: "https://example.com".into(), tooltip: None, external: true };
+    let link = || gridcraft_model::Hyperlink { target: "https://example.com".into(), tooltip: None, external: true, display: None };
     let (a1, c5) = (CellRef::parse("A1").unwrap(), CellRef::parse("C5").unwrap());
     {
         let sh = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(0).unwrap();
@@ -6489,7 +6491,7 @@ fn clearing_links_and_notes_records_their_cells() {
         .sheet_mut(0)
         .unwrap()
         .hyperlinks
-        .insert(c5, gridcraft_model::Hyperlink { target: "https://example.com".into(), tooltip: None, external: true });
+        .insert(c5, gridcraft_model::Hyperlink { target: "https://example.com".into(), tooltip: None, external: true, display: None });
     s.execute("review.newNote", json!({"cell": "D7", "text": "note", "author": "Example"})).unwrap();
     s.doc_mut().unwrap().touched = Some(Vec::new());
     s.execute("edit.clearHyperlinks", json!({"range": "C5"})).unwrap();
@@ -6504,7 +6506,7 @@ fn clearing_links_and_notes_records_their_cells() {
 fn clearing_links_and_notes_keeps_allow_edit_ranges() {
     let mut s = s();
     s.execute("cell.set", json!({"cell": "A1", "input": "x"})).unwrap();
-    let link = || gridcraft_model::Hyperlink { target: "https://example.com".into(), tooltip: None, external: true };
+    let link = || gridcraft_model::Hyperlink { target: "https://example.com".into(), tooltip: None, external: true, display: None };
     let (a1, c5) = (CellRef::parse("A1").unwrap(), CellRef::parse("C5").unwrap());
     {
         let sh = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(0).unwrap();
@@ -6649,4 +6651,19 @@ fn history_charges_the_storage_of_empty_comment_replies() {
     let sheet = s.doc().unwrap().wb.sheet(0).unwrap().clone();
     // 500 replies of no text are still 500 elements.
     assert!(crate::sheet_text_bytes(&sheet) >= 500 * std::mem::size_of::<(String, String)>());
+}
+
+/// A link's stored display string (from a file) stays when only its ScreenTip is edited and goes
+/// when the link is pointed somewhere else.
+#[test]
+fn editing_a_link_keeps_its_display_only_while_the_target_stays() {
+    let mut s = s();
+    let a1 = CellRef::parse("A1").unwrap();
+    let link = gridcraft_model::Hyperlink { target: "https://example.com".into(), tooltip: None, external: true, display: Some("Example".into()) };
+    std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(0).unwrap().hyperlinks.insert(a1, link);
+    let display = |s: &Session| s.doc().unwrap().wb.active().unwrap().hyperlinks.get(&a1).and_then(|h| h.display.clone());
+    s.execute("insert.link", json!({"cell": "A1", "target": "https://example.com", "tooltip": "Go"})).unwrap();
+    assert_eq!(display(&s).as_deref(), Some("Example"));
+    s.execute("insert.link", json!({"cell": "A1", "target": "https://example.org"})).unwrap();
+    assert_eq!(display(&s), None);
 }

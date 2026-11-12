@@ -1529,7 +1529,9 @@ fn insert_link(s: &mut Session, p: &Json) -> Result<Json> {
         } else {
             sh.set_style(at, link_style);
         }
-        sh.hyperlinks.insert(at, Hyperlink { target: target.clone(), tooltip: tooltip.clone(), external });
+        // The display string read from a file stays while the link keeps its target and text.
+        let display = sh.hyperlinks.get(&at).filter(|h| h.target == target && text.is_none()).and_then(|h| h.display.clone());
+        sh.hyperlinks.insert(at, Hyperlink { target: target.clone(), tooltip: tooltip.clone(), external, display });
         cx.touch(sheet, at);
         Ok(Json::Null)
     })

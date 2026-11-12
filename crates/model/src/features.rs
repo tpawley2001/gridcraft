@@ -499,6 +499,10 @@ pub struct Hyperlink {
     /// the file, not a `location`. A bare file name can't be told from a defined name by its text.
     #[serde(default)]
     pub external: bool,
+    /// The display string the file stored with the link (XLSX `<hyperlink display>`, Excel's "Text
+    /// to display"), written back on save. `None` for links made or retargeted in the app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
 }
 
 // ---------------------------------------------------------------- drawing objects

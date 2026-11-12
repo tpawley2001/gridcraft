@@ -2137,7 +2137,7 @@ fn hyperlink(payload: &[u8], rels: &[Rel], sheet: &mut Sheet, budget: &mut Budge
         report.warn("XLSB hyperlinks past the text limit were skipped.");
         return;
     }
-    let link = Hyperlink { target, tooltip: (!tooltip.is_empty()).then_some(tooltip), external };
+    let link = Hyperlink { target, tooltip: (!tooltip.is_empty()).then_some(tooltip), external, display: None };
     for c in range.iter() {
         if budget.links >= MAX_LINK_CELLS {
             report.warn(format!("XLSB hyperlinks past the first {MAX_LINK_CELLS} cells of a sheet were dropped."));

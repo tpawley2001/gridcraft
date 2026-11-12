@@ -31,8 +31,10 @@ pub(super) fn read_hyperlinks(cx: &mut Ctx<'_>, name: &str, e: &El, rels: &[Rel]
             continue;
         }
         let tooltip = h.attr("tooltip").map(|t| truncate_chars(t, MAX_TOOLTIP_CHARS));
-        let link_bytes = (target.len() + tooltip.as_ref().map_or(0, String::len)) as u64;
-        let link = Hyperlink { target, tooltip, external };
+        // The stored display string (Excel's "Text to display"), kept as written for the next save.
+        let display = h.attr("display").filter(|d| !d.is_empty()).map(|d| truncate_chars(d, MAX_HYPERLINK_TARGET));
+        let link_bytes = (target.len() + tooltip.as_ref().map_or(0, String::len) + display.as_ref().map_or(0, String::len)) as u64;
+        let link = Hyperlink { target, tooltip, external, display };
         for c in range.iter() {
             if budget.cells >= MAX_HYPERLINK_CELLS {
                 cx.warn(format!("sheet \"{name}\": hyperlinks past the first {MAX_HYPERLINK_CELLS} cells were dropped"));
