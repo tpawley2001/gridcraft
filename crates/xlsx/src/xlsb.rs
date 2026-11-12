@@ -131,6 +131,14 @@ impl Budget {
 /// Imports worksheet scalar values, cell formulas (with their saved results) and cell formatting.
 /// Dates retain the workbook's original date system. Inspect warnings for unsupported features.
 pub fn read_xlsb(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
+    read_xlsb_with(bytes, crate::FunctionInfo::default())
+}
+
+/// [`read_xlsb`] with the function library's facts, which decide where the legacy formulas get
+/// Excel's implicit `@` (as [`crate::read_xls_with`] does for `.xls`).
+pub fn read_xlsb_with(bytes: &[u8], functions: crate::FunctionInfo) -> Result<(Workbook, ReadReport), IoError> {
+    // Stub from the acceptance-test commit: `functions` is not used yet.
+    let _ = functions;
     let mut package = Package::open_repairing(bytes)?;
     let types = content_types(&mut package)?;
     let root_rels = relationships(&mut package, "")?;
