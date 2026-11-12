@@ -233,6 +233,32 @@ pub fn points_to_chars(px: f64) -> f64 {
 }
 
 impl Sheet {
+    /// Switches the sheet to `mode`, each view keeping its own zoom as in Excel: the zoom of the
+    /// view being left is stored in that view's field and the new view shows at its stored zoom,
+    /// or at its default (Normal 100, Page Break Preview 60, Page Layout 100) when none is stored
+    /// or the stored one is outside 10..=400. Choosing the current view changes nothing.
+    pub fn switch_view(&mut self, mode: SheetViewMode) {
+        if self.view == mode {
+            return;
+        }
+        let zoom = self.zoom;
+        *self.view_zoom_mut(self.view) = Some(zoom);
+        let default = match mode {
+            SheetViewMode::PageBreakPreview => 60,
+            SheetViewMode::Normal | SheetViewMode::PageLayout => 100,
+        };
+        self.zoom = self.view_zoom_mut(mode).filter(|z| (10..=400).contains(z)).unwrap_or(default);
+        self.view = mode;
+    }
+
+    fn view_zoom_mut(&mut self, mode: SheetViewMode) -> &mut Option<u16> {
+        match mode {
+            SheetViewMode::Normal => &mut self.zoom_normal,
+            SheetViewMode::PageBreakPreview => &mut self.zoom_page_break,
+            SheetViewMode::PageLayout => &mut self.zoom_page_layout,
+        }
+    }
+
     pub fn new(name: impl Into<String>) -> Sheet {
         Sheet {
             name: name.into(),

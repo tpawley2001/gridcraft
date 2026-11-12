@@ -3,20 +3,22 @@ use super::{
     stash_get, stash_map, stash_set, str_param, target_sheet, u32_param,
 };
 
-/// Switches a sheet's view. Like zoom, the view is saved with the file but is not an edit: it
+/// Switches a sheet's view, each view at its own zoom (see `Sheet::switch_view`). Like zoom, the view is saved with the file but is not an edit: it
 /// neither records an undo step nor marks a clean workbook as changed.
 pub(super) fn set_view(s: &mut Session, p: &Json, mode: SheetViewMode) -> Result<Json> {
     let si = target_sheet(s, p)?;
     let d = s.doc_mut()?;
     let dirty = d.is_dirty();
     let wb = std::sync::Arc::make_mut(&mut d.wb);
+    let mut zoom = None;
     if let Some(sh) = wb.sheet_mut(si) {
-        sh.view = mode;
+        sh.switch_view(mode);
+        zoom = Some(sh.zoom);
     }
     if !dirty {
         d.saved = d.wb.clone();
     }
-    Ok(json!({"view": mode.as_str()}))
+    Ok(json!({"view": mode.as_str(), "zoom": zoom}))
 }
 
 pub(super) fn ruler(s: &mut Session, p: &Json) -> Result<Json> {
