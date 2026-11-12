@@ -65,6 +65,7 @@ mod linked_picture_tests;
 mod literal_category_roundtrip;
 mod locale_numfmt;
 mod malformed;
+mod mdx_metadata_kept_tests;
 mod multilevel_category_roundtrip;
 mod note_box;
 mod note_picture_fill_ids;
