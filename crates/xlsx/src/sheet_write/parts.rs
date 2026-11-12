@@ -151,7 +151,18 @@ pub(super) fn autofilter_xml(range: RangeRef, criteria: &[(u32, FilterCriterion)
     s
 }
 
-pub(super) fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, out: &mut Out) -> String {
+/// Writes the named cell style attributes of a table or table column whose style the workbook still
+/// has, so a saved file never names a cell style it does not contain.
+fn write_cell_style_names(s: &mut String, names: [(&str, &Option<String>); 3], cell_styles: &[(String, Style)]) {
+    for (attr, name) in names {
+        let Some(name) = name.as_deref() else { continue };
+        if name == "Normal" || cell_styles.iter().any(|(n, _)| !n.is_empty() && n == name) {
+            let _ = write!(s, " {attr}=\"{}\"", esc_attr(&encode_xstring(name)));
+        }
+    }
+}
+
+pub(super) fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, cell_styles: &[(String, Style)], out: &mut Out) -> String {
     let mut s =
         format!("{XML_DECL}<table xmlns=\"{NS_MAIN}\" id=\"{id}\" name=\"{0}\" displayName=\"{0}\" ref=\"{1}\"", esc_attr(name), t.range.a1());
     if !t.header_row {
@@ -177,6 +188,11 @@ pub(super) fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, out: &m
             let _ = write!(s, " {attr}=\"{}\"", dxf_id(&mut out.dxfs, st));
         }
     }
+    write_cell_style_names(
+        &mut s,
+        [("headerRowCellStyle", &t.header_row_cell_style), ("dataCellStyle", &t.data_cell_style), ("totalsRowCellStyle", &t.totals_row_cell_style)],
+        cell_styles,
+    );
     if let Some(c) = t.connection_id {
         let _ = write!(s, " connectionId=\"{c}\"");
     }
@@ -237,6 +253,15 @@ pub(super) fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, out: &m
                     let _ = write!(s, " {attr}=\"{}\"", dxf_id(&mut out.dxfs, st));
                 }
             }
+            write_cell_style_names(
+                &mut s,
+                [
+                    ("headerRowCellStyle", &c.header_row_cell_style),
+                    ("dataCellStyle", &c.data_cell_style),
+                    ("totalsRowCellStyle", &c.totals_row_cell_style),
+                ],
+                cell_styles,
+            );
         }
         let calc = col.and_then(|c| c.formula.as_ref()).filter(|f| !f.is_empty());
         let custom = if t.totals_row && totals == TotalsFn::Custom { col.and_then(|c| c.totals_label.as_ref()) } else { None };
@@ -561,6 +586,9 @@ mod tests {
             header_row_dxf: None,
             data_dxf: None,
             totals_row_dxf: None,
+            header_row_cell_style: None,
+            data_cell_style: None,
+            totals_row_cell_style: None,
         };
         let mut columns: Vec<TableColumn> = (0..10_000).map(|_| col("Total")).collect();
         columns[1] = col("total3");
@@ -583,6 +611,9 @@ mod tests {
             header_row_dxf: None,
             data_dxf: None,
             totals_row_dxf: None,
+            header_row_cell_style: None,
+            data_cell_style: None,
+            totals_row_cell_style: None,
             header_row_border_dxf: None,
             table_border_dxf: None,
             totals_row_border_dxf: None,

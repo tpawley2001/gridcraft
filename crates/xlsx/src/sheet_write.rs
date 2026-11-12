@@ -224,7 +224,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
             // The id was decided for the whole workbook before any sheet was written.
             let id = out.table_ids.get(si).and_then(|ids| ids.get(*index)).copied().unwrap_or(n);
             let name = table_name(&t.name, &mut used_names, n);
-            let xml = table_xml(t, cols, &name, id, out);
+            let xml = table_xml(t, cols, &name, id, &wb.cell_styles, out);
             out.part(&format!("xl/tables/table{n}.xml"), Some(CT_TABLE), xml.into_bytes());
             let rid = rels.add("table", &format!("../tables/table{n}.xml"));
             let _ = write!(parts, "<tablePart r:id=\"{rid}\"/>");
