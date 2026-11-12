@@ -1880,6 +1880,18 @@ pub struct ShapeFormat {
     pub vert: Option<ShapeTextVert>,
     /// Rotation of the text in its box (`a:bodyPr rot`), in 60000ths of a degree.
     pub text_rotation: Option<i32>,
+    /// Vertical text overflow (`a:bodyPr vertOverflow`); `None` when the file leaves it out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vert_overflow: Option<ShapeTextVertOverflow>,
+    /// Horizontal text overflow (`a:bodyPr horzOverflow`); `None` when the file leaves it out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub horz_overflow: Option<ShapeTextHorzOverflow>,
+    /// Text stays upright when the shape is rotated (`a:bodyPr upright`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub upright: bool,
+    /// The autofit child of `a:bodyPr`; `None` when the file has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autofit: Option<ShapeTextAutofit>,
     /// Outline width in EMU (`a:ln w`, 12700 per point); `None` is the default 0.75 pt.
     pub line_width_emu: Option<i32>,
     /// The fill's DrawingML colour as the file gave it (a theme colour, or a colour with
@@ -2103,6 +2115,76 @@ impl ShapeTextVert {
             _ => return None,
         })
     }
+}
+
+/// How text overflows a shape's box vertically (`a:bodyPr vertOverflow`,
+/// ST_TextVertOverflowType).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShapeTextVertOverflow {
+    Overflow,
+    Ellipsis,
+    Clip,
+}
+
+impl ShapeTextVertOverflow {
+    /// The `vertOverflow` attribute value.
+    pub fn xml(self) -> &'static str {
+        match self {
+            Self::Overflow => "overflow",
+            Self::Ellipsis => "ellipsis",
+            Self::Clip => "clip",
+        }
+    }
+
+    /// The value for a `vertOverflow` attribute; `None` for anything outside the schema's list.
+    pub fn from_xml(s: &str) -> Option<Self> {
+        Some(match s {
+            "overflow" => Self::Overflow,
+            "ellipsis" => Self::Ellipsis,
+            "clip" => Self::Clip,
+            _ => return None,
+        })
+    }
+}
+
+/// How text overflows a shape's box horizontally (`a:bodyPr horzOverflow`,
+/// ST_TextHorzOverflowType).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShapeTextHorzOverflow {
+    Overflow,
+    Clip,
+}
+
+impl ShapeTextHorzOverflow {
+    /// The `horzOverflow` attribute value.
+    pub fn xml(self) -> &'static str {
+        match self {
+            Self::Overflow => "overflow",
+            Self::Clip => "clip",
+        }
+    }
+
+    /// The value for a `horzOverflow` attribute; `None` for anything outside the schema's list.
+    pub fn from_xml(s: &str) -> Option<Self> {
+        Some(match s {
+            "overflow" => Self::Overflow,
+            "clip" => Self::Clip,
+            _ => return None,
+        })
+    }
+}
+
+/// A shape's text autofit setting (the `a:bodyPr` child `a:noAutofit`, `a:normAutofit` or
+/// `a:spAutoFit`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShapeTextAutofit {
+    /// Do not autofit (`a:noAutofit`).
+    None,
+    /// Shrink text on overflow (`a:normAutofit`): font scale and line spacing reduction in
+    /// 1000ths of a percent, each `None` when the file leaves it out.
+    Normal { font_scale: Option<i32>, line_reduction: Option<i32> },
+    /// Resize the shape to fit its text (`a:spAutoFit`).
+    Shape,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

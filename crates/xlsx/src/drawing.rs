@@ -13,7 +13,8 @@ use std::sync::Arc;
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
 use gridcraft_model::{
     Anchor, AnchorMode, CameraTool, Color, DrawingHyperlink, GeometryPath, Image, KeptDmlColor, PathCommand, PathShade, PictureLocks, Shape,
-    ShapeFormat, ShapeGeometry, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextVert, ShapeTextWrap, Sheet, Theme,
+    ShapeFormat, ShapeGeometry, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextAutofit, ShapeTextHorzOverflow, ShapeTextVert,
+    ShapeTextVertOverflow, ShapeTextWrap, Sheet, Theme,
 };
 
 use crate::IoError;
@@ -781,6 +782,19 @@ fn read_text_format(body: Option<&El>) -> ShapeFormat {
             _ => None,
         });
         f.vert = b.attr("vert").and_then(ShapeTextVert::from_xml);
+        f.vert_overflow = b.attr("vertOverflow").and_then(ShapeTextVertOverflow::from_xml);
+        f.horz_overflow = b.attr("horzOverflow").and_then(ShapeTextHorzOverflow::from_xml);
+        f.upright = b.flag("upright", false);
+        // The first autofit child wins; a value outside the schema is dropped.
+        f.autofit = b.children.iter().find_map(|c| match c.name.as_str() {
+            "noAutofit" => Some(ShapeTextAutofit::None),
+            "normAutofit" => Some(ShapeTextAutofit::Normal {
+                font_scale: c.attr("fontScale").and_then(|v| v.parse().ok()),
+                line_reduction: c.attr("lnSpcReduction").and_then(|v| v.parse().ok()),
+            }),
+            "spAutoFit" => Some(ShapeTextAutofit::Shape),
+            _ => None,
+        });
     }
     let ppr = body.kids("p").next().and_then(|p| p.child("pPr"));
     f.align = ppr.and_then(|p| p.attr("algn")).map(|a| match a {
@@ -905,12 +919,18 @@ fn holds_written_text(tb: &El, src: &str) -> bool {
     crate::xml::parse(written.as_bytes()).is_ok_and(|w| body_text(&w) == body_text(tb))
 }
 
-/// A shape's `a:bodyPr`: text rotation, direction, wrapping and insets as read (absent ones stay
-/// absent) and the vertical anchor attribute `anchor`.
+/// A shape's `a:bodyPr`: text rotation, overflow, direction, wrapping, insets, upright text and
+/// the autofit child as read (absent ones stay absent) and the vertical anchor attribute `anchor`.
 fn write_body_pr(s: &mut String, f: &ShapeFormat, anchor: &str) {
     s.push_str("<a:bodyPr");
     if let Some(r) = f.text_rotation {
         let _ = write!(s, " rot=\"{r}\"");
+    }
+    if let Some(v) = f.vert_overflow {
+        let _ = write!(s, " vertOverflow=\"{}\"", v.xml());
+    }
+    if let Some(v) = f.horz_overflow {
+        let _ = write!(s, " horzOverflow=\"{}\"", v.xml());
     }
     if let Some(v) = f.vert {
         let _ = write!(s, " vert=\"{}\"", v.xml());
@@ -926,7 +946,25 @@ fn write_body_pr(s: &mut String, f: &ShapeFormat, anchor: &str) {
             let _ = write!(s, " {k}=\"{v}\"");
         }
     }
-    let _ = write!(s, " rtlCol=\"0\"{anchor}/>");
+    let _ = write!(s, " rtlCol=\"0\"{anchor}");
+    if f.upright {
+        s.push_str(" upright=\"1\"");
+    }
+    match f.autofit {
+        None => s.push_str("/>"),
+        Some(ShapeTextAutofit::None) => s.push_str("><a:noAutofit/></a:bodyPr>"),
+        Some(ShapeTextAutofit::Shape) => s.push_str("><a:spAutoFit/></a:bodyPr>"),
+        Some(ShapeTextAutofit::Normal { font_scale, line_reduction }) => {
+            s.push_str("><a:normAutofit");
+            if let Some(v) = font_scale {
+                let _ = write!(s, " fontScale=\"{v}\"");
+            }
+            if let Some(v) = line_reduction {
+                let _ = write!(s, " lnSpcReduction=\"{v}\"");
+            }
+            s.push_str("/></a:bodyPr>");
+        }
+    }
 }
 
 /// The opening `<xdr:twoCellAnchor>` for a model anchor, carrying Excel's `editAs` when the mode
