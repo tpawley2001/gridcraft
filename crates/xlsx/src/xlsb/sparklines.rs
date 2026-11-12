@@ -1,10 +1,10 @@
 //! XLSB sparklines: the Excel 2010 sparkline group collection of a worksheet's future-record
 //! block ([MS-XLSB] 2.1.7.62 SPARKLINEGROUPS), mapped to the same `Sparkline` values the `.xlsx`
-//! reader builds from `x14:sparklineGroups`. Only the type, the series colour and the markers
-//! flag of a group are modelled; its other colours, axis and empty-cell options are not.
+//! reader builds from `x14:sparklineGroups`. The type, the series colour, the markers flag and the
+//! grouping are read; the group's other colours, axis and empty-cell options keep their defaults.
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
-use gridcraft_model::{Color, Sheet, Sparkline, SparklineKind};
+use gridcraft_model::{Color, Sheet, Sparkline, SparklineGroup, SparklineKind};
 
 use super::{Bytes, FormulaBytes, invalid, styles};
 use crate::IoError;
@@ -31,12 +31,15 @@ struct Group {
     kind: SparklineKind,
     color: Color,
     markers: bool,
+    /// Numbered from 1 per sheet, so the group's sparklines are saved as one group again.
+    id: u32,
 }
 
 /// Sparkline reading state for one worksheet.
 #[derive(Default)]
 pub(super) struct Sparklines {
     group: Option<Group>,
+    groups: u32,
     warned: bool,
 }
 impl Sparklines {
@@ -45,11 +48,18 @@ impl Sparklines {
     pub(super) fn record(&mut self, id: u16, payload: &[u8], links: &Links, sheet: &mut Sheet, report: &mut ReadReport) {
         let ok = match id {
             BEGIN_GROUP => {
-                self.group = group(payload).ok();
+                self.groups = self.groups.saturating_add(1);
+                self.group = group(payload, self.groups).ok();
                 self.group.is_some()
             }
             END_GROUP => {
-                self.group = None;
+                // A group of one needs no id, as in the .xlsx reader.
+                if let Some(g) = self.group.take() {
+                    let mut members = sheet.sparklines.iter_mut().rev().take_while(|sp| sp.group.id == g.id);
+                    if let (Some(only), None) = (members.next(), members.next()) {
+                        only.group.id = 0;
+                    }
+                }
                 true
             }
             // The sparklines of a group that couldn't be read were already warned about.
@@ -57,7 +67,8 @@ impl Sparklines {
                 Some(_) if sheet.sparklines.len() >= MAX_SPARKLINES => false,
                 Some(g) => match sparkline(payload, links) {
                     Ok((cell, source)) => {
-                        sheet.sparklines.push(Sparkline { cell, source, kind: g.kind, color: g.color, markers: g.markers });
+                        let group = SparklineGroup { id: g.id, ..SparklineGroup::default() };
+                        sheet.sparklines.push(Sparkline { cell, source, kind: g.kind, color: g.color, markers: g.markers, group });
                         true
                     }
                     Err(_) => false,
@@ -117,7 +128,7 @@ fn frt_header<'a>(b: &mut Bytes<'a>) -> Result<(Option<CellRef>, Option<FormulaB
 }
 
 /// BrtBeginSparklineGroup ([MS-XLSB] 2.4.228).
-fn group(payload: &[u8]) -> Result<Group, IoError> {
+fn group(payload: &[u8], id: u32) -> Result<Group, IoError> {
     let mut b = Bytes::new(payload);
     frt_header(&mut b)?;
     let flags = b.u16()?;
@@ -131,7 +142,7 @@ fn group(payload: &[u8]) -> Result<Group, IoError> {
         2 => SparklineKind::WinLoss,
         _ => return Err(invalid("unknown sparkline type")),
     };
-    Ok(Group { kind, color, markers: flags & 0x0008 != 0 })
+    Ok(Group { kind, color, markers: flags & 0x0008 != 0, id })
 }
 
 /// BrtSparkline ([MS-XLSB] 2.4.806): the sparkline's cell and the A1 text of its data range.

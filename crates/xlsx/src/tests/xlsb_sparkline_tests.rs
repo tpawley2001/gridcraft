@@ -1,7 +1,7 @@
 //! XLSB sparklines: the Excel 2010 sparkline group records of a worksheet's future-record block,
 //! assembled in Rust from the public [MS-XLSB] layout and compared with the `.xlsx` reader.
 use gridcraft_core::{CellRef, Value};
-use gridcraft_model::{Color, Sparkline, SparklineKind};
+use gridcraft_model::{Color, Sparkline, SparklineGroup, SparklineKind};
 
 use super::xlsb_tests::{cell, record, row, sst, wide, worksheet};
 use super::{make_zip, minimal};
@@ -151,6 +151,7 @@ fn line_group_becomes_three_sparklines() {
             kind: SparklineKind::Line,
             color: Color::Rgb(0x376092),
             markers: true,
+            group: SparklineGroup { id: 1, ..SparklineGroup::default() },
         })
         .collect();
     assert_eq!(got, &want);
@@ -165,8 +166,9 @@ fn column_and_win_loss_groups_and_theme_colours() {
     assert_eq!(s.len(), 2);
     assert_eq!((s[0].kind, s[0].markers, s[0].source.as_str()), (SparklineKind::Column, false, "Other!A1:D1"));
     assert_eq!((s[1].kind, s[1].markers, s[1].color), (SparklineKind::WinLoss, true, Color::Rgb(0x00B050)));
-    // The same group in `.xlsx` resolves its theme colour identically.
-    let xml = r#"<sheetData/><extLst><ext uri="{05C60535-1F16-4fd2-B633-F4F36F0B64E0}"><x14:sparklineGroups xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"><x14:sparklineGroup type="column"><x14:colorSeries theme="4"/><x14:sparklines><x14:sparkline><xm:f>Other!A1:D1</xm:f><xm:sqref>F2</xm:sqref></x14:sparkline></x14:sparklines></x14:sparklineGroup></x14:sparklineGroups></ext></extLst>"#;
+    // The same group in `.xlsx` resolves its theme colour identically. The `.xlsb` reader leaves the
+    // empty-cell mode at the model's default (`gap`), so the `.xlsx` group states it.
+    let xml = r#"<sheetData/><extLst><ext uri="{05C60535-1F16-4fd2-B633-F4F36F0B64E0}"><x14:sparklineGroups xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"><x14:sparklineGroup type="column" displayEmptyCellsAs="gap"><x14:colorSeries theme="4"/><x14:sparklines><x14:sparkline><xm:f>Other!A1:D1</xm:f><xm:sqref>F2</xm:sqref></x14:sparkline></x14:sparklines></x14:sparklineGroup></x14:sparklineGroups></ext></extLst>"#;
     let (x, _) = read_xlsx(&minimal(xml, &[], "", "")).unwrap();
     assert_eq!(x.sheets[0].sparklines.first(), s.first());
 }

@@ -6,8 +6,8 @@ use std::fmt::Write as _;
 use gridcraft_core::{CellError, CellRef, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_model::{
     Cell, CfOperator, CfRule, CfValueKind, Color, CondFormat, ErrorStyle, FilterCriterion, Formula, LineInfo, NoteBox, NoteCorner, Orientation,
-    PageOrder, PrintSettings, Sheet, SparklineKind, Style, Table, TotalsFn, Validation, ValidationKind, Workbook, default_icon_thresholds,
-    icon_count,
+    PageOrder, PrintSettings, Sheet, Sparkline, SparklineAxis, SparklineEmpty, SparklineKind, Style, Table, TotalsFn, Validation, ValidationKind,
+    Workbook, default_icon_thresholds, icon_count,
 };
 
 use crate::drawing::{Obj, image_content_type, image_ext};
@@ -261,28 +261,126 @@ fn write_sheet_extensions(s: &mut String, sheet: &Sheet, prio: &[u32]) {
     }
     if !sheet.sparklines.is_empty() {
         let _ = write!(s, "<ext uri=\"{{05C60535-1F16-4fd2-B633-F4F36F0B64E0}}\" xmlns:x14=\"{X14_NS}\"><x14:sparklineGroups xmlns:xm=\"{XM_NS}\">");
-        for sp in &sheet.sparklines {
-            let ty = match sp.kind {
-                SparklineKind::Line => "",
-                SparklineKind::Column => " type=\"column\"",
-                SparklineKind::WinLoss => " type=\"stacked\"",
-            };
-            let src =
-                if sp.source.contains('!') { sp.source.clone() } else { format!("{}!{}", gridcraft_formula::quote_sheet(&sheet.name), sp.source) };
-            let color = if sp.color == Color::Auto { "rgb=\"FF376092\"".to_string() } else { color_attrs(&sp.color) };
-            let _ = write!(
-                s,
-                "<x14:sparklineGroup displayEmptyCellsAs=\"gap\"{ty}{}><x14:colorSeries {color}/><x14:sparklines><x14:sparkline><xm:f>{}</xm:f><xm:sqref>{}</xm:sqref></x14:sparkline></x14:sparklines></x14:sparklineGroup>",
-                if sp.markers { " markers=\"1\"" } else { "" },
-                esc(&src),
-                sp.cell.a1()
-            );
+        for members in sparkline_groups(&sheet.sparklines) {
+            write_sparkline_group(s, sheet, &members);
         }
         s.push_str("</x14:sparklineGroups></ext>");
     }
     if !solid_bars.is_empty() || !sheet.sparklines.is_empty() {
         s.push_str("</extLst>");
     }
+}
+
+/// The sparklines of a sheet in saved groups, in order: sparklines read from one group (same
+/// non-zero group id and equal settings) stay together; every other sparkline is its own group.
+fn sparkline_groups(sparklines: &[Sparkline]) -> Vec<Vec<&Sparkline>> {
+    let mut groups: Vec<Vec<&Sparkline>> = Vec::new();
+    // Group id -> indexes into `groups` of the groups saved with that id.
+    let mut by_id: HashMap<u32, Vec<usize>> = HashMap::new();
+    for sp in sparklines {
+        if sp.group.id != 0 {
+            let same = |g: &Vec<&Sparkline>| {
+                g.first().is_some_and(|f| f.kind == sp.kind && f.color == sp.color && f.markers == sp.markers && f.group == sp.group)
+            };
+            let candidates = by_id.entry(sp.group.id).or_default();
+            let found = candidates.iter().copied().find(|&i| groups.get(i).is_some_and(same));
+            if let Some(g) = found.and_then(|i| groups.get_mut(i)) {
+                g.push(sp);
+                continue;
+            }
+            candidates.push(groups.len());
+        }
+        groups.push(vec![sp]);
+    }
+    groups
+}
+
+/// One `<x14:sparklineGroup>` with the settings of its first member ([MS-XLSX] `CT_SparklineGroup`):
+/// attributes that differ from the format's defaults, colours in schema order, the date-axis range,
+/// then the sparklines.
+fn write_sparkline_group(s: &mut String, sheet: &Sheet, members: &[&Sparkline]) {
+    let Some(first) = members.first() else { return };
+    let g = &first.group;
+    let empty = match g.display_empty {
+        SparklineEmpty::Gap => "gap",
+        SparklineEmpty::Zero => "zero",
+        SparklineEmpty::Span => "span",
+    };
+    let _ = write!(s, "<x14:sparklineGroup displayEmptyCellsAs=\"{empty}\"");
+    match first.kind {
+        SparklineKind::Line => {}
+        SparklineKind::Column => s.push_str(" type=\"column\""),
+        SparklineKind::WinLoss => s.push_str(" type=\"stacked\""),
+    }
+    for (on, name) in [
+        (first.markers, "markers"),
+        (g.high, "high"),
+        (g.low, "low"),
+        (g.first, "first"),
+        (g.last, "last"),
+        (g.negative, "negative"),
+        (g.display_x_axis, "displayXAxis"),
+        (g.display_hidden, "displayHidden"),
+        (g.right_to_left, "rightToLeft"),
+        (g.date_axis, "dateAxis"),
+    ] {
+        if on {
+            let _ = write!(s, " {name}=\"1\"");
+        }
+    }
+    if g.line_weight.is_finite() && g.line_weight != 0.75 {
+        let _ = write!(s, " lineWeight=\"{}\"", num(g.line_weight));
+    }
+    for (axis, name) in [(g.min_axis, "minAxisType"), (g.max_axis, "maxAxisType")] {
+        match axis {
+            SparklineAxis::Individual => {}
+            SparklineAxis::Group => {
+                let _ = write!(s, " {name}=\"group\"");
+            }
+            SparklineAxis::Custom => {
+                let _ = write!(s, " {name}=\"custom\"");
+            }
+        }
+    }
+    for (value, name) in [(g.manual_min, "manualMin"), (g.manual_max, "manualMax")] {
+        if let Some(v) = value.filter(|v| v.is_finite()) {
+            let _ = write!(s, " {name}=\"{}\"", num(v));
+        }
+    }
+    s.push('>');
+    let series = if first.color == Color::Auto { "rgb=\"FF376092\"".to_string() } else { color_attrs(&first.color) };
+    let _ = write!(s, "<x14:colorSeries {series}/>");
+    for (color, name) in [
+        (g.color_negative, "colorNegative"),
+        (g.color_axis, "colorAxis"),
+        (g.color_markers, "colorMarkers"),
+        (g.color_first, "colorFirst"),
+        (g.color_last, "colorLast"),
+        (g.color_high, "colorHigh"),
+        (g.color_low, "colorLow"),
+    ] {
+        if let Some(c) = color {
+            let _ = write!(s, "<x14:{name} {}/>", color_attrs(&c));
+        }
+    }
+    if let Some(range) = &g.date_range {
+        let _ = write!(s, "<xm:f>{}</xm:f>", esc(&qualified_source(sheet, range)));
+    }
+    s.push_str("<x14:sparklines>");
+    for sp in members {
+        let _ = write!(
+            s,
+            "<x14:sparkline><xm:f>{}</xm:f><xm:sqref>{}</xm:sqref></x14:sparkline>",
+            esc(&qualified_source(sheet, &sp.source)),
+            sp.cell.a1()
+        );
+    }
+    s.push_str("</x14:sparklines></x14:sparklineGroup>");
+}
+
+/// A sparkline range with its sheet: the file format needs `Sheet!A1:B2`.
+fn qualified_source(sheet: &Sheet, source: &str) -> String {
+    if source.contains('!') { source.to_string() } else { format!("{}!{}", gridcraft_formula::quote_sheet(&sheet.name), source) }
 }
 
 fn write_sheet_notes(s: &mut String, sheet: &Sheet, si: usize, kept: &crate::passthrough::SheetKept<'_>, rels: &mut Rels, out: &mut Out) {

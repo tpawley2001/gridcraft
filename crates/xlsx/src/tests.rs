@@ -95,6 +95,7 @@ mod sheet_sort_state;
 mod signature_line_vml_tests;
 mod smartart_passthrough;
 mod smooth_roundtrip;
+mod sparkline_group_tests;
 mod spreadsheetml_tests;
 mod strict_passthrough;
 mod sylk_tests;

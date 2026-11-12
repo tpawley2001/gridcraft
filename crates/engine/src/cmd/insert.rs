@@ -1152,7 +1152,7 @@ fn insert_sparkline(s: &mut Session, p: &Json) -> Result<Json> {
     edit(s, |cx| {
         let sh = cx.sheet_mut(sheet)?;
         sh.sparklines.retain(|x| x.cell != loc);
-        sh.sparklines.push(Sparkline { cell: loc, source: src.clone(), kind, color: Color::Theme(4, 0), markers });
+        sh.sparklines.push(Sparkline { cell: loc, source: src.clone(), kind, color: Color::Theme(4, 0), markers, group: Default::default() });
         Ok(Json::Null)
     })
 }
