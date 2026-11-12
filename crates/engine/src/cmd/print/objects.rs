@@ -557,3 +557,12 @@ fn flatten_path(path: &gridcraft_model::GeometryPath, (x, y, w, h): (f32, f32, f
     }
     out
 }
+
+/// A shape's outer shadow for print: its offset in points times `scale` (x to the right, y down the
+/// page) and its colour blended over white; `None` when the shape has no outer shadow to draw.
+/// Stub: not implemented yet (drop the `allow` once the shape printing code calls it).
+#[allow(dead_code)]
+pub(super) fn shape_shadow(wb: &gridcraft_model::Workbook, shp: &gridcraft_model::Shape, scale: f32) -> Option<((f32, f32), [u8; 3])> {
+    let _ = (wb, shp, scale);
+    None
+}
