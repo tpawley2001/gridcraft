@@ -308,6 +308,82 @@ fn paint_geometry_paths(
     }
 }
 
+/// Paints a shape's outer shadow (`a:outerShdw`, ECMA-376 Part 1 §20.1.8.45) under it: its outline
+/// moved by the shadow's offset at zoom `z`, filled with the shadow colour at its opacity (a shape
+/// without a fill, or a line, strokes it instead). The blur is not drawn: the edge stays sharp.
+#[allow(clippy::too_many_arguments)]
+fn paint_shape_shadow(
+    p: &Painter,
+    wb: &Workbook,
+    sp: &gridcraft_engine::model::Shape,
+    r: Rect,
+    preset: Option<&[gridcraft_engine::model::GeometryPath]>,
+    fill: Color32,
+    line: Color32,
+    z: f32,
+) {
+    let Some(gridcraft_engine::model::ShapeEffects::OuterShadow(sh)) = sp.format.effects.as_ref() else { return };
+    let (Some((dx, dy)), Some(([cr, cg, cb], alpha))) = (sh.offset_pt(), sh.rgba(&wb.theme)) else { return };
+    let c = Color32::from_rgba_unmultiplied(cr, cg, cb, (alpha * 255.0).round().clamp(0.0, 255.0) as u8);
+    let r = r.translate(vec2(dx * z, dy * z));
+    if !r.is_finite() {
+        return;
+    }
+    let line_kind = matches!(sp.kind, ShapeKind::Line | ShapeKind::Arrow);
+    let (f, l) = if fill != Color32::TRANSPARENT && !line_kind {
+        (c, Color32::TRANSPARENT)
+    } else if line != Color32::TRANSPARENT {
+        (Color32::TRANSPARENT, c)
+    } else {
+        return;
+    };
+    let stroke = Stroke::new(1.0, l);
+    if let Some(paths) = preset {
+        paint_geometry_paths(p, paths, r, sp, f, l, &[]);
+        return;
+    }
+    match sp.kind {
+        ShapeKind::Rectangle | ShapeKind::TextBox => {
+            p.rect_filled(r, 0.0, f);
+            p.rect_stroke(r, 0.0, stroke, StrokeKind::Inside);
+        }
+        ShapeKind::RoundedRectangle => {
+            p.rect_filled(r, 10.0 * z, f);
+            p.rect_stroke(r, 10.0 * z, stroke, StrokeKind::Inside);
+        }
+        ShapeKind::Ellipse => {
+            let pts: Vec<Pos2> = (0..64)
+                .map(|i| {
+                    let a = i as f32 / 64.0 * std::f32::consts::TAU;
+                    pos2(r.center().x + r.width() / 2.0 * a.cos(), r.center().y + r.height() / 2.0 * a.sin())
+                })
+                .collect();
+            p.add(PathShape::convex_polygon(pts, f, stroke));
+        }
+        ShapeKind::Triangle => {
+            p.add(PathShape::convex_polygon(vec![pos2(r.center().x, r.top()), r.right_bottom(), r.left_bottom()], f, stroke));
+        }
+        ShapeKind::Freeform => {
+            let paths = sp.geometry.as_ref().map(|g| g.paths.as_slice()).unwrap_or_default();
+            if paths.is_empty() {
+                p.rect_filled(r, 0.0, f);
+                p.rect_stroke(r, 0.0, stroke, StrokeKind::Inside);
+            }
+            paint_geometry_paths(p, paths, r, sp, f, l, &[]);
+        }
+        ShapeKind::Line | ShapeKind::Arrow => {
+            p.line_segment([r.left_top(), r.right_bottom()], Stroke::new(2.0, c));
+            if sp.kind == ShapeKind::Arrow {
+                let d = (r.right_bottom() - r.left_top()).normalized();
+                let n = vec2(-d.y, d.x);
+                let tip = r.right_bottom();
+                p.add(PathShape::convex_polygon(vec![tip, tip - d * 10.0 + n * 5.0, tip - d * 10.0 - n * 5.0], c, Stroke::NONE));
+            }
+        }
+        ShapeKind::Ink | ShapeKind::Icon | ShapeKind::Equation => {}
+    }
+}
+
 /// A shape outline's preset dash (`a:prstDash`, ECMA-376 Part 1 §20.1.10.48) in screen pixels:
 /// the pattern in units of the outline width at zoom `z`, at least a pixel; empty when solid.
 fn outline_dash(sp: &gridcraft_engine::model::Shape, z: f32) -> Vec<f32> {
@@ -401,6 +477,7 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
         // at a resolution of the box in hundredths of a point, whatever its kind.
         let res = |v: f32| (v.abs() / geo.z.max(0.01) * 100.0).round().min(1.0e9) as i64;
         let preset = sp.geometry.as_ref().and_then(|g| gridcraft_engine::model::preset_paths(g, res(r.width()), res(r.height())));
+        paint_shape_shadow(p, wb, sp, r, preset.as_deref(), fill, full_line, geo.z);
         match sp.kind {
             _ if preset.is_some() => paint_geometry_paths(p, preset.as_deref().unwrap_or_default(), r, sp, fill, full_line, &dash),
             ShapeKind::Rectangle | ShapeKind::TextBox => {

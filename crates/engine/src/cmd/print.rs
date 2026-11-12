@@ -542,4 +542,6 @@ mod shape_hole_tests;
 #[allow(clippy::collapsible_if)] // the acceptance tests' PDF path parser nests its checks
 mod shape_outline_tests;
 #[cfg(test)]
+mod shape_shadow_tests;
+#[cfg(test)]
 mod tests;

@@ -866,6 +866,48 @@ pub struct OuterShadow {
     pub color: Option<KeptDmlColor>,
 }
 
+impl OuterShadow {
+    /// How far the shadow is moved from the shape, in points: x to the right, y down the page.
+    /// `dir` turns clockwise from the right (ECMA-376 Part 1 §20.1.8.45). `None` when `dist` is
+    /// absent or not positive, so there is nothing to draw.
+    pub fn offset_pt(&self) -> Option<(f32, f32)> {
+        let dist = self.dist.filter(|d| *d > 0)? as f64 / 12_700.0;
+        let dir = (f64::from(self.dir.unwrap_or(0)) / 60_000.0).to_radians();
+        // A shadow further than any sheet is wide is still finite.
+        let clamp = |v: f64| v.clamp(-1.0e6, 1.0e6) as f32;
+        Some((clamp(dist * dir.cos()), clamp(dist * dir.sin())))
+    }
+
+    /// The shadow's colour and its opacity (0 to 1): `a:srgbClr` and `a:schemeClr` through
+    /// `theme`, `a:prstClr` white or else black, `a:sysClr` its last colour or else black; the
+    /// opacity is the colour's `a:alpha` child (fully opaque without one). Other transforms are
+    /// not applied. `None` without a colour.
+    pub fn rgba(&self, theme: &crate::style::Theme) -> Option<([u8; 3], f32)> {
+        let kept = self.color.as_ref()?;
+        let xml = kept.xml.as_str();
+        let tag = xml.strip_prefix("<a:").and_then(|t| t.split([' ', '/', '>']).next()).unwrap_or("");
+        let rgb = match tag {
+            "prstClr" if xml_attr(xml, "val") == Some("white") => [255, 255, 255],
+            "prstClr" => [0, 0, 0],
+            "sysClr" => kept.color.resolve(theme).unwrap_or([0, 0, 0]),
+            _ => kept.color.resolve(theme)?,
+        };
+        let alpha = match xml.find("<a:alpha ") {
+            Some(at) => xml.get(at..).and_then(|t| xml_attr(t, "val")).and_then(|v| v.trim().parse::<f64>().ok()).unwrap_or(100_000.0),
+            None => 100_000.0,
+        };
+        Some((rgb, (alpha / 100_000.0).clamp(0.0, 1.0) as f32))
+    }
+}
+
+/// The value of the first `name="…"` attribute in the first element of `xml`.
+fn xml_attr<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
+    let head = xml.split('>').next()?;
+    let pat = format!(" {name}=\"");
+    let rest = head.get(head.find(&pat)? + pat.len()..)?;
+    rest.get(..rest.find('"')?)
+}
+
 /// A chart trendline (Add Chart Element ▸ Trendline, Format Trendline pane).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Trendline {
@@ -2918,5 +2960,40 @@ mod line_dash_tests {
         assert!(dash_polyline(&line, false, &[f32::NAN, 1.0]).iter().all(|r| length(r) < 1e-4));
         assert!(dash_polyline(&[[0.0, 0.0]], false, &[1.0, 1.0]).is_empty());
         assert!(dash_polyline(&[[0.0, 0.0], [1.0e9, 0.0]], false, &[1.0e-3, 1.0e-3]).len() <= MAX_DASHES);
+    }
+}
+
+#[cfg(test)]
+mod outer_shadow_tests {
+    use super::*;
+    use crate::style::Theme;
+
+    fn shadow(color: Color, xml: &str) -> OuterShadow {
+        OuterShadow { dist: Some(38100), color: Some(KeptDmlColor { color, xml: xml.into() }), ..Default::default() }
+    }
+
+    #[test]
+    fn preset_and_system_colours_resolve_and_alpha_is_read() {
+        let theme = Theme::default();
+        let white = shadow(Color::Auto, "<a:prstClr val=\"white\"><a:alpha val=\"25000\"/></a:prstClr>");
+        assert_eq!(white.rgba(&theme), Some(([255, 255, 255], 0.25)));
+        let other = shadow(Color::Auto, "<a:prstClr val=\"red\"/>");
+        assert_eq!(other.rgba(&theme), Some(([0, 0, 0], 1.0)), "other preset names are black");
+        let sys = shadow(Color::Rgb(0x112233), "<a:sysClr val=\"windowText\" lastClr=\"112233\"/>");
+        assert_eq!(sys.rgba(&theme), Some(([0x11, 0x22, 0x33], 1.0)));
+        let sys_bare = shadow(Color::Auto, "<a:sysClr val=\"windowText\"/>");
+        assert_eq!(sys_bare.rgba(&theme), Some(([0, 0, 0], 1.0)));
+    }
+
+    #[test]
+    fn hostile_distances_and_alphas_stay_bounded() {
+        let mut s = shadow(Color::Rgb(0), "<a:srgbClr val=\"000000\"><a:alpha val=\"-5\"/></a:srgbClr>");
+        s.dist = Some(i64::MAX);
+        s.dir = Some(i32::MIN);
+        let (dx, dy) = s.offset_pt().unwrap_or_default();
+        assert!(dx.is_finite() && dy.is_finite());
+        assert_eq!(s.rgba(&Theme::default()).map(|c| c.1), Some(0.0));
+        s.dist = Some(-1);
+        assert_eq!(s.offset_pt(), None);
     }
 }
