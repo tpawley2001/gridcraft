@@ -161,10 +161,25 @@ fn proper_upper_char(ch: char) -> char {
     if ch == '\u{130}' { 'I' } else { upper_char(ch) }
 }
 
+/// Lowercase of capital sigma: final `ς` unless the next character is a letter or digit (Excel looks
+/// only ahead, so a lone `Σ` gives `ς` and `ΑΣ1` gives `ασ1`).
+fn lower_sigma(next: Option<char>) -> char {
+    if next.is_some_and(char::is_alphanumeric) { '\u{3C3}' } else { '\u{3C2}' }
+}
+
 fn lower(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    // Whole-string lowercasing applies the Greek final-sigma rule (word-final Σ becomes ς). Dotted capital I
-    // maps to plain `i`, as per-character lowering does, not to `i` plus a combining dot.
-    text_val(text(a, 0)?.replace('\u{130}', "I").to_lowercase())
+    // Dotted capital I maps to plain `i`, not to `i` plus a combining dot.
+    let s = text(a, 0)?;
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\u{3A3}' => out.push(lower_sigma(chars.peek().copied())),
+            '\u{130}' => out.push('i'),
+            _ => out.extend(ch.to_lowercase()),
+        }
+    }
+    text_val(out)
 }
 
 fn upper(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
@@ -175,9 +190,12 @@ fn proper(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     let s = text(a, 0)?;
     let mut out = String::with_capacity(s.len());
     let mut prev_letter = false;
-    for ch in s.chars() {
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
         if ch.is_alphabetic() {
-            if prev_letter {
+            if prev_letter && ch == '\u{3A3}' {
+                out.push(lower_sigma(chars.peek().copied()));
+            } else if prev_letter {
                 out.push(lower_char(ch));
             } else {
                 out.push(proper_upper_char(ch));

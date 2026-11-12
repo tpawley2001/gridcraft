@@ -444,16 +444,67 @@ pub fn sort_compare(a: &Value, b: &Value) -> Ordering {
     }
 }
 
-/// Number → text the way Excel converts in `&` and `TEXT(x,"General")`-free contexts: up to 15
-/// significant digits, scientific for very large or very small magnitudes.
+/// Number → text the way Excel converts in `&`, CONCATENATE, LEN and other text contexts (not
+/// `TEXT(x,"General")`): rounded to 15 significant digits (an exact tie at the 16th digit goes toward zero),
+/// then plain digits for magnitudes from 1E-15 up to (not including) 1E+20, E notation from 1E+20 up.
+/// Below 1E-15 the result is [`number_to_short_text`]. Measured in Excel: `2^53` gives `9007199254740990`,
+/// `1E+20` gives `1E+20`, `1E-15` gives `0.000000000000001`.
 pub fn number_to_text(n: f64) -> String {
     if n == 0.0 || !n.is_finite() {
         return "0".into();
     }
-    if let Some(digits) = whole_number_digits(n.abs()) {
-        return if n < 0.0 { format!("-{digits}") } else { digits };
+    let Some((digits, exp)) = fifteen_digits(n.abs()) else { return number_to_short_text(n) };
+    if exp < -15 {
+        return number_to_short_text(n);
     }
-    number_to_short_text(n)
+    let digits = digits.trim_end_matches('0');
+    let mut out = String::with_capacity(40);
+    if n < 0.0 {
+        out.push('-');
+    }
+    if exp >= 20 {
+        let (first, rest) = digits.split_at(digits.len().min(1));
+        out.push_str(if first.is_empty() { "0" } else { first });
+        if !rest.is_empty() {
+            out.push('.');
+            out.push_str(rest);
+        }
+        out.push_str(&format!("E+{exp:02}"));
+    } else if let Ok(int_len) = usize::try_from(exp.saturating_add(1)) {
+        let (int, frac) = digits.split_at(digits.len().min(int_len));
+        out.push_str(if int.is_empty() { "0" } else { int });
+        out.extend(std::iter::repeat_n('0', int_len.saturating_sub(int.len())));
+        if !frac.is_empty() {
+            out.push('.');
+            out.push_str(frac);
+        }
+    } else {
+        out.push_str("0.");
+        out.extend(std::iter::repeat_n('0', usize::try_from(-exp - 1).unwrap_or(0)));
+        out.push_str(digits);
+    }
+    out
+}
+
+/// The 15 significant digits of a positive finite number and the power of ten of the first, rounded to
+/// nearest with an exact tie at the 16th digit going toward zero, as Excel does (`1E+15-0.5` shows
+/// `999999999999999`).
+fn fifteen_digits(a: f64) -> Option<(String, i32)> {
+    fn split(s: &str) -> Option<(String, i32)> {
+        let (mant, exp) = s.split_once('e')?;
+        Some((mant.chars().filter(char::is_ascii_digit).collect(), exp.parse().ok()?))
+    }
+    // A tie needs a 5 as the 16th digit followed only by zeros. A double has at most 767 significant digits,
+    // so 800 cover the exact expansion; the 30-digit screen avoids that work for almost every number.
+    let is_tie = |ds: &str| ds.get(15..16) == Some("5") && ds.get(16..).is_some_and(|t| t.bytes().all(|d| d == b'0'));
+    let (screen, _) = split(&format!("{a:.29e}"))?;
+    if is_tie(&screen) {
+        let (exact, exp) = split(&format!("{a:.799e}"))?;
+        if is_tie(&exact) {
+            return Some((exact.get(..15)?.to_string(), exp));
+        }
+    }
+    split(&format!("{a:.14e}"))
 }
 
 /// [`number_to_text`] without writing out big whole numbers: everything from 1E+15 up is in E notation, the
@@ -475,25 +526,6 @@ pub fn number_to_short_text(n: f64) -> String {
     let decimals = (14 - mag).clamp(0, 30) as usize;
     let s = format!("{:.*}", decimals, n);
     trim_decimal(&s)
-}
-
-/// All the digits of a whole number from 1E+15 up to (not including) 1E+21 whose 15-significant-digit form is
-/// exact, like Excel writes `123456789012345000` rather than `1.23456789012345E+17`. The digits come from the
-/// 15-significant-digit form, so binary noise below it never shows. `None` when the rule does not apply.
-fn whole_number_digits(a: f64) -> Option<String> {
-    if !(1e15..1e21).contains(&a) {
-        return None;
-    }
-    let s = format!("{:.14e}", a);
-    if s.parse::<f64>().ok()? != a {
-        return None;
-    }
-    let (mant, exp) = s.split_once('e')?;
-    let exp: usize = exp.parse().ok()?;
-    let mut digits: String = mant.chars().filter(char::is_ascii_digit).collect();
-    let zeros = exp.checked_sub(digits.len().checked_sub(1)?)?;
-    digits.extend(std::iter::repeat_n('0', zeros));
-    Some(digits)
 }
 
 /// Removes trailing zeros (and a trailing point) from a decimal string.
@@ -528,20 +560,29 @@ mod tests {
         assert_eq!(number_to_text(1e15), "1000000000000000");
         assert_eq!(number_to_text(123456789012345000.0), "123456789012345000");
         assert_eq!(number_to_text(-123456789012345000.0), "-123456789012345000");
-        assert_eq!(number_to_text(1e20), "100000000000000000000");
+        assert_eq!(number_to_text(1e20), "1E+20");
+        assert_eq!(number_to_text(99999999999999900000.0), "99999999999999900000");
+        assert_eq!(number_to_text(2f64.powi(53)), "9007199254740990");
+        assert_eq!(number_to_text(1.23456789012345e20), "1.23456789012345E+20");
         assert_eq!(number_to_text(1e21), "1E+21");
         assert_eq!(number_to_text(1e-20), "1E-20");
         assert_eq!(number_to_short_text(1e20), "1E+20");
-        assert_eq!(number_to_text(1234567890123456.0), "1.23456789012346E+15");
+        assert_eq!(number_to_text(1234567890123456.0), "1234567890123460");
         assert_eq!(number_to_text(0.0001), "0.0001");
-        assert_eq!(number_to_text(1e-10), "1E-10");
+        assert_eq!(number_to_text(1e-10), "0.0000000001");
+        assert_eq!(number_to_text(1e-15), "0.000000000000001");
+        assert_eq!(number_to_text(1.23e-13), "0.000000000000123");
+        assert_eq!(number_to_text(-1.5e-14), "-0.000000000000015");
         assert_eq!(number_to_text(1.0 / 3.0), "0.333333333333333");
     }
 
     #[test]
     fn number_text_rounds_up_to_scientific_boundary() {
-        assert_eq!(number_to_text(999999999999999.9), "1E+15");
-        assert_eq!(number_to_text(-999999999999999.9), "-1E+15");
+        assert_eq!(number_to_text(999999999999999.9), "1000000000000000");
+        assert_eq!(number_to_text(-999999999999999.9), "-1000000000000000");
+        // An exact tie at the 16th digit goes toward zero.
+        assert_eq!(number_to_text(999999999999999.5), "999999999999999");
+        assert_eq!(number_to_text(1234567890123455.0), "1234567890123450");
         assert_eq!(number_to_text(999999999999999.0), "999999999999999");
     }
 
