@@ -130,11 +130,22 @@ pub(crate) struct Budget {
     pictures: usize,
     /// A shared formula's text was refused: no later shared formula, in any sheet, is expanded.
     shared_text_spent: bool,
+    /// Data validation rules kept, and the warnings given, across the workbook.
+    dv: validation::Totals,
 }
 
 impl Default for Budget {
     fn default() -> Self {
-        Budget { cells: 0, text: 0, records: 0, max_records: MAX_RECORDS, charts: 0, pictures: 0, shared_text_spent: false }
+        Budget {
+            cells: 0,
+            text: 0,
+            records: 0,
+            max_records: MAX_RECORDS,
+            charts: 0,
+            pictures: 0,
+            shared_text_spent: false,
+            dv: validation::Totals::default(),
+        }
     }
 }
 
@@ -505,7 +516,7 @@ fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>, functions: F
         if g.biff5.is_some() {
             "Imported from an Excel 5.0/95 (.xls) workbook: values, formulas, cell formatting, column widths, row heights, defined names, charts, pictures, text boxes and drawn shapes were read. Comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         } else {
-            "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights, defined names, charts and pictures were read. Comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
+            "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights, defined names, charts, pictures and data validation were read. Comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         }
         .into(),
     );
@@ -1109,6 +1120,8 @@ struct SheetState<'g> {
     /// How many cells' text was cut to [`CELL_TEXT_MAX`], and the first of them.
     cut_text: usize,
     first_cut: Option<CellRef>,
+    /// The Dv records the sheet's DVal record still allows; `None` before a DVal record.
+    dv_left: Option<u32>,
 }
 
 /// The most text one cell holds, in UTF-16 code units (the way `LEN` counts). A BIFF8 string may
@@ -1368,6 +1381,7 @@ fn worksheet<'g>(
         data_table_record: false,
         cut_text: 0,
         first_cut: None,
+        dv_left: None,
     };
     let mut custom_views = crate::binary_custom_views::SheetViews::default();
     let mut depth = 1usize;
@@ -1769,7 +1783,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x007F => st.charts.imdata(rec, st.g.biff5.is_some()),
         // Only a BIFF5 polygon waits for its points.
         chart::COORDLIST => st.charts.coordlist(rec, report),
-        // DVAL is only a header; import actual DV records regardless of its declared count.
+        0x01B2 => st.dv_left = Some(validation::dval_count(&mut c)),
         0x01BE => validation::read(&mut c, st, budget, report)?,
         0x01B0 | 0x0879 => st.cond.header(&c.rest(), rec.id == 0x0879),
         0x01B1 => st.cond.cf(&c.rest(), &st.g.links, &mut st.sheet),
