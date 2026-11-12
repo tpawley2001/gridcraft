@@ -1,4 +1,4 @@
-use super::day_count::{basis_arg, coup_daybs, coup_days, coup_daysnc, coupons, date, day_count, freq_arg, shift_months, year_basis, year_frac, ymd};
+use super::day_count::{basis_arg, coup_daybs, coup_days, coupons, date, day_count, freq_arg, shift_months, year_basis, year_frac, ymd};
 use super::{Arg, CellError, Ctx, DateSystem, R, Value, days_in_month, has, num, num_val, opt_bool};
 
 // ---------------------------------------------------------------------------------------------
@@ -196,17 +196,28 @@ struct Bond {
     a: f64,
     dsc: f64,
     freq: f64,
+    /// `(A, E, DSR)` for YIELD when one coupon period is left (DSR: settlement to redemption).
+    last: (f64, f64, f64),
 }
 
 fn bond(sys: DateSystem, settle: f64, mat: f64, freq: f64, basis: u32) -> R<Bond> {
     let c = coupons(sys, settle, mat, freq)?;
     let e = coup_days(&c, freq, basis);
     let a = coup_daybs(sys, &c, settle, basis)?;
-    let dsc = coup_daysnc(sys, &c, settle, freq, basis)?;
-    if e <= 0.0 {
+    // Inside PRICE/YIELD/DURATION/MDURATION, DSC is the actual day count under actual/actual and
+    // E - A under every other basis (actual/360 and actual/365 included), as Excel computes it.
+    let dsc = if basis == 1 { c.ncd - settle } else { e - a };
+    // YIELD with one period left: the 30/360 bases count settlement to redemption directly;
+    // actual/360 and actual/365 use actual days throughout (A, E and DSR), like actual/actual.
+    let last = match basis {
+        0 | 4 => (a, e, day_count(sys, settle, mat, basis)?),
+        1 => (a, e, dsc),
+        _ => (settle - c.pcd, c.ncd - c.pcd, mat - settle),
+    };
+    if e <= 0.0 || last.1 <= 0.0 {
         return Err(CellError::Num);
     }
-    Ok(Bond { n: c.num, e, a, dsc, freq })
+    Ok(Bond { n: c.num, e, a, dsc, freq, last })
 }
 
 fn bond_price(b: &Bond, rate: f64, yld: f64, red: f64) -> f64 {
@@ -245,8 +256,9 @@ pub(super) fn yield_(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     }
     let b = bond(c.date_system(), s, m, f, basis)?;
     if b.n == 1.0 {
-        let base = pr / 100.0 + b.a / b.e * rate / f;
-        return num_val(((red / 100.0 + rate / f) - base) / base * f * b.e / b.dsc);
+        let (la, le, dsr) = b.last;
+        let base = pr / 100.0 + la / le * rate / f;
+        return num_val(((red / 100.0 + rate / f) - base) / base * f * le / dsr);
     }
     // Price is decreasing in yield: bisect on [0, hi].
     let g = |y: f64| bond_price(&b, rate, y, red) - pr;
