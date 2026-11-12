@@ -4,7 +4,7 @@ members = ["crates/*", "apps/*", "xtask"]
 default-members = ["crates/*", "apps/gridcraft", "apps/gridcraft-cli", "xtask"]
 
 [workspace.package]
-version = "0.19.0"
+version = "0.19.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -26,8 +26,8 @@ gridcraft-ui-egui = { path = "crates/ui-egui" }
 gridcraft-mcp = { path = "crates/mcp" }
 gridcraft-pdf = { path = "crates/pdf" }
 gridcraft-math = { path = "crates/math" }
-# Every craft-libs crate (craft-window here, craft-ui in ui-egui, craft-print in
-# the app) comes from one storytold/craft-libs revision.
+# Every craft-libs crate (craft-window here, craft-ui in ui-egui, craft-print in the app,
+# craft-web-api and craft-web-host in the web app) comes from storytold/craft-libs.
 
 # foundation
 thiserror = "2"
@@ -69,8 +69,8 @@ skrifa = { version = "0.44", default-features = false, features = ["std"] }
 # Real font bytes for tests (Ubuntu Light, compiled into epaint).
 epaint_default_fonts = "0.37"
 # One native window per workbook: the window list, Window menu titles and the immediate-viewport
-# driver. Same craft-libs revision as the other craft-libs crates.
-craft-window = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d", default-features = false, features = ["egui"] }
+# driver. The craft-libs revision upstream pins.
+craft-window = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "bb57d422d0bc842cbde430955825553ab7b976f4", default-features = false, features = ["egui"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

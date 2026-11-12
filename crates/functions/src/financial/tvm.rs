@@ -116,10 +116,12 @@ pub(super) fn ppmt(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     num_val(pmt_calc(rate, np, pv, fv, typ) - ipmt_calc(rate, per, np, pv, fv, typ))
 }
 
-/// CUMIPMT / CUMPRINC. The raw arguments are validated first; then the first period rounds up
-/// and the last rounds down (an empty span sums to 0). The loan length keeps its fraction: the
-/// payment and each period's balance use the fractional `nper`.
-fn cumulative(a: &[Arg], principal: bool) -> R<Value> {
+/// The validated (rate, periods, pv, start, end, type) of CUMIPMT/CUMPRINC: every check that
+/// refuses a call before its period loop, shared with the lifted-call work preflight. The raw
+/// arguments are validated first; then the first period rounds up and the last rounds down (an
+/// empty span sums to 0). The loan length keeps its fraction: the payment and each period's
+/// balance use the fractional `nper`.
+pub(crate) fn cumulative_args(a: &[Arg]) -> R<(f64, f64, f64, f64, f64, f64)> {
     let (rate, np, pv) = (num(a, 0)?, num(a, 1)?, num(a, 2)?);
     let (start, end, typ) = (num(a, 3)?, num(a, 4)?, num(a, 5)?);
     if rate <= 0.0 || np <= 0.0 || pv <= 0.0 || start < 1.0 || end < start || end > np || (typ != 0.0 && typ != 1.0) {
@@ -128,7 +130,11 @@ fn cumulative(a: &[Arg], principal: bool) -> R<Value> {
     if end - start > 1e7 || np > 1e15 {
         return Err(CellError::Num);
     }
-    let (start, end) = (start.ceil(), end.floor());
+    Ok((rate, np, pv, start.ceil(), end.floor(), typ))
+}
+
+fn cumulative(a: &[Arg], principal: bool) -> R<Value> {
+    let (rate, np, pv, start, end, typ) = cumulative_args(a)?;
     let p = pmt_calc(rate, np, pv, 0.0, typ);
     let mut sum = 0.0;
     let mut per = start;
