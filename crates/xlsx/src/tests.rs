@@ -302,6 +302,7 @@ mod cell_style_identity_tests;
 mod codex_day_border_extras;
 mod codex_day_protection;
 mod outline_apply_styles_tests;
+mod package_root_vendor_parts_tests;
 
 mod workbook_protection_locks {
     use super::minimal;
