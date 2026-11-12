@@ -9,7 +9,7 @@
 
 use std::fmt::Write as _;
 
-use gridcraft_model::{KeptShapeText, ShapeFormat};
+use gridcraft_model::{KeptShapeText, ShapeFormat, Theme};
 
 use crate::xml::{El, esc, esc_attr};
 
@@ -191,8 +191,12 @@ fn known_element(name: &str) -> bool {
 }
 
 /// The kept body of `tb`, read as `text` with the run-level format `f`.
+/// `None` when the body is exactly what the writer writes for the plain text anyway.
 pub(super) fn kept(tb: &El, text: &str, f: &ShapeFormat) -> Option<KeptShapeText> {
-    kept_body_xml(tb).map(|xml| KeptShapeText::new(xml, text.to_string(), f))
+    let xml = kept_body_xml(tb)?;
+    let mut plain = String::new();
+    super::write_plain_text(&mut plain, text, f, &Theme::default());
+    (xml != plain).then(|| KeptShapeText::new(xml, text.to_string(), f))
 }
 
 /// The XML after `a:bodyPr` of the text body `tb` to keep, or `None` when it holds anything that

@@ -989,30 +989,35 @@ fn write_text_body(s: &mut String, sh: &Shape, theme: &Theme) {
     };
     s.push_str("<xdr:txBody>");
     write_body_pr(s, f, anchor);
-    if let Some(kept) = f.kept_text_xml(&sh.text) {
-        s.push_str(kept);
-    } else {
-        s.push_str("<a:lstStyle/>");
-        let algn = match f.align {
-            None => "",
-            Some(ShapeTextAlign::Left) => " algn=\"l\"",
-            Some(ShapeTextAlign::Center) => " algn=\"ctr\"",
-            Some(ShapeTextAlign::Right) => " algn=\"r\"",
-        };
-        let rtl = if f.rtl { " rtl=\"1\"" } else { "" };
-        let ppr = if algn.is_empty() && rtl.is_empty() { String::new() } else { format!("<a:pPr{algn}{rtl}/>") };
-        let (rpr_attrs, rpr_body) = run_props(f, theme);
-        for line in sh.text.split('\n') {
-            if line.is_empty() {
-                let _ = write!(s, "<a:p>{ppr}<a:endParaRPr lang=\"en-US\"{rpr_attrs}/></a:p>");
-            } else if rpr_body.is_empty() {
-                let _ = write!(s, "<a:p>{ppr}<a:r><a:rPr lang=\"en-US\"{rpr_attrs}/><a:t>{}</a:t></a:r></a:p>", esc(line));
-            } else {
-                let _ = write!(s, "<a:p>{ppr}<a:r><a:rPr lang=\"en-US\"{rpr_attrs}>{rpr_body}</a:rPr><a:t>{}</a:t></a:r></a:p>", esc(line));
-            }
-        }
+    match f.kept_text_xml(&sh.text) {
+        Some(kept) => s.push_str(kept),
+        None => write_plain_text(s, &sh.text, f, theme),
     }
     s.push_str("</xdr:txBody>");
+}
+
+/// The `a:lstStyle` and paragraphs written for `text` in the one format `f`: one paragraph and
+/// one run per line.
+fn write_plain_text(s: &mut String, text: &str, f: &ShapeFormat, theme: &Theme) {
+    s.push_str("<a:lstStyle/>");
+    let algn = match f.align {
+        None => "",
+        Some(ShapeTextAlign::Left) => " algn=\"l\"",
+        Some(ShapeTextAlign::Center) => " algn=\"ctr\"",
+        Some(ShapeTextAlign::Right) => " algn=\"r\"",
+    };
+    let rtl = if f.rtl { " rtl=\"1\"" } else { "" };
+    let ppr = if algn.is_empty() && rtl.is_empty() { String::new() } else { format!("<a:pPr{algn}{rtl}/>") };
+    let (rpr_attrs, rpr_body) = run_props(f, theme);
+    for line in text.split('\n') {
+        if line.is_empty() {
+            let _ = write!(s, "<a:p>{ppr}<a:endParaRPr lang=\"en-US\"{rpr_attrs}/></a:p>");
+        } else if rpr_body.is_empty() {
+            let _ = write!(s, "<a:p>{ppr}<a:r><a:rPr lang=\"en-US\"{rpr_attrs}/><a:t>{}</a:t></a:r></a:p>", esc(line));
+        } else {
+            let _ = write!(s, "<a:p>{ppr}<a:r><a:rPr lang=\"en-US\"{rpr_attrs}>{rpr_body}</a:rPr><a:t>{}</a:t></a:r></a:p>", esc(line));
+        }
+    }
 }
 
 /// A shape's `a:bodyPr`: text rotation, overflow, direction, wrapping, insets, upright text and
