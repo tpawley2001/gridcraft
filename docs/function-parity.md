@@ -1,6 +1,6 @@
 # Function parity: worksheet functions and formulas
 
-> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-12 · **Change:** minor (RTD, DATESTRING and NUMBERSTRING answer `#N/A` instead of `#NAME?`; earlier: MID, REPLACE, FIND and SEARCH count UTF-16 positions; earlier: TEXT rejects two elapsed-time codes in one section; earlier: G0306: PRICE, YIELD, DURATION, MDURATION and COUPDAYSNC count days to the next coupon like Excel)
+> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-12 · **Change:** minor (TREND, GROWTH, LINEST and LOGEST read a one-cell known_y's as one observation of many x variables; earlier: RTD, DATESTRING and NUMBERSTRING answer `#N/A` instead of `#NAME?`; earlier: MID, REPLACE, FIND and SEARCH count UTF-16 positions; earlier: TEXT rejects two elapsed-time codes in one section; earlier: G0306: PRICE, YIELD, DURATION, MDURATION and COUPDAYSNC count days to the next coupon like Excel)
 
 Excel's worksheet functions, category by category, against GridCraft's function library. Part of
 [target-app-parity.md](target-app-parity.md); gaps feed [gaps.md](gaps.md).
@@ -155,6 +155,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | TREND, GROWTH, LINEST and LOGEST with a one-cell known_y's read it as one observation: every known_x's cell is an x variable (any shape), new_x's needs the same cell count (else `#REF!`) and the result is one value; with a constant every slope is 0 and the intercept is y, without one the fit goes to the x with the largest absolute value, as Excel does, instead of `#REF!` (`regression_one_cell_y_excel.rs`) |
 | 2026-11-12 | minor | Formulas from files without dynamic-array metadata: GROUPBY's row_fields, values and filter_array (and PIVOTBY's row_fields, col_fields, values and filter_array) take arrays, not implicit intersection, so a filter such as `E1:E10>3` works as in Excel (`legacy_groupby_filter_array.rs`) |
 | 2026-11-12 | minor | MAKEARRAY with a fractional rows or cols (such as 2.7) gives `#VALUE!` instead of rounding down, as Excel does (`makearray_size_excel.rs`) |
 | 2026-11-12 | minor | The spill operator `A1#` on a formula cell with no spilled range (a single value, an error, or a blocked `#SPILL!`) refers to that one cell, as Excel does, instead of `#REF!`; a constant or blank cell is still `#REF!` (`spill_operator_single_value_excel.rs`) |
