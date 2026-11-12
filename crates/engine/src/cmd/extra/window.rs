@@ -3,20 +3,22 @@ use super::{
     stash_get, stash_map, stash_set, str_param, target_sheet, u32_param,
 };
 
-/// Switches a sheet's view. Like zoom, the view is saved with the file but is not an edit: it
+/// Switches a sheet's view, each view at its own zoom (see `Sheet::switch_view`). Like zoom, the view is saved with the file but is not an edit: it
 /// neither records an undo step nor marks a clean workbook as changed.
 pub(super) fn set_view(s: &mut Session, p: &Json, mode: SheetViewMode) -> Result<Json> {
     let si = target_sheet(s, p)?;
     let d = s.doc_mut()?;
     let dirty = d.is_dirty();
     let wb = std::sync::Arc::make_mut(&mut d.wb);
+    let mut zoom = None;
     if let Some(sh) = wb.sheet_mut(si) {
-        sh.view = mode;
+        sh.switch_view(mode);
+        zoom = Some(sh.zoom);
     }
     if !dirty {
         d.saved = d.wb.clone();
     }
-    Ok(json!({"view": mode.as_str()}))
+    Ok(json!({"view": mode.as_str(), "zoom": zoom}))
 }
 
 pub(super) fn ruler(s: &mut Session, p: &Json) -> Result<Json> {
@@ -40,8 +42,8 @@ pub(crate) fn keep_watch_list(from: &Workbook, to: &mut std::sync::Arc<Workbook>
 
 /// Normal, Page Layout and Page Break Preview belong to the window, not to the edits: Excel doesn't
 /// undo a switch between them, and `set_view` is no undo step. So undo and redo keep each sheet's
-/// current view when they swap in another snapshot of the workbook, and a view kept this way
-/// doesn't make a saved workbook dirty.
+/// current view, and the zooms that go with it (each view has its own), when they swap in another
+/// snapshot of the workbook. A view kept this way doesn't make a saved workbook dirty.
 pub(crate) fn keep_view_modes(d: &mut crate::DocState, now: &Workbook) {
     // Sheets have no stable id. A name missing from `now` is a rename being undone or redone, which
     // keeps the sheet count and position: the sheet is the one at the same index, under a name the
@@ -49,9 +51,11 @@ pub(crate) fn keep_view_modes(d: &mut crate::DocState, now: &Workbook) {
     let renamed = |i: usize| {
         (now.sheets.len() == d.wb.sheets.len()).then(|| now.sheets.get(i)).flatten().filter(|sh| !d.wb.sheets.iter().any(|s| s.name == sh.name))
     };
-    let current = |i: usize, name: &str| now.sheets.iter().find(|sh| sh.name == name).or_else(|| renamed(i)).map(|sh| sh.view);
-    let changed: Vec<(usize, SheetViewMode)> =
-        d.wb.sheets.iter().enumerate().filter_map(|(i, sh)| current(i, &sh.name).filter(|v| *v != sh.view).map(|v| (i, v))).collect();
+    type ViewState = (SheetViewMode, u16, Option<u16>, Option<u16>, Option<u16>);
+    let state = |sh: &gridcraft_model::Sheet| -> ViewState { (sh.view, sh.zoom, sh.zoom_normal, sh.zoom_page_break, sh.zoom_page_layout) };
+    let current = |i: usize, name: &str| now.sheets.iter().find(|sh| sh.name == name).or_else(|| renamed(i)).map(|sh| state(sh));
+    let changed: Vec<(usize, ViewState)> =
+        d.wb.sheets.iter().enumerate().filter_map(|(i, sh)| current(i, &sh.name).filter(|v| *v != state(sh)).map(|v| (i, v))).collect();
     if changed.is_empty() {
         return;
     }
@@ -59,7 +63,7 @@ pub(crate) fn keep_view_modes(d: &mut crate::DocState, now: &Workbook) {
     let wb = std::sync::Arc::make_mut(&mut d.wb);
     for (i, v) in changed {
         if let Some(sh) = wb.sheet_mut(i) {
-            sh.view = v;
+            (sh.view, sh.zoom, sh.zoom_normal, sh.zoom_page_break, sh.zoom_page_layout) = v;
         }
     }
     if !dirty {
@@ -263,4 +267,24 @@ pub(super) fn watch_window(s: &mut Session, p: &Json) -> Result<Json> {
         })
         .collect();
     Ok(Json::Array(rows))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Session;
+    use serde_json::json;
+
+    /// Undo doesn't take back a view switch, so it keeps the zooms that came with it too: the sheet
+    /// stays in Page Break Preview at that view's zoom.
+    #[test]
+    fn undo_keeps_the_zoom_of_a_view_switch() {
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
+        s.execute("view.pageBreakPreview", json!({})).unwrap();
+        s.execute("edit.undo", json!({})).unwrap();
+        let sh = s.doc().unwrap().wb.active().unwrap();
+        assert_eq!(sh.view, gridcraft_model::SheetViewMode::PageBreakPreview);
+        assert_eq!((sh.zoom, sh.zoom_normal, sh.zoom_page_break), (60, Some(100), None));
+    }
 }

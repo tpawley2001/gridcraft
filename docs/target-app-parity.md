@@ -335,6 +335,7 @@ The inventory carried over from the 2026-10-07 ROADMAP.md, updated for what land
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | G0336: Normal, Page Break Preview and Page Layout each keep their own zoom; Page Break Preview opens at 60% (no score change) |
 | 2026-11-11 | minor | G0278: page layout, print, PDF: form controls with Print object on print with the sheet and extend the automatic print range; off leaves them out (no score change) |
 | 2026-11-10 | minor | Rows no longer list fixed issues (#21, #28, #43, #57, #128-#130, #132-#134, #138-#140) as open bugs; system fonts list (#4), subtotal header (#131), COUNTBLANK outside the used range (#137) and the grid scroll bars (#176) were checked fixed and dropped too (no score change) |
 | 2026-11-09 | minor | G0218: Review row lists Check Accessibility and opening password-encrypted `.xlsx` and `.xls` files; Missing now names saving with a password to open and RC4-encrypted `.xlsx`, as gaps.md §7 records. What-if row names the ToolPak tools that draw charts (no score change) |

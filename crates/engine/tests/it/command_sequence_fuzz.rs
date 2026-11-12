@@ -492,7 +492,7 @@ fn watch_list(wb: &Workbook) -> Option<&str> {
 }
 
 /// The workbook with view state (active sheet, scroll, active cell, Normal / Page Layout / Page
-/// Break Preview) and the Watch Window list reset: undo restores view state as it was, but
+/// Break Preview and each view's zoom) and the Watch Window list reset: undo restores view state as it was, but
 /// switching sheets or views isn't an undoable edit.
 fn canonical(wb: &Workbook) -> Workbook {
     let mut wb = wb.clone();
@@ -503,6 +503,8 @@ fn canonical(wb: &Workbook) -> Workbook {
         sh.view_active = CellRef::default();
         sh.view_top_left = CellRef::default();
         sh.view = SheetViewMode::Normal;
+        sh.zoom = 100;
+        (sh.zoom_normal, sh.zoom_page_break, sh.zoom_page_layout) = (None, None, None);
     }
     wb
 }
