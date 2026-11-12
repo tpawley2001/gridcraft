@@ -59,6 +59,7 @@ mod pctrank_timevalue;
 mod percent_entry;
 mod pivot_unknown_func;
 mod pivotchart_link;
+mod pricemat_yieldmat_excel;
 mod print_from_a1;
 mod print_long_text;
 mod print_multi_area;
