@@ -89,6 +89,26 @@ pub(crate) fn input_to_cell(input: &str, sheet: usize, at: CellRef, wb: &mut gri
     Ok(Some(Cell { value: parsed.value, formula: None, style, py: None }))
 }
 
+/// [`input_to_cell`] for an entry the user typed (`cell.set`, the cell editor, Ctrl+Enter fill):
+/// a leading apostrophe also marks the cell's format with the quote prefix
+/// (`Style::quote_prefix`, XLSX `xf quotePrefix`), as Excel does, so the text stays text when the
+/// workbook is edited elsewhere, and an entry without one clears the mark. An empty entry leaves
+/// the format alone.
+pub(crate) fn typed_input_to_cell(input: &str, sheet: usize, at: CellRef, wb: &mut gridcraft_model::Workbook) -> Result<Option<Cell>> {
+    let mut cell = input_to_cell(input, sheet, at, wb)?;
+    if input.is_empty() {
+        return Ok(cell);
+    }
+    if let Some(c) = cell.as_mut() {
+        // In a Text-format cell the apostrophe is kept as part of the text, so it is not a mark.
+        let quoted = input.starts_with('\'') && c.formula.is_none() && matches!(&c.value, Value::Text(t) if t.as_ref() != input);
+        if wb.styles.get(c.style).quote_prefix != quoted {
+            c.style = wb.styles.derive(c.style, |s| s.quote_prefix = quoted);
+        }
+    }
+    Ok(cell)
+}
+
 /// Parses a formula as it is typed (without the `=`). Excel closes missing parentheses for you,
 /// and refuses a formula that still doesn't parse.
 pub(crate) fn parse_typed_formula(body: &str) -> Result<gridcraft_formula::Expr> {
@@ -147,7 +167,7 @@ pub(super) fn cell_set(s: &mut Session, p: &Json) -> Result<Json> {
             if !range.is_single() && cx.wb.sheet(sheet).is_some_and(|sh| sh.tables.iter().any(|t| t.range.intersects(&range))) {
                 return Err(EngineError::Other("Multi-cell array formulas aren't allowed in tables.".into()));
             }
-            let mut cell = input_to_cell(&input, sheet, range.start, &mut cx.wb)?.unwrap_or_default();
+            let mut cell = typed_input_to_cell(&input, sheet, range.start, &mut cx.wb)?.unwrap_or_default();
             if let Some(f) = cell.formula.as_mut() {
                 std::sync::Arc::make_mut(f).array = Some(range);
             }
@@ -163,7 +183,7 @@ pub(super) fn cell_set(s: &mut Session, p: &Json) -> Result<Json> {
             cx.touch(sheet, range.start);
             return Ok(Json::Null);
         }
-        let cell = input_to_cell(&input, sheet, at, &mut cx.wb)?;
+        let cell = typed_input_to_cell(&input, sheet, at, &mut cx.wb)?;
         let sh = cx.sheet_mut(sheet)?;
         match cell {
             Some(c) => sh.set_cell(at, c),
@@ -337,7 +357,7 @@ pub(super) fn range_fill(s: &mut Session, p: &Json) -> Result<Json> {
                 let base = match by_style.get(&style) {
                     Some(c) => c.clone(),
                     None => {
-                        let c = input_to_cell(&input, sheet, at, &mut cx.wb)?;
+                        let c = typed_input_to_cell(&input, sheet, at, &mut cx.wb)?;
                         by_style.insert(style, c.clone());
                         c
                     }

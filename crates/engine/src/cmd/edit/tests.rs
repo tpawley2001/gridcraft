@@ -776,3 +776,25 @@ fn tab_on_a_protected_sheet_skips_hidden_rows_and_lands_on_merged_cells() {
     s.execute("selection.move", json!({"dr": 0, "dc": 1, "tab": true})).unwrap();
     assert_eq!(s.doc().unwrap().selection.active.a1(), "B2");
 }
+
+/// Ctrl+Enter fill of a selection is typed entry too: a leading apostrophe marks every cell with
+/// the quote prefix, and filling again without one clears it.
+#[test]
+fn fill_with_an_apostrophe_marks_every_cell_with_the_quote_prefix() {
+    let mut s = Session::new();
+    s.new_workbook();
+    let marked = |s: &Session, a: &str| {
+        let d = s.doc().unwrap();
+        let sh = d.wb.active().unwrap();
+        let at = CellRef::parse(a).unwrap();
+        (sh.value(at), d.wb.styles.get(sh.style_id(at)).quote_prefix, crate::display::edit_text(&d.wb, sh, at))
+    };
+    s.execute("range.fill", json!({"range": "A1:B2", "input": "'0123"})).unwrap();
+    for a in ["A1", "B1", "A2", "B2"] {
+        assert_eq!(marked(&s, a), (Value::text("0123"), true, "'0123".to_string()), "{a}");
+    }
+    s.execute("range.fill", json!({"range": "A1:B2", "input": "0123"})).unwrap();
+    for a in ["A1", "B2"] {
+        assert_eq!(marked(&s, a), (Value::Number(123.0), false, "123".to_string()), "{a}");
+    }
+}
