@@ -501,9 +501,9 @@ pub(crate) fn page_sequence(rows: usize, cols: usize, order: PageOrder, cap: usi
 fn printed_reach(sh: &Sheet, row_bands: &[(u32, u32)], col_bands: &[(u32, u32)]) -> Option<Vec<usize>> {
     // The lowest occupied row band of each column band.
     let mut last: Vec<Option<usize>> = vec![None; col_bands.len()];
-    // Marks the rectangle rows r0..=r1 x columns c0..=c1. Bands stop at a page cap, so what lies
+    // Marks the rectangle ending in row r1 over columns c0..=c1 (only its lowest row matters). Bands stop at a page cap, so what lies
     // past the last band counts on the last band (everything before it prints).
-    let mut mark = |r0: u32, r1: u32, c0: u32, c1: u32| {
+    let mut mark = |r1: u32, c0: u32, c1: u32| {
         let (Some(first), Some(end), Some(col_end)) = (row_bands.first(), row_bands.last(), col_bands.last()) else { return };
         if r1 < first.0 {
             return;
@@ -524,19 +524,19 @@ fn printed_reach(sh: &Sheet, row_bands: &[(u32, u32)], col_bands: &[(u32, u32)])
         }
     };
     for (c, _) in sh.cells.iter() {
-        mark(c.row, c.row, c.col, c.col);
+        mark(c.row, c.col, c.col);
     }
     for r in sh.spill_ranges.values() {
-        mark(r.start.row, r.end.row, r.start.col, r.end.col);
+        mark(r.end.row, r.start.col, r.end.col);
     }
     for m in sh.merges.iter().filter(|m| sh.cells.get(m.start).is_some()) {
-        mark(m.start.row, m.end.row, m.start.col, m.end.col);
+        mark(m.end.row, m.start.col, m.end.col);
     }
     let mut object = |a: &Anchor| {
         let x = sh.col_left(a.cell.col) + a.dx as f64;
         let y = sh.row_top(a.cell.row) + a.dy as f64;
         let (r1, c1) = (sh.row_at(y + a.height.max(0.0) as f64), sh.col_at(x + a.width.max(0.0) as f64));
-        mark(a.cell.row, r1.max(a.cell.row), a.cell.col, c1.max(a.cell.col));
+        mark(r1.max(a.cell.row), a.cell.col, c1.max(a.cell.col));
     };
     for c in sh.charts.iter().filter(|o| !o.hidden && !o.no_print) {
         object(&c.anchor);
