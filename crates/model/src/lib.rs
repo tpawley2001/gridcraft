@@ -23,7 +23,7 @@ pub use cell::{Cell, CellPicture, Formula};
 pub use features::*;
 pub use macros::*;
 pub use password::PasswordHash;
-pub use preserved::{Preserved, PreservedAnchor, PreservedPart, PreservedRel, PreservedSheet, PreservedXml};
+pub use preserved::{Preserved, PreservedAnchor, PreservedPart, PreservedRel, PreservedSheet, PreservedVbaSignature, PreservedXml};
 pub use python::{PyCode, PyOutput};
 pub use sheet::{
     DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, DataTable, LineIndex, Sheet, SheetSplit, SheetUid, SheetViewMode, Visibility, points_to_chars,

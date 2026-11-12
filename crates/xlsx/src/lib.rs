@@ -48,6 +48,7 @@ mod tables;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 mod theme;
+mod vba_signature;
 mod web_publishing;
 mod write;
 mod xlm;

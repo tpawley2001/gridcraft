@@ -92,6 +92,21 @@ pub struct Preserved {
     /// Relationships of the sheet's drawing part that `anchors` use (ids as in the source file);
     /// their targets are in `parts`.
     pub drawing_rels: Vec<PreservedRel>,
+    /// The digital signature of the workbook's VBA project (workbook owner only).
+    pub vba_signature: Option<PreservedVbaSignature>,
+}
+
+/// The signature parts of a VBA project (`xl/vbaProject.bin` relationships), kept with the project
+/// bytes they were read with: a signature is only valid over exactly those bytes, so it is written
+/// back only while the workbook's VBA project is unchanged.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PreservedVbaSignature {
+    /// The VBA project bytes the signature was read with.
+    pub project: Arc<Vec<u8>>,
+    /// The VBA project part's relationships to the signature parts.
+    pub rels: Vec<PreservedRel>,
+    /// The signature parts, bytes unchanged.
+    pub parts: Vec<PreservedPart>,
 }
 
 impl Preserved {
@@ -103,10 +118,12 @@ impl Preserved {
             && self.vml.is_none()
             && self.sheets.is_empty()
             && self.anchors.is_empty()
+            && self.vba_signature.is_none()
     }
     /// Total bytes held.
     pub fn byte_len(&self) -> usize {
-        let parts = self.parts.iter().chain(self.vml.iter()).fold(0usize, |n, p| n.saturating_add(p.data.len()));
+        let signature = self.vba_signature.iter().flat_map(|s| &s.parts);
+        let parts = self.parts.iter().chain(self.vml.iter()).chain(signature).fold(0usize, |n, p| n.saturating_add(p.data.len()));
         self.anchors.iter().fold(parts, |n, a| n.saturating_add(a.xml.len()))
     }
 }

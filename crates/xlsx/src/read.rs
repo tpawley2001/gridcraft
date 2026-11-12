@@ -527,10 +527,15 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
 
     // A VBA project is carried through unchanged: GridCraft never runs macros, but preserving the
     // binary keeps macro-enabled workbooks from being silently stripped on save.
+    let mut vba_signature = None;
     if let Some(r) = find_rel(&wb_rels, "vbaProject").cloned() {
         match cx.pkg.read(&r.target) {
             Ok(Some(data)) => {
-                wb.vba_project = Some(data.into());
+                let project = Arc::new(data);
+                let mut warnings = Vec::new();
+                vba_signature = crate::vba_signature::read(&mut cx.pkg, &r.target, &project, &mut |w| warnings.push(w))?;
+                warnings.into_iter().for_each(|w| cx.warn(w));
+                wb.vba_project = Some(project);
                 cx.warn("macros (VBA project) were kept but not executed");
             }
             Ok(None) => cx.warn("macros (VBA project) reference a missing part and were dropped"),
@@ -539,6 +544,11 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
         }
     }
     wb.preserved = kept.workbook(&mut cx, &wb_part, &wb_xml, &file_to_model);
+    if let Some(sig) = vba_signature {
+        let mut p = wb.preserved.as_deref().cloned().unwrap_or_default();
+        p.vba_signature = Some(sig);
+        wb.preserved = Some(Arc::new(p));
+    }
     crate::web_publishing::read(&wb_xml, &mut wb);
     if let Some(w) = cx.python.warning() {
         cx.warn(w);
