@@ -88,6 +88,7 @@ mod quote_prefix_tests;
 mod rich_error_values_tests;
 mod richdata_excel_package_tests;
 mod richdata_tests;
+mod richdata_types_part_tests;
 mod roundtrip;
 mod sensitivity_label;
 mod shape_block_arrow_tests;
