@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cell::Formula;
 use crate::sheet::Sheet;
-use crate::style::{StyleTable, Theme};
+use crate::style::{Style, StyleTable, Theme};
 
 /// Most equation source, in bytes, one [`Workbook::refresh_equations`] lays out: about 2,500
 /// typical equations, or a few seconds of the slowest 4 KB sources.
@@ -59,6 +59,67 @@ pub struct CellStyleId {
     pub hidden: bool,
     /// `customBuiltin`: a built-in style the user changed.
     pub custom_builtin: bool,
+}
+
+/// The workbook's custom table and PivotTable styles (ECMA-376 Part 1 §18.8.42 `tableStyles`), kept
+/// so an open + save keeps them. Not drawn yet: tables naming one keep the name.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TableStyles {
+    /// `defaultTableStyle` as written, when the file stated it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_table_style: Option<String>,
+    /// `defaultPivotStyle` as written, when the file stated it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_pivot_style: Option<String>,
+    /// The custom styles, in file order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub styles: Vec<CustomTableStyle>,
+}
+
+impl TableStyles {
+    /// Nothing to keep: no custom styles and no stated defaults.
+    pub fn is_empty(&self) -> bool {
+        self.styles.is_empty() && self.default_table_style.is_none() && self.default_pivot_style.is_none()
+    }
+}
+
+/// One custom table style (§18.8.40 `tableStyle`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CustomTableStyle {
+    pub name: String,
+    /// Usable for PivotTables (`pivot`, default true).
+    pub pivot: bool,
+    /// Usable for tables (`table`, default true).
+    pub table: bool,
+    /// The style's elements, in file order.
+    pub elements: Vec<TableStyleElement>,
+}
+
+impl Default for CustomTableStyle {
+    fn default() -> Self {
+        CustomTableStyle { name: String::new(), pivot: true, table: true, elements: vec![] }
+    }
+}
+
+/// One element of a custom table style (§18.8.41 `tableStyleElement`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TableStyleElement {
+    /// `type` as written (§18.18.83 `ST_TableStyleType`; unknown values are kept).
+    pub kind: String,
+    /// `size`: the stripe band size (default 1).
+    pub size: u32,
+    /// The differential format `dxfId` pointed at; `None` when absent or out of range.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dxf: Option<Style>,
+}
+
+impl Default for TableStyleElement {
+    fn default() -> Self {
+        TableStyleElement { kind: String::new(), size: 1, dxf: None }
+    }
 }
 
 /// `workbookProtection` settings besides the structure lock ([`Workbook::protected_structure`]
@@ -361,6 +422,9 @@ pub struct Workbook {
     /// The workbook's Recent Colors (XLSX `colors/mruColors`), ARGB, most recent first, kept as read.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mru_colors: Vec<u32>,
+    /// The workbook's custom table / PivotTable styles (XLSX `tableStyles`), kept as read.
+    #[serde(default, skip_serializing_if = "TableStyles::is_empty")]
+    pub table_styles: TableStyles,
     /// VBA project (`xl/vbaProject.bin`) carried through unchanged. GridCraft does not run
     /// macros; the blob is preserved so that saving a macro-enabled workbook never destroys the
     /// macros it arrived with. base64 in JSON. `None` = the workbook has no macros. Shared, so a
@@ -497,6 +561,7 @@ impl Workbook {
             phonetics: vec![],
             indexed_colors: None,
             mru_colors: vec![],
+            table_styles: TableStyles::default(),
             vba_project: None,
             csv_delimiter: None,
             macros: crate::macros::Macros::default(),

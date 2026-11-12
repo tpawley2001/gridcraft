@@ -6,8 +6,8 @@ use std::fmt::Write as _;
 
 use gridcraft_model::style::{DxfStated, Protection};
 use gridcraft_model::{
-    Alignment, BorderLine, BorderStyle, Borders, CellStyleId, Color, Fill, Font, HAlign, NumFmt, PatternType, ReadingOrder, Style, Underline, VAlign,
-    VertAlign, Workbook,
+    Alignment, BorderLine, BorderStyle, Borders, CellStyleId, Color, CustomTableStyle, Fill, Font, HAlign, NumFmt, PatternType, ReadingOrder, Style,
+    TableStyleElement, TableStyles, Underline, VAlign, VertAlign, Workbook,
 };
 
 use crate::tables::{INDEXED, builtin_format, builtin_id};
@@ -38,6 +38,8 @@ pub struct StylesIn {
     pub indexed_colors: Option<Vec<u32>>,
     /// Recent Colors (`colors/mruColors`), ARGB, in file order; only `rgb=` colours.
     pub mru_colors: Vec<u32>,
+    /// Custom table styles (`tableStyles`), with each element's `dxfId` resolved against `dxfs`.
+    pub table_styles: TableStyles,
 }
 
 /// An `rgb` attribute as ARGB: 8 hex digits as written, 6 hex digits with alpha `FF`.
@@ -479,8 +481,71 @@ pub fn read_styles(root: &El, checkboxes: &[bool], minor_font: &str, theme_fonts
     }
     // Inline dxf format codes are interned: a code repeated by many dxfs is one allocation.
     let mut inline_fmts = HashMap::new();
-    let dxfs = root.child("dxfs").map(|d| d.kids("dxf").map(|x| read_dxf(x, &palette, &shared_fmts, &mut inline_fmts)).collect()).unwrap_or_default();
-    StylesIn { xfs, dxfs, palette, named, named_ids, num_fmts: fmts, indexed_colors, mru_colors }
+    let dxfs: Vec<Style> = root.child("dxfs").map(|d| d.kids("dxf").map(|x| read_dxf(x, &palette, &shared_fmts, &mut inline_fmts)).collect()).unwrap_or_default();
+    let table_styles = root.child("tableStyles").map(|t| read_table_styles(t, &dxfs)).unwrap_or_default();
+    StylesIn { xfs, dxfs, palette, named, named_ids, num_fmts: fmts, indexed_colors, mru_colors, table_styles }
+}
+
+/// `<tableStyles>` (ECMA-376 Part 1 §18.8.42). A `dxfId` past the end of `dxfs` keeps the element
+/// without a format. The `count` attributes are not trusted.
+fn read_table_styles(t: &El, dxfs: &[Style]) -> TableStyles {
+    let styles = t
+        .kids("tableStyle")
+        .map(|s| CustomTableStyle {
+            name: s.attr("name").unwrap_or("").to_string(),
+            pivot: s.attr_bool("pivot").unwrap_or(true),
+            table: s.attr_bool("table").unwrap_or(true),
+            elements: s
+                .kids("tableStyleElement")
+                .map(|e| TableStyleElement {
+                    kind: e.attr("type").unwrap_or("").to_string(),
+                    size: e.attr_u32("size").unwrap_or(1),
+                    dxf: e.attr_u32("dxfId").and_then(|i| dxfs.get(i as usize)).cloned(),
+                })
+                .collect(),
+        })
+        .collect();
+    TableStyles {
+        default_table_style: t.attr("defaultTableStyle").map(str::to_string),
+        default_pivot_style: t.attr("defaultPivotStyle").map(str::to_string),
+        styles,
+    }
+}
+
+/// `<tableStyles>` for the workbook, registering each element's format in `dxfs`.
+fn table_styles_xml(ts: &TableStyles, dxfs: &mut Vec<Style>) -> String {
+    let table = ts.default_table_style.as_deref().unwrap_or("TableStyleMedium2");
+    let pivot = ts.default_pivot_style.as_deref().unwrap_or("PivotStyleLight16");
+    let mut s =
+        format!("<tableStyles count=\"{}\" defaultTableStyle=\"{}\" defaultPivotStyle=\"{}\"", ts.styles.len(), esc_attr(table), esc_attr(pivot));
+    if ts.styles.is_empty() {
+        s.push_str("/>");
+        return s;
+    }
+    s.push('>');
+    for st in &ts.styles {
+        let _ = write!(s, "<tableStyle name=\"{}\"", esc_attr(&st.name));
+        if !st.pivot {
+            s.push_str(" pivot=\"0\"");
+        }
+        if !st.table {
+            s.push_str(" table=\"0\"");
+        }
+        let _ = write!(s, " count=\"{}\">", st.elements.len());
+        for e in &st.elements {
+            let _ = write!(s, "<tableStyleElement type=\"{}\"", esc_attr(&e.kind));
+            if e.size != 1 {
+                let _ = write!(s, " size=\"{}\"", e.size);
+            }
+            if let Some(d) = &e.dxf {
+                let _ = write!(s, " dxfId=\"{}\"", dxf_id(dxfs, d));
+            }
+            s.push_str("/>");
+        }
+        s.push_str("</tableStyle>");
+    }
+    s.push_str("</tableStyles>");
+    s
 }
 
 /// The `builtinId`, `iLevel`, `hidden` and `customBuiltin` attributes of a `cellStyle`, each only
@@ -956,8 +1021,11 @@ pub fn write_styles(wb: &Workbook, dxfs: &[Style], extra_fmts: &[String]) -> (St
         named += 1;
     }
 
+    // Custom table styles add their formats to the differential formats first.
+    let mut dxfs = dxfs.to_vec();
+    let table_styles = table_styles_xml(&wb.table_styles, &mut dxfs);
     let mut dx = String::new();
-    for d in dxfs {
+    for d in &dxfs {
         dx.push_str("<dxf>");
         let def = Style::default();
         let st = &d.dxf_stated;
@@ -1035,7 +1103,7 @@ pub fn write_styles(wb: &Workbook, dxfs: &[Style], extra_fmts: &[String]) -> (St
     let _ = write!(s, "<cellXfs count=\"{count}\">{xfs}</cellXfs>");
     let _ = write!(s, "<cellStyles count=\"{named}\">{cell_styles}</cellStyles>");
     let _ = write!(s, "<dxfs count=\"{}\">{dx}</dxfs>", dxfs.len());
-    s.push_str("<tableStyles count=\"0\" defaultTableStyle=\"TableStyleMedium2\" defaultPivotStyle=\"PivotStyleLight16\"/>");
+    s.push_str(&table_styles);
     s.push_str(&colors_xml(wb));
     s.push_str("</styleSheet>");
     (s, nf.map)
