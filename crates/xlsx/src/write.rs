@@ -169,6 +169,11 @@ pub struct Out {
 }
 
 impl Out {
+    /// Whether a part of this name (case-insensitive) was already written.
+    pub fn has_part(&self, name: &str) -> bool {
+        let name = crate::package::normalize(name);
+        self.parts.iter().any(|(n, _)| crate::package::normalize(n) == name)
+    }
     pub fn part(&mut self, name: &str, content_type: Option<&str>, data: Vec<u8>) {
         if let Some(ct) = content_type {
             self.overrides.push((format!("/{name}"), ct.to_string()));
@@ -579,6 +584,7 @@ pub fn write_xlsx_named_with(wb: &Workbook, kind: XlsxKind, book_name: Option<&s
     if let Some(data) = wb.vba_project.as_ref().filter(|_| kind.is_macro_enabled()) {
         wb_rels.add("vbaProject", "vbaProject.bin");
         out.part("xl/vbaProject.bin", Some(CT_VBA), data.to_vec());
+        crate::vba_signature::write(wb, data, &mut out);
     }
     out.part("xl/_rels/workbook.xml.rels", None, wb_rels.xml().into_bytes());
 
