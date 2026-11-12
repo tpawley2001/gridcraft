@@ -1656,6 +1656,13 @@ pub struct FormControl {
     pub drop_lines: u32,
     /// How many items of a list box can be selected.
     pub selection: ListSelection,
+    /// The fill is automatic (Format Control > Colors and Lines). Files from Excel turn it off
+    /// for check boxes, option buttons, buttons, labels and group boxes.
+    pub auto_fill: bool,
+    /// The line is automatic (Format Control > Colors and Lines).
+    pub auto_line: bool,
+    /// The alternative text (Format Control > Alt Text).
+    pub alt_text: Option<String>,
 }
 
 impl Default for FormControl {
@@ -1680,6 +1687,9 @@ impl Default for FormControl {
             input_range: None,
             drop_lines: DEFAULT_DROP_LINES,
             selection: ListSelection::Single,
+            auto_fill: true,
+            auto_line: true,
+            alt_text: None,
         }
     }
 }

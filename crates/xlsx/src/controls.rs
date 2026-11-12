@@ -148,15 +148,26 @@ pub fn write(out: &mut Out, rels: &mut Rels, sheet: &Sheet, shape_id: impl Fn(us
                 emu(dy)
             )
         };
-        let mut pr = String::from(" defaultSize=\"0\" autoPict=\"0\"");
+        let mut pr = String::from(" defaultSize=\"0\"");
         if !c.print {
             pr.push_str(" print=\"0\"");
         }
         if !c.locked {
             pr.push_str(" locked=\"0\"");
         }
+        // `autoFill` and `autoLine` default to true: only a control that turned them off says so.
+        if !c.auto_fill {
+            pr.push_str(" autoFill=\"0\"");
+        }
+        if !c.auto_line {
+            pr.push_str(" autoLine=\"0\"");
+        }
+        pr.push_str(" autoPict=\"0\"");
         if let Some(m) = macro_ref(c) {
             let _ = write!(pr, " macro=\"{}\"", esc_attr(&m));
+        }
+        if let Some(t) = &c.alt_text {
+            let _ = write!(pr, " altText=\"{}\"", esc_attr(t));
         }
         let (move_cells, size_cells) = match c.anchor.mode {
             AnchorMode::MoveAndSize => (true, true),
@@ -700,7 +711,13 @@ pub fn read(cx: &mut Ctx<'_>, controls: Option<&El>, vml_rid: Option<&str>, rels
             pr.and_then(|pr| pr.child("anchor")).and_then(|a| anchor_from_markers(a, sheet)).or_else(|| shape.and_then(|s| vml_anchor(s, sheet)));
         let Some(anchor) = anchor else { continue };
         let id = cx.next_object_id();
-        sheet.controls.push(build(p, kind, anchor, ctl.attr("name"), id));
+        let mut control = build(p, kind, anchor, ctl.attr("name"), id);
+        if let Some(pr) = pr {
+            control.auto_fill = pr.flag("autoFill", true);
+            control.auto_line = pr.flag("autoLine", true);
+            control.alt_text = pr.attr("altText").filter(|t| !t.is_empty()).map(str::to_string);
+        }
+        sheet.controls.push(control);
         read.insert(n);
     }
     // Controls known only from the VML. The ones not read (an edit box, or past the limit) stay
