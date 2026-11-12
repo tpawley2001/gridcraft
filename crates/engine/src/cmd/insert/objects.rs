@@ -84,6 +84,7 @@ locks: None, hidden: false, hyperlink: None, name: None,
         mime,
         alt: str_param(p, "alt").unwrap_or("").into(),
         blip_ext: Vec::new(),
+        border: None,
         link: None,
     };
     let sheet = d.wb.active_sheet();

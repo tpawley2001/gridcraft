@@ -948,6 +948,7 @@ impl Embedded {
                 mime: (*mime).to_string(),
                 alt: props.alt.unwrap_or_default(),
                 blip_ext: vec![],
+                border: None,
                 link: None,
             });
         }
@@ -966,6 +967,7 @@ impl Embedded {
                 mime: "image/png".to_string(),
                 alt: String::new(),
                 blip_ext: vec![],
+                border: None,
                 link: None,
             });
         }

@@ -122,6 +122,7 @@ fn html_export_embeds_images_as_data_uris() {
         mime: "image/png".into(),
         alt: "a \"logo\"".into(),
         blip_ext: Vec::new(),
+        border: None,
         link: None,
     });
     let html = to_html(&wb, 0).unwrap();
@@ -152,6 +153,7 @@ fn html_export_places_images_at_their_anchor_using_sheet_geometry() {
         mime: "image/png".into(),
         alt: String::new(),
         blip_ext: Vec::new(),
+        border: None,
         link: None,
     });
     sh.set_value(CellRef::new(1, 1), gridcraft_core::Value::Number(1.0));
@@ -186,6 +188,7 @@ fn book_with_picture(anchor: &str, cell_at: (u32, u32)) -> Workbook {
         mime: "image/png".into(),
         alt: String::new(),
         blip_ext: Vec::new(),
+        border: None,
         link: None,
     });
     wb

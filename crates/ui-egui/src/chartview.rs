@@ -240,6 +240,15 @@ fn paint_shape_text(p: &Painter, wb: &Workbook, sp: &gridcraft_engine::model::Sh
     clip.galley(pos, g, color);
 }
 
+/// A picture's border (Picture Border) as a solid stroke centred on its edge: `w` EMU at 9525 EMU
+/// per sheet pixel, scaled with zoom. Dashes are not drawn.
+fn picture_border_stroke(wb: &Workbook, im: &gridcraft_engine::model::Image, z: f32) -> Option<Stroke> {
+    let b = im.border.as_ref()?;
+    let c = b.color.resolve(&wb.theme).map(theme::color32)?;
+    let px = b.width_emu.unwrap_or(gridcraft_engine::model::PictureBorder::DEFAULT_WIDTH_EMU).max(0) as f32 / 9525.0;
+    Some(Stroke::new((px * z).clamp(0.0, 4000.0), c))
+}
+
 pub(crate) fn anchor_rect(geo: &Geo, sh: &Sheet, a: &Anchor) -> Rect {
     let x = geo.x(sh, a.cell.col) + a.dx * geo.z;
     let y = geo.y(sh, a.cell.row) + a.dy * geo.z;
@@ -479,6 +488,9 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
             p.image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         } else {
             p.rect_filled(r, 0.0, Tokens::get(p.ctx()).sheet_track);
+        }
+        if let Some(stroke) = picture_border_stroke(wb, im, geo.z) {
+            p.rect_stroke(r, 0.0, stroke, StrokeKind::Middle);
         }
         done(start, r);
     }

@@ -436,6 +436,7 @@ fn sample() -> Workbook {
         mime: "image/png".into(),
         alt: "Logo \"x\"".into(),
         blip_ext: Vec::new(),
+        border: None,
         link: None,
     });
     s.shapes.push(Shape {

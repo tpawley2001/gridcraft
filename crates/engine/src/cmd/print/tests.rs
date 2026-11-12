@@ -548,6 +548,7 @@ fn charts_and_images_are_drawn() {
         mime: "image/png".into(),
         alt: String::new(),
         blip_ext: Vec::new(),
+        border: None,
         link: None,
     });
     let charts = s.doc().unwrap().wb.active().unwrap().charts.len();
@@ -1187,4 +1188,48 @@ fn chart_budget_counts_path_points_and_drops_charts_that_do_not_fit() {
     let mut pics = PicCache { chart_prims: MAX_CHART_PRIMS - 10, ..Default::default() };
     assert!(pics.chart((0, 1), || vec![line(1000)]).is_none());
     assert!(pics.charts.is_empty() && pics.rejected_charts.contains(&(0, 1)));
+}
+
+/// A picture's border prints as one solid rectangle stroke on the picture's bounds, at its weight
+/// in points (3 pt red here), and a picture without a border prints none.
+#[test]
+fn picture_border_prints_as_a_stroke_on_its_bounds() {
+    let mut s = s();
+    let mut png = Vec::new();
+    let img = image::RgbaImage::from_raw(1, 1, vec![0, 0, 255, 255]).unwrap();
+    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let d = s.doc_mut().unwrap();
+    let wb = std::sync::Arc::make_mut(&mut d.wb);
+    let id = wb.next_object_id();
+    let mut pic = Image {
+        camera: None,
+        locks: None,
+        hidden: false,
+        no_print: false,
+        hyperlink: None,
+        name: None,
+        id,
+        anchor: Anchor { cell: CellRef::new(2, 2), dx: 0.0, dy: 0.0, width: 80.0, height: 40.0, mode: gridcraft_model::AnchorMode::MoveAndSize },
+        data: png.into(),
+        mime: "image/png".into(),
+        alt: String::new(),
+        blip_ext: Vec::new(),
+        border: None,
+        link: None,
+    };
+    assert_eq!(objects::picture_border_stroke(wb, &pic, 1.0), None);
+    pic.border = Some(gridcraft_model::PictureBorder {
+        color: gridcraft_model::Color::Rgb(0xFF0000),
+        width_emu: Some(38100),
+        dash: Some(gridcraft_model::LineDash::SysDash),
+        ..Default::default()
+    });
+    assert_eq!(objects::picture_border_stroke(wb, &pic, 1.0), Some(([255, 0, 0], 3.0)));
+    assert_eq!(objects::picture_border_stroke(wb, &pic, 0.5), Some(([255, 0, 0], 1.5)), "scaled with the printout");
+    wb.sheet_mut(0).unwrap().images.push(pic);
+    let (pdf, _) = pdf_of(&mut s, json!({}));
+    let text = String::from_utf8_lossy(&pdf);
+    let strokes: Vec<&str> = text.split("1 0 0 RG\n").skip(1).filter(|t| t.starts_with("3 w [] 0 d\n")).collect();
+    assert_eq!(strokes.len(), 1, "one solid 3 pt red stroke");
+    assert!(strokes.first().unwrap().lines().nth(1).unwrap().ends_with(" re S"), "a rectangle stroke");
 }

@@ -12,9 +12,9 @@ use std::sync::Arc;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
 use gridcraft_model::{
-    Anchor, AnchorMode, CameraTool, Color, DrawingHyperlink, GeometryPath, Image, KeptDmlColor, PathCommand, PathShade, PictureLocks, Shape,
-    ShapeFormat, ShapeGeometry, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextAutofit, ShapeTextHorzOverflow, ShapeTextVert,
-    ShapeTextVertOverflow, ShapeTextWrap, Sheet, Theme,
+    Anchor, AnchorMode, CameraTool, Color, DrawingHyperlink, GeometryPath, Image, KeptDmlColor, LineDash, PathCommand, PathShade, PictureBorder,
+    PictureLocks, Shape, ShapeFormat, ShapeGeometry, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextAutofit, ShapeTextHorzOverflow,
+    ShapeTextVert, ShapeTextVertOverflow, ShapeTextWrap, Sheet, Theme,
 };
 
 use crate::IoError;
@@ -450,6 +450,7 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                         alt,
                         link,
                         blip_ext,
+                        border: obj.child("spPr").and_then(|sp| read_picture_border(sp, &cx.theme_colors)),
                     });
                 }
                 "graphicFrame" => {
@@ -652,6 +653,36 @@ fn write_custom_geometry(s: &mut String, paths: &[GeometryPath]) {
         s.push_str("</a:path>");
     }
     s.push_str("</a:pathLst></a:custGeom>");
+}
+
+/// A picture's border (`spPr/a:ln`, ECMA-376 Part 1 §20.1.2.2.24): only a line with a solid fill
+/// whose colour resolves. A `w` outside ST_LineWidth and an unknown or solid dash are dropped.
+fn read_picture_border(sp: &El, theme: &[u32; 12]) -> Option<PictureBorder> {
+    let ln = sp.child("ln")?;
+    let fill = ln.child("solidFill")?;
+    let color = dml_color_resolved(fill, theme)?;
+    let width_emu = ln.attr("w").and_then(|w| w.parse::<i32>().ok()).filter(|w| (0..=20_116_800).contains(w));
+    let dash = ln
+        .child("prstDash")
+        .and_then(|d| d.attr("val"))
+        .and_then(|v| crate::chart::DASHES.iter().find(|(_, n)| *n == v))
+        .map(|(d, _)| *d)
+        .filter(|d| *d != LineDash::Solid);
+    Some(PictureBorder { source: kept_dml_color(fill, color), color, width_emu, dash })
+}
+
+/// The picture border's `a:ln`, or nothing for a picture without one.
+fn write_picture_border(border: Option<&PictureBorder>, theme: &Theme) -> String {
+    let Some(b) = border else { return String::new() };
+    let Some(color) = kept_or_srgb(b.source.as_ref(), &b.color, theme) else { return String::new() };
+    let w = b.width_emu.map(|w| format!(" w=\"{w}\"")).unwrap_or_default();
+    let dash = b
+        .dash
+        .filter(|d| *d != LineDash::Solid)
+        .and_then(|d| crate::chart::DASHES.iter().find(|(k, _)| *k == d))
+        .map(|(_, n)| format!("<a:prstDash val=\"{n}\"/>"))
+        .unwrap_or_default();
+    format!("<a:ln{w}><a:solidFill>{color}</a:solidFill>{dash}</a:ln>")
 }
 
 fn read_shape(obj: &El, anchor: Anchor, theme: &[u32; 12], scheme: &shape_style::FormatScheme) -> Option<Shape> {
@@ -1157,9 +1188,10 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                 s.push_str(&open);
                 let _ = write!(
                     s,
-                    "<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"{id}\" name=\"{name}\" descr=\"{}\"{hidden}>{link}</xdr:cNvPr>{locks}</xdr:nvPicPr><xdr:blipFill><a:blip {blip_ref}{blip_end}<a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>",
+                    "<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"{id}\" name=\"{name}\" descr=\"{}\"{hidden}>{link}</xdr:cNvPr>{locks}</xdr:nvPicPr><xdr:blipFill><a:blip {blip_ref}{blip_end}<a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>{}</xdr:spPr></xdr:pic>",
                     esc_attr(&img.alt),
-                    xfrm(&img.anchor, "a:xfrm")
+                    xfrm(&img.anchor, "a:xfrm"),
+                    write_picture_border(img.border.as_ref(), theme)
                 );
             }
             Obj::Chart(ch, rid) if crate::chartex::is_chartex(ch.kind) => {
