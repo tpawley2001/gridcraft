@@ -95,6 +95,7 @@ mod text_elapsed_tokens_excel;
 mod text_excel_edges;
 mod text_positions_utf16_excel;
 mod trace_error;
+mod view_zoom_per_view;
 mod workbook_author;
 mod wrap_row_height;
 mod xls_pivot_refresh;
