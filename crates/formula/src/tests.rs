@@ -587,3 +587,19 @@ fn names_of_a_linked_workbook_round_trip() -> Result<(), ParseError> {
     assert!(matches!(parse("Table1[1]")?, Expr::Struct(_)));
     Ok(())
 }
+
+#[test]
+fn wrappers_stacked_across_levels_are_bounded_as_a_whole() {
+    // Each level adds 40 percents inside the parser's per-level bound, so no level is too deep alone.
+    let stacked = |levels: usize| {
+        let mut f = "1".to_string();
+        for _ in 0..levels {
+            f = format!("({f}){}", "%".repeat(40));
+        }
+        f
+    };
+    assert!(parse(&stacked(5)).is_ok());
+    assert!(parse(&stacked(7)).is_err(), "7 x 41 wrappers on one path");
+    assert!(parse(&format!("{}1{}", "(".repeat(200), ")".repeat(200))).is_ok());
+    assert!(parse(&format!("={}", vec!["A1%"; 100].join("+"))).is_ok(), "siblings are not stacked");
+}
