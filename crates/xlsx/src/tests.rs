@@ -355,3 +355,4 @@ mod codex_day_print_options;
 mod codex_day_table_metadata;
 mod codex_day_text_body;
 mod split_panes_kept_tests;
+mod vba_signature_kept_tests;
