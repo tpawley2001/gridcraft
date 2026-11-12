@@ -252,8 +252,9 @@ fn ods_extension_error_cache_never_imports_its_placeholder_zero() {
         r#"<table:table-cell xmlns:calcext="urn:org:documentfoundation:names:experimental:calc:xmlns:calcext:1.0" calcext:value-type="error" office:value-type="float" office:value="0" table:formula="of:=1/0"><text:p>#DIV/0!</text:p></table:table-cell>"#,
     );
     let (wb, report) = read_ods(&bytes).unwrap();
-    assert_eq!(wb.sheets[0].value(CellRef::new(0, 0)), text("#DIV/0!"));
-    assert!(report.warnings.iter().any(|w| w.contains("unsupported or missing")));
+    // The saved error is read as the error itself, never as the writer's placeholder 0.
+    assert_eq!(wb.sheets[0].value(CellRef::new(0, 0)), Value::Error(gridcraft_core::CellError::Div0));
+    assert!(!report.warnings.iter().any(|w| w.contains("unsupported or missing")));
 }
 
 #[test]
