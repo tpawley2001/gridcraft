@@ -30,6 +30,7 @@ mod chart_surface;
 mod chart_theme_override_tests;
 mod chart_tick_skip;
 mod code_name_tests;
+mod compat_sp_anchor_tests;
 mod controls_tests;
 mod csv_tests;
 mod custom_views_tests;
