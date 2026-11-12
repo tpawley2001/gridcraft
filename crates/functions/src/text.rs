@@ -138,7 +138,8 @@ fn mid(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
 }
 
 fn len(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    num_val(text(a, 0)?.chars().count() as f64)
+    // Excel counts UTF-16 code units: a character outside the Basic Multilingual Plane counts 2.
+    num_val(text(a, 0)?.encode_utf16().count() as f64)
 }
 
 fn lower_char(ch: char) -> char {
@@ -161,7 +162,9 @@ fn proper_upper_char(ch: char) -> char {
 }
 
 fn lower(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    text_val(text(a, 0)?.chars().map(lower_char).collect::<String>())
+    // Whole-string lowercasing applies the Greek final-sigma rule (word-final Σ becomes ς). Dotted capital I
+    // maps to plain `i`, as per-character lowering does, not to `i` plus a combining dot.
+    text_val(text(a, 0)?.replace('\u{130}', "I").to_lowercase())
 }
 
 fn upper(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
@@ -210,12 +213,14 @@ fn substitute(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
             return Err(CellError::Value);
         }
         let inst = inst.trunc() as usize;
-        match s.match_indices(old.as_str()).nth(inst - 1) {
-            Some((pos, _)) => {
+        // Excel counts occurrences at every start position, so they may overlap ("aa" occurs 3 times in "aaaa").
+        let found = s.char_indices().filter(|&(pos, _)| s.get(pos..).is_some_and(|rest| rest.starts_with(old.as_str()))).nth(inst - 1);
+        match found.and_then(|(pos, _)| Some((s.get(..pos)?, s.get(pos + old.len()..)?))) {
+            Some((head, tail)) => {
                 let mut out = String::with_capacity(s.len() + new.len());
-                out.push_str(&s[..pos]);
+                out.push_str(head);
                 out.push_str(&new);
-                out.push_str(&s[pos + old.len()..]);
+                out.push_str(tail);
                 check_len(out)
             }
             None => text_val(s),
@@ -1253,6 +1258,7 @@ mod tests {
         close(ev("LEN", vec![t("héllo")]), 5.0);
         close(ev("LEN", vec![n(123.45)]), 6.0);
         close(ev("LEN", vec![empty()]), 0.0);
+        close(ev("LEN", vec![t("\u{1F600}")]), 2.0);
         is_text(ev("LEFT", vec![n(12345.0), n(2.0)]), "12");
     }
 
@@ -1260,6 +1266,7 @@ mod tests {
     fn case_and_cleanup() {
         is_text(ev("UPPER", vec![t("abc")]), "ABC");
         is_text(ev("LOWER", vec![t("ABC")]), "abc");
+        is_text(ev("LOWER", vec![t("\u{3A3}\u{391}\u{3A3} \u{3A3}")]), "\u{3C3}\u{3B1}\u{3C2} \u{3C3}");
         is_text(ev("UPPER", vec![t("Straße")]), "STRAßE");
         is_text(ev("LOWER", vec![t("İ")]), "i");
         is_text(ev("PROPER", vec![t("İSTANBUL")]), "Istanbul");
@@ -1287,6 +1294,10 @@ mod tests {
         is_text(ev("SUBSTITUTE", vec![t("a-b-c"), t("-"), t("+"), n(5.0)]), "a-b-c");
         is_err(ev("SUBSTITUTE", vec![t("a"), t("a"), t("b"), n(0.0)]), CellError::Value);
         is_text(ev("SUBSTITUTE", vec![t("abc"), t(""), t("x")]), "abc");
+        is_text(ev("SUBSTITUTE", vec![t("aaaa"), t("aa"), t("b"), n(2.0)]), "aba");
+        is_text(ev("SUBSTITUTE", vec![t("aaaa"), t("aa"), t("b"), n(3.0)]), "aab");
+        is_text(ev("SUBSTITUTE", vec![t("aaaa"), t("aa"), t("b"), n(4.0)]), "aaaa");
+        is_text(ev("SUBSTITUTE", vec![t("aaaa"), t("aa"), t("b")]), "bb");
         is_text(ev("REPLACE", vec![t("abcdef"), n(2.0), n(3.0), t("XY")]), "aXYef");
         is_text(ev("REPLACE", vec![t("abc"), n(10.0), n(1.0), t("Z")]), "abcZ");
         is_text(ev("REPT", vec![t("ab"), n(3.0)]), "ababab");
