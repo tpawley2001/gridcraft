@@ -12,9 +12,9 @@ use std::sync::Arc;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
 use gridcraft_model::{
-    Anchor, AnchorMode, CameraTool, Color, DrawingHyperlink, GeometryPath, Image, KeptDmlColor, LineDash, PathCommand, PathShade, PictureBorder,
-    PictureLocks, Shape, ShapeFormat, ShapeGeometry, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextAutofit, ShapeTextHorzOverflow,
-    ShapeTextVert, ShapeTextVertOverflow, ShapeTextWrap, Sheet, Theme,
+    Anchor, AnchorMode, CameraTool, Color, DrawingHyperlink, GeometryPath, Image, KeptDmlColor, KeptShapeText, LineDash, PathCommand, PathShade,
+    PictureBorder, PictureLocks, Shape, ShapeFormat, ShapeGeometry, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextAutofit,
+    ShapeTextHorzOverflow, ShapeTextVert, ShapeTextVertOverflow, ShapeTextWrap, Sheet, Theme,
 };
 
 use crate::IoError;
@@ -25,6 +25,7 @@ use crate::xml::{El, esc, esc_attr};
 mod blip_ext;
 pub use blip_ext::write as write_blip_ext;
 mod ink;
+mod kept_text;
 mod line_effects;
 pub(crate) mod shape_style;
 
@@ -786,6 +787,14 @@ fn read_shape(obj: &El, anchor: Anchor, theme: &[u32; 12], scheme: &shape_style:
     format.line_width_emu = ln.and_then(|l| l.attr("w")).and_then(|w| w.parse::<i32>().ok()).filter(|w| (0..=20_116_800).contains(w));
     line_effects::read(sp, ln, &mut format);
     format.style = obj.child("style").map(|st| shape_style::read(st, sp, ln, theme, scheme));
+    // The body as the file gave it (several runs, bullets, list styles), kept for Save while the
+    // text is unedited. A linked text box's text is the cell's, so its body is not kept.
+    let linked = obj.attr("textlink").is_some_and(|l| !l.is_empty());
+    if !linked && !text.is_empty() {
+        if let Some(xml) = obj.child("txBody").and_then(kept_text::kept_body_xml) {
+            format.kept_text = Some(KeptShapeText::new(xml, text.clone(), &format));
+        }
+    }
     Some(Shape {
         hidden: false,
         no_print: false,
@@ -1329,24 +1338,31 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                     };
                     s.push_str("<xdr:txBody>");
                     write_body_pr(&mut s, f, anchor);
-                    s.push_str("<a:lstStyle/>");
-                    let algn = match f.align {
-                        None => "",
-                        Some(ShapeTextAlign::Left) => " algn=\"l\"",
-                        Some(ShapeTextAlign::Center) => " algn=\"ctr\"",
-                        Some(ShapeTextAlign::Right) => " algn=\"r\"",
-                    };
-                    let rtl = if f.rtl { " rtl=\"1\"" } else { "" };
-                    let ppr = if algn.is_empty() && rtl.is_empty() { String::new() } else { format!("<a:pPr{algn}{rtl}/>") };
-                    let (rpr_attrs, rpr_body) = run_props(f, theme);
-                    for line in sh.text.split('\n') {
-                        if line.is_empty() {
-                            let _ = write!(s, "<a:p>{ppr}<a:endParaRPr lang=\"en-US\"{rpr_attrs}/></a:p>");
-                        } else if rpr_body.is_empty() {
-                            let _ = write!(s, "<a:p>{ppr}<a:r><a:rPr lang=\"en-US\"{rpr_attrs}/><a:t>{}</a:t></a:r></a:p>", esc(line));
-                        } else {
-                            let _ =
-                                write!(s, "<a:p>{ppr}<a:r><a:rPr lang=\"en-US\"{rpr_attrs}>{rpr_body}</a:rPr><a:t>{}</a:t></a:r></a:p>", esc(line));
+                    if let Some(kept) = f.kept_text_xml(&sh.text) {
+                        s.push_str(kept);
+                    } else {
+                        s.push_str("<a:lstStyle/>");
+                        let algn = match f.align {
+                            None => "",
+                            Some(ShapeTextAlign::Left) => " algn=\"l\"",
+                            Some(ShapeTextAlign::Center) => " algn=\"ctr\"",
+                            Some(ShapeTextAlign::Right) => " algn=\"r\"",
+                        };
+                        let rtl = if f.rtl { " rtl=\"1\"" } else { "" };
+                        let ppr = if algn.is_empty() && rtl.is_empty() { String::new() } else { format!("<a:pPr{algn}{rtl}/>") };
+                        let (rpr_attrs, rpr_body) = run_props(f, theme);
+                        for line in sh.text.split('\n') {
+                            if line.is_empty() {
+                                let _ = write!(s, "<a:p>{ppr}<a:endParaRPr lang=\"en-US\"{rpr_attrs}/></a:p>");
+                            } else if rpr_body.is_empty() {
+                                let _ = write!(s, "<a:p>{ppr}<a:r><a:rPr lang=\"en-US\"{rpr_attrs}/><a:t>{}</a:t></a:r></a:p>", esc(line));
+                            } else {
+                                let _ = write!(
+                                    s,
+                                    "<a:p>{ppr}<a:r><a:rPr lang=\"en-US\"{rpr_attrs}>{rpr_body}</a:rPr><a:t>{}</a:t></a:r></a:p>",
+                                    esc(line)
+                                );
+                            }
                         }
                     }
                     s.push_str("</xdr:txBody>");

@@ -2138,6 +2138,65 @@ pub struct ShapeFormat {
     /// fill, outline, effects and text colour the shape's own properties leave unset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub style: Option<ShapeStyle>,
+    /// The text body as the file gave it (several runs, paragraph properties, list styles),
+    /// written back while `Shape::text` and the text format are still the ones read with it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kept_text: Option<KeptShapeText>,
+}
+
+impl ShapeFormat {
+    /// The kept text body's XML to write for `text`, while `text` and this format's run-level
+    /// properties are still the ones read with it; `None` once either was edited.
+    pub fn kept_text_xml(&self, text: &str) -> Option<&str> {
+        let k = self.kept_text.as_ref()?;
+        let same = k.text == text
+            && k.font_size == self.font_size
+            && k.bold == self.bold
+            && k.italic == self.italic
+            && k.font == self.font
+            && k.text_color == self.text_color
+            && k.text_outline == self.text_outline
+            && k.align == self.align
+            && k.rtl == self.rtl;
+        same.then_some(k.xml.as_str())
+    }
+}
+
+/// A shape's text body kept from a file (`xdr:txBody`, ECMA-376 Part 1 §20.1.2.2.40): `xml` is
+/// everything after `a:bodyPr` (the `a:lstStyle` and every `a:p`), rebuilt from parsed values;
+/// `text` and the run-level fields are what was read with it into `Shape::text` and
+/// [`ShapeFormat`].
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KeptShapeText {
+    pub xml: String,
+    pub text: String,
+    pub font_size: Option<f32>,
+    pub bold: bool,
+    pub italic: bool,
+    pub font: Option<String>,
+    pub text_color: Option<Color>,
+    pub text_outline: Option<(Color, f32)>,
+    pub align: Option<ShapeTextAlign>,
+    pub rtl: bool,
+}
+
+impl KeptShapeText {
+    /// A kept body `xml` for `text` read with the run-level properties of `f`.
+    pub fn new(xml: String, text: String, f: &ShapeFormat) -> Self {
+        Self {
+            xml,
+            text,
+            font_size: f.font_size,
+            bold: f.bold,
+            italic: f.italic,
+            font: f.font.clone(),
+            text_color: f.text_color,
+            text_outline: f.text_outline,
+            align: f.align,
+            rtl: f.rtl,
+        }
+    }
 }
 
 /// A shape's style element (`xdr:style`, CT_ShapeStyle, ECMA-376 Part 1 §20.5.2.30): each
@@ -2736,6 +2795,22 @@ mod tests {
         let old: ShapeFormat = serde_json::from_str(r#"{"bold":true,"rtl":true}"#).expect("old JSON");
         assert!(old.bold && old.rtl);
         assert_eq!((old.inset_left, old.wrap, old.vert, old.text_rotation), (None, None, None, None));
+    }
+
+    #[test]
+    fn kept_shape_text_survives_json_and_is_dropped_by_edits() {
+        let mut f = ShapeFormat { font_size: Some(11.0), bold: true, ..ShapeFormat::default() };
+        f.kept_text = Some(KeptShapeText::new("<a:lstStyle/><a:p/>".into(), "Total".into(), &f));
+        let json = serde_json::to_string(&f).expect("serialize format");
+        assert_eq!(serde_json::from_str::<ShapeFormat>(&json).expect("deserialize format"), f);
+        assert_eq!(f.kept_text_xml("Total"), Some("<a:lstStyle/><a:p/>"));
+        assert_eq!(f.kept_text_xml("Total!"), None, "edited text");
+        let mut g = f.clone();
+        g.italic = true;
+        assert_eq!(g.kept_text_xml("Total"), None, "edited format");
+        let old: ShapeFormat = serde_json::from_str(r#"{"bold":true}"#).expect("old JSON");
+        assert_eq!(old.kept_text, None);
+        assert!(!serde_json::to_string(&ShapeFormat::default()).expect("serialize").contains("kept_text"));
     }
 
     #[test]
