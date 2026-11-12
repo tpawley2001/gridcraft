@@ -61,10 +61,31 @@ fn find_exact(x: &Value, hay: &[Value], wild: bool, reverse: bool) -> Option<usi
 /// `HLOOKUP("STRING", {"INTEGRAL","DOUBLE","BLANK","STRING","REF","AREA (rows)",<blank>}, …)`
 /// finds "STRING" and `LOOKUP("DOUBLE", {"DOUBLE","BLANK","STRING","REF","AREA (rows)"}, …)`
 /// finds "DOUBLE". Work is linear in the vector length at worst.
+///
+/// Descending searches (MATCH -1) first probe the first entry of the needle's type, as the
+/// largest one: when it is smaller than the needle the answer is #N/A, when it is equal the
+/// search ends there. On sorted data this changes nothing; on other data it is what Excel
+/// answers (observed: `MATCH(1, {1..10}, -1)` is 1, `MATCH(5, {1..10}, -1)` and
+/// `MATCH(6, {5;1;9;3;7;2;8;4;10;6}, -1)` are #N/A).
 fn bsearch_last(x: &Value, hay: &[Value], desc: bool) -> Option<usize> {
     let mut hi = hay.len().checked_sub(1)?;
     let mut lo = 0usize;
     let mut best = None;
+    let end_of_run = |j: usize| {
+        let mut k = j;
+        while hay.get(k + 1).is_some_and(|w| same_type(x, w) && lookup_order(w, x) == Ordering::Equal) {
+            k += 1;
+        }
+        k
+    };
+    if desc {
+        let j = hay.iter().position(|v| same_type(x, v))?;
+        match hay.get(j).map(|v| lookup_order(v, x))? {
+            Ordering::Less => return None,
+            Ordering::Equal => return Some(end_of_run(j)),
+            Ordering::Greater => {}
+        }
+    }
     while lo <= hi {
         let mid = lo + (hi - lo) / 2;
         let Some(j) = (lo..=mid).rev().find(|&j| hay.get(j).is_some_and(|v| same_type(x, v))) else {
@@ -74,11 +95,7 @@ fn bsearch_last(x: &Value, hay: &[Value], desc: bool) -> Option<usize> {
         let v = hay.get(j)?;
         let o = lookup_order(v, x);
         if o == Ordering::Equal {
-            let mut k = j;
-            while hay.get(k + 1).is_some_and(|w| same_type(x, w) && lookup_order(w, x) == Ordering::Equal) {
-                k += 1;
-            }
-            return Some(k);
+            return Some(end_of_run(j));
         }
         let before = if desc { o == Ordering::Greater } else { o == Ordering::Less };
         if before {
@@ -680,6 +697,11 @@ mod tests {
         // Sorted duplicates give the last one; descending data with MATCH -1 too.
         close(ev("MATCH", vec![n(2.0), av(row(&[1.0, 2.0, 2.0, 2.0, 3.0])), n(1.0)]), 4.0);
         close(ev("MATCH", vec![n(20.0), av(row(&[40.0, 20.0, 20.0, 10.0])), n(-1.0)]), 3.0);
+        // Descending search on ascending data: the first entry decides (#N/A when it is smaller).
+        let asc = row(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]);
+        close(ev("MATCH", vec![n(1.0), av(asc.clone()), n(-1.0)]), 1.0);
+        is_err(ev("MATCH", vec![n(5.0), av(asc.clone()), n(-1.0)]), CellError::NA);
+        close(ev("MATCH", vec![n(0.0), av(asc), n(-1.0)]), 10.0);
         // Only text and blanks: no number to find.
         is_err(ev("MATCH", vec![n(5.0), av(arr(vec![vec![tv("a"), Value::Empty, tv("b")]]))]), CellError::NA);
         // A long run of trailing blanks (whole-column lookups) still finds the last number.

@@ -55,6 +55,7 @@ mod legacy_t_sumproduct;
 mod line_count_overflow;
 mod logical_text_args;
 mod long_operator_chains;
+mod match_binary_search_excel;
 mod number_text_sigma_excel;
 mod ods_matrix_formulas;
 mod offset_overflow;
