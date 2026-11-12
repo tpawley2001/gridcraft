@@ -148,6 +148,15 @@ pub struct Sheet {
     #[serde(default)]
     pub outline_apply_styles: bool,
     pub right_to_left: bool,
+    /// Page Layout view shows its ruler (`sheetView showRuler`, on unless a file turned it off).
+    #[serde(default = "yes")]
+    pub show_ruler: bool,
+    /// Page Layout view shows the white space of the page margins (`sheetView showWhiteSpace`).
+    #[serde(default = "yes")]
+    pub show_white_space: bool,
+    /// The window is protected (`sheetView windowProtection`), kept for the round trip.
+    #[serde(default)]
+    pub window_protection: bool,
     pub zoom: u16,
     /// Each view's own zoom as stated in the file (`zoomScaleNormal`, `zoomScaleSheetLayoutView`
     /// for Page Break Preview, `zoomScalePageLayoutView`), kept for the round trip. `None` = not
@@ -263,6 +272,9 @@ impl Sheet {
             show_formulas: false,
             show_zeros: true,
             right_to_left: false,
+            show_ruler: true,
+            show_white_space: true,
+            window_protection: false,
             zoom: 100,
             zoom_normal: None,
             zoom_page_break: None,

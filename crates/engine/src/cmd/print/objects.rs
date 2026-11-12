@@ -231,18 +231,25 @@ fn draw_control(pg: &mut Page, c: &gridcraft_model::FormControl, b: &Block, (x, 
 }
 
 fn draw_sparklines(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, b: &Block, block: RangeRef) {
+    let values_of = |sp: &gridcraft_model::Sparkline| -> Vec<Option<f64>> {
+        match gridcraft_calc::evaluate(wb, si, sp.cell, &sp.source) {
+            Value::Array(a) => a.iter().take(10_000).map(Value::as_f64).collect(),
+            v => vec![v.as_f64()],
+        }
+    };
+    if !sh.sparklines.iter().any(|sp| block.contains(sp.cell)) {
+        return;
+    }
+    let groups = gridcraft_chart::SparklineGroupLimits::new(&sh.sparklines, values_of);
     for sp in &sh.sparklines {
         if !block.contains(sp.cell) {
             continue;
         }
-        let vals: Vec<Option<f64>> = match gridcraft_calc::evaluate(wb, si, sp.cell, &sp.source) {
-            Value::Array(a) => a.iter().take(10_000).map(Value::as_f64).collect(),
-            v => vec![v.as_f64()],
-        };
-        let color = rgb_of(sp.color, wb).unwrap_or([0x15, 0x60, 0x82]);
+        let vals = values_of(sp);
+        let style = gridcraft_chart::sparkline_style(sp, &wb.theme, [0x15, 0x60, 0x82], &vals, &groups);
         let (x, y, w, h) = b.rect(RangeRef::cell(sp.cell));
         let (wpx, hpx) = (w / b.k, h / b.k);
-        let prims = gridcraft_chart::render_sparkline(sp.kind, &vals, [color[0], color[1], color[2], 255], sp.markers, wpx, hpx);
+        let prims = gridcraft_chart::render_sparkline_styled(sp.kind, &vals, &style, wpx, hpx);
         draw_prims(pg, &prims, Xf { ox: x, oy: y, k: b.k });
     }
 }
