@@ -10,9 +10,15 @@ const MAX_ENTRIES: usize = 200_000;
 /// relationship parts themselves and the targets whose content is checked.
 const RELATIONSHIP_BUDGET: u64 = 512 * 1024 * 1024;
 
-/// Relationship kinds (lower case) whose absence after a save isn't a loss: the calculation chain is
-/// a cache Excel rebuilds, and GridCraft never writes it.
-pub(super) const REBUILT_KINDS: [&str; 1] = ["calcchain"];
+/// Relationship kinds (lower case) whose absence after a save isn't a loss: caches rebuilt from
+/// content, never written by GridCraft.
+pub(super) const REBUILT_KINDS: [&str; 2] = [
+    // The calculation chain: a cache Excel rebuilds.
+    "calcchain",
+    // The `.xlsb` sheet index ([MS-XLSB] 2.1.7.2 Binary Index): a lookup cache for the binary sheet
+    // stream with no SpreadsheetML counterpart.
+    "xlbinaryindex",
+];
 
 // ---------------------------------------------------------------- package validation
 

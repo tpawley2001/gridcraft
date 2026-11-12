@@ -10,14 +10,18 @@ pub fn round_trip(wb: &Workbook, source: &[u8], opts: &Options) -> RoundTrip {
     round_trip_as(wb, source, "roundtrip.xlsx", opts)
 }
 
-/// The name a round trip of `source_name` is saved under: the source's package kind, so a
-/// macro-enabled file keeps its VBA project (an `.xlsx` save drops it by design).
-pub(super) fn round_trip_name(source_name: &str, _wb: &Workbook) -> &'static str {
+/// The name a round trip of `source_name` is saved under: the source's package kind when GridCraft
+/// writes it (`.xlsm`, `.xltm`, `.xltx`), otherwise `.xlsx`. A workbook that carries a VBA project
+/// (`wb.vba_project`) is saved as `.xlsm` unless its source was a macro template, whatever the
+/// source was named (an `.xlsb` with macros, a macro workbook named `.xlsx`): an `.xlsx` save drops
+/// the project by design, which is not a loss of the file being checked.
+pub(super) fn round_trip_name(source_name: &str, wb: &Workbook) -> &'static str {
     let ext = source_name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
     match ext.as_str() {
         "xlsm" => "roundtrip.xlsm",
         "xltm" => "roundtrip.xltm",
-        "xltx" => "roundtrip.xltx",
+        "xltx" if wb.vba_project.is_none() => "roundtrip.xltx",
+        _ if wb.vba_project.is_some() => "roundtrip.xlsm",
         _ => "roundtrip.xlsx",
     }
 }
