@@ -89,6 +89,7 @@ mod richdata_tests;
 mod roundtrip;
 mod sensitivity_label;
 mod shape_block_arrow_tests;
+mod shape_line_dash_effects_tests;
 mod shape_outline_width_tests;
 mod shape_preset_geometry;
 mod shape_style_refs_kept_tests;
