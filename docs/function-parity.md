@@ -37,7 +37,6 @@ Excel's worksheet functions, category by category, against GridCraft's function 
 
 | Category | Excel | Ours | Working | % working | Missing |
 |---|---|---|---|---|---|
-| 2026-11-12 | minor | MAKEARRAY with a fractional rows or cols (such as 2.7) gives `#VALUE!` instead of rounding down, as Excel does (`makearray_size_excel.rs`) |
 | Statistical | 111 | 111 | 111 | 100% | — |
 | Math and trigonometry | 80 | 80 | 80 | 100% | — |
 | Financial | 55 | 55 | 55 | 100% | — |
@@ -160,6 +159,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | MAKEARRAY with a fractional rows or cols (such as 2.7) gives `#VALUE!` instead of rounding down, as Excel does (`makearray_size_excel.rs`) |
 | 2026-11-11 | minor | CUMIPMT and CUMPRINC round a fractional start period up and end period down (an empty span gives 0) and keep a fractional nper for the payment and balances, as Excel does (`cumipmt_fractional_excel.rs`) |
 | 2026-11-11 | minor | DISC, INTRATE, RECEIVED, PRICEDISC and YIELDDISC with basis 1 over at most a year divide by 366 when the span holds a 29 February (or lies in one leap year), else 365, like YEARFRAC(settlement, maturity, 1), instead of the settlement year's length, as Excel does (`disc_family_basis1_excel.rs`) |
 | 2026-11-11 | minor | PRICEMAT and YIELDMAT with basis 1 use one year length for all three fractions, the one YEARFRAC(issue, settlement, 1) divides by (365 or 366 within a year, else the average of the calendar years spanned), as Excel does (`pricemat_yieldmat_excel.rs`) |
