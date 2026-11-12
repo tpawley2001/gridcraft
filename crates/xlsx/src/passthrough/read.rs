@@ -1069,8 +1069,14 @@ enum AnchorKind {
     WebExtension,
 }
 
-/// The `graphicData` URI of a SmartArt graphic.
+/// The `graphicData` URI of a SmartArt graphic, and its Strict spelling (ISO/IEC 29500-1 Annex A).
 const URI_DIAGRAM: &str = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
+const URI_DIAGRAM_STRICT: &str = "http://purl.oclc.org/ooxml/drawingml/diagram";
+
+/// Whether a `graphicData` URI is a SmartArt graphic's (Transitional or Strict).
+fn is_diagram_uri(uri: Option<&str>) -> bool {
+    matches!(uri, Some(URI_DIAGRAM | URI_DIAGRAM_STRICT))
+}
 /// The `graphicData` URIs of charts.
 const URI_CHART: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 const URI_CHARTEX: &str = "http://schemas.microsoft.com/office/drawing/2014/chartex";
@@ -1096,7 +1102,7 @@ fn is_web_extension_anchor(frag: &str) -> bool {
 /// Whether an anchor fragment (`twoCellAnchor`, `oneCellAnchor`, `absoluteAnchor`) holds a
 /// SmartArt graphic frame.
 fn is_smartart_anchor(frag: &str) -> bool {
-    if !frag.contains(URI_DIAGRAM) {
+    if !frag.contains(URI_DIAGRAM) && !frag.contains(URI_DIAGRAM_STRICT) {
         return false;
     }
     let Ok(el) = xml::parse(frag.as_bytes()) else { return false };
@@ -1104,7 +1110,7 @@ fn is_smartart_anchor(frag: &str) -> bool {
         .iter()
         .filter(|c| c.name == "graphicFrame")
         .filter_map(|c| c.path(&["graphic", "graphicData"]))
-        .any(|gd| gd.attr("uri") == Some(URI_DIAGRAM))
+        .any(|gd| is_diagram_uri(gd.attr("uri")))
 }
 
 /// Whether an anchor fragment's object (the child after `from`/`to`/`pos`/`ext`) is a group.
@@ -1125,7 +1131,7 @@ fn group_unsupported(frag: &str) -> Option<&'static str> {
         if e.name == "graphicData" {
             match e.attr("uri") {
                 Some(URI_CHART) | Some(URI_CHARTEX) => return Some("it contains a chart"),
-                Some(URI_DIAGRAM) => return Some("it contains a SmartArt graphic"),
+                uri if is_diagram_uri(uri) => return Some("it contains a SmartArt graphic"),
                 _ => {}
             }
         }
@@ -1650,5 +1656,6 @@ mod group_tests {
         assert_eq!(group_unsupported(&group_with(&frame(URI_CHART))), Some("it contains a chart"));
         let nested = group_with(&format!("<xdr:grpSp>{}</xdr:grpSp>", frame(URI_DIAGRAM)));
         assert_eq!(group_unsupported(&nested), Some("it contains a SmartArt graphic"));
+        assert_eq!(group_unsupported(&group_with(&frame(URI_DIAGRAM_STRICT))), Some("it contains a SmartArt graphic"));
     }
 }

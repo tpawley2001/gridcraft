@@ -19,6 +19,7 @@ const NAMESPACES: &[(&str, &str)] = &[
     ("http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing", "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"),
     ("http://purl.oclc.org/ooxml/drawingml/chart", "http://schemas.openxmlformats.org/drawingml/2006/chart"),
     ("http://purl.oclc.org/ooxml/drawingml/picture", "http://schemas.openxmlformats.org/drawingml/2006/picture"),
+    ("http://purl.oclc.org/ooxml/drawingml/diagram", "http://schemas.openxmlformats.org/drawingml/2006/diagram"),
     ("http://purl.oclc.org/ooxml/officeDocument/customXml", "http://schemas.openxmlformats.org/officeDocument/2006/customXml"),
     ("http://purl.oclc.org/ooxml/officeDocument/extendedProperties", "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"),
     ("http://purl.oclc.org/ooxml/officeDocument/customProperties", "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"),
@@ -45,8 +46,9 @@ pub enum Untranslatable {
     Damaged,
 }
 
-/// `xml` with the Strict namespace URIs of its `xmlns`/`xmlns:*` declarations replaced by their
-/// Transitional spelling. Element text and other attributes are untouched.
+/// `xml` with the Strict namespace URIs of its `xmlns`/`xmlns:*` declarations, and of the `uri`
+/// attribute of `graphicData` elements, replaced by their Transitional spelling. Element text and
+/// other attributes (such as a diagram data part's `dataModelExt minVer`) are untouched.
 pub fn translate_namespaces(xml: &str) -> Result<Cow<'_, str>, Untranslatable> {
     if !xml.contains(STRICT_HOST) {
         return Ok(Cow::Borrowed(xml));
@@ -87,8 +89,11 @@ fn tag_end(s: &str) -> Option<usize> {
     None
 }
 
-/// Copies one tag to `out`, translating its namespace declarations.
+/// Copies one tag to `out`, translating its namespace declarations and, on a `graphicData`
+/// element (any prefix), a `uri` naming a known Strict namespace.
 fn translate_tag(tag: &str, out: &mut String) -> Result<(), Untranslatable> {
+    let element = tag.get(1..).unwrap_or("").split(|c: char| c.is_whitespace() || c == '/' || c == '>').next().unwrap_or("");
+    let graphic_data = element.rsplit(':').next() == Some("graphicData");
     let mut i = 0;
     while let Some(eq) = tag.get(i..).and_then(|s| s.find('=')).map(|j| i + j) {
         let name = tag.get(i..eq).unwrap_or("").trim_end();
@@ -104,6 +109,8 @@ fn translate_tag(tag: &str, out: &mut String) -> Result<(), Untranslatable> {
         let value = tag.get(open + 1..close).unwrap_or("");
         if name == "xmlns" || name.starts_with("xmlns:") {
             out.push_str(translate_namespace(value)?);
+        } else if graphic_data && name == "uri" {
+            out.push_str(NAMESPACES.iter().find(|(s, _)| *s == value).map_or(value, |(_, t)| *t));
         } else {
             out.push_str(value);
         }
@@ -229,6 +236,13 @@ mod tests {
             );
             assert_eq!(translate_namespaces(&x).as_deref(), Ok(want.as_str()));
         }
+    }
+
+    #[test]
+    fn graphic_data_uri_is_translated_and_other_values_are_not() {
+        let x = r#"<xdr:wsDr xmlns:a="http://purl.oclc.org/ooxml/drawingml/main"><a:graphicData uri="http://purl.oclc.org/ooxml/drawingml/diagram"><dgm:relIds xmlns:dgm="http://purl.oclc.org/ooxml/drawingml/diagram"/></a:graphicData><graphicData uri='http://purl.oclc.org/ooxml/drawingml/chart'/><a:graphicData uri="http://purl.oclc.org/ooxml/somethingNew/main"/><dsp:dataModelExt uri="http://purl.oclc.org/ooxml/drawingml/diagram" minVer="http://purl.oclc.org/ooxml/drawingml/diagram"/></xdr:wsDr>"#;
+        let want = r#"<xdr:wsDr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram"><dgm:relIds xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"/></a:graphicData><graphicData uri='http://schemas.openxmlformats.org/drawingml/2006/chart'/><a:graphicData uri="http://purl.oclc.org/ooxml/somethingNew/main"/><dsp:dataModelExt uri="http://purl.oclc.org/ooxml/drawingml/diagram" minVer="http://purl.oclc.org/ooxml/drawingml/diagram"/></xdr:wsDr>"#;
+        assert_eq!(translate_namespaces(x).as_deref(), Ok(want));
     }
 
     #[test]
