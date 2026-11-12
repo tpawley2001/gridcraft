@@ -4663,7 +4663,7 @@ fn row_height_and_column_width_take_a_list_of_areas() {
 fn freezing_panes_replaces_a_split() {
     let mut s = s();
     let split = gridcraft_model::SheetSplit { x: 12540.0, y: 0.0, top_left: None, active_pane: None };
-    s.doc_mut().unwrap().wb.sheets[0].split = Some(split.clone());
+    std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(0).unwrap().split = Some(split.clone());
     s.execute("view.unfreezePanes", json!({})).unwrap();
     assert_eq!(s.doc().unwrap().wb.sheets[0].split, Some(split), "unfreezing leaves a split alone");
     s.execute("view.freezeTopRow", json!({})).unwrap();
