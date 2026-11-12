@@ -468,6 +468,7 @@ impl KeptReader {
             || controls.vml_only_unmodelled
             || rels.iter().any(|r| is_kind(r, &["customProperty"]))
             || self.custom_views
+            || controls.data_consolidate
         {
             self.sheet_elements(cx, part, name, &rels, &mut p, &mut seen, controls);
         }
@@ -561,6 +562,13 @@ impl KeptReader {
             match self.custom_sheet_views(cx, name, x, rels, p, seen) {
                 Ok(x) => p.elements.push(PreservedXml { slot: "customSheetViews".into(), xml: x }),
                 Err(why) => cx.warn(format!("sheet \"{name}\": custom views were dropped: {why}")),
+            }
+        }
+        // The Data > Consolidate settings: sources in other workbooks name external relationships.
+        if let Some(x) = frags.iter().position(|(slot, _)| slot == SHEET_SLOT_CONSOLIDATE).map(|i| frags.remove(i).1) {
+            match self.data_consolidate(cx, name, x, rels, p, seen) {
+                Ok(x) => p.elements.push(PreservedXml { slot: SHEET_SLOT_CONSOLIDATE.into(), xml: x }),
+                Err(why) => cx.warn(format!("sheet \"{name}\": Consolidate settings were dropped: {why}")),
             }
         }
         // Controls and OLE objects are drawn from shapes in the legacy VML drawing. Controls only
@@ -743,6 +751,37 @@ impl KeptReader {
     /// A sheet's `<customSheetViews>` as kept: each view must have a `guid`. The printer settings
     /// parts its `<pageSetup r:id>`s name are kept with it; when they can't be, the (optional)
     /// `r:id`s are removed rather than left naming nothing.
+    /// The sheet's `<dataConsolidate>`, with the external relationships its `<dataRef r:id>`s
+    /// name kept. An id that names no external workbook path is dropped from its `<dataRef>`.
+    fn data_consolidate(
+        &mut self,
+        cx: &mut Ctx<'_>,
+        name: &str,
+        x: String,
+        rels: &[PreservedRel],
+        p: &mut Preserved,
+        seen: &mut HashSet<String>,
+    ) -> Result<String, String> {
+        let x = self.transitional(cx, &format!("sheet \"{name}\": Consolidate settings"), x)?;
+        let source = |id: &str| rels.iter().find(|r| r.id == id && r.external && is_kind(r, &[EXTERNAL_LINK_PATH]));
+        let mut roots: Vec<PreservedRel> = vec![];
+        let mut missing = false;
+        map_rel_ids(&x, &mut |id| {
+            match source(id) {
+                Some(r) if !roots.iter().any(|q| q.id == r.id) => roots.push(r.clone()),
+                Some(_) => {}
+                None => missing = true,
+            }
+            Some(id.to_string())
+        })
+        .ok_or("their XML is damaged")?;
+        let x = if missing { retain_rel_ids(&x, &|id| source(id).is_some()).ok_or("their XML is damaged")? } else { x };
+        if !roots.is_empty() {
+            self.keep(cx, p, &roots, seen)?;
+        }
+        Ok(x)
+    }
+
     fn custom_sheet_views(
         &mut self,
         cx: &mut Ctx<'_>,
@@ -881,7 +920,7 @@ fn scan_sheet(bytes: &[u8]) -> Option<SheetScan> {
                 let end = usize::try_from(reader.buffer_position()).ok()?;
                 let wanted = matches!(
                     local.as_slice(),
-                    b"customProperties" | b"customSheetViews" | b"picture" | b"oleObjects" | b"controls" | b"AlternateContent"
+                    b"customProperties" | b"customSheetViews" | b"dataConsolidate" | b"picture" | b"oleObjects" | b"controls" | b"AlternateContent"
                 );
                 if wanted && end.saturating_sub(start) <= MAX_FRAGMENT {
                     let frag = text.get(start..end)?;
@@ -1192,7 +1231,7 @@ fn push_fragment(out: &mut SheetScan, frag: &str, local: &[u8], decls: &[(String
     } else {
         String::from_utf8_lossy(local).into_owned()
     };
-    let known = [SHEET_SLOTS, SHEET_SLOTS_EARLY, SHEET_SLOTS_MID].iter().any(|slots| slots.contains(&slot.as_str()));
+    let known = [SHEET_SLOTS, SHEET_SLOTS_EARLY, SHEET_SLOTS_MID, &[SHEET_SLOT_CONSOLIDATE]].iter().any(|slots| slots.contains(&slot.as_str()));
     if known && !out.fragments.iter().any(|(s, _)| *s == slot) {
         out.fragments.push((slot, frag));
     }
@@ -1233,6 +1272,12 @@ pub(crate) fn custom_workbook_views_xml(el: &xml::El, active: &dyn Fn(u32) -> u3
 /// An XML fragment without its relationship-id attributes (any attribute in the relationships
 /// namespace). `None` when the fragment is damaged.
 fn drop_rel_ids(x: &str) -> Option<String> {
+    retain_rel_ids(x, &|_| false)
+}
+
+/// An XML fragment with only the relationship-id attributes whose value passes `keep`. `None`
+/// when the fragment is damaged.
+fn retain_rel_ids(x: &str, keep: &dyn Fn(&str) -> bool) -> Option<String> {
     let mut reader = Reader::from_str(x);
     let mut writer = Writer::new(Vec::with_capacity(x.len()));
     let mut prefixes: HashSet<Vec<u8>> = HashSet::new();
@@ -1249,7 +1294,8 @@ fn drop_rel_ids(x: &str) -> Option<String> {
         for a in e.attributes().with_checks(false) {
             let a = a.ok()?;
             let key = a.key.as_ref();
-            if key.starts_with(b"xmlns") || !a.key.prefix().is_some_and(|p| prefixes.contains(p.as_ref())) {
+            let is_rel = !key.starts_with(b"xmlns") && a.key.prefix().is_some_and(|p| prefixes.contains(p.as_ref()));
+            if !is_rel || std::str::from_utf8(&a.value).is_ok_and(keep) {
                 out.push_attribute(Attribute { key: QName(key), value: a.value.clone() });
             }
         }

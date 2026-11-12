@@ -138,6 +138,11 @@ const SHEET_SLOTS_EARLY: &[&str] = &["customProperties"];
 /// Kept sheet elements that come between `<autoFilter>`/`<sortState>` and `<mergeCells>` in
 /// CT_Worksheet: the sheet's part of the Custom Views (ECMA-376 Part 1 §18.3.1.28).
 const SHEET_SLOTS_MID: &[&str] = &["customSheetViews"];
+/// The sheet's Data > Consolidate settings (ECMA-376 Part 1 §18.3.1.29), just before
+/// `<customSheetViews>` in CT_Worksheet.
+const SHEET_SLOT_CONSOLIDATE: &str = "dataConsolidate";
+/// The relationship kind of a `<dataRef r:id>`: a source range in another workbook.
+const EXTERNAL_LINK_PATH: &str = "externalLinkPath";
 /// Attributes of `<customWorkbookView>` (CT_CustomWorkbookView, ECMA-376 Part 1 §18.2.3).
 const CUSTOM_WORKBOOK_VIEW_ATTRS: &[&str] = &[
     "name",

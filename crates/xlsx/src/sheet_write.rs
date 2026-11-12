@@ -205,7 +205,8 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
     let kept = write_sheet_printing(&mut s, sheet, &part, &mut rels, out);
     // The sheet's part of the Custom Views goes between <autoFilter> and <mergeCells>; it is known
     // once the kept relationships are added.
-    let custom_views = kept.custom_sheet_views(&crate::passthrough::custom_view_guids(wb));
+    // The Data > Consolidate settings come just before it.
+    let custom_views = kept.data_consolidate() + &kept.custom_sheet_views(&crate::passthrough::custom_view_guids(wb));
     if !custom_views.is_empty() && s.is_char_boundary(custom_views_at) {
         s.insert_str(custom_views_at, &custom_views);
     }
