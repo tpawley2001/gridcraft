@@ -77,6 +77,7 @@ mod sheet_name_quoting;
 mod side_by_side;
 mod solver_population_report;
 mod sparse_clear_invalidation;
+mod spill_operator_single_value_excel;
 mod stat_one_cell_ref;
 mod stored_list_shape;
 mod structural_edit_rewrite;
