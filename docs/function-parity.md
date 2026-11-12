@@ -37,6 +37,7 @@ Excel's worksheet functions, category by category, against GridCraft's function 
 
 | Category | Excel | Ours | Working | % working | Missing |
 |---|---|---|---|---|---|
+| 2026-11-12 | minor | MAKEARRAY with a fractional rows or cols (such as 2.7) gives `#VALUE!` instead of rounding down, as Excel does (`makearray_size_excel.rs`) |
 | Statistical | 111 | 111 | 111 | 100% | — |
 | Math and trigonometry | 80 | 80 | 80 | 100% | — |
 | Financial | 55 | 55 | 55 | 100% | — |

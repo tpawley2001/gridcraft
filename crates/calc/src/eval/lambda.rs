@@ -169,9 +169,13 @@ impl<'h> Evaluator<'h> {
                     return err(CellError::Value);
                 }
                 let (rows, cols) = match (self.arg_num(args, 0, 0.0), self.arg_num(args, 1, 0.0)) {
-                    (Ok(r), Ok(c)) => (r.trunc(), c.trunc()),
+                    (Ok(r), Ok(c)) => (r, c),
                     (Err(e), _) | (_, Err(e)) => return err(e),
                 };
+                // Sizes must be whole numbers: a fractional size is #VALUE!, not rounded down.
+                if rows.fract() != 0.0 || cols.fract() != 0.0 {
+                    return err(CellError::Value);
+                }
                 if rows < 1.0 || cols < 1.0 || rows * cols > MAX_CELLS as f64 {
                     return err(CellError::Value);
                 }
