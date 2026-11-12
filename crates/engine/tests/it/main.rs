@@ -52,6 +52,7 @@ mod hidden_sheet_navigation;
 mod ink_roundtrip;
 mod lambda_value_groupby_excel;
 mod legacy_array_value_positions;
+mod legacy_groupby_filter_array;
 mod legacy_implicit_intersection;
 mod legacy_t_sumproduct;
 mod line_count_overflow;

@@ -914,6 +914,10 @@ fn param(name: &str, i: usize, functions: FunctionInfo) -> Param {
         // LOOKUP's vectors and AGGREGATE's array form evaluate their arguments as arrays.
         "LOOKUP" if i > 0 => Param::Array,
         "AGGREGATE" if i == 2 => Param::Array,
+        // GROUPBY's and PIVOTBY's filter_array is evaluated as an array (Excel saves
+        // `GROUPBY(…,E1:E10>3)` without dynamic-array metadata and filters by every row).
+        "GROUPBY" if i == 6 => Param::Array,
+        "PIVOTBY" if i == 9 => Param::Array,
         "ROW" | "COLUMN" | "ROWS" | "COLUMNS" | "AREAS" | "ISREF" | "ISFORMULA" | "FORMULATEXT" | "SHEET" | "SHEETS" | "TRIMRANGE"
         | "ANCHORARRAY" => Param::Ref,
         "CELL" | "GETPIVOTDATA" if i == 1 => Param::Ref,
