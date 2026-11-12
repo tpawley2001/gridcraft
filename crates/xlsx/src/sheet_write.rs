@@ -808,6 +808,12 @@ fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcr
         if info.collapsed {
             s.push_str(" collapsed=\"1\"");
         }
+        if info.thick_top {
+            s.push_str(" thickTop=\"1\"");
+        }
+        if info.thick_bottom {
+            s.push_str(" thickBot=\"1\"");
+        }
         if cells.is_empty() {
             s.push_str("/>");
             continue;
