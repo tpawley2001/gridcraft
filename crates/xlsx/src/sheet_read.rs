@@ -238,6 +238,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
                     sheet.outline_apply_styles = o.flag("applyStyles", false);
                 }
                 fit_to_page = e.child("pageSetUpPr").is_some_and(|p| p.flag("fitToPage", false));
+                sheet.print.auto_page_breaks = e.child("pageSetUpPr").is_none_or(|p| p.flag("autoPageBreaks", true));
             }
             "sheetViews" => read_views(e, &mut sheet),
             "sheetFormatPr" => read_sheet_format(e, &mut sheet),
@@ -301,6 +302,11 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
                     let w = e.attr_u32("fitToWidth").unwrap_or(1).min(32767) as u16;
                     let h = e.attr_u32("fitToHeight").unwrap_or(1).min(32767) as u16;
                     sheet.print.fit_to = Some((w, h));
+                } else if e.attr("fitToWidth").is_some() || e.attr("fitToHeight").is_some() {
+                    // Fit To is off but the file keeps its page counts: hold them for the save.
+                    let w = e.attr_u32("fitToWidth").unwrap_or(1).min(32767) as u16;
+                    let h = e.attr_u32("fitToHeight").unwrap_or(1).min(32767) as u16;
+                    sheet.print.fit_to_stored = Some((w, h)).filter(|&f| f != (1, 1));
                 }
             }
             "headerFooter" => read_header_footer(e, &mut sheet.print),

@@ -44,6 +44,7 @@ mod drawing_hyperlinks;
 mod dxf_font_charset;
 mod encrypted_tests;
 mod equation_tests;
+mod fit_to_stored_tests;
 mod fixtures;
 mod form_check_option_controls_tests;
 mod form_list_controls_tests;

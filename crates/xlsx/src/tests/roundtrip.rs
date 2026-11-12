@@ -314,6 +314,8 @@ fn sample() -> Workbook {
         title_cols: Some((0, 0)),
         scale: 80,
         fit_to: Some((1, 0)),
+        fit_to_stored: None,
+        auto_page_breaks: false,
         gridlines: true,
         headings: true,
         center_h: true,

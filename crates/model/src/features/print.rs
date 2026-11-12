@@ -26,6 +26,15 @@ pub struct PrintSettings {
     /// Percent scale, or fit to pages (wide, tall).
     pub scale: u16,
     pub fit_to: Option<(u16, u16)>,
+    /// Fit To page counts (wide, tall; 0 = automatic) a file keeps while Fit To is off
+    /// (`fit_to` is `None`), written back so choosing Fit To later starts from them. Never
+    /// affects printing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit_to_stored: Option<(u16, u16)>,
+    /// `pageSetUpPr autoPageBreaks`: show automatic page break lines (on unless a file turned
+    /// it off).
+    #[serde(default = "yes")]
+    pub auto_page_breaks: bool,
     pub gridlines: bool,
     pub headings: bool,
     pub center_h: bool,
@@ -283,6 +292,8 @@ impl Default for PrintSettings {
             title_cols: None,
             scale: 100,
             fit_to: None,
+            fit_to_stored: None,
+            auto_page_breaks: true,
             gridlines: false,
             headings: false,
             center_h: false,
