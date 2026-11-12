@@ -623,17 +623,24 @@ fn paint_sparklines(q: &QuadrantPaint<'_>, range: RangeRef) {
     let si = q.sheet_index;
     let sh = q.sheet;
     // Sparklines.
+    let values_of = |sp: &gridcraft_engine::model::Sparkline| -> Vec<Option<f64>> {
+        match gridcraft_engine::calc::evaluate(wb, si, sp.cell, &sp.source) {
+            Value::Array(a) => a.data.iter().map(Value::as_f64).collect(),
+            v => vec![v.as_f64()],
+        }
+    };
+    if !sh.sparklines.iter().any(|sp| range.contains(sp.cell)) {
+        return;
+    }
+    let groups = gridcraft_chart::SparklineGroupLimits::new(&sh.sparklines, values_of);
     for sp in &sh.sparklines {
         if !range.contains(sp.cell) {
             continue;
         }
         let rect = geo.cell_rect(sh, sp.cell).shrink(3.0);
-        let vals: Vec<Option<f64>> = match gridcraft_engine::calc::evaluate(wb, si, sp.cell, &sp.source) {
-            Value::Array(a) => a.data.iter().map(Value::as_f64).collect(),
-            v => vec![v.as_f64()],
-        };
-        let col = sp.color.resolve(&wb.theme).unwrap_or([0x2B, 0x7C, 0xD3]);
-        let prims = gridcraft_chart::render_sparkline(sp.kind, &vals, [col[0], col[1], col[2], 255], sp.markers, rect.width(), rect.height());
+        let vals = values_of(sp);
+        let style = gridcraft_chart::sparkline_style(sp, &wb.theme, [0x2B, 0x7C, 0xD3], &vals, &groups);
+        let prims = gridcraft_chart::render_sparkline_styled(sp.kind, &vals, &style, rect.width(), rect.height());
         crate::chartview::paint_prims(p, rect.min, &prims, 1.0);
     }
 }
