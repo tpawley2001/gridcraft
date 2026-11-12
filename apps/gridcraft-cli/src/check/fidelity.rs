@@ -12,7 +12,7 @@ pub fn round_trip(wb: &Workbook, source: &[u8], opts: &Options) -> RoundTrip {
 
 /// The name a round trip of `source_name` is saved under: the source's package kind, so a
 /// macro-enabled file keeps its VBA project (an `.xlsx` save drops it by design).
-pub(super) fn round_trip_name(source_name: &str) -> &'static str {
+pub(super) fn round_trip_name(source_name: &str, _wb: &Workbook) -> &'static str {
     let ext = source_name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
     match ext.as_str() {
         "xlsm" => "roundtrip.xlsm",
