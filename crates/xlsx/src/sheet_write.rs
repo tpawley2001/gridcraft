@@ -702,51 +702,56 @@ fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut O
         s.push_str("</dataValidations>");
     }
     if !sheet.hyperlinks.is_empty() {
-        s.push_str("<hyperlinks>");
-        for (c, h) in &sheet.hyperlinks {
-            let t = h.target.trim();
-            if t.is_empty() {
-                continue;
-            }
-            // `external` is what the file said, or what Insert › Link chose; the scheme test covers
-            // links made before the flag existed.
-            let external = h.external
-                || t.contains("://")
-                || t.to_ascii_lowercase().starts_with("mailto:")
-                || t.starts_with("\\\\")
-                || t.to_ascii_lowercase().starts_with("file:");
-            let _ = write!(s, "<hyperlink ref=\"{}\"", c.a1());
-            if external {
-                let (url, loc) = match t.split_once('#') {
-                    Some((u, l)) if !u.is_empty() => (u, Some(l)),
-                    _ => (t, None),
-                };
-                let id = rels.add_external("hyperlink", url);
-                let _ = write!(s, " r:id=\"{id}\"");
-                if let Some(l) = loc {
-                    let _ = write!(s, " location=\"{}\"", esc_attr(l));
-                }
-            } else {
-                let _ = write!(s, " location=\"{}\"", esc_attr(t.trim_start_matches('#')));
-            }
-            if let Some(tt) = &h.tooltip {
-                let _ = write!(s, " tooltip=\"{}\"", esc_attr(tt));
-            }
-            // The display string the file came with; a link inside the workbook made here shows its location.
-            match h.display.as_deref() {
-                Some(d) => {
-                    let _ = write!(s, " display=\"{}\"", esc_attr(d));
-                }
-                None if !external => {
-                    let _ = write!(s, " display=\"{}\"", esc_attr(t.trim_start_matches('#')));
-                }
-                None => {}
-            }
-            s.push_str("/>");
-        }
-        s.push_str("</hyperlinks>");
+        write_hyperlinks(s, sheet, rels);
     }
     (prio, custom_views_at)
+}
+
+/// The sheet's `<hyperlinks>` (ECMA-376 Part 1 §18.3.1.48), adding a relationship per external link.
+fn write_hyperlinks(s: &mut String, sheet: &Sheet, rels: &mut Rels) {
+    s.push_str("<hyperlinks>");
+    for (c, h) in &sheet.hyperlinks {
+        let t = h.target.trim();
+        if t.is_empty() {
+            continue;
+        }
+        // `external` is what the file said, or what Insert › Link chose; the scheme test covers
+        // links made before the flag existed.
+        let external = h.external
+            || t.contains("://")
+            || t.to_ascii_lowercase().starts_with("mailto:")
+            || t.starts_with("\\\\")
+            || t.to_ascii_lowercase().starts_with("file:");
+        let _ = write!(s, "<hyperlink ref=\"{}\"", c.a1());
+        if external {
+            let (url, loc) = match t.split_once('#') {
+                Some((u, l)) if !u.is_empty() => (u, Some(l)),
+                _ => (t, None),
+            };
+            let id = rels.add_external("hyperlink", url);
+            let _ = write!(s, " r:id=\"{id}\"");
+            if let Some(l) = loc {
+                let _ = write!(s, " location=\"{}\"", esc_attr(l));
+            }
+        } else {
+            let _ = write!(s, " location=\"{}\"", esc_attr(t.trim_start_matches('#')));
+        }
+        if let Some(tt) = &h.tooltip {
+            let _ = write!(s, " tooltip=\"{}\"", esc_attr(tt));
+        }
+        // The display string the file came with; a link inside the workbook made here shows its location.
+        match h.display.as_deref() {
+            Some(d) => {
+                let _ = write!(s, " display=\"{}\"", esc_attr(d));
+            }
+            None if !external => {
+                let _ = write!(s, " display=\"{}\"", esc_attr(t.trim_start_matches('#')));
+            }
+            None => {}
+        }
+        s.push_str("/>");
+    }
+    s.push_str("</hyperlinks>");
 }
 
 struct SheetCellData<'a> {
