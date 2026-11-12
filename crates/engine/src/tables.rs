@@ -343,6 +343,7 @@ pub(crate) fn sync_headers(cx: &mut crate::cmd::Ctx) {
         if name != text || !is_text {
             let style = sh.style_id(c);
             sh.cells.set(c, Cell { value: gridcraft_core::Value::text(name.as_str()), style, ..Default::default() });
+            sh.cell_mdx.remove(&c);
         }
         if !old.eq_ignore_ascii_case(&name) {
             renames.push((si, table, range, old, name));

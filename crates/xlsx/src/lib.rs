@@ -28,6 +28,7 @@ mod drawing;
 mod external_link;
 mod feature_bags;
 mod fmla;
+mod mdx_metadata;
 mod ods;
 mod ods_formula;
 mod ods_page;

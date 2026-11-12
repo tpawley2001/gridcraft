@@ -150,3 +150,16 @@ impl Preserved {
         self.anchors.iter().fold(parts, |n, a| n.saturating_add(a.xml.len()))
     }
 }
+
+/// Cube-formula value metadata of `xl/metadata.xml` (ECMA-376 Part 1, 18.9: the `XLMDX` metadata
+/// type, `metadataStrings` and `mdxMetadata`), kept as read so an open + save keeps the cells'
+/// link to their cube. Cells refer to a record by index ([`crate::Sheet::cell_mdx`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MdxMetadata {
+    /// The attributes of the `XLMDX` `metadataType`, in file order.
+    pub type_attrs: Vec<(String, String)>,
+    /// `metadataStrings`, in order (`<s v>`; MDX records name them by index).
+    pub strings: Vec<String>,
+    /// Each `<mdx>` record of `mdxMetadata`, in order, as raw XML.
+    pub records: Vec<String>,
+}

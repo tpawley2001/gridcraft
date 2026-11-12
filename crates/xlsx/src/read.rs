@@ -34,6 +34,8 @@ pub struct Ctx<'a> {
     pub num_fmts: std::collections::HashMap<u32, String>,
     /// Value metadata blocks, indexed by the worksheet's one-based `vm` attribute.
     pub cell_pictures: Vec<Option<crate::richdata::RichCell>>,
+    /// Cube-formula (MDX) value metadata, and the record each value-metadata block names.
+    pub mdx: crate::mdx_metadata::MdxIn,
     /// x14 conditional-format ids of the current sheet's data bars, with the index of the rule in `cond_formats`.
     pub cf_ext_ids: Vec<(String, usize)>,
     /// Cells of the worksheet being read whose formulas lack dynamic-array metadata (legacy
@@ -71,6 +73,7 @@ impl<'a> Ctx<'a> {
             next_id: 1,
             num_fmts: Default::default(),
             cell_pictures: vec![],
+            mdx: Default::default(),
             cf_ext_ids: vec![],
             legacy_formulas: vec![],
             shared_formula_bytes: 0,
@@ -365,10 +368,12 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
             vec![]
         }
     };
+    cx.mdx = crate::mdx_metadata::read(&mut cx, &wb_rels);
     // The code of Python cells, which their formulas name by index.
     cx.python = crate::python_part::read(&mut cx, &wb_rels)?;
     let mut wb = Workbook::new();
     wb.sheets.clear();
+    wb.mdx_metadata = cx.mdx.metadata.clone();
 
     read_workbook_styles(&mut cx, &mut wb, &wb_rels, &mut kept)?;
     read_shared_strings(&mut cx, &wb_rels)?;
