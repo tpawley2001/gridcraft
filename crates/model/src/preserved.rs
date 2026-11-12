@@ -70,6 +70,24 @@ pub struct PreservedSheet {
     pub sheet_id: u32,
 }
 
+/// A PivotTable read from a file, with the parts it was read from: when its cache can't be rebuilt
+/// on save (the source sheet, table or name is gone), these are written back unchanged, as Excel
+/// keeps such a PivotTable with its last results (sheet owner only).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PreservedPivot {
+    /// The model PivotTable's id and name when it was read (the PivotTable it belongs to).
+    pub id: u32,
+    pub name: String,
+    /// The `pivotTableDefinition` part.
+    pub table: PreservedPart,
+    /// Its `cacheId` in the source file.
+    pub cache_id: u32,
+    /// The `pivotCacheDefinition` part; its `rels` hold the relationship to `records`.
+    pub cache: PreservedPart,
+    /// The `pivotCacheRecords` part, when the file had one.
+    pub records: Option<PreservedPart>,
+}
+
 /// Unmodelled content kept for one owner (the workbook, which also holds package-root content,
 /// or one sheet).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -94,6 +112,8 @@ pub struct Preserved {
     pub drawing_rels: Vec<PreservedRel>,
     /// The digital signature of the workbook's VBA project (workbook owner only).
     pub vba_signature: Option<PreservedVbaSignature>,
+    /// PivotTables of the sheet with the parts they were read from (sheet owner only).
+    pub pivots: Vec<PreservedPivot>,
 }
 
 /// The signature parts of a VBA project (`xl/vbaProject.bin` relationships), kept with the project
@@ -119,11 +139,14 @@ impl Preserved {
             && self.sheets.is_empty()
             && self.anchors.is_empty()
             && self.vba_signature.is_none()
+            && self.pivots.is_empty()
     }
     /// Total bytes held.
     pub fn byte_len(&self) -> usize {
         let signature = self.vba_signature.iter().flat_map(|s| &s.parts);
         let parts = self.parts.iter().chain(self.vml.iter()).chain(signature).fold(0usize, |n, p| n.saturating_add(p.data.len()));
+        let pivots = self.pivots.iter().flat_map(|p| [Some(&p.table), Some(&p.cache), p.records.as_ref()]).flatten();
+        let parts = pivots.fold(parts, |n, p| n.saturating_add(p.data.len()));
         self.anchors.iter().fold(parts, |n, a| n.saturating_add(a.xml.len()))
     }
 }

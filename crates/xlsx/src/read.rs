@@ -444,12 +444,17 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
             }
         };
         legacy_formulas.push((wb.sheets.len(), std::mem::take(&mut cx.legacy_formulas)));
+        let mut kept_pivots = Vec::new();
         match crate::pivot::read_pivots(&mut cx, &mut pivot_caches, &rel.target, &name) {
-            Ok(p) => sheet.pivots = p,
+            Ok((p, k)) => (sheet.pivots, kept_pivots) = (p, k),
             Err(IoError::TooLarge(m)) => return Err(IoError::TooLarge(m)),
             Err(e) => cx.warn(format!("PivotTables on sheet \"{name}\" could not be read: {e}")),
         }
         sheet.preserved = kept.sheet(&mut cx, &rel.target, &name, &read_controls);
+        if !kept_pivots.is_empty() {
+            let pivots = gridcraft_model::Preserved { pivots: kept_pivots, ..Default::default() };
+            crate::passthrough::merge_preserved(&mut sheet.preserved, Some(std::sync::Arc::new(pivots)));
+        }
         sheet.file_id = se.attr_u32("sheetId").unwrap_or(0);
         sheet.visibility = visibility(se);
         file_to_model.push(Some(wb.sheets.len()));
@@ -549,6 +554,8 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
         p.vba_signature = Some(sig);
         wb.preserved = Some(Arc::new(p));
     }
+    // PivotTables whose cache is rebuilt on save don't need their original parts.
+    crate::pivot::drop_rebuildable_kept(&mut wb);
     crate::web_publishing::read(&wb_xml, &mut wb);
     if let Some(w) = cx.python.warning() {
         cx.warn(w);
