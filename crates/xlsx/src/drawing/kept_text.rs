@@ -9,6 +9,8 @@
 
 use std::fmt::Write as _;
 
+use gridcraft_model::{KeptShapeText, ShapeFormat};
+
 use crate::xml::{El, esc, esc_attr};
 
 /// Longest kept body, in bytes of XML; a longer one is written the usual way.
@@ -186,6 +188,11 @@ const ATTRIBUTES: &[&str] = &[
 
 fn known_element(name: &str) -> bool {
     ELEMENTS.contains(&name) || super::DML_COLOR_TRANSFORMS.iter().any(|(n, _)| *n == name)
+}
+
+/// The kept body of `tb`, read as `text` with the run-level format `f`.
+pub(super) fn kept(tb: &El, text: &str, f: &ShapeFormat) -> Option<KeptShapeText> {
+    kept_body_xml(tb).map(|xml| KeptShapeText::new(xml, text.to_string(), f))
 }
 
 /// The XML after `a:bodyPr` of the text body `tb` to keep, or `None` when it holds anything that
