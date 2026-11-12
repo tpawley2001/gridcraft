@@ -90,6 +90,7 @@ mod table_resize_overlap;
 mod table_total_row_last_row;
 mod text_elapsed_tokens_excel;
 mod text_excel_edges;
+mod text_positions_utf16_excel;
 mod trace_error;
 mod workbook_author;
 mod wrap_row_height;
