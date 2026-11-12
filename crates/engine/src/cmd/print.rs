@@ -571,6 +571,8 @@ fn page_setup(s: &mut Session, p: &Json) -> Result<Json> {
 }
 
 #[cfg(test)]
+mod empty_pages_tests;
+#[cfg(test)]
 mod fit_manual_breaks_tests;
 #[cfg(test)]
 mod indent_width_tests;
