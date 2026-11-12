@@ -26,8 +26,15 @@ gridcraft-ui-egui = { path = "crates/ui-egui" }
 gridcraft-mcp = { path = "crates/mcp" }
 gridcraft-pdf = { path = "crates/pdf" }
 gridcraft-math = { path = "crates/math" }
-# Every craft-libs crate (craft-window here, craft-ui in ui-egui, craft-print in the app,
-# craft-web-api and craft-web-host in the web app) comes from storytold/craft-libs.
+# Every craft-libs crate (craft-window and the file-format crates here, craft-ui in ui-egui,
+# craft-print in the app, craft-web-api and craft-web-host in the web app) comes from one
+# craft-libs revision.
+# Compound files ([MS-CFB]) and password-encrypted OOXML packages ([MS-OFFCRYPTO]).
+craft-cfb = { git = "https://github.com/storytold/craft-libs", rev = "bb57d422d0bc842cbde430955825553ab7b976f4", version = "0.1.0" }
+craft-offcrypto = { git = "https://github.com/storytold/craft-libs", rev = "bb57d422d0bc842cbde430955825553ab7b976f4", version = "0.1.0" }
+# Delimited text (CSV, TSV) and SYLK; `crates/xlsx/src/csv.rs` and `crates/engine/src/io/sylk.rs`
+# turn them into workbooks.
+craft-csv = { git = "https://github.com/storytold/craft-libs", rev = "bb57d422d0bc842cbde430955825553ab7b976f4", version = "0.1.0" }
 
 # foundation
 thiserror = "2"
@@ -41,10 +48,9 @@ rayon = "1"
 regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
 quick-xml = "0.41"
 zip = { version = "3", default-features = false, features = ["deflate"] }
-sha2 = { version = "0.11", default-features = false }
-# Decrypting password-protected workbooks ([MS-OFFCRYPTO]): AES and SHA-1, pure Rust (wasm-safe).
-aes = { version = "0.9", default-features = false }
+# SHA-1 for the in-tree .xls reader's RC4 CryptoAPI passwords (`crates/xlsx/src/xls_crypto.rs`).
 sha1 = { version = "0.11", default-features = false }
+sha2 = { version = "0.11", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 # equations: RaTeX (MIT) lays LaTeX out as positioned glyphs, rules and paths. Exact pins: it is
