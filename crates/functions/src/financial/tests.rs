@@ -31,6 +31,11 @@ fn tvm() {
     close_tol(ev("CUMPRINC", vec![n(0.09 / 12.0), n(360.0), n(125000.0), n(1.0), n(1.0), n(0.0)]), -68.27827118, 1e-9);
     is_err(ev("CUMIPMT", vec![n(0.0), n(360.0), n(125000.0), n(1.0), n(1.0), n(0.0)]), CellError::Num);
     is_err(ev("CUMIPMT", vec![n(0.01), n(360.0), n(125000.0), n(1.0), n(1.0), n(2.0)]), CellError::Num);
+    // Fractional periods: start rounds up, end rounds down, an empty span is 0; nper keeps its fraction.
+    close_tol(ev("CUMIPMT", vec![n(0.09 / 12.0), n(360.0), n(125000.0), n(13.2), n(24.0), n(0.0)]), -10204.137103548666, 1e-9);
+    close_tol(ev("CUMIPMT", vec![n(0.09 / 12.0), n(360.0), n(125000.0), n(13.5), n(13.7), n(0.0)]), 0.0, 1e-12);
+    close_tol(ev("CUMIPMT", vec![n(0.09 / 12.0), n(360.2), n(125000.0), n(13.0), n(24.0), n(0.0)]), -11135.415973843741, 1e-9);
+    is_err(ev("CUMIPMT", vec![n(0.09 / 12.0), n(360.0), n(125000.0), n(0.5), n(1.0), n(0.0)]), CellError::Num);
 }
 
 /// PMT within about 4 ULPs of Excel's (Value2 of synthetic probes; libm differs by an ULP across
