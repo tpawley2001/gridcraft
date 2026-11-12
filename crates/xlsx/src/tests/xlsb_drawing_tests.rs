@@ -197,3 +197,38 @@ fn sheet_without_drawing_record_has_no_objects() {
     assert!(s.images.is_empty() && s.shapes.is_empty() && s.charts.is_empty());
     assert!(!report.warnings.iter().any(|w| w.contains("drawing")), "{:?}", report.warnings);
 }
+
+/// An XLSB sheet keeps no VML drawing, so an OLE object's DrawingML placeholder (`compatSp`)
+/// would name a shape the saved file doesn't have (Excel repairs such a file): it is dropped with
+/// a warning, and the rectangle beside it is saved.
+#[test]
+fn compat_sp_placeholder_is_dropped_and_the_shape_beside_it_kept() {
+    let rect = r#"<xdr:sp macro="" textlink=""><xdr:nvSpPr><xdr:cNvPr id="2" name="Start Button"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1219200" cy="381000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:sp>"#;
+    let frame = r#"<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="1025" name="Object 1" hidden="1"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/drawing/2010/compatibility"><com14:compatSp xmlns:com14="http://schemas.microsoft.com/office/drawing/2010/compatibility" spid="_x0000_s1025"/></a:graphicData></a:graphic></xdr:graphicFrame>"#;
+    let ole = format!(
+        r#"<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main" Requires="a14">{}</mc:Choice><mc:Fallback/></mc:AlternateContent>"#,
+        anchor(5, 1, 7, 5, frame)
+    );
+    let xml = drawing(&format!("{}{ole}", anchor(1, 1, 3, 3, rect)));
+    let bytes = package(
+        &sheet(Some("rId7")),
+        &[("xl/worksheets/_rels/sheet1.bin.rels", SHEET_RELS.as_bytes()), ("xl/drawings/drawing1.xml", xml.as_bytes())],
+    );
+    let (wb, report) = read_xlsb(&bytes).unwrap();
+    cells_intact(&wb);
+    assert!(
+        report.warnings.iter().any(|w| w.contains("markup-compatibility") && w.contains("dropped")),
+        "the dropped placeholder is reported: {:?}",
+        report.warnings
+    );
+    let out = crate::write_xlsx(&wb).unwrap();
+    let mut pkg = crate::package::Package::open(&out).unwrap();
+    let mut drawings = String::new();
+    for n in pkg.names() {
+        if n.starts_with("xl/drawings/") && n.ends_with(".xml") && !n.contains("_rels") {
+            drawings.push_str(&String::from_utf8(pkg.read(&n).unwrap().unwrap()).unwrap());
+        }
+    }
+    assert!(!drawings.contains("compatSp"), "no placeholder for a shape that isn't saved: {drawings}");
+    assert!(drawings.contains("Start Button"), "the rectangle is kept: {drawings}");
+}
