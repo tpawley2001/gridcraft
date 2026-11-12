@@ -198,6 +198,16 @@ fn mat_terms(a: &[Arg], sys: DateSystem) -> R<(f64, f64, f64, f64, f64)> {
     if s >= m || issue >= s || rate < 0.0 || x < 0.0 {
         return Err(CellError::Num);
     }
+    if b == 1 {
+        // Actual/actual: one year length for all three fractions, the one
+        // YEARFRAC(issue, settlement, 1) divides by.
+        let ai = year_frac(sys, issue, s, 1)?;
+        if ai <= 0.0 {
+            return Err(CellError::Num);
+        }
+        let year = (s - issue) / ai;
+        return Ok(((m - issue) / year, (m - s) / year, ai, rate, x));
+    }
     let dim = year_frac(sys, issue, m, b)?;
     let dsm = year_frac(sys, s, m, b)?;
     let ai = year_frac(sys, issue, s, b)?;

@@ -157,6 +157,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-11 | minor | PRICEMAT and YIELDMAT with basis 1 use one year length for all three fractions, the one YEARFRAC(issue, settlement, 1) divides by (365 or 366 within a year, else the average of the calendar years spanned), as Excel does (`pricemat_yieldmat_excel.rs`) |
 | 2026-11-11 | minor | DISC, INTRATE, RECEIVED, PRICEDISC and YIELDDISC with basis 1 over more than a year divide by the average length of the calendar years spanned, like YEARFRAC (365.3 for 2008-2017), as Excel does (`disc_family_basis`) |
 | 2026-11-11 | minor | G0304: ACCRINT matches Excel 365 for calc_method FALSE (a settlement before first_interest gives a negative amount) and for every basis: the span after the coupon date before settlement (or one period before first_interest) is one ratio over that period's length, and each earlier quasi-coupon period counts on its own (`accrint_excel.rs`) |
 | 2026-11-11 | minor | G0301: with several error arguments, SUM, PRODUCT, MAX/MIN, AVERAGE, STDEV/VAR, AND/OR/XOR, TEXTJOIN, CONCAT and NPV return the first error of a computed argument (a literal, `-A1`, `A1+0`, `1/0`, a function result) before any error inside a reference, like Excel (`SUM(<#REF!>,-<#VALUE!>)` is `#VALUE!`); functions with fixed arguments and operators keep the first error in order (`error_precedence.rs`) |
