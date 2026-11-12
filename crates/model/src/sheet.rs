@@ -141,6 +141,10 @@ pub struct Sheet {
     pub phonetic_props: Option<crate::PhoneticProps>,
     /// Frozen rows and columns (top/left).
     pub freeze: Option<(u32, u32)>,
+    /// The frozen panes were a split window before freezing (`<pane state="frozenSplit">`,
+    /// ECMA-376 Part 1 §18.18.53), so unfreezing restores the split. Only meaningful with `freeze`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub freeze_was_split: bool,
     /// A split window that is not frozen; `None` whenever `freeze` is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub split: Option<SheetSplit>,
@@ -315,6 +319,7 @@ impl Sheet {
             merges: vec![],
             phonetic_props: None,
             freeze: None,
+            freeze_was_split: false,
             split: None,
             tab_color: None,
             code_name: None,

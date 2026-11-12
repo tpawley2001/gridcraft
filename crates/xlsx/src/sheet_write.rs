@@ -1118,9 +1118,10 @@ fn write_sheet_views(s: &mut String, sheet: &Sheet, selected: bool) {
             if rows > 0 {
                 let _ = write!(s, " ySplit=\"{rows}\"");
             }
+            let state = if sheet.freeze_was_split { "frozenSplit" } else { "frozen" };
             let _ = write!(
                 s,
-                " topLeftCell=\"{}\" activePane=\"{pane}\" state=\"frozen\"/>",
+                " topLeftCell=\"{}\" activePane=\"{pane}\" state=\"{state}\"/>",
                 CellRef::new(
                     rows.max(sheet.view_top_left.row).min(gridcraft_core::MAX_ROWS - 1),
                     cols.max(sheet.view_top_left.col).min(gridcraft_core::MAX_COLS - 1)

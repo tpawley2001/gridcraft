@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0344: a split window (`pane` not frozen) is kept through open + save; earlier: G0334: a sheet's `sheetView` `showRuler`, `showWhiteSpace` and `windowProtection` and its `printOptions gridLinesSet` are kept through open + save; earlier: G0333: a shape's theme style (`xdr:style`) is kept through open + save and drawn)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0352: frozen panes that were a split before freezing (`state="frozenSplit"`) stay `frozenSplit` through open + save; earlier: G0344: a split window (`pane` not frozen) is kept through open + save; earlier: G0334: a sheet's `sheetView` `showRuler`, `showWhiteSpace` and `windowProtection` and its `printOptions gridLinesSet` are kept through open + save; earlier: G0333: a shape's theme style (`xdr:style`) is kept through open + save and drawn)
 
 
 Legacy VML captions accept HTML-style `br` line breaks, preserving buttons, macro assignments and shown notes through open + save (`vml_html_br_tests.rs`).
@@ -207,6 +207,7 @@ Wrong checksums. In an intact `.xlsx`, `.xlsm`, `.xlsb` or `.ods` package, a par
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | G0352: `.xlsx` frozen panes that were a split before freezing (`pane state="frozenSplit"`, ECMA-376 Part 1 §18.18.53) are written back as `frozenSplit` instead of `frozen`, so unfreezing in Excel restores the split; freezing or unfreezing in the app makes a plain freeze (`pane_frozen_split_kept_tests.rs`). |
 | 2026-11-12 | minor | G0344: `.xlsx` a split window (`pane` with no `state` or `state="split"`, ECMA-376 Part 1 §18.3.1.66) is read and written back instead of dropped; a freeze set in the app replaces it; the grid does not show the split yet. |
 | 2026-11-12 | minor | G0340: a table whose style is one of the workbook's custom table styles (ECMA-376 Part 1 §18.8.40-§18.8.41) is drawn from that style's elements — whole table, row and column stripes with their sizes, first/last column, header and total rows, first/last header and total cells — instead of the default Medium 2 look, on screen, in print and by Convert to Range; each element sets only what its format sets, borders go to the element's edges and inside lines, and a cell's own formatting wins. PivotTable-only elements are not drawn (`custom_table_style_draw.rs`) |
 | 2026-11-12 | minor | G0338: XLSX `sheetPr published="0"` (ECMA-376 Part 1 §18.3.1.82) and `outlinePr showOutlineSymbols="0"` (§18.3.1.31) are read and written back, with `sheetPr`/`outlinePr` written for either alone; defaults are never written, and `outlinePr showOutlineSymbols` stays independent of `sheetView showOutlineSymbols`. No UI yet (`sheet_pr_flags_tests.rs`) |
