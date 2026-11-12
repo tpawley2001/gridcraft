@@ -116,21 +116,24 @@ pub(super) fn ppmt(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     num_val(pmt_calc(rate, np, pv, fv, typ) - ipmt_calc(rate, per, np, pv, fv, typ))
 }
 
+/// CUMIPMT / CUMPRINC. The raw arguments are validated first; then the first period rounds up
+/// and the last rounds down (an empty span sums to 0). The loan length keeps its fraction: the
+/// payment and each period's balance use the fractional `nper`.
 fn cumulative(a: &[Arg], principal: bool) -> R<Value> {
     let (rate, np, pv) = (num(a, 0)?, num(a, 1)?, num(a, 2)?);
-    let (start, end, typ) = (num(a, 3)?.trunc(), num(a, 4)?.trunc(), num(a, 5)?);
-    let np_i = np.trunc();
-    if rate <= 0.0 || np_i <= 0.0 || pv <= 0.0 || start < 1.0 || end < start || end > np_i || (typ != 0.0 && typ != 1.0) {
+    let (start, end, typ) = (num(a, 3)?, num(a, 4)?, num(a, 5)?);
+    if rate <= 0.0 || np <= 0.0 || pv <= 0.0 || start < 1.0 || end < start || end > np || (typ != 0.0 && typ != 1.0) {
         return Err(CellError::Num);
     }
-    if end - start > 1e7 || np_i > 1e15 {
+    if end - start > 1e7 || np > 1e15 {
         return Err(CellError::Num);
     }
-    let p = pmt_calc(rate, np_i, pv, 0.0, typ);
+    let (start, end) = (start.ceil(), end.floor());
+    let p = pmt_calc(rate, np, pv, 0.0, typ);
     let mut sum = 0.0;
     let mut per = start;
     while per <= end {
-        let i = ipmt_calc(rate, per, np_i, pv, 0.0, typ);
+        let i = ipmt_calc(rate, per, np, pv, 0.0, typ);
         sum += if principal { p - i } else { i };
         per += 1.0;
     }
