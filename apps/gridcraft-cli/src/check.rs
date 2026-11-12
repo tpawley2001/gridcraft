@@ -389,4 +389,6 @@ fn check_inner(path: &str, bytes: &[u8], opts: &Options) -> FileReport {
 #[cfg(test)]
 mod macro_source_tests;
 #[cfg(test)]
+mod not_a_loss_tests;
+#[cfg(test)]
 mod tests;
