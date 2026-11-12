@@ -84,6 +84,7 @@ mod sensitivity_label;
 mod shape_block_arrow_tests;
 mod shape_outline_width_tests;
 mod shape_preset_geometry;
+mod shape_style_refs_kept_tests;
 mod shape_text_rtl;
 mod shape_theme_color_kept_tests;
 mod shared_media;
