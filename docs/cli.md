@@ -91,12 +91,14 @@ up by *signature*, `expected type → actual type` (e.g. `number → #SPILL!`), 
 
 **Round trip.** The recalculated workbook is written with GridCraft's XLSX writer in the source's package kind
 (`.xlsm`, `.xltm` and `.xltx` stay what they are, so a macro-enabled file keeps its VBA project; any other workbook
-that carries a VBA project, such as an `.xlsb` with macros, is written as `.xlsm`; everything else is
-written as `.xlsx`), the package is validated (every
+that carries a VBA project, such as an `.xlsb` with macros, is written as `.xlsm`, and so is one with defined names
+calling Excel 4.0 macro functions such as `GET.WORKSPACE` (or names using them), which a macro-free save leaves out
+(an `.xltx` with such names is written as `.xltm`); everything else is written as `.xlsx`), the package is validated (every
 part has a content type, every content-type override and internal relationship target exists, relationship ids are
 unique: what Excel would "repair"), compared with the source (no kind of relationship it had, such as `xmlMaps`, is
 missing; a calculation chain doesn't count, Excel rebuilds it, nor does an `.xlsb` sheet index (`xlBinaryIndex`), nor do a link to a place in the workbook and a
-relationship to an empty part, such as a comments part without comments; kinds compare ignoring case and hyphens,
+relationship to an empty part, such as a comments part without comments, nor a shared-string table no cell refers
+to (no `<c t="s">` in any sheet); kinds compare ignoring case and hyphens,
 so Strict Open XML's `extendedProperties` matches transitional `extended-properties`) and read back. Categories compared: `package`, `sheets` (names and order),
 `values`, `formulas`, `numFmts` (per cell), `merges`, `names`, `tables` (name, range, columns), `condFormats` (rules
 per sheet), `validations`, `charts` (kinds and series counts), `comments`, `hyperlinks`, `pivots`. `#SPILL!`/`#CALC!`

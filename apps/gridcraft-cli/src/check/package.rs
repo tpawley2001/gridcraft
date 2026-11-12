@@ -286,6 +286,10 @@ fn relationship_kinds_within(bytes: &[u8], mut budget: u64) -> Result<BTreeMap<S
     // would otherwise each spend a full per-part allowance.
     let mut verdicts: HashMap<(String, &'static str), bool> = HashMap::new();
     let mut kinds = BTreeMap::new();
+    // Sheet parts (scanned for cells that use shared strings) and the first shared-string
+    // relationship whose table has content: decided once every rels part is read.
+    let mut sheet_parts: BTreeSet<String> = BTreeSet::new();
+    let mut shared_strings: Option<String> = None;
     for n in names.iter().filter(|n| part_key(n).ends_with(".rels")) {
         let Some(src_dir) = rels_source_dir(&part_key(n)) else { continue };
         let xml = match read_zip_part_within(&mut zip, n, &mut budget) {
@@ -302,9 +306,19 @@ fn relationship_kinds_within(bytes: &[u8], mut budget: u64) -> Result<BTreeMap<S
             }
             let external = attr(attrs, "TargetMode").is_some_and(|m| m.eq_ignore_ascii_case("External"));
             if !external
+                && SHEET_KINDS.iter().any(|k| kind.eq_ignore_ascii_case(k))
+                && let Some(part) = by_key.get(&resolve_target(&src_dir, target).to_ascii_lowercase())
+            {
+                sheet_parts.insert((*part).clone());
+            }
+            if !external
                 && let Some(part) = by_key.get(&resolve_target(&src_dir, target).to_ascii_lowercase())
                 && !holds_something(&mut zip, part, kind, &mut verdicts, &mut budget)
             {
+                continue;
+            }
+            if kind.eq_ignore_ascii_case("sharedStrings") {
+                shared_strings.get_or_insert_with(|| kind.to_string());
                 continue;
             }
             // Keyed without case or hyphens: Strict Open XML spells some kinds differently from
@@ -314,7 +328,51 @@ fn relationship_kinds_within(bytes: &[u8], mut budget: u64) -> Result<BTreeMap<S
             kinds.entry(key).or_insert_with(|| kind.to_string());
         }
     }
+    // A shared string is content only through a cell that refers to it (`<c t="s">`): a table no
+    // cell uses carries nothing, and the writer (like Excel's own save) leaves it out.
+    if let Some(kind) = shared_strings
+        && sheets_use_shared_strings(&mut zip, &sheet_parts, &mut budget)
+    {
+        kinds.insert("sharedstrings".to_string(), kind);
+    }
     Ok(kinds)
+}
+
+/// Relationship kinds whose target is a sheet part holding cells.
+const SHEET_KINDS: [&str; 4] = ["worksheet", "dialogsheet", "xlMacrosheet", "xlIntlMacrosheet"];
+
+/// Whether a cell in one of the sheet `parts` refers to a shared string (a `c` element whose `t`
+/// is `s`). Streams each part and stops at the first such cell. Spends from `budget`; when it runs
+/// out, or a part can't be read or parsed in full, the answer is `true` (the table stays listed).
+fn sheets_use_shared_strings(zip: &mut Zip<'_>, parts: &BTreeSet<String>, budget: &mut u64) -> bool {
+    use quick_xml::events::Event;
+    for name in parts {
+        let Ok(f) = zip.by_name(name) else { return true };
+        if *budget == 0 {
+            return true;
+        }
+        let size = f.size();
+        let take = size.min(MAX_XML_PART).min(*budget);
+        *budget -= take;
+        let truncated = take < size;
+        let mut reader = quick_xml::Reader::from_reader(std::io::BufReader::new(f.take(take)));
+        let mut buf = Vec::new();
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                    if local_name(e.name().as_ref()) == b"c" && e.attributes().flatten().any(|a| a.key.as_ref() == b"t" && a.value.as_ref() == b"s") {
+                        return true;
+                    }
+                }
+                Ok(Event::Eof) if truncated => return true,
+                Ok(Event::Eof) => break,
+                Ok(_) => {}
+                Err(_) => return true,
+            }
+            buf.clear();
+        }
+    }
+    false
 }
 
 /// The directory of the part a rels part describes: `xl` for `xl/_rels/workbook.xml.rels`, the
