@@ -29,6 +29,10 @@ const MAX_STYLE_NAME: usize = 255;
 
 /// The automatic font colour (IcvFont 0x7FFF) and the system foreground/background colours.
 const ICV_FONT_AUTO: u16 = 0x7FFF;
+/// The largest font family a workbook can hold (`ST_FontFamily`, ECMA-376 Part 1 §18.18.94).
+/// Old writers put the LOGFONT pitch-and-family byte (such as 0x20) in a Font record's `bFamily`;
+/// Excel reads a byte above this as 0, so such a font stays distinct from a twin with family 2.
+const MAX_FONT_FAMILY: u8 = 14;
 const ICV_DEFAULT_FG: u16 = 0x40;
 const ICV_DEFAULT_BG: u16 = 0x41;
 
@@ -459,7 +463,7 @@ fn read_font(c: &mut Cursor<'_, '_>, name: impl FnOnce(&mut Cursor<'_, '_>) -> O
         0x22 => Underline::DoubleAccounting,
         _ => Underline::None,
     };
-    f.family = Some(family);
+    f.family = Some(if family > MAX_FONT_FAMILY { 0 } else { family });
     f.charset = Some(charset);
     Some((f, icv, height, weight))
 }

@@ -164,6 +164,7 @@ mod xls_edit_ranges_tests;
 mod xls_extern_name_tests;
 mod xls_external_link_tests;
 mod xls_external_name_ref_tests;
+mod xls_font_family_range_tests;
 mod xls_form_control_tests;
 mod xls_group_shapes_tests;
 mod xls_invalid_names_tests;
