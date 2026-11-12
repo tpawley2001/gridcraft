@@ -575,6 +575,9 @@ fn analyze_date(mut toks: Vec<Tok>, mut sec: Section) -> Section {
             *t = Tok::Date(DatePart::Minute(n));
         }
     }
+    // Observed in Excel: a section takes at most one elapsed token (`[h]:[mm]` and `[h]:mm [s]` are
+    // invalid), and no plain time token of a larger unit may come before it (`h [m]`).
+    sec.invalid |= !elapsed_tokens_valid(&toks);
     // Resolve minutes first, then apply each elapsed unit throughout this section.
     // Reusing elapsed tokens also keeps fractional-second rounding consistent.
     let elapsed_h = toks.iter().any(|t| matches!(t, Tok::Date(DatePart::ElapsedH(_))));
@@ -611,6 +614,31 @@ fn analyze_date(mut toks: Vec<Tok>, mut sec: Section) -> Section {
     sec.ampm = out.iter().any(|t| matches!(t, Tok::Date(DatePart::AmPm | DatePart::AP(..))));
     sec.toks = out;
     sec
+}
+
+/// Whether a date section's elapsed tokens are usable: none, or exactly one with no plain hour,
+/// minute or second token of a larger unit before it (`h [m]` is invalid; `[s]:m` and
+/// `h [h]:mm` are fine).
+fn elapsed_tokens_valid(toks: &[Tok]) -> bool {
+    // Units ranked seconds < minutes < hours.
+    let elapsed_unit = |t: &Tok| match t {
+        Tok::Date(DatePart::ElapsedH(_)) => Some(3u8),
+        Tok::Date(DatePart::ElapsedM(_)) => Some(2),
+        Tok::Date(DatePart::ElapsedS(_)) => Some(1),
+        _ => None,
+    };
+    let plain_unit = |t: &Tok| match t {
+        Tok::Date(DatePart::Hour(_)) => Some(3u8),
+        Tok::Date(DatePart::Minute(_)) => Some(2),
+        Tok::Date(DatePart::Second(_)) => Some(1),
+        _ => None,
+    };
+    if toks.iter().filter(|t| elapsed_unit(t).is_some()).count() > 1 {
+        return false;
+    }
+    let Some(at) = toks.iter().position(|t| elapsed_unit(t).is_some()) else { return true };
+    let unit = toks.get(at).and_then(elapsed_unit).unwrap_or(0);
+    toks.get(..at).is_none_or(|before| before.iter().filter_map(plain_unit).all(|p| p <= unit))
 }
 
 fn analyze_general(toks: Vec<Tok>, mut sec: Section) -> Section {
