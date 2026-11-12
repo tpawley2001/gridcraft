@@ -438,6 +438,23 @@ fn linest_family() {
     is_err(ev("LINEST", vec![c(&[1.0, 2.0]), c(&[1.0, 2.0, 3.0])]), CellError::Ref);
 }
 
+// One observation (a 1x1 known_y's): each known_x's cell is an x variable; without a constant the fit goes to the
+// largest |x| (the first on a tie), with one the slopes are 0 and the intercept is y.
+#[test]
+fn linest_family_one_observation() {
+    let y = || n(12.0);
+    let xs = || c(&[24.0, 24.0, 654.0]);
+    close(rows_of(&ev("TREND", vec![y(), xs()]))[0][0].clone(), 12.0);
+    close(rows_of(&ev("TREND", vec![y(), xs(), c(&[5.0, 45.0, 1.0]), b(false)]))[0][0].clone(), 12.0 / 654.0);
+    close(rows_of(&ev("TREND", vec![y(), c(&[24.0, 24.0]), c(&[5.0, 45.0]), b(false)]))[0][0].clone(), 2.5);
+    is_err(ev("TREND", vec![y(), xs(), n(7.0)]), CellError::Ref);
+    let l = rows_of(&ev("LINEST", vec![y(), xs(), b(false)]));
+    assert_eq!(l[0].len(), 4);
+    close(l[0][0].clone(), 12.0 / 654.0);
+    close(l[0][1].clone(), 0.0);
+    close(l[0][2].clone(), 0.0);
+}
+
 // #2177: one predictor row of 16,384 columns built three 16,384² matrices (6 GB) and an O(k³)
 // inversion; a wider TOROW aborted the process. It is now refused before allocating.
 #[test]

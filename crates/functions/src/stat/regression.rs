@@ -81,6 +81,17 @@ fn parse_xy(y: &Value, x: Option<&Value>) -> R<Xy> {
     let y_is_row = ya.rows == 1 && ya.cols > 1;
     let yv: Vec<f64> = ya.data.iter().map(strict_num).collect::<R<_>>()?;
     let (xs, k) = match x {
+        // One observation (a 1x1 known_y's): every cell of known_x's, whatever its shape, is its own x variable,
+        // in row-major order.
+        Some(xv) if n == 1 => {
+            let xa = as_array(xv);
+            let k = xa.data.len();
+            if k == 0 {
+                return Err(CellError::Ref);
+            }
+            check_regression_size(1, k)?;
+            (vec![xa.data.iter().map(strict_num).collect::<R<Vec<_>>>()?], k)
+        }
         None => ((1..=n).map(|i| vec![i as f64]).collect(), 1),
         Some(xv) => {
             let xa = as_array(xv);
@@ -208,8 +219,33 @@ fn regress(y: &[f64], x: &[Vec<f64>], k: usize, constant: bool) -> R<Fit> {
             }
         }
     }
-    let (inv, dropped) = sym_inverse(&xtx);
-    let coef: Vec<f64> = (0..k).map(|i| inv.get(i).map(|r| r.iter().zip(&xty).map(|(a, b)| a * b).sum()).unwrap_or(0.0)).collect();
+    let (inv, mut dropped) = sym_inverse(&xtx);
+    let mut coef: Vec<f64> = (0..k).map(|i| inv.get(i).map(|r| r.iter().zip(&xty).map(|(a, b)| a * b).sum()).unwrap_or(0.0)).collect();
+    if n == 1 && !constant {
+        // One observation without a constant: the whole fit goes to the x variable with the largest absolute value
+        // (the first one on a tie), as Excel does; every other slope is 0. (With a constant the centred data are all
+        // zero, so every slope is already 0 and the intercept is y.) The statistics rows LINEST/LOGEST give for one
+        // observation are not measured against Excel; they are whatever the code below derives.
+        let (row, yv) = (x.first().map(Vec::as_slice).unwrap_or(&[]), y.first().copied().unwrap_or(0.0));
+        let mut best: Option<(usize, f64)> = None;
+        for (j, v) in row.iter().take(k).enumerate() {
+            if *v != 0.0 && best.is_none_or(|(_, b)| v.abs() > b.abs()) {
+                best = Some((j, *v));
+            }
+        }
+        for (j, (c, d)) in coef.iter_mut().zip(dropped.iter_mut()).enumerate() {
+            match best {
+                Some((bj, bv)) if bj == j => {
+                    *c = yv / bv;
+                    *d = false;
+                }
+                _ => {
+                    *c = 0.0;
+                    *d = true;
+                }
+            }
+        }
+    }
     let b = if constant { ym - coef.iter().zip(&xm).map(|(c, m)| c * m).sum::<f64>() } else { 0.0 };
     let mut ssresid = 0.0;
     let mut sstot = 0.0;
@@ -320,6 +356,13 @@ pub(super) fn trend_impl(a: &[Arg], log: bool) -> R<Value> {
             if xy.k == 1 {
                 let data = na.data.iter().map(|v| strict_num(v).map(|x| predict(&[x]))).collect::<R<Vec<_>>>()?;
                 array_val(na.rows, na.cols, data)
+            } else if xy.y.len() == 1 {
+                // One observation: new_x's is one observation too, with one cell per x variable (any shape).
+                if na.data.len() != xy.k {
+                    return Err(CellError::Ref);
+                }
+                let row = na.data.iter().map(strict_num).collect::<R<Vec<_>>>()?;
+                array_val(1, 1, vec![predict(&row)])
             } else if !xy.y_is_row && na.cols == xy.k {
                 let mut data = Vec::with_capacity(na.rows);
                 for r in 0..na.rows {
