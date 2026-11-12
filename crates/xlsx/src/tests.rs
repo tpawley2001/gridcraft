@@ -116,6 +116,7 @@ mod sylk_write_tests;
 mod table_cell_style_names_tests;
 mod table_dxfs;
 mod table_header_space_tests;
+mod table_hidden_totals_tests;
 mod table_ids;
 mod theme_fmt_scheme_tests;
 mod thick_row_flags_tests;
