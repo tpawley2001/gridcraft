@@ -182,6 +182,8 @@ pub(super) fn read(obj: &El, anchor: Anchor) -> Option<Shape> {
     Some(Shape {
         hidden: false,
         no_print: false,
+        unlocked: false,
+        alt_title: String::new(),
         hyperlink: None,
         name: None,
         alt: String::new(),

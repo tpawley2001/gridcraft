@@ -59,6 +59,8 @@ pub(super) fn insert_pivot_chart(s: &mut Session, p: &Json) -> Result<Json> {
         theme_override: None,
         hidden: false,
         no_print: false,
+        unlocked: false,
+        alt_title: String::new(),
         id,
         kind,
         anchor: Anchor {

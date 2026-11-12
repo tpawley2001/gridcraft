@@ -58,6 +58,8 @@ fn exported_ink_has_a_visible_unfilled_path_and_correct_stroke() {
             alt: String::new(),
             hidden: false,
             no_print: false,
+            unlocked: false,
+            alt_title: String::new(),
             hyperlink: None,
             name: None,
             id,

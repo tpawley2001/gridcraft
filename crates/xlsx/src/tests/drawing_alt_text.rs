@@ -13,6 +13,8 @@ fn shape(kind: ShapeKind, text: &str, alt: &str) -> Shape {
     Shape {
         hidden: false,
         no_print: false,
+        unlocked: false,
+        alt_title: String::new(),
         hyperlink: None,
         name: None,
         alt: alt.into(),
@@ -37,6 +39,8 @@ fn waterfall(alt: &str) -> Chart {
         theme_override: None,
         hidden: false,
         no_print: false,
+        unlocked: false,
+        alt_title: String::new(),
         alt: alt.into(),
         id: 2,
         kind: ChartKind::Waterfall,

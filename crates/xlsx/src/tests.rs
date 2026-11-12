@@ -41,6 +41,7 @@ mod data_table_text_results_tests;
 mod dif_tests;
 mod drawing_alt_text;
 mod drawing_hyperlinks;
+mod drawing_locked_title_kept_tests;
 mod dxf_font_charset;
 mod encrypted_tests;
 mod equation_tests;

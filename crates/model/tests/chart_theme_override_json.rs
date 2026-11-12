@@ -18,6 +18,8 @@ fn chart() -> Chart {
         theme_override: None,
         hidden: false,
         no_print: false,
+        unlocked: false,
+        alt_title: String::new(),
         id: 1,
         kind: ChartKind::Doughnut,
         anchor: Anchor::default(),
