@@ -187,7 +187,12 @@ fn freeze_panes(s: &mut Session, p: &Json) -> Result<Json> {
 
 fn set_freeze(s: &mut Session, si: usize, f: Option<(u32, u32)>) -> Result<Json> {
     edit(s, |cx| {
-        cx.sheet_mut(si)?.freeze = f;
+        let sh = cx.sheet_mut(si)?;
+        sh.freeze = f;
+        // Frozen panes replace a window split.
+        if f.is_some() {
+            sh.split = None;
+        }
         Ok(json!({"freeze": f}))
     })
 }
