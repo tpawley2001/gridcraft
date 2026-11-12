@@ -572,6 +572,11 @@ impl<'h> Evaluator<'h> {
         Ev::R(vec![Area { sheet: si, range: RangeRef::new(CellRef::new(r0, c0), CellRef::new(r1, c1)) }])
     }
 
+    /// Whether the cell holds a formula.
+    fn holds_formula(&self, sheet: usize, c: CellRef) -> bool {
+        self.host.workbook().sheet(sheet).and_then(|s| s.cells.get(c)).is_some_and(|cell| cell.formula.is_some())
+    }
+
     fn unary(&mut self, op: UnOp, x: &Expr) -> Ev {
         if let UnOp::Trim(mode) = op {
             return self.trim_ref(mode, x);
@@ -581,6 +586,9 @@ impl<'h> Evaluator<'h> {
                 Ev::R(areas) => match areas.as_slice() {
                     [a] if a.range.is_single() => match self.host.spill_range(a.sheet, a.range.start) {
                         Some(range) => Ev::R(vec![Area { sheet: a.sheet, range }]),
+                        // A formula cell that doesn't spill (one value, an error, a blocked spill)
+                        // is its own 1x1 spill range; anything else (a constant, a blank) is #REF!.
+                        None if self.holds_formula(a.sheet, a.range.start) => Ev::R(vec![*a]),
                         None => err(CellError::Ref),
                     },
                     _ => err(CellError::Ref),

@@ -91,7 +91,7 @@ FORECAST is Statistical.
 | 3-D references (`Sheet1:Sheet3!A1`) | done; deleting a span's end sheet keeps the rest (#140) |
 | Structured references (`Table1[Col]`, `[#Totals]`, `@`; the unbracketed `[[#This Row],Col]` some writers emit) | done |
 | Defined names (workbook and sheet scope), Create from Selection | done |
-| Dynamic arrays, spill, `#SPILL!`, spill operator `A1#` | done; stale spills after a structural edit or a cleared blocker fixed (#133, #139; PRs #148, #157) |
+| Dynamic arrays, spill, `#SPILL!`, spill operator `A1#` | done; stale spills after a structural edit or a cleared blocker fixed (#133, #139; PRs #148, #157); `A1#` on a formula cell that does not spill (one value, an error, a blocked spill) is that one cell, not `#REF!` |
 | Recalculation after clearing large sparse ranges | every stored cell changed by Clear is reported to recalculation, without a million-coordinate cutoff; removed formula spills are cleared, and removing empty merges still unblocks spills (#1032) |
 | SUBTOTAL / AGGREGATE input size | references trim to the used range; all areas, arrays and values of one call are charged against the 16-million-cell limit before any cell is read (skipped hidden, nested and error cells count), and `#NUM!` past it (#2175) |
 | SUBTOTAL 3 / 103 (COUNTA) with an error cell | done: a cell holding an error counts as one non-empty value instead of being returned, as in Excel (`=SUBTOTAL(3,$D$3:D5)-1` is 0 when D5 is `#REF!`); SUBTOTAL 1, 2, 4–11 and AGGREGATE still return the error |
@@ -162,6 +162,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | The spill operator `A1#` on a formula cell with no spilled range (a single value, an error, or a blocked `#SPILL!`) refers to that one cell, as Excel does, instead of `#REF!`; a constant or blank cell is still `#REF!` (`spill_operator_single_value_excel.rs`) |
 | 2026-11-11 | minor | MID, REPLACE, FIND and SEARCH count UTF-16 code units, so positions after an emoji agree with Excel; half a surrogate pair becomes U+FFFD (`text_positions_utf16_excel.rs`) |
 | 2026-11-11 | minor | Month-end maturities: COUPDAYS with basis 1 measures the coupon period on dates stepped back from maturity one period at a time with the day clamped (31 Aug, 28 Feb, 28 Aug…), ending at the first such date after settlement and starting one period earlier (on the month end when that date is one); COUPDAYBS basis 0 from an end-of-February coupon date to a 31st keeps the 31st (COUPDAYSNC follows). PRICE, YIELD and DURATION keep COUPNCD - COUPPCD as the period length (`coup_eom_excel.rs`) |
 | 2026-11-11 | minor | AMORLINC and AMORDEGRC with basis 1 or 3 count a purchase on 29 February as 28 February in the first period, as Excel does (`amor_feb_end_excel.rs`) |
