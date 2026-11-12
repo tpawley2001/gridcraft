@@ -436,9 +436,16 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
         manual_col_breaks: fit.is_none_or(|(w, _)| w == 0),
         chart_sheet: None,
     };
+    // Without a print area the pages below and to the right of everything on the sheet are left
+    // out (Excel prints each band of columns down to its last cell); a print area prints its grid.
+    let trim_empty = range_override.is_none() && sh.print.print_areas().is_empty();
     let paginate = |lay: &mut SheetLayout| {
         (lay.row_bands, lay.col_bands, lay.col_offsets) = split_bands_pieces(sh, lay, MAX_PAGES);
-        lay.pages = page_sequence(lay.row_bands.len(), lay.col_bands.len(), lay.settings.page_order, MAX_PAGES);
+        let reach = if trim_empty { printed_reach(sh, &lay.row_bands, &lay.col_bands) } else { None };
+        lay.pages = match reach {
+            Some(reach) => printed_page_sequence(&reach, lay.settings.page_order, MAX_PAGES),
+            None => page_sequence(lay.row_bands.len(), lay.col_bands.len(), lay.settings.page_order, MAX_PAGES),
+        };
     };
     match fit {
         Some((fw, fh)) => {
@@ -484,6 +491,103 @@ pub(crate) fn page_sequence(rows: usize, cols: usize, order: PageOrder, cap: usi
         })
         .take(cap)
         .collect()
+}
+
+/// Per column band, the number of row bands printed in it: page (r, c) prints when some page
+/// at or below and at or to the right of it (r2 >= r, c2 >= c) has something on it (a stored
+/// cell, a spill range, a merged range whose anchor cell is stored, or a printing drawing
+/// object). The counts never grow from left to right. `None` when nothing lies on any page (the
+/// caller then prints the full grid).
+fn printed_reach(sh: &Sheet, row_bands: &[(u32, u32)], col_bands: &[(u32, u32)]) -> Option<Vec<usize>> {
+    // The lowest occupied row band of each column band.
+    let mut last: Vec<Option<usize>> = vec![None; col_bands.len()];
+    // Marks the rectangle rows r0..=r1 x columns c0..=c1. Bands stop at a page cap, so what lies
+    // past the last band counts on the last band (everything before it prints).
+    let mut mark = |r0: u32, r1: u32, c0: u32, c1: u32| {
+        let (Some(first), Some(end), Some(col_end)) = (row_bands.first(), row_bands.last(), col_bands.last()) else { return };
+        if r1 < first.0 {
+            return;
+        }
+        // The band holding the rectangle's lowest row on the pages.
+        let rb = row_bands.partition_point(|b| b.1 < r1.min(end.1));
+        if row_bands.get(rb).is_none_or(|b| b.0 > r1) {
+            return;
+        }
+        let from = col_bands.partition_point(|b| b.1 < c0.min(col_end.1));
+        for (ci, b) in col_bands.iter().enumerate().skip(from) {
+            if b.0 > c1 {
+                break;
+            }
+            if let Some(slot) = last.get_mut(ci) {
+                *slot = Some(slot.map_or(rb, |v| v.max(rb)));
+            }
+        }
+    };
+    for (c, _) in sh.cells.iter() {
+        mark(c.row, c.row, c.col, c.col);
+    }
+    for r in sh.spill_ranges.values() {
+        mark(r.start.row, r.end.row, r.start.col, r.end.col);
+    }
+    for m in sh.merges.iter().filter(|m| sh.cells.get(m.start).is_some()) {
+        mark(m.start.row, m.end.row, m.start.col, m.end.col);
+    }
+    let mut object = |a: &Anchor| {
+        let x = sh.col_left(a.cell.col) + a.dx as f64;
+        let y = sh.row_top(a.cell.row) + a.dy as f64;
+        let (r1, c1) = (sh.row_at(y + a.height.max(0.0) as f64), sh.col_at(x + a.width.max(0.0) as f64));
+        mark(a.cell.row, r1.max(a.cell.row), a.cell.col, c1.max(a.cell.col));
+    };
+    for c in sh.charts.iter().filter(|o| !o.hidden && !o.no_print) {
+        object(&c.anchor);
+    }
+    for i in sh.images.iter().filter(|o| !o.hidden && !o.no_print) {
+        object(&i.anchor);
+    }
+    for s in sh.shapes.iter().filter(|o| !o.hidden && !o.no_print) {
+        object(&s.anchor);
+    }
+    for c in sh.controls.iter().filter(|o| o.print) {
+        object(&c.anchor);
+    }
+    // Sweep from the right: a band prints down to the lowest occupied band at or right of it.
+    let mut reach = vec![0usize; last.len()];
+    let mut below: Option<usize> = None;
+    for (ci, l) in last.iter().enumerate().rev() {
+        below = match (below, *l) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        };
+        if let Some(slot) = reach.get_mut(ci) {
+            *slot = below.map_or(0, |v| v + 1);
+        }
+    }
+    below.map(|_| reach)
+}
+
+/// [`page_sequence`] over only the printed pages: `reach[c]` row bands of column band `c`
+/// (non-increasing in `c`). Over-then-down prints the same pages in a different sequence.
+fn printed_page_sequence(reach: &[usize], order: PageOrder, cap: usize) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    match order {
+        PageOrder::DownThenOver => {
+            for (c, &n) in reach.iter().enumerate() {
+                out.extend((0..n).map(|r| (r, c)).take(cap.saturating_sub(out.len())));
+            }
+        }
+        PageOrder::OverThenDown => {
+            let rows = reach.first().copied().unwrap_or(0);
+            for r in 0..rows {
+                if out.len() >= cap {
+                    break;
+                }
+                let cols = reach.partition_point(|&n| n > r);
+                out.extend((0..cols).map(|c| (r, c)).take(cap.saturating_sub(out.len())));
+            }
+        }
+    }
+    out.truncate(cap);
+    out
 }
 
 /// Inclusive-start/end index spans of the pages along one axis.
