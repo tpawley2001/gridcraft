@@ -268,6 +268,7 @@ fn paint_geometry_paths(
     sp: &gridcraft_engine::model::Shape,
     fill: Color32,
     line: Color32,
+    dash: &[f32],
 ) {
     let has_fill = !sp.format.no_fill && fill != Color32::TRANSPARENT;
     for path in paths {
@@ -288,12 +289,51 @@ fn paint_geometry_paths(
             p.add(egui::Shape::mesh(mesh));
         }
         for o in crate::freeform::outlines(std::slice::from_ref(path), r) {
-            if o.stroke && !sp.format.no_line && o.points.len() >= 2 {
+            if o.stroke && !sp.format.no_line && o.points.len() >= 2 && !dash.is_empty() {
+                stroke_dashed(p, &o.points, o.closed, Stroke::new(1.0, line), dash);
+            } else if o.stroke && !sp.format.no_line && o.points.len() >= 2 {
                 let stroke = PathStroke::new(1.0, line);
                 p.add(if o.closed { PathShape::closed_line(o.points, stroke) } else { PathShape::line(o.points, stroke) });
             }
         }
     }
+}
+
+/// A shape outline's preset dash (`a:prstDash`, ECMA-376 Part 1 §20.1.10.48) in screen pixels:
+/// the pattern in units of the outline width at zoom `z`, at least a pixel; empty when solid.
+fn outline_dash(sp: &gridcraft_engine::model::Shape, z: f32) -> Vec<f32> {
+    let pt = sp.drawn_line_width_emu().map_or(0.75, |emu| emu.max(0) as f32 / 12700.0);
+    let unit = (pt * z).clamp(1.0, 1000.0);
+    sp.format.line_dash.map(|d| d.pattern().iter().map(|v| v * unit).collect()).unwrap_or_default()
+}
+
+/// Strokes the polyline `pts` (closed back to its start when `closed`) with the on/off runs of
+/// `dash`, in pixels.
+fn stroke_dashed(p: &Painter, pts: &[Pos2], closed: bool, stroke: Stroke, dash: &[f32]) {
+    let flat: Vec<[f32; 2]> = pts.iter().map(|q| [q.x, q.y]).collect();
+    for run in gridcraft_engine::model::dash_polyline(&flat, closed, dash) {
+        p.add(PathShape::line(run.into_iter().map(|q| pos2(q[0], q[1])).collect(), PathStroke::from(stroke)));
+    }
+}
+
+/// The corners of `r` with quarter arcs of `radius`, clockwise from the top right.
+fn rounded_rect_outline(r: Rect, radius: f32) -> Vec<Pos2> {
+    const SEGS: usize = 6;
+    let rad = radius.clamp(0.0, r.width().min(r.height()) / 2.0);
+    let corners = [
+        (r.right() - rad, r.top() + rad, -90.0f32),
+        (r.right() - rad, r.bottom() - rad, 0.0),
+        (r.left() + rad, r.bottom() - rad, 90.0),
+        (r.left() + rad, r.top() + rad, 180.0),
+    ];
+    let mut pts = Vec::with_capacity(4 * (SEGS + 1));
+    for (cx, cy, start) in corners {
+        for i in 0..=SEGS {
+            let a = (start + 90.0 * i as f32 / SEGS as f32).to_radians();
+            pts.push(pos2(cx + rad * a.cos(), cy + rad * a.sin()));
+        }
+    }
+    pts
 }
 
 pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workbook, si: usize, sh: &Sheet) -> Vec<PaintedObject> {
@@ -335,19 +375,34 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
         } else {
             sp.drawn_line().resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::DARK_GRAY)
         };
+        // A dashed outline is stroked by `stroke_dashed` instead of the solid stroke below.
+        let dash = if line == Color32::TRANSPARENT { Vec::new() } else { outline_dash(sp, geo.z) };
+        let full_line = line;
+        let line = if dash.is_empty() { line } else { Color32::TRANSPARENT };
+        let dashed = |pts: &[Pos2], closed: bool, width: f32| {
+            if !dash.is_empty() {
+                stroke_dashed(p, pts, closed, Stroke::new(width, full_line), &dash);
+            }
+        };
+        let box_outline = |r: Rect| {
+            let r = r.shrink(0.5);
+            [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()]
+        };
         // A preset kept from the file (block arrows, chevron, diamond, …) draws its own outline,
         // at a resolution of the box in hundredths of a point, whatever its kind.
         let res = |v: f32| (v.abs() / geo.z.max(0.01) * 100.0).round().min(1.0e9) as i64;
         let preset = sp.geometry.as_ref().and_then(|g| gridcraft_engine::model::preset_paths(g, res(r.width()), res(r.height())));
         match sp.kind {
-            _ if preset.is_some() => paint_geometry_paths(p, preset.as_deref().unwrap_or_default(), r, sp, fill, line),
+            _ if preset.is_some() => paint_geometry_paths(p, preset.as_deref().unwrap_or_default(), r, sp, fill, full_line, &dash),
             ShapeKind::Rectangle | ShapeKind::TextBox => {
                 p.rect_filled(r, 0.0, fill);
                 p.rect_stroke(r, 0.0, Stroke::new(1.0, line), StrokeKind::Inside);
+                dashed(&box_outline(r), true, 1.0);
             }
             ShapeKind::RoundedRectangle => {
                 p.rect_filled(r, 10.0 * geo.z, fill);
                 p.rect_stroke(r, 10.0 * geo.z, Stroke::new(1.0, line), StrokeKind::Inside);
+                dashed(&rounded_rect_outline(r.shrink(0.5), 10.0 * geo.z), true, 1.0);
             }
             ShapeKind::Ellipse => {
                 let pts: Vec<Pos2> = (0..64)
@@ -356,10 +411,13 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
                         pos2(r.center().x + r.width() / 2.0 * a.cos(), r.center().y + r.height() / 2.0 * a.sin())
                     })
                     .collect();
+                dashed(&pts, true, 1.0);
                 p.add(PathShape::convex_polygon(pts, fill, Stroke::new(1.0, line)));
             }
             ShapeKind::Triangle => {
-                p.add(PathShape::convex_polygon(vec![pos2(r.center().x, r.top()), r.right_bottom(), r.left_bottom()], fill, Stroke::new(1.0, line)));
+                let pts = vec![pos2(r.center().x, r.top()), r.right_bottom(), r.left_bottom()];
+                p.add(PathShape::convex_polygon(pts.clone(), fill, Stroke::new(1.0, line)));
+                dashed(&pts, true, 1.0);
             }
             ShapeKind::Ink => {
                 let pt = gridcraft_engine::cmd::draw::ink_width(sp);
@@ -367,7 +425,7 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
                 let pts: Vec<Pos2> =
                     gridcraft_engine::cmd::draw::ink_points(sp).iter().map(|q| pos2(r.left() + q[0] * geo.z, r.top() + q[1] * geo.z)).collect();
                 if pts.len() >= 2 {
-                    let col = ink_color(line, pt);
+                    let col = ink_color(full_line, pt);
                     p.add(PathShape::line(pts, PathStroke::new(w, col)));
                 }
                 label = false;
@@ -390,16 +448,18 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
                 if paths.is_empty() {
                     p.rect_filled(r, 0.0, fill);
                     p.rect_stroke(r, 0.0, Stroke::new(1.0, line), StrokeKind::Inside);
+                    dashed(&box_outline(r), true, 1.0);
                 }
-                paint_geometry_paths(p, paths, r, sp, fill, line);
+                paint_geometry_paths(p, paths, r, sp, fill, full_line, &dash);
             }
             ShapeKind::Line | ShapeKind::Arrow => {
                 p.line_segment([r.left_top(), r.right_bottom()], Stroke::new(2.0, line));
+                dashed(&[r.left_top(), r.right_bottom()], false, 2.0);
                 if sp.kind == ShapeKind::Arrow {
                     let d = (r.right_bottom() - r.left_top()).normalized();
                     let n = vec2(-d.y, d.x);
                     let tip = r.right_bottom();
-                    p.add(PathShape::convex_polygon(vec![tip, tip - d * 10.0 + n * 5.0, tip - d * 10.0 - n * 5.0], line, Stroke::NONE));
+                    p.add(PathShape::convex_polygon(vec![tip, tip - d * 10.0 + n * 5.0, tip - d * 10.0 - n * 5.0], full_line, Stroke::NONE));
                 }
             }
         }
