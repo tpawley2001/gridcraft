@@ -8,7 +8,7 @@ use std::io::{Cursor, Read};
 use std::sync::Arc;
 
 use gridcraft_core::date::{days_in_month, serial_from_ymd};
-use gridcraft_core::{CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
+use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_model::{Cell, DefinedName, NumFmt, Sheet, StyleId, Workbook};
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
@@ -459,7 +459,7 @@ impl Import {
                     Some("boolean") => b"boolean-value",
                     Some("date") => b"date-value",
                     Some("time") => b"time-value",
-                    Some("string") => b"string-value",
+                    Some("string" | "error") => b"string-value",
                     _ => b"value",
                 };
                 let formula_text = attr(reader, e, TABLE, b"formula")?;
@@ -639,12 +639,20 @@ impl Import {
                 format = Some("[h]:mm:ss.000");
                 Value::Number(n)
             }),
+            // A saved error result: the displayed text, else `office:string-value`. Only the seven
+            // classic error texts are mapped; anything else (`Err:502`, a localized name) stays text.
+            Some("error") => {
+                let text = if draft.text.is_empty() { raw.unwrap_or("") } else { draft.text.as_str() };
+                const CLASSIC: [CellError; 7] =
+                    [CellError::Null, CellError::Div0, CellError::Value, CellError::Ref, CellError::Name, CellError::Num, CellError::NA];
+                CLASSIC.into_iter().find(|e| e.as_str() == text).map(Value::Error)
+            }
             None if !draft.formula => Some(if draft.text.is_empty() { Value::Empty } else { Value::Text(Arc::from(draft.text.as_str())) }),
             _ => None,
         };
         let value = value.unwrap_or_else(|| {
             self.report.warn("Some ODS values or formula caches were unsupported or missing; their displayed text (or raw value) was kept as text. A formula without either is marked [Unavailable ODS formula result].");
-            let text = if !draft.text.is_empty() { draft.text.as_str() } else if let Some(raw) = raw { raw } else if draft.formula { "[Unavailable ODS formula result]" } else { "[Unsupported ODS value]" };
+            let text = if !draft.text.is_empty() { draft.text.as_str() } else if let Some(raw) = raw.filter(|_| draft.kind.as_deref() != Some("error")) { raw } else if draft.formula { "[Unavailable ODS formula result]" } else { "[Unsupported ODS value]" };
             Value::Text(Arc::from(text))
         });
         let style = match format {
