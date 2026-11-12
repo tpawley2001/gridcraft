@@ -158,6 +158,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-11 | minor | DISC, INTRATE, RECEIVED, PRICEDISC and YIELDDISC with basis 1 over at most a year divide by 366 when the span holds a 29 February (or lies in one leap year), else 365, like YEARFRAC(settlement, maturity, 1), instead of the settlement year's length, as Excel does (`disc_family_basis1_excel.rs`) |
 | 2026-11-11 | minor | PRICEMAT and YIELDMAT with basis 1 use one year length for all three fractions, the one YEARFRAC(issue, settlement, 1) divides by (365 or 366 within a year, else the average of the calendar years spanned), as Excel does (`pricemat_yieldmat_excel.rs`) |
 | 2026-11-11 | minor | G0306: PRICE, YIELD, DURATION and MDURATION count settlement to the next coupon as E - A under actual/360 and actual/365 (not actual days); YIELD with one period left counts settlement to redemption on the 30/360 calendar for bases 0 and 4 and in actual days for bases 2 and 3; COUPDAYSNC basis 4 counts 30E/360 days directly, as in Excel (`bond_dsc_tests.rs`) |
 | 2026-11-11 | minor | DISC, INTRATE, RECEIVED, PRICEDISC and YIELDDISC with basis 1 over more than a year divide by the average length of the calendar years spanned, like YEARFRAC (365.3 for 2008-2017), as Excel does (`disc_family_basis`) |

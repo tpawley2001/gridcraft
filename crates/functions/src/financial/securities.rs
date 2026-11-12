@@ -104,16 +104,12 @@ fn disc_args(a: &[Arg]) -> R<(f64, f64, f64, f64, u32)> {
 }
 
 /// Fraction of a year from settlement to maturity for discount securities. Under actual/actual
-/// (basis 1) a span longer than one year divides by the average length of the calendar years it
-/// touches, like YEARFRAC; a shorter span keeps the settlement year's length.
+/// (basis 1) the year length is the one YEARFRAC(settlement, maturity, 1) divides by: 366 when a
+/// span of at most one year holds a 29 February, else 365, and the average length of the calendar
+/// years touched for a longer span.
 fn disc_frac(sys: DateSystem, s: f64, m: f64, b: u32) -> R<f64> {
     if b == 1 {
-        let (y1, m1, d1) = ymd(sys, s)?;
-        let (y2, m2, d2) = ymd(sys, m)?;
-        let within_year = y2 == y1 || (y2 == y1 + 1 && (m2 < m1 || (m2 == m1 && d2 <= d1)));
-        if !within_year {
-            return year_frac(sys, s, m, 1);
-        }
+        return year_frac(sys, s, m, 1);
     }
     Ok(day_count(sys, s, m, b)? / year_basis(sys, b, s)?)
 }
