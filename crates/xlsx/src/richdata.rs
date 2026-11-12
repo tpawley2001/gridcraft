@@ -19,6 +19,24 @@ const NS_RICH: &str = "http://schemas.microsoft.com/office/spreadsheetml/2017/ri
 const NS_IMAGE_REL: &str = "http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel";
 // Lower case, as Excel writes it: Excel refuses a workbook whose XLRICHVALUE extension URI is in
 // upper case (same class as #2339). The reader compares it case-insensitively.
+/// The rich value types part ([MS-XLSX] 2.3.6): fixed key flags for the reserved keys, as Excel
+/// writes them for a workbook with pictures in cells.
+const RICH_VALUE_TYPES: &str = concat!(
+    "<rvTypesInfo xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2\" ",
+    "xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" mc:Ignorable=\"x\" ",
+    "xmlns:x=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><global><keyFlags>",
+    "<key name=\"_Self\"><flag name=\"ExcludeFromFile\" value=\"1\"/><flag name=\"ExcludeFromCalcComparison\" value=\"1\"/></key>",
+    "<key name=\"_DisplayString\"><flag name=\"ExcludeFromCalcComparison\" value=\"1\"/></key>",
+    "<key name=\"_Flags\"><flag name=\"ExcludeFromCalcComparison\" value=\"1\"/></key>",
+    "<key name=\"_Format\"><flag name=\"ExcludeFromCalcComparison\" value=\"1\"/></key>",
+    "<key name=\"_SubLabel\"><flag name=\"ExcludeFromCalcComparison\" value=\"1\"/></key>",
+    "<key name=\"_Attribution\"><flag name=\"ExcludeFromCalcComparison\" value=\"1\"/></key>",
+    "<key name=\"_Icon\"><flag name=\"ExcludeFromCalcComparison\" value=\"1\"/></key>",
+    "<key name=\"_Display\"><flag name=\"ExcludeFromCalcComparison\" value=\"1\"/></key>",
+    "<key name=\"_CanonicalPropertyNames\"><flag name=\"ExcludeFromCalcComparison\" value=\"1\"/></key>",
+    "<key name=\"_ClassificationId\"><flag name=\"ExcludeFromCalcComparison\" value=\"1\"/></key>",
+    "</keyFlags></global></rvTypesInfo>"
+);
 const RICH_EXT: &str = "{3e2802c4-a4d2-4d8b-9148-e3be6c30e623}";
 const MAX_IMAGE: u64 = 16 * 1024 * 1024;
 const MAX_IMAGES_TOTAL: usize = 128 * 1024 * 1024;
@@ -415,6 +433,12 @@ pub fn write(out: &mut Out, workbook_rels: &mut Rels) -> Result<(), IoError> {
             "application/vnd.ms-excel.rdrichvaluestructure+xml",
             "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure",
             structures.into_bytes(),
+        ),
+        (
+            "rdRichValueTypes.xml",
+            "application/vnd.ms-excel.rdrichvaluetypes+xml",
+            "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes",
+            format!("{XML_DECL}{RICH_VALUE_TYPES}").into_bytes(),
         ),
         (
             "richValueRel.xml",

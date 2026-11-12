@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0346: a picture's border (colour, weight, dash) is kept on XLSX open + save and drawn and printed)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0354: workbooks with pictures in cells are saved with the rich value types part; earlier: G0346: a picture's border (colour, weight, dash) is kept on XLSX open + save and drawn and printed)
 > **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0345: a shape's outline dash (`a:prstDash`), line cap and join and its outer shadow or empty effect list (`a:effectLst`) are kept on XLSX open + save; dashed outlines are drawn and printed dashed; earlier: G0338: `sheetPr published="0"` and `outlinePr showOutlineSymbols="0"` kept on XLSX open + save; earlier: G0334: a sheet's `sheetView` `showRuler`, `showWhiteSpace` and `windowProtection` and its `printOptions gridLinesSet` are kept through open + save)
 > **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0338: `sheetPr published="0"` and `outlinePr showOutlineSymbols="0"` kept on XLSX open + save)
 > **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0334: a sheet's `sheetView` `showRuler`, `showWhiteSpace` and `windowProtection` and its `printOptions gridLinesSet` are kept through open + save; earlier: see the lines below.)
@@ -105,7 +105,8 @@ formula's shape. Rich-value metadata other than cell pictures (data types, `#SPI
 values) is still dropped. Pictures in cells are saved with the rich-value package spelled as
 Excel writes it (lower-case content types and `XLRICHVALUE` extension URI, `coerce` on the
 metadata type, a `_localImage` structure with `Text` only for pictures that have alt text);
-Excel refused the earlier spelling (`richdata_excel_package_tests.rs`).
+Excel refused the earlier spelling (`richdata_excel_package_tests.rs`). The rich value types
+part (`xl/richData/rdRichValueTypes.xml`) is written with them, as Excel saves it.
 
 Legacy formulas calculate like Excel. A formula read without dynamic-array metadata (an `<f>`
 without `t="array"` on a cell without `cm` in .xlsx, a non-array formula without `XLDAPR` cell
@@ -517,3 +518,4 @@ Wrong checksums. In an intact `.xlsx`, `.xlsm`, `.xlsb` or `.ods` package, a par
 | 2026-11-12 | minor | G0329: XLSX form controls keep `controlPr` `autoFill="0"`, `autoLine="0"` and `altText` (Format Control fill/line and alt text; ECMA-376 §18.3.1.20, [MS-XLSX]) through open + save; controls made in the app write none of them (`control_pr_kept_tests.rs`) |
 | 2026-11-12 | minor | G0345: XLSX shapes (`xdr:sp`) keep their outline's preset dash (`a:prstDash`, ECMA-376 Part 1 §20.1.10.48), line cap (`a:ln cap`) and join (`a:round`, `a:bevel`, `a:miter lim`) and an effect list that is empty or one outer shadow (`a:effectLst`/`a:outerShdw`, §20.1.8.45, every attribute and its colour with transforms) through open + save. Unknown values are dropped; other effects (glow, inner shadow, reflection, soft edge) are still not kept. Screen and print stroke dashed outlines with the standard's on/off runs scaled by the line width; round caps and joins and the shadow are not drawn yet. Not covered: `a:custDash`, arrowheads, connectors, pictures. |
 | 2026-11-12 | minor | G0342: `.xls` data validation (DVal/Dv, [MS-XLS] 2.4.96, 2.4.95): Dv records with no DVal before them or past its count are ignored; relative references start from the top-left cell of all the rule's ranges; list, custom and any-value rules read as `between`; unknown types read as any value; columns past IV clamp to IV; a malformed rule is skipped alone, the rest kept; at most 65,536 rules per workbook; one warning each for skipped and ignored records (`xls_dv_tests.rs`). |
+| 2026-11-12 | minor | G0354: XLSX workbooks with pictures in cells write `xl/richData/rdRichValueTypes.xml` ([MS-XLSX] 2.3.6) and its workbook relationship, as Excel saves them; open + save keeps exactly one (`richdata_types_part_tests.rs`) |
