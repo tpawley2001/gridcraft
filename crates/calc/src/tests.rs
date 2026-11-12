@@ -724,8 +724,8 @@ fn spill_into_the_old_area_of_a_blocked_neighbour() {
 #[test]
 fn formulas_reading_an_array_that_loses_a_spill_conflict_read_spill_errors() {
     // Two arrays of one recalculation want the same empty cell: the one laid out second is
-    // #SPILL!, and the formulas that read it in that pass (at its anchor, through `A2#`, or over
-    // the cells it would have spilled into) kept its values.
+    // #SPILL!, and the formulas that read it in that pass (at its anchor, through `A2#`, which is
+    // then the anchor cell alone, or over the cells it would have spilled into) kept its values.
     let mut t = T::new();
     t.set("B1", "=SEQUENCE(3)");
     t.set("A2", "=SEQUENCE(1,3)");
@@ -737,7 +737,7 @@ fn formulas_reading_an_array_that_loses_a_spill_conflict_read_spill_errors() {
     t.calc.recalc_all(&mut t.wb);
     let spill = Value::Error(CellError::Spill);
     assert_eq!((t.num("B2"), t.get("A2"), t.get("D2")), (2.0, spill.clone(), spill));
-    assert_eq!((t.get("C2"), t.num("E2"), t.get("F2"), t.num("G2")), (Value::Empty, 0.0, Value::Error(CellError::Ref), 0.0));
+    assert_eq!((t.get("C2"), t.num("E2"), t.get("F2"), t.num("G2")), (Value::Empty, 0.0, Value::Error(CellError::Spill), 0.0));
 }
 
 #[test]
@@ -2460,10 +2460,14 @@ fn a_dynamic_array_of_one_value_still_anchors_a_spill() {
     assert_eq!(t.get("C1"), Value::from(5.0));
     assert_eq!(t.get("C5"), Value::from(7.0));
 
-    // A formula whose result is a scalar never becomes an anchor: `#` on it is still #REF!.
+    // A formula whose result is a scalar doesn't spill, but `#` on it is that one cell, as in
+    // Excel; on a constant it is still #REF!.
     t.set("D1", "=1+1");
     t.set("E11", "=ROWS(D1#)");
-    assert_eq!(t.get("E11"), Value::Error(CellError::Ref));
+    assert_eq!(t.get("E11"), Value::from(1.0));
+    t.set("D2", "2");
+    t.set("E12", "=ROWS(D2#)");
+    assert_eq!(t.get("E12"), Value::Error(CellError::Ref));
 }
 
 #[test]
