@@ -104,10 +104,13 @@ fn text_needs_quote_prefix(t: &str, sys: gridcraft_core::date::DateSystem) -> bo
 pub fn edit_text(wb: &Workbook, sheet: &Sheet, c: CellRef) -> String {
     let raw = sheet.input_text(c);
     let Some(cell) = sheet.cell(c) else { return raw };
+    // A text cell marked with the quote prefix (typed with a leading `'`, or `xf quotePrefix` in a
+    // file) shows the apostrophe, as Excel does; unmarked text that would not read back as itself
+    // gets one too, so committing the editor unchanged keeps it text.
+    let style = wb.styles.get(cell.style);
     if let Value::Text(t) = &cell.value
         && cell.formula.is_none()
-        && wb.styles.get(cell.style).num_fmt.as_str() != "@"
-        && text_needs_quote_prefix(t, wb.date_system)
+        && (style.quote_prefix || (style.num_fmt.as_str() != "@" && text_needs_quote_prefix(t, wb.date_system)))
     {
         return format!("'{raw}");
     }
