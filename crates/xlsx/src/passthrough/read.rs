@@ -297,9 +297,10 @@ impl KeptReader {
         }
         let mut p = Preserved::default();
         let mut seen = HashSet::new();
-        // Package root: custom document properties, ribbon customisation, task panes, sensitivity label.
+        // Package root: custom document properties, ribbon customisation, task panes, sensitivity label,
+        // Dell Data Protection parts.
         if let Ok(root) = raw_rels(cx, "") {
-            for r in root.iter().filter(|r| is_kind(r, PACKAGE_ROOTS)) {
+            for r in root.iter().filter(|r| is_package_root(r)) {
                 let mut q = Preserved::default();
                 match self.keep(cx, &mut q, std::slice::from_ref(r), &mut seen) {
                     Ok(()) => {

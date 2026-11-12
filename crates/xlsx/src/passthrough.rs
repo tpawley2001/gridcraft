@@ -115,6 +115,12 @@ const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
 
 /// Relationship kinds (last segment of the type) kept from the package root.
 const PACKAGE_ROOTS: &[&str] = &["custom-properties", "extensibility", "webextensiontaskpanes", "classificationlabels"];
+/// Relationship type prefix of the Dell Data Protection (Dell Encryption) package-root parts.
+const NS_DDP_PREFIX: &str = "http://schemas.dell.com/ddp/";
+/// Relationship kinds kept from the package root only under [`NS_DDP_PREFIX`]: the encrypted file,
+/// its policy metadata and its HMACs. Excel writes them back unchanged; the generic names
+/// `metadataFile`/`hmacFile` of other vendors are not taken for these.
+const PACKAGE_ROOTS_DDP: &[&str] = &["xenFile", "metadataFile", "hmacFile"];
 /// Relationship kinds kept from the workbook without a workbook element.
 /// The shared workbook revision history (`revisionHeaders`, with the logs it names) is checked and
 /// written back only while the sheets are unchanged (see [`revisions`]).
@@ -261,6 +267,10 @@ const OWN_DIRS: &[&str] = &[
     "xl/activex/",
     "xl/webextensions/",
     "xl/printersettings/",
+    // Dell Data Protection parts (see `PACKAGE_ROOTS_DDP`), where Excel writes them back.
+    "ddp/",
+    "docprops/metadata.xml",
+    "docprops/hmac.xml",
 ];
 
 /// The package-root relationship type of the custom document properties part.
@@ -380,6 +390,11 @@ fn kind(rel_type: &str) -> &str {
 fn is_kind(r: &PreservedRel, kinds: &[&str]) -> bool {
     let k = kind(&r.rel_type);
     kinds.iter().any(|x| x.eq_ignore_ascii_case(k))
+}
+
+/// A relationship from the package root whose part is kept as it is.
+fn is_package_root(r: &PreservedRel) -> bool {
+    is_kind(r, PACKAGE_ROOTS) || (r.rel_type.starts_with(NS_DDP_PREFIX) && is_kind(r, PACKAGE_ROOTS_DDP))
 }
 
 fn rewritten(r: &PreservedRel) -> bool {
