@@ -361,6 +361,14 @@ fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>, functions: F
     let mut parsed = Vec::new();
     // Names of the readable sheets so far: `wb.sheets` is only filled once every sheet is parsed.
     let mut names: Vec<&str> = Vec::new();
+    // Cells whose text was cut to fit, and the first of them as `Sheet!A1`.
+    let mut cut_text = (0usize, None::<String>);
+    let mut count_cut = |st: &SheetState<'_>, sheet: &str| {
+        cut_text.0 += st.cut_text;
+        if let (None, Some(at)) = (&cut_text.1, st.first_cut) {
+            cut_text.1 = Some(format!("{}!{}", gridcraft_core::quote_sheet(sheet), at.a1()));
+        }
+    };
     for (bound, bs) in g.sheets.iter().enumerate() {
         if bs.kind == 2 {
             match chart::chart_sheet(&stream, bs.pos, &mut budget, &g.links, g.biff5.as_ref(), &mut report)? {
@@ -376,7 +384,10 @@ fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>, functions: F
         if bs.kind == 1 {
             // An Excel 4.0 macro sheet: its cells are kept for a macro-enabled save, never evaluated.
             let read = match worksheet(&stream, bs, None, &g, &styles, &mut budget, &mut report, true)? {
-                Some((st, filter)) => Some(finish_sheet(st, filter, &g, &mut budget, &mut report)?),
+                Some((st, filter)) => {
+                    count_cut(&st, &bs.name);
+                    Some(finish_sheet(st, filter, &g, &mut budget, &mut report)?)
+                }
                 None => None,
             };
             match read {
@@ -411,9 +422,17 @@ fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>, functions: F
             model_index.push(None);
             continue;
         };
+        count_cut(&st, &bs.name);
         names.push(&bs.name);
         model_index.push(Some(parsed.len()));
         parsed.push((bs.visibility, st, filter));
+    }
+    if let (n @ 1.., Some(first)) = cut_text {
+        report.warn(if n == 1 {
+            format!("1 cell held more text than Excel's 32,767 characters and was cut to fit (first: {first}).")
+        } else {
+            format!("{n} cells held more text than Excel's 32,767 characters and were cut to fit (first: {first}).")
+        });
     }
     // Every sheet's mandatory text is charged by now; shared formulas take what is left.
     for (visibility, st, filter) in parsed {
@@ -1100,9 +1119,62 @@ struct SheetState<'g> {
     /// whose sheet has no TABLE record lost its table, which is reported.
     data_table_cell: bool,
     data_table_record: bool,
+    /// How many cells' text was cut to [`CELL_TEXT_MAX`], and the first of them.
+    cut_text: usize,
+    first_cut: Option<CellRef>,
+}
+
+/// The most text one cell holds, in UTF-16 code units (the way `LEN` counts). A BIFF8 string may
+/// declare up to 65,535 characters, so a file can carry more than a cell may hold.
+const CELL_TEXT_MAX: usize = 32_767;
+
+/// `s` cut to its first [`CELL_TEXT_MAX`] UTF-16 code units, or `None` when it fits. A character
+/// that would be split (a surrogate pair straddling the limit) is dropped whole.
+fn cut_cell_text(s: &str) -> Option<&str> {
+    // A UTF-8 byte never stands for more than one UTF-16 unit.
+    if s.len() <= CELL_TEXT_MAX {
+        return None;
+    }
+    let mut units = 0usize;
+    for (i, ch) in s.char_indices() {
+        units += ch.len_utf16();
+        if units > CELL_TEXT_MAX {
+            return s.get(..i);
+        }
+    }
+    None
+}
+
+/// A cell value with its text cut to fit one cell, and whether it was cut.
+fn fit_cell_value(value: Value) -> (Value, bool) {
+    let cut = match &value {
+        Value::Text(t) => cut_cell_text(t).map(Arc::<str>::from),
+        _ => None,
+    };
+    match cut {
+        Some(t) => (Value::Text(t), true),
+        None => (value, false),
+    }
 }
 
 impl SheetState<'_> {
+    /// Stores a cell's text value, cut to fit one cell.
+    fn put_text(&mut self, budget: &mut Budget, row: u16, col: u16, ixfe: u16, value: Value) -> Result<(), IoError> {
+        let (value, cut) = fit_cell_value(value);
+        if let Some(pos) = self.put(budget, row, col, ixfe, value)?
+            && cut
+        {
+            self.note_cut(pos);
+        }
+        Ok(())
+    }
+
+    /// Counts a cell whose text was cut to fit.
+    fn note_cut(&mut self, pos: CellRef) {
+        self.cut_text += 1;
+        self.first_cut.get_or_insert(pos);
+    }
+
     /// Records why a formula was kept as its value (each reason once).
     fn unsupported(&mut self, why: &'static str) {
         if !self.unsupported.contains(&why) {
@@ -1281,6 +1353,8 @@ fn worksheet<'g>(
         data_table_ranges: HashSet::new(),
         data_table_cell: false,
         data_table_record: false,
+        cut_text: 0,
+        first_cut: None,
     };
     let mut custom_views = crate::binary_custom_views::SheetViews::default();
     let mut depth = 1usize;
@@ -1504,7 +1578,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
             let i = c.u32()? as usize;
             match st.g.sst.get(i) {
                 Some(s) => {
-                    st.put(budget, r, col, x, Value::Text(s.clone()))?;
+                    st.put_text(budget, r, col, x, Value::Text(s.clone()))?;
                 }
                 None => report.warn("Some cells refer to missing shared strings and were left empty."),
             }
@@ -1514,7 +1588,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
             let (r, col, x) = (c.u16()?, c.u16()?, c.u16()?);
             let s = text(&mut c, st.g)?;
             budget.text(s.len())?;
-            st.put(budget, r, col, x, Value::from(s))?;
+            st.put_text(budget, r, col, x, Value::from(s))?;
         }
         0x0205 => {
             let (r, col, x) = (c.u16()?, c.u16()?, c.u16()?);
@@ -1541,10 +1615,14 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
             if let Some((pos, style)) = st.pending_string.take() {
                 let s = text(&mut c, st.g)?;
                 budget.text(s.len())?;
+                let (value, cut) = fit_cell_value(Value::from(s));
+                if cut {
+                    st.note_cut(pos);
+                }
                 if let Some(cell) = st.sheet.cells.get_mut(pos) {
-                    cell.value = Value::from(s);
+                    cell.value = value;
                 } else {
-                    st.sheet.cells.set(pos, Cell { value: Value::from(s), formula: None, style, py: None });
+                    st.sheet.cells.set(pos, Cell { value, formula: None, style, py: None });
                 }
             }
         }
@@ -1908,5 +1986,23 @@ mod budget_tests {
         // a shorter formula would fit the 2 bytes left, but the cut-off holds
         assert!(!budget.try_shared_text(1));
         assert!(budget.try_text(1), "text the import needs is still charged normally");
+    }
+}
+
+#[cfg(test)]
+mod cell_text_tests {
+    use super::*;
+
+    #[test]
+    fn cell_text_is_cut_at_the_limit_between_characters() {
+        assert_eq!(cut_cell_text(&"a".repeat(CELL_TEXT_MAX)), None);
+        assert_eq!(cut_cell_text(&"a".repeat(CELL_TEXT_MAX + 1)).map(str::len), Some(CELL_TEXT_MAX));
+        // Multi-byte characters of one UTF-16 unit each: counted as units, not bytes.
+        let e = "\u{e9}".repeat(CELL_TEXT_MAX);
+        assert_eq!(cut_cell_text(&e), None);
+        let pair = format!("{}\u{1F600}", "a".repeat(CELL_TEXT_MAX - 1));
+        assert_eq!(cut_cell_text(&pair), Some("a".repeat(CELL_TEXT_MAX - 1).as_str()));
+        let (v, cut) = fit_cell_value(Value::number(1.0));
+        assert!(!cut && v == Value::number(1.0));
     }
 }
