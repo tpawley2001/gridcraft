@@ -48,6 +48,7 @@ mod form_list_controls_tests;
 mod google_sheets_dummy;
 mod group_passthrough;
 mod hidden_drawings;
+mod hyperlink_display_kept_tests;
 mod indexed_colors_roundtrip;
 mod ink_roundtrip;
 mod kept_macro_dialog_sheets;
