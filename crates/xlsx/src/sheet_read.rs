@@ -446,6 +446,11 @@ fn read_views(e: &El, sheet: &mut Sheet) {
     if let Some(z) = v.attr_u32("zoomScale") {
         sheet.zoom = z.clamp(10, 400) as u16;
     }
+    // Per-view zooms; 0 or out of range counts as not stated.
+    let view_zoom = |a: &str| v.attr_u32(a).filter(|z| (10..=400).contains(z)).and_then(|z| u16::try_from(z).ok());
+    sheet.zoom_normal = view_zoom("zoomScaleNormal");
+    sheet.zoom_page_break = view_zoom("zoomScaleSheetLayoutView");
+    sheet.zoom_page_layout = view_zoom("zoomScalePageLayoutView");
     if let Some(c) = v.attr("topLeftCell").and_then(CellRef::parse) {
         sheet.view_top_left = c;
     }
