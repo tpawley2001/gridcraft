@@ -466,6 +466,10 @@ pub struct Workbook {
     /// Unmodelled file content kept for saving (package root and workbook level). Not in JSON.
     #[serde(skip)]
     pub preserved: Option<Arc<crate::preserved::Preserved>>,
+    /// Cube-formula (MDX) value metadata read from the file, which the sheets' `cell_mdx` refer
+    /// to by record index. Shared between snapshots. Not in JSON.
+    #[serde(skip)]
+    pub mdx_metadata: Option<Arc<crate::preserved::MdxMetadata>>,
     /// Chart sheets of the file it was read from, in tab order, for printing only (they are not
     /// in `sheets`; their parts are in `preserved`). Shared between snapshots. Not in JSON.
     #[serde(skip)]
@@ -582,6 +586,7 @@ impl Workbook {
             macros_read: vec![],
             macros_unread: Arc::default(),
             preserved: None,
+            mdx_metadata: None,
             chart_sheets: Arc::default(),
             source_dir: None,
             region: gridcraft_core::region::default_region(),

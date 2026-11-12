@@ -643,7 +643,9 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
             None => Value::Empty,
         },
     };
-    let rich = c.attr("vm").and_then(|vm| {
+    // A cube formula's (or OLAP PivotTable value's) link to its MDX record, set once the cell is.
+    let mdx = c.attr("vm").and_then(|vm| cx.mdx.record(vm));
+    let rich = c.attr("vm").filter(|_| mdx.is_none()).and_then(|vm| {
         if vm == "0" {
             return None;
         }
@@ -722,6 +724,9 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
         None => value,
     };
     sheet.cells.set(pos, Cell { value, formula: formula.map(Arc::new), style, py });
+    if let Some(record) = mdx {
+        sheet.cell_mdx.insert(pos, record);
+    }
 }
 
 /// Reads a What-If data table's `<f t="dataTable">` (ECMA-376 Part 1, 18.3.1.40) onto the sheet.

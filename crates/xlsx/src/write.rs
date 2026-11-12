@@ -158,6 +158,9 @@ pub struct Out {
     pub dynamic_arrays: bool,
     pub needs_calc: bool,
     pub cell_pictures: crate::richdata::PicturesOut,
+    /// The workbook's cube-formula (MDX) value metadata, written in `xl/metadata.xml`; cells
+    /// refer to it by `vm` (see [`crate::mdx_metadata::metadata`]).
+    pub mdx: Option<std::sync::Arc<gridcraft_model::MdxMetadata>>,
     /// Kept (pass-through) parts written so far.
     pub kept: crate::passthrough::KeptOut,
     /// Decides which formulas need dynamic-array metadata.
@@ -452,6 +455,7 @@ pub fn write_xlsx_named_with(wb: &Workbook, kind: XlsxKind, book_name: Option<&s
         dynamic_arrays: false,
         needs_calc: false,
         cell_pictures: Default::default(),
+        mdx: wb.mdx_metadata.clone().filter(|m| !m.records.is_empty()),
         kept: Default::default(),
         functions,
         names: Default::default(),
@@ -561,6 +565,8 @@ pub fn write_xlsx_named_with(wb: &Workbook, kind: XlsxKind, book_name: Option<&s
     wb_rels.add("sharedStrings", "sharedStrings.xml");
     if !out.cell_pictures.is_empty() {
         crate::richdata::write(&mut out, &mut wb_rels)?;
+    } else if let Some(mdx) = out.mdx.clone() {
+        crate::mdx_metadata::write(&mut out, &mdx, &mut wb_rels);
     } else if out.dynamic_arrays {
         out.part(
             "xl/metadata.xml",

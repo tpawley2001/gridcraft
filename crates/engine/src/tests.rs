@@ -6323,6 +6323,7 @@ fn a_script_cannot_switch_windows() {
 }
 
 mod controls;
+mod cube_links;
 mod equation;
 mod filter_date_tests;
 mod form_check_option;

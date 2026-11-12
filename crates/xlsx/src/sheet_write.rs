@@ -241,6 +241,8 @@ struct CellWriteInput<'a> {
     reference: CellRef,
     cell: Option<&'a Cell>,
     picture: Option<&'a std::sync::Arc<gridcraft_model::CellPicture>>,
+    /// The cube (MDX) record the cell's value comes from.
+    mdx: Option<u32>,
     header_override: Option<&'a String>,
     spill_value: Option<&'a Value>,
     dynamic_range: Option<&'a RangeRef>,
@@ -1002,6 +1004,7 @@ fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcr
                     reference: cell_ref,
                     cell,
                     picture: sheet.cell_pictures.get(&cell_ref),
+                    mdx: sheet.cell_mdx.get(&cell_ref).copied(),
                     header_override: ov,
                     spill_value: ex,
                     dynamic_range: array.as_ref(),
@@ -1168,8 +1171,17 @@ fn write_sheet_views(s: &mut String, sheet: &Sheet, selected: bool) {
 }
 
 fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_model::StyleId) -> u32, out: &mut Out) {
-    let CellWriteInput { reference: c, cell, picture, header_override: ov, spill_value: extra, dynamic_range: dynamic, data_table, in_data_table } =
-        input;
+    let CellWriteInput {
+        reference: c,
+        cell,
+        picture,
+        mdx,
+        header_override: ov,
+        spill_value: extra,
+        dynamic_range: dynamic,
+        data_table,
+        in_data_table,
+    } = input;
     let style = cell.map(|x| sid(x.style)).unwrap_or(0);
     s.push_str("<c r=\"");
     push_a1(s, c);
@@ -1178,9 +1190,16 @@ fn write_cell(s: &mut String, input: CellWriteInput<'_>, sid: &dyn Fn(gridcraft_
         let _ = write!(s, " s=\"{style}\"");
     }
     if let Some(picture) = picture {
-        let vm = out.cell_pictures.index(picture);
+        // The MDX blocks come first in `valueMetadata` (see `crate::mdx_metadata::metadata`).
+        let records = out.mdx.as_ref().map_or(0, |m| m.records.len());
+        let vm = (out.cell_pictures.index(picture) as usize).saturating_add(records);
         let _ = write!(s, " t=\"e\" vm=\"{vm}\"><v>#VALUE!</v></c>");
         return;
+    }
+    // A cube value keeps its link: MDX record `n` is value-metadata block `n + 1`. A record the
+    // workbook does not hold is never pointed at.
+    if let Some(n) = mdx.filter(|n| cell.is_some() && ov.is_none() && out.mdx.as_ref().is_some_and(|m| (*n as usize) < m.records.len())) {
+        let _ = write!(s, " vm=\"{}\"", u64::from(n) + 1);
     }
     let formula = if ov.is_some() { None } else { cell.and_then(|x| x.formula.as_ref()) };
     // A Python cell is saved as [MS-XLSX] 2.3.10 specifies, `_xlfn._xlws.PY(index,0|1)` with its

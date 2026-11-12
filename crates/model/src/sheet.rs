@@ -117,6 +117,11 @@ pub struct Sheet {
     /// Static pictures are sparse rich content. Ordinary cells carry no picture pointer.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty", with = "picture_map")]
     pub cell_pictures: BTreeMap<CellRef, Arc<CellPicture>>,
+    /// Cells whose value comes from a cube (CUBEMEMBER, CUBEVALUE, an OLAP PivotTable value):
+    /// address -> index of the MDX record in [`crate::Workbook::mdx_metadata`]. Like
+    /// `cell_pictures`, replacing a cell's content drops its entry. Not in JSON.
+    #[serde(skip)]
+    pub cell_mdx: BTreeMap<CellRef, u32>,
     /// Values spilled by dynamic-array formulas (maintained by calc), keyed by cell.
     #[serde(skip)]
     pub spill: BTreeMap<CellRef, Value>,
@@ -308,6 +313,7 @@ impl Sheet {
             file_id: 0,
             cells: CellStore::new(),
             cell_pictures: BTreeMap::new(),
+            cell_mdx: BTreeMap::new(),
             spill: BTreeMap::new(),
             spill_ranges: BTreeMap::new(),
             cols: BTreeMap::new(),
@@ -562,21 +568,25 @@ impl Sheet {
     /// Replaces content, removing any picture at this address. Style-only edits use set_style.
     pub fn set_cell(&mut self, c: CellRef, cell: Cell) {
         self.cell_pictures.remove(&c);
+        self.cell_mdx.remove(&c);
         self.cells.set(c, cell);
     }
     pub fn remove_cell(&mut self, c: CellRef) -> Option<Cell> {
         self.cell_pictures.remove(&c);
+        self.cell_mdx.remove(&c);
         self.cells.remove(c)
     }
     /// Removes content in a range; returns scalar cells, with pictures removed from the side map.
     pub fn take_cells(&mut self, range: RangeRef) -> Vec<(CellRef, Cell)> {
         self.cell_pictures.retain(|c, _| !range.contains(*c));
+        self.cell_mdx.retain(|c, _| !range.contains(*c));
         self.cells.take_range(range)
     }
     /// Pictures retain a scalar fallback for calculation and unsupported consumers.
     pub fn set_picture(&mut self, c: CellRef, picture: Arc<CellPicture>) {
         let style = self.style_id(c);
         self.cells.set(c, Cell { value: Value::Error(gridcraft_core::CellError::Value), formula: None, style, py: None });
+        self.cell_mdx.remove(&c);
         self.cell_pictures.insert(c, picture);
     }
     pub fn input_text(&self, c: CellRef) -> String {

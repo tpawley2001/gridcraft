@@ -454,7 +454,11 @@ pub fn write(out: &mut Out, workbook_rels: &mut Rels) -> Result<(), IoError> {
     out.part(
         "xl/metadata.xml",
         Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"),
-        metadata(count, out.dynamic_arrays).into_bytes(),
+        match &out.mdx {
+            Some(mdx) => crate::mdx_metadata::metadata(mdx, count, out.dynamic_arrays),
+            None => metadata(count, out.dynamic_arrays),
+        }
+        .into_bytes(),
     );
     workbook_rels.add("sheetMetadata", "metadata.xml");
     Ok(())
