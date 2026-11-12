@@ -39,24 +39,41 @@ pub(super) fn accrint(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
         }
         Ok(j)
     };
-    let start = if calc_method || settle <= first { issue } else { cd(index_of(settle)?)? };
-    let mut j = index_of(start)?;
-    let mut sum = 0.0;
+    // Normal length of a quasi-coupon period under the basis (COUPDAYS); `p0`..`p1` is the period.
+    let period_len = |p0: f64, p1: f64| match basis {
+        1 => p1 - p0,
+        3 => 365.0 / freq,
+        _ => 360.0 / freq,
+    };
+    // Excel splits the accrual at the coupon date `pcd`: before settlement on or after
+    // first_interest that is the coupon date on or before settlement; otherwise it is the
+    // quasi-coupon date one period before first_interest, and the span from `pcd` to
+    // settlement is then negative. The part after `pcd` is one ratio over that period's
+    // length; the periods from issue up to `pcd` are each counted as their own ratio.
+    let pcd_index = if settle > first { index_of(settle)? } else { -1 };
+    let (pcd, ncd) = (cd(pcd_index)?, cd(pcd_index + 1)?);
+    if !calc_method && settle > first {
+        return num_val(par * rate / freq * day_count(sys, pcd, settle, basis)? / period_len(pcd, ncd));
+    }
+    let mut sum = day_count(sys, issue.max(pcd), settle, basis)? / period_len(pcd, ncd);
+    let mut j = index_of(issue)?;
     let mut guard = 0;
-    loop {
+    while j < pcd_index {
         let (p0, p1) = (cd(j)?, cd(j + 1)?);
-        if p0 >= settle {
-            break;
+        if issue <= p0 {
+            // A whole earlier period accrues one full coupon.
+            sum += 1.0;
+        } else {
+            // The period holding the issue date; European 30/360 measures it by its own 30/360 length.
+            let len = if basis == 4 { day_count(sys, p0, p1, 4)? } else { period_len(p0, p1) };
+            if len <= 0.0 {
+                return Err(CellError::Num);
+            }
+            sum += day_count(sys, issue, p1, basis)? / len;
         }
-        let from = p0.max(start);
-        let to = p1.min(settle);
-        if to > from {
-            let nl = match basis {
-                1 => p1 - p0,
-                3 => 365.0 / freq,
-                _ => 360.0 / freq,
-            };
-            sum += day_count(sys, from, to, basis)? / nl;
+        // calc_method FALSE keeps only the period that holds the issue date.
+        if !calc_method {
+            break;
         }
         j += 1;
         guard += 1;

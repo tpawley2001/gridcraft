@@ -174,6 +174,10 @@ fn securities() {
     is_err(ev("ACCRINTM", vec![d(2008, 6, 15), d(2008, 4, 1), n(0.1)]), CellError::Num);
     close_tol(ev("ACCRINT", vec![d(2008, 3, 1), d(2008, 8, 31), d(2008, 5, 1), n(0.1), n(1000.0), n(2.0), n(0.0)]), 16.66666667, 1e-9);
     close_tol(ev("ACCRINT", vec![d(2008, 3, 5), d(2008, 8, 31), d(2008, 5, 1), n(0.1), n(1000.0), n(2.0), n(0.0), b(false)]), 15.55555556, 1e-9);
+    // calc_method FALSE drops the whole periods between issue and first_interest (Excel: -900, TRUE 50).
+    let accr = |calc: bool| ev("ACCRINT", vec![d(2007, 8, 15), d(2017, 11, 15), d(2008, 2, 15), n(0.1), n(1000.0), n(2.0), n(1.0), b(calc)]);
+    close_tol(accr(true), 57.33695652173907, 1e-9);
+    close_tol(accr(false), -892.663043478261, 1e-9);
     close_tol(ev("PRICEMAT", vec![d(2008, 2, 15), d(2008, 4, 13), d(2007, 11, 11), n(0.061), n(0.061), n(0.0)]), 99.98449888, 1e-9);
     close_tol(ev("YIELDMAT", vec![d(2008, 3, 15), d(2008, 11, 3), d(2007, 11, 8), n(0.0625), n(100.0123), n(0.0)]), 0.060954, 1e-6);
     close_tol(ev("PRICE", vec![d(2008, 2, 15), d(2017, 11, 15), n(0.0575), n(0.065), n(100.0), n(2.0), n(0.0)]), 94.63436, 1e-7);
