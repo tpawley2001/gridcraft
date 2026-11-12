@@ -86,6 +86,7 @@ mod picture_border_kept_tests;
 mod picture_effects;
 mod picture_locks_tests;
 mod pivot_tests;
+mod pivot_unresolved_source_tests;
 mod quote_prefix_tests;
 mod rich_error_values_tests;
 mod richdata_excel_package_tests;

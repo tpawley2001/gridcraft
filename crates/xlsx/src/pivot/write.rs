@@ -104,6 +104,8 @@ pub struct PivotWriter {
     caches: Vec<(u32, String)>,
     pending: Vec<Pending>,
     tables: u32,
+    /// Kept caches already written: original cache definition part → (cache id, part number).
+    kept_caches: HashMap<String, (u32, usize)>,
 }
 
 struct Pending {
@@ -120,8 +122,18 @@ impl PivotWriter {
     pub fn add_sheet(&mut self, wb: &Workbook, si: usize, out: &mut Out, rels: &mut Rels) {
         let Some(sheet) = wb.sheet(si) else { return };
         for (idx, pt) in sheet.pivots.iter().enumerate() {
-            let Some(cache) = build_cache(wb, pt, si) else { continue };
-            let n = self.caches.len() as u32 + 1;
+            let Some(cache) = build_cache(wb, pt, si) else {
+                // A PivotTable read from a file whose source is gone keeps the parts it was read
+                // from, as Excel keeps it (only Refresh fails); one made here is skipped.
+                if resolve_source(wb, &pt.source, si, 0).is_none()
+                    && let Some(k) = sheet.preserved.as_deref().and_then(|p| p.pivots.iter().find(|k| k.id == pt.id && k.name == pt.name))
+                {
+                    self.add_kept(k, out, rels);
+                }
+                continue;
+            };
+            let n = self.caches.len() + 1;
+            let cache_id = self.free_cache_id(n as u32);
             let cache_part = format!("xl/pivotCache/pivotCacheDefinition{n}.xml");
             let rec_rid = if let Some((count, xml)) = &cache.records {
                 let mut r = Rels::default();
@@ -134,15 +146,65 @@ impl PivotWriter {
                 None
             };
             out.part(&cache_part, Some(CT_PIVOT_CACHE_DEF), cache_xml(&cache, rec_rid.as_deref(), wb.date_system).into_bytes());
-            self.caches.push((n, format!("pivotCache/pivotCacheDefinition{n}.xml")));
+            self.caches.push((cache_id, format!("pivotCache/pivotCacheDefinition{n}.xml")));
             self.tables += 1;
             let t = self.tables;
             rels.add("pivotTable", &format!("../pivotTables/pivotTable{t}.xml"));
             let mut tr = Rels::default();
             tr.add("pivotCacheDefinition", &format!("../pivotCache/pivotCacheDefinition{n}.xml"));
             out.part(&format!("xl/pivotTables/_rels/pivotTable{t}.xml.rels"), None, tr.xml().into_bytes());
-            self.pending.push(Pending { part: format!("xl/pivotTables/pivotTable{t}.xml"), sheet: si, idx, cache_id: n, cache });
+            self.pending.push(Pending { part: format!("xl/pivotTables/pivotTable{t}.xml"), sheet: si, idx, cache_id, cache });
         }
+    }
+
+    /// `wanted` when no cache has it yet, else the smallest free cache id.
+    fn free_cache_id(&self, wanted: u32) -> u32 {
+        let used = |id: u32| self.caches.iter().any(|(c, _)| *c == id);
+        if wanted != 0 && !used(wanted) {
+            return wanted;
+        }
+        (1..=u32::MAX).find(|id| !used(*id)).unwrap_or(u32::MAX)
+    }
+
+    /// Writes a kept PivotTable from the parts it was read from, and its cache once per workbook
+    /// (PivotTables that shared a cache in the source file share it again). Only the table's
+    /// `cacheId` is rewritten, when its original id is taken.
+    fn add_kept(&mut self, k: &PreservedPivot, out: &mut Out, rels: &mut Rels) {
+        let key = crate::package::normalize(&k.cache.name);
+        let (cache_id, n) = match self.kept_caches.get(&key) {
+            Some(c) => *c,
+            None => {
+                let n = self.caches.len() + 1;
+                let cache_id = self.free_cache_id(k.cache_id);
+                (cache_id, n)
+            }
+        };
+        let table = if cache_id == k.cache_id {
+            k.table.data.to_vec()
+        } else {
+            let Some(t) = set_root_attr(&k.table.data, "cacheId", &cache_id.to_string()) else { return };
+            t
+        };
+        if !self.kept_caches.contains_key(&key) {
+            if let Some(records) = &k.records {
+                let mut r = Rels::default();
+                for rel in k.cache.rels.iter().filter(|r| r.rel_type.ends_with("/pivotCacheRecords")) {
+                    r.add_kept(&rel.id, &rel.rel_type, &format!("pivotCacheRecords{n}.xml"), false);
+                }
+                out.part(&format!("xl/pivotCache/_rels/pivotCacheDefinition{n}.xml.rels"), None, r.xml().into_bytes());
+                out.part(&format!("xl/pivotCache/pivotCacheRecords{n}.xml"), Some(CT_PIVOT_CACHE_REC), records.data.to_vec());
+            }
+            out.part(&format!("xl/pivotCache/pivotCacheDefinition{n}.xml"), Some(CT_PIVOT_CACHE_DEF), k.cache.data.to_vec());
+            self.caches.push((cache_id, format!("pivotCache/pivotCacheDefinition{n}.xml")));
+            self.kept_caches.insert(key, (cache_id, n));
+        }
+        self.tables += 1;
+        let t = self.tables;
+        rels.add("pivotTable", &format!("../pivotTables/pivotTable{t}.xml"));
+        let mut tr = Rels::default();
+        tr.add("pivotCacheDefinition", &format!("../pivotCache/pivotCacheDefinition{n}.xml"));
+        out.part(&format!("xl/pivotTables/_rels/pivotTable{t}.xml.rels"), None, tr.xml().into_bytes());
+        out.part(&format!("xl/pivotTables/pivotTable{t}.xml"), Some(CT_PIVOT_TABLE), table);
     }
 
     /// Adds the workbook relationships to the caches; returns the `<pivotCaches>` element (empty
@@ -183,6 +245,94 @@ impl PivotWriter {
             let Some(pt) = wb.sheet(p.sheet).and_then(|s| s.pivots.get(p.idx)) else { continue };
             let xml = table_xml(pt, p.idx, p.cache_id, &p.cache, fmt_id);
             out.part(&p.part, Some(CT_PIVOT_TABLE), xml.into_bytes());
+        }
+    }
+}
+
+/// The XML part `xml` with attribute `name` of its root element set to `value` (added when
+/// absent); every other byte unchanged. `None` when the root start tag can't be found.
+fn set_root_attr(xml: &[u8], name: &str, value: &str) -> Option<Vec<u8>> {
+    // The root start tag: the first `<` not opening a declaration, comment or instruction.
+    let mut at = 0;
+    let start = loop {
+        let i = at + xml.get(at..)?.iter().position(|b| *b == b'<')?;
+        match xml.get(i + 1)? {
+            b'?' | b'!' => at = i + 1,
+            _ => break i,
+        }
+    };
+    let is_space = |b: u8| matches!(b, b' ' | b'\t' | b'\r' | b'\n');
+    let mut i = start + 1;
+    while xml.get(i).is_some_and(|b| !is_space(*b) && *b != b'>' && *b != b'/') {
+        i += 1;
+    }
+    let name_end = i;
+    loop {
+        while xml.get(i).is_some_and(|b| is_space(*b)) {
+            i += 1;
+        }
+        if matches!(*xml.get(i)?, b'>' | b'/') {
+            break;
+        }
+        let a = i;
+        while xml.get(i).is_some_and(|b| !is_space(*b) && *b != b'=') {
+            i += 1;
+        }
+        let attr = xml.get(a..i)?;
+        while xml.get(i).is_some_and(|b| is_space(*b)) {
+            i += 1;
+        }
+        if *xml.get(i)? != b'=' {
+            return None;
+        }
+        i += 1;
+        while xml.get(i).is_some_and(|b| is_space(*b)) {
+            i += 1;
+        }
+        let quote = *xml.get(i)?;
+        if quote != b'"' && quote != b'\'' {
+            return None;
+        }
+        let v = i + 1;
+        let v_end = v + xml.get(v..)?.iter().position(|b| *b == quote)?;
+        if attr == name.as_bytes() {
+            let mut outx = Vec::with_capacity(xml.len() + value.len());
+            outx.extend_from_slice(xml.get(..v)?);
+            outx.extend_from_slice(esc_attr(value).as_bytes());
+            outx.extend_from_slice(xml.get(v_end..)?);
+            return Some(outx);
+        }
+        i = v_end + 1;
+    }
+    let mut outx = Vec::with_capacity(xml.len() + name.len() + value.len() + 4);
+    outx.extend_from_slice(xml.get(..name_end)?);
+    outx.extend_from_slice(format!(" {name}=\"{}\"", esc_attr(value)).as_bytes());
+    outx.extend_from_slice(xml.get(name_end..)?);
+    Some(outx)
+}
+
+/// Drops the kept parts of PivotTables whose source resolves: their caches are rebuilt on save.
+pub fn drop_rebuildable_kept(wb: &mut Workbook) {
+    for si in 0..wb.sheets.len() {
+        let Some(sheet) = wb.sheet(si) else { continue };
+        let Some(p) = sheet.preserved.as_deref().filter(|p| !p.pivots.is_empty()) else { continue };
+        let keep: Vec<PreservedPivot> = p
+            .pivots
+            .iter()
+            .filter(|k| {
+                let pt = sheet.pivots.iter().find(|pt| pt.id == k.id && pt.name == k.name);
+                pt.is_some_and(|pt| resolve_source(wb, &pt.source, si, 0).is_none())
+            })
+            .cloned()
+            .collect();
+        if keep.len() == p.pivots.len() {
+            continue;
+        }
+        let mut p = p.clone();
+        p.pivots = keep;
+        let p = if p.is_empty() { None } else { Some(std::sync::Arc::new(p)) };
+        if let Some(sheet) = wb.sheets.get_mut(si) {
+            std::sync::Arc::make_mut(sheet).preserved = p;
         }
     }
 }

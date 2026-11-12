@@ -18,7 +18,8 @@ use gridcraft_core::date::datetime_from_serial;
 use gridcraft_core::{CellRef, DateSystem, RangeRef, Value, number_to_text};
 use gridcraft_formula::quote_sheet;
 use gridcraft_model::{
-    PivotCalcField, PivotDateGroup, PivotField, PivotFilter, PivotFunc, PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue, Workbook,
+    PivotCalcField, PivotDateGroup, PivotField, PivotFilter, PivotFunc, PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue, PreservedPivot,
+    Workbook,
 };
 
 use crate::IoError;
@@ -30,7 +31,7 @@ mod read;
 mod write;
 
 pub use read::{CachesIn, read_pivots};
-pub use write::PivotWriter;
+pub use write::{PivotWriter, drop_rebuildable_kept};
 
 pub const CT_PIVOT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml";
 pub const CT_PIVOT_CACHE_DEF: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml";

@@ -317,6 +317,7 @@ pub(crate) fn merge_preserved(into: &mut Option<Arc<Preserved>>, add: Option<Arc
     p.elements.extend(add.elements);
     p.sheets.extend(add.sheets);
     p.anchors.extend(add.anchors);
+    p.pivots.extend(add.pivots);
     if p.vml.is_none() {
         p.vml = add.vml;
     }

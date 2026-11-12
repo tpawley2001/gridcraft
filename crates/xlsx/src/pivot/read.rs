@@ -1,7 +1,9 @@
+use super::{CT_PIVOT_CACHE_DEF, CT_PIVOT_CACHE_REC, CT_PIVOT_TABLE, NS_REL};
 use super::{
     CellRef, Ctx, DateSystem, El, HashMap, IoError, MAX_FIELDS, PivotCalcField, PivotDateGroup, PivotField, PivotFilter, PivotFunc, PivotLayout,
     PivotShowAs, PivotSort, PivotTable, PivotValue, RangeRef, abs_range, func_caption, func_from, number_to_text, quote_sheet, same,
 };
+use gridcraft_model::{PreservedPart, PreservedPivot, PreservedRel};
 
 // ================================================================ reading
 
@@ -39,6 +41,9 @@ pub struct CachesIn {
     by_id: HashMap<u32, String>,
     parsed: HashMap<String, Option<CacheIn>>,
     next_id: u32,
+    /// The parts of each cache as read (definition, records), for keeping them; `None` when
+    /// they can't be kept.
+    raw: HashMap<String, Option<(PreservedPart, Option<PreservedPart>)>>,
 }
 
 impl CachesIn {
@@ -53,7 +58,7 @@ impl CachesIn {
                 }
             }
         }
-        CachesIn { by_id, parsed: HashMap::new(), next_id: 1 }
+        CachesIn { by_id, parsed: HashMap::new(), next_id: 1, raw: HashMap::new() }
     }
 }
 
@@ -133,10 +138,69 @@ fn read_cache(cx: &mut Ctx<'_>, part: &str, sheet_name: &str) -> Option<CacheIn>
     Some(CacheIn { source, fields })
 }
 
-/// Reads the PivotTables related to a worksheet part.
-pub fn read_pivots(cx: &mut Ctx<'_>, caches: &mut CachesIn, sheet_part: &str, sheet_name: &str) -> Result<Vec<PivotTable>, IoError> {
+/// A part's bytes for keeping: `None` when it is missing, unreadable or Strict Open XML (what is
+/// saved is Transitional).
+fn raw_part(cx: &mut Ctx<'_>, part: &str, content_type: &str) -> Result<Option<PreservedPart>, IoError> {
+    let data = match cx.pkg.read(part) {
+        Ok(Some(d)) => d,
+        Ok(None) => return Ok(None),
+        Err(IoError::TooLarge(m)) => return Err(IoError::TooLarge(m)),
+        Err(_) => return Ok(None),
+    };
+    if data.windows(STRICT_NS.len()).any(|w| w == STRICT_NS) {
+        return Ok(None);
+    }
+    Ok(Some(PreservedPart { name: part.to_string(), content_type: content_type.to_string(), data: data.into(), rels: vec![] }))
+}
+
+const STRICT_NS: &[u8] = b"http://purl.oclc.org/ooxml/";
+
+/// The definition and records parts of a cache, as read (once per cache).
+fn raw_cache(cx: &mut Ctx<'_>, caches: &mut CachesIn, cache_part: &str) -> Result<Option<(PreservedPart, Option<PreservedPart>)>, IoError> {
+    if let Some(c) = caches.raw.get(cache_part) {
+        return Ok(c.clone());
+    }
+    let kept = match raw_part(cx, cache_part, CT_PIVOT_CACHE_DEF)? {
+        None => None,
+        Some(mut def) => {
+            // The records part: the relationship the root's `r:id` names, else the first one.
+            let root_rid = crate::xml::parse(&def.data).ok().and_then(|x| x.attr("id").map(str::to_string));
+            let rels = cx.pkg.rels(cache_part)?;
+            let recs: Vec<&crate::package::Rel> = rels.iter().filter(|r| r.kind == "pivotCacheRecords" && !r.external).collect();
+            let rel = recs.iter().find(|r| root_rid.as_deref() == Some(r.id.as_str())).or_else(|| recs.first());
+            let records = match rel {
+                Some(r) => {
+                    let records = raw_part(cx, &r.target, CT_PIVOT_CACHE_REC)?;
+                    if records.is_some() {
+                        def.rels.push(PreservedRel {
+                            id: r.id.clone(),
+                            rel_type: format!("{NS_REL}/pivotCacheRecords"),
+                            target: r.target.clone(),
+                            external: false,
+                        });
+                    }
+                    records
+                }
+                None => None,
+            };
+            Some((def, records))
+        }
+    };
+    caches.raw.insert(cache_part.to_string(), kept.clone());
+    Ok(kept)
+}
+
+/// Reads the PivotTables related to a worksheet part, with the parts each was read from (to keep
+/// when its cache can't be rebuilt on save).
+pub fn read_pivots(
+    cx: &mut Ctx<'_>,
+    caches: &mut CachesIn,
+    sheet_part: &str,
+    sheet_name: &str,
+) -> Result<(Vec<PivotTable>, Vec<PreservedPivot>), IoError> {
     let rels = cx.pkg.rels(sheet_part)?;
     let mut out = Vec::new();
+    let mut kept = Vec::new();
     for rel in rels.iter().filter(|r| r.kind == "pivotTable" && !r.external) {
         let Some(x) = cx.optional_xml(&rel.target)? else { continue };
         if x.name != "pivotTableDefinition" {
@@ -165,10 +229,17 @@ pub fn read_pivots(cx: &mut Ctx<'_>, caches: &mut CachesIn, sheet_part: &str, sh
         let Some(cache) = cache else { continue };
         if let Some(pt) = read_table(cx, &x, &cache, caches.next_id) {
             caches.next_id = caches.next_id.saturating_add(1);
+            if let Some(table) = raw_part(cx, &rel.target, CT_PIVOT_TABLE)?
+                && let Some((def, records)) = raw_cache(cx, caches, &cache_part)?
+            {
+                let cache_id =
+                    x.attr_u32("cacheId").or_else(|| caches.by_id.iter().filter(|(_, t)| **t == cache_part).map(|(id, _)| *id).min()).unwrap_or(0);
+                kept.push(PreservedPivot { id: pt.id, name: pt.name.clone(), table, cache_id, cache: def, records });
+            }
             out.push(pt);
         }
     }
-    Ok(out)
+    Ok((out, kept))
 }
 
 /// A pivot field's data items (not subtotal or grand-total items).
