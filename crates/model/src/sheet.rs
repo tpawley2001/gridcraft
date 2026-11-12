@@ -149,6 +149,15 @@ pub struct Sheet {
     pub outline_apply_styles: bool,
     pub right_to_left: bool,
     pub zoom: u16,
+    /// Each view's own zoom as stated in the file (`zoomScaleNormal`, `zoomScaleSheetLayoutView`
+    /// for Page Break Preview, `zoomScalePageLayoutView`), kept for the round trip. `None` = not
+    /// stated. [`Sheet::zoom`] stays the zoom of the current view.
+    #[serde(default)]
+    pub zoom_normal: Option<u16>,
+    #[serde(default)]
+    pub zoom_page_break: Option<u16>,
+    #[serde(default)]
+    pub zoom_page_layout: Option<u16>,
     pub cond_formats: Vec<CondFormat>,
     pub validations: Vec<Validation>,
     #[serde(default)]
@@ -255,6 +264,9 @@ impl Sheet {
             show_zeros: true,
             right_to_left: false,
             zoom: 100,
+            zoom_normal: None,
+            zoom_page_break: None,
+            zoom_page_layout: None,
             cond_formats: vec![],
             validations: vec![],
             validation_settings: ValidationSettings::default(),

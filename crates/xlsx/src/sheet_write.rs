@@ -1029,7 +1029,20 @@ fn write_sheet_views(s: &mut String, sheet: &Sheet, selected: bool) {
         let _ = write!(s, " view=\"{}\"", sheet.view.as_str());
     }
     if sheet.zoom != 100 && (10..=400).contains(&sheet.zoom) {
-        let _ = write!(s, " zoomScale=\"{0}\" zoomScaleNormal=\"{0}\"", sheet.zoom);
+        let _ = write!(s, " zoomScale=\"{}\"", sheet.zoom);
+    }
+    // Each view's own zoom: the current view's is `Sheet::zoom` (it may have changed since the
+    // file was read), written when not 100 or when the file stated it; the others as stated.
+    use gridcraft_model::SheetViewMode as Mode;
+    for (mode, attr, kept) in [
+        (Mode::Normal, "zoomScaleNormal", sheet.zoom_normal),
+        (Mode::PageBreakPreview, "zoomScaleSheetLayoutView", sheet.zoom_page_break),
+        (Mode::PageLayout, "zoomScalePageLayoutView", sheet.zoom_page_layout),
+    ] {
+        let value = if mode == sheet.view { (sheet.zoom != 100 || kept.is_some()).then_some(sheet.zoom) } else { kept };
+        if let Some(z) = value.filter(|z| (10..=400).contains(z)) {
+            let _ = write!(s, " {attr}=\"{z}\"");
+        }
     }
     if sheet.view_top_left != CellRef::default() && sheet.freeze.is_none() {
         let _ = write!(s, " topLeftCell=\"{}\"", sheet.view_top_left.a1());
