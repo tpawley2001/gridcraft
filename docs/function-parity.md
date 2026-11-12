@@ -162,6 +162,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | MAKEARRAY with a fractional rows or cols (such as 2.7) gives `#VALUE!` instead of rounding down, as Excel does (`makearray_size_excel.rs`) |
 | 2026-11-12 | minor | The spill operator `A1#` on a formula cell with no spilled range (a single value, an error, or a blocked `#SPILL!`) refers to that one cell, as Excel does, instead of `#REF!`; a constant or blank cell is still `#REF!` (`spill_operator_single_value_excel.rs`) |
 | 2026-11-11 | minor | MID, REPLACE, FIND and SEARCH count UTF-16 code units, so positions after an emoji agree with Excel; half a surrogate pair becomes U+FFFD (`text_positions_utf16_excel.rs`) |
 | 2026-11-11 | minor | Month-end maturities: COUPDAYS with basis 1 measures the coupon period on dates stepped back from maturity one period at a time with the day clamped (31 Aug, 28 Feb, 28 Aug…), ending at the first such date after settlement and starting one period earlier (on the month end when that date is one); COUPDAYBS basis 0 from an end-of-February coupon date to a 31st keeps the 31st (COUPDAYSNC follows). PRICE, YIELD and DURATION keep COUPNCD - COUPPCD as the period length (`coup_eom_excel.rs`) |
