@@ -89,7 +89,7 @@ FORECAST is Statistical.
 | 3-D references (`Sheet1:Sheet3!A1`) | done; deleting a span's end sheet keeps the rest (#140) |
 | Structured references (`Table1[Col]`, `[#Totals]`, `@`; the unbracketed `[[#This Row],Col]` some writers emit) | done |
 | Defined names (workbook and sheet scope), Create from Selection | done |
-| Dynamic arrays, spill, `#SPILL!`, spill operator `A1#` | done; stale spills after a structural edit or a cleared blocker fixed (#133, #139; PRs #148, #157) |
+| Dynamic arrays, spill, `#SPILL!`, spill operator `A1#` | done; stale spills after a structural edit or a cleared blocker fixed (#133, #139; PRs #148, #157); `A1#` on a formula cell that does not spill (one value, an error, a blocked spill) is that one cell, not `#REF!` |
 | Recalculation after clearing large sparse ranges | every stored cell changed by Clear is reported to recalculation, without a million-coordinate cutoff; removed formula spills are cleared, and removing empty merges still unblocks spills (#1032) |
 | SUBTOTAL / AGGREGATE input size | references trim to the used range; all areas, arrays and values of one call are charged against the 16-million-cell limit before any cell is read (skipped hidden, nested and error cells count), and `#NUM!` past it (#2175) |
 | SUBTOTAL 3 / 103 (COUNTA) with an error cell | done: a cell holding an error counts as one non-empty value instead of being returned, as in Excel (`=SUBTOTAL(3,$D$3:D5)-1` is 0 when D5 is `#REF!`); SUBTOTAL 1, 2, 4–11 and AGGREGATE still return the error |
@@ -159,6 +159,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | The spill operator `A1#` on a formula cell with no spilled range (a single value, an error, or a blocked `#SPILL!`) refers to that one cell, as Excel does, instead of `#REF!`; a constant or blank cell is still `#REF!` (`spill_operator_single_value_excel.rs`) |
 | 2026-11-11 | minor | CUMIPMT and CUMPRINC round a fractional start period up and end period down (an empty span gives 0) and keep a fractional nper for the payment and balances, as Excel does (`cumipmt_fractional_excel.rs`) |
 | 2026-11-11 | minor | DISC, INTRATE, RECEIVED, PRICEDISC and YIELDDISC with basis 1 over at most a year divide by 366 when the span holds a 29 February (or lies in one leap year), else 365, like YEARFRAC(settlement, maturity, 1), instead of the settlement year's length, as Excel does (`disc_family_basis1_excel.rs`) |
 | 2026-11-11 | minor | PRICEMAT and YIELDMAT with basis 1 use one year length for all three fractions, the one YEARFRAC(issue, settlement, 1) divides by (365 or 366 within a year, else the average of the calendar years spanned), as Excel does (`pricemat_yieldmat_excel.rs`) |

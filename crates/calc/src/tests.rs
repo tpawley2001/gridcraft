@@ -46,13 +46,24 @@ fn spill_range_operator() {
     assert_eq!((t.num("C1"), t.num("C2")), (15.0, 5.0));
     t.set("A1", "2");
     assert_eq!((t.num("C1"), t.num("C2")), (3.0, 2.0));
-    // A blocked spill, or a cell that doesn't spill, gives #REF!.
+    // A blocked spill is the anchor cell alone, so its #SPILL! flows through; ROWS sees one cell.
     t.set("B2", "x");
-    assert_eq!(t.get("C1"), Value::Error(CellError::Ref));
+    assert_eq!(t.get("C1"), Value::Error(CellError::Spill));
+    assert_eq!(t.num("C2"), 1.0);
     t.set("B2", "");
-    assert_eq!(t.num("C1"), 3.0);
+    assert_eq!((t.num("C1"), t.num("C2")), (3.0, 2.0));
+    // A constant that doesn't spill gives #REF!, and so does a blank cell.
     t.set("D1", "=SUM(A1#)");
     assert_eq!(t.get("D1"), Value::Error(CellError::Ref));
+    t.set("D2", "=SUM(Z9#)");
+    assert_eq!(t.get("D2"), Value::Error(CellError::Ref));
+    // A formula with one value is its own one-cell spill range, and its users follow its value.
+    t.set("F1", "=A1*10");
+    t.set("F2", "=SUM(F1#)+ROWS(F1#)");
+    assert_eq!(t.num("F2"), 21.0);
+    t.set("A1", "3");
+    assert_eq!(t.num("F2"), 31.0);
+    t.set("A1", "2");
     // Through a defined name.
     t.wb.names.push(gridcraft_model::DefinedName {
         name: "Seq".into(),
