@@ -1,10 +1,12 @@
-//! Static in-cell PNG/JPEG images, from the public MS-XLSX rich-data schemas.
+//! Static in-cell PNG/JPEG images and cached rich error values (`#SPILL!`, `#CALC!`), from the
+//! public MS-XLSX rich-data schemas.
 //! `vm` and metadata type IDs are one-based; every subsequent table index is zero-based.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
+use gridcraft_core::CellError;
 use gridcraft_model::CellPicture;
 
 use crate::IoError;
@@ -116,8 +118,29 @@ fn entries<'a>(cx: &mut Ctx<'_>, el: &'a El, child: &'a str) -> Result<Vec<&'a E
     Ok(entries)
 }
 
+/// What a cell's value metadata resolves to.
+#[derive(Clone, Debug)]
+pub enum RichCell {
+    /// A picture in the cell.
+    Picture(Arc<CellPicture>),
+    /// An error value (structure type `_error`). Excel stores errors it cannot write in `<v>`
+    /// (`#SPILL!`, `#CALC!`) this way, with `#VALUE!` as the cell's fallback. `None` is an
+    /// `errorType` this reader does not know: the fallback is kept.
+    Error(Option<CellError>),
+}
+
+/// The error a rich value's `errorType` names, as measured in workbooks saved by Excel. Other
+/// numbers are not guessed.
+fn rich_error(error_type: u32) -> Option<CellError> {
+    match error_type {
+        8 => Some(CellError::Spill),
+        13 => Some(CellError::Calc),
+        _ => None,
+    }
+}
+
 /// Resolves every value-metadata block without assuming the indices at each layer coincide.
-pub fn read(cx: &mut Ctx<'_>, workbook_rels: &[Rel]) -> Result<Vec<Option<Arc<CellPicture>>>, IoError> {
+pub fn read(cx: &mut Ctx<'_>, workbook_rels: &[Rel]) -> Result<Vec<Option<RichCell>>, IoError> {
     let Some(metadata_path) = part(cx, workbook_rels, "sheetMetadata") else { return Ok(vec![]) };
     let Some(metadata) = read_xml(cx, &metadata_path, "metadata")? else { return Ok(vec![]) };
     let Some(types) = metadata.child("metadataTypes") else { return Ok(vec![]) };
@@ -135,19 +158,34 @@ pub fn read(cx: &mut Ctx<'_>, workbook_rels: &[Rel]) -> Result<Vec<Option<Arc<Ce
         return Ok(vec![]);
     };
     rels.extend(cx.pkg.rels(&data_path)?);
-    let (Some(structure_path), Some(image_rels_path)) = (part(cx, &rels, "rdRichValueStructure"), part(cx, &rels, "richValueRel")) else {
-        cx.warn("missing rich-value structure or image relationships; cell pictures were not loaded");
+    let Some(structure_path) = part(cx, &rels, "rdRichValueStructure") else {
+        cx.warn("missing rich-value structure relationship; cell pictures were not loaded");
         return Ok(vec![]);
     };
     let Some(data) = read_xml(cx, &data_path, "rvData")? else { return Ok(vec![]) };
     let Some(structures) = read_xml(cx, &structure_path, "rvStructures")? else { return Ok(vec![]) };
-    let Some(image_rel_list) = read_xml(cx, &image_rels_path, "richValueRels")? else { return Ok(vec![]) };
-    let image_rels = cx.pkg.rels(&image_rels_path)?;
     let structures = entries(cx, &structures, "s")?;
     // Each structure's key layout, worked out once: every value would otherwise walk its
-    // structure's keys again. Only local-image structures matter here.
+    // structure's keys again. Only local-image and error structures matter here.
     let layouts: Vec<Option<Layout>> = structures.iter().map(|s| Layout::of(s)).collect();
-    let image_rel_list = entries(cx, &image_rel_list, "rel")?;
+    // Image relationships are needed only by pictures: a workbook whose rich values are all
+    // errors has none.
+    let image_rels_path = part(cx, &rels, "richValueRel");
+    if image_rels_path.is_none() && layouts.iter().any(|l| matches!(l, Some(Layout { kind: Kind::Image { .. }, .. }))) {
+        cx.warn("missing rich-value image relationships; cell pictures were not loaded");
+    }
+    let image_rel_list = match &image_rels_path {
+        Some(path) => read_xml(cx, path, "richValueRels")?,
+        None => None,
+    };
+    let image_rels = match &image_rels_path {
+        Some(path) => cx.pkg.rels(path)?,
+        None => vec![],
+    };
+    let image_rel_list = match &image_rel_list {
+        Some(list) => entries(cx, list, "rel")?,
+        None => vec![],
+    };
     // Relationships by id, a repeated id recorded as invalid (`None`), so a value's lookup is
     // one probe rather than a scan of the whole table for duplicates.
     let mut rels_by_id: HashMap<&str, Option<&Rel>> = HashMap::new();
@@ -199,27 +237,39 @@ pub fn read(cx: &mut Ctx<'_>, workbook_rels: &[Rel]) -> Result<Vec<Option<Arc<Ce
         .collect())
 }
 
-/// Where a `_localImage` structure keeps the values a picture needs.
+/// Where a `_localImage` or `_error` structure keeps the values this reader needs.
 struct Layout {
     keys: usize,
-    /// Index of the one `_rvRel:LocalImageIdentifier` key of type `i`, if exactly one.
-    image: Option<usize>,
-    /// Index of the one `Text` key of type `s`, if exactly one.
-    text: Option<usize>,
+    kind: Kind,
+}
+
+enum Kind {
+    Image {
+        /// Index of the one `_rvRel:LocalImageIdentifier` key of type `i`, if exactly one.
+        image: Option<usize>,
+        /// Index of the one `Text` key of type `s`, if exactly one.
+        text: Option<usize>,
+    },
+    Error {
+        /// Index of the one `errorType` key of type `i`, if exactly one.
+        error_type: Option<usize>,
+    },
 }
 
 impl Layout {
     fn of(structure: &El) -> Option<Layout> {
-        if structure.attr("t") != Some("_localImage") {
-            return None;
-        }
         let keys: Vec<&El> = structure.kids("k").collect();
         let one = |name: &str, ty: &str| {
             let mut matches = keys.iter().enumerate().filter(|(_, k)| k.attr("n") == Some(name));
             let (i, key) = matches.next()?;
             (matches.next().is_none() && key.attr("t") == Some(ty)).then_some(i)
         };
-        Some(Layout { keys: keys.len(), image: one("_rvRel:LocalImageIdentifier", "i"), text: one("Text", "s") })
+        let kind = match structure.attr("t")? {
+            "_localImage" => Kind::Image { image: one("_rvRel:LocalImageIdentifier", "i"), text: one("Text", "s") },
+            "_error" => Kind::Error { error_type: one("errorType", "i") },
+            _ => return None,
+        };
+        Some(Layout { keys: keys.len(), kind })
     }
 }
 
@@ -231,15 +281,20 @@ fn read_value(
     rels_by_id: &HashMap<&str, Option<&Rel>>,
     cache: &mut HashMap<(String, String), Arc<CellPicture>>,
     total: &mut usize,
-) -> Result<Option<Arc<CellPicture>>, IoError> {
+) -> Result<Option<RichCell>, IoError> {
     let Some(Some(layout)) = value.attr_u32("s").and_then(|n| layouts.get(n as usize)) else { return Ok(None) };
     let values: Vec<_> = value.kids("v").collect();
     if layout.keys != values.len() {
         return Ok(None);
     }
     let lookup = |slot: Option<usize>| slot.and_then(|i| values.get(i)).map(|v| v.text.as_str());
-    let Some(rel_id) =
-        lookup(layout.image).and_then(|v| v.trim().parse::<usize>().ok()).and_then(|n| image_rel_list.get(n)).and_then(|rel| rel.attr("id"))
+    let (image, text) = match layout.kind {
+        Kind::Image { image, text } => (image, text),
+        Kind::Error { error_type } => {
+            return Ok(Some(RichCell::Error(lookup(error_type).and_then(|v| v.trim().parse::<u32>().ok()).and_then(rich_error))));
+        }
+    };
+    let Some(rel_id) = lookup(image).and_then(|v| v.trim().parse::<usize>().ok()).and_then(|n| image_rel_list.get(n)).and_then(|rel| rel.attr("id"))
     else {
         return Ok(None);
     };
@@ -248,10 +303,10 @@ fn read_value(
         cx.warn("a cell picture has an external or invalid image relationship; kept its scalar fallback");
         return Ok(None);
     };
-    let alt = lookup(layout.text).unwrap_or("").to_string();
+    let alt = lookup(text).unwrap_or("").to_string();
     let key = (normalize(&rel.target), alt.clone());
     if let Some(picture) = cache.get(&key) {
-        return Ok(Some(picture.clone()));
+        return Ok(Some(RichCell::Picture(picture.clone())));
     }
     let data = match cx.pkg.read_limited(&rel.target, MAX_IMAGE) {
         Ok(Some(data)) => data,
@@ -275,7 +330,7 @@ fn read_value(
     *total += data.len();
     let picture = Arc::new(CellPicture { data, mime: mime.to_string(), alt });
     cache.insert(key, picture.clone());
-    Ok(Some(picture))
+    Ok(Some(RichCell::Picture(picture)))
 }
 
 /// One rich value per shared model payload; copied cells can reuse a metadata block.

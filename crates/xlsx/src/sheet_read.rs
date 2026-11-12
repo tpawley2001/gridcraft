@@ -607,16 +607,23 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
             None => Value::Empty,
         },
     };
-    let picture = c.attr("vm").and_then(|vm| {
+    let rich = c.attr("vm").and_then(|vm| {
         if vm == "0" {
             return None;
         }
-        let picture = vm.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).and_then(|n| cx.cell_pictures.get(n)).cloned().flatten();
-        if picture.is_none() {
+        let rich = vm.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).and_then(|n| cx.cell_pictures.get(n)).cloned().flatten();
+        if rich.is_none() {
             cx.warn("some cells have unsupported or missing value metadata; kept their scalar fallback (cell pictures may be missing)");
         }
-        picture
+        rich
     });
+    let (picture, value) = match rich {
+        Some(crate::richdata::RichCell::Picture(picture)) => (Some(picture), value),
+        // An error Excel cannot write in `<v>` (`#SPILL!`, `#CALC!`) is stored as a `#VALUE!`
+        // fallback plus a rich error value; the cell is otherwise read like any error cell.
+        Some(crate::richdata::RichCell::Error(Some(error))) if matches!(value, Value::Error(_)) => (None, Value::Error(error)),
+        _ => (None, value),
+    };
     if let Some(picture) = picture {
         if c.child("f").is_some() {
             cx.warn("formula-generated cell pictures were imported as static pictures; their formulas were not retained");
