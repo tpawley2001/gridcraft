@@ -79,6 +79,7 @@ mod phonetic_tests;
 mod picture_effects;
 mod picture_locks_tests;
 mod pivot_tests;
+mod quote_prefix_tests;
 mod rich_error_values_tests;
 mod richdata_excel_package_tests;
 mod richdata_tests;

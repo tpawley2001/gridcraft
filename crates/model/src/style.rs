@@ -465,6 +465,10 @@ pub struct Style {
     /// Number format code; "General" by default.
     pub num_fmt: NumFmt,
     pub protection: Protection,
+    /// The text was typed with a leading apostrophe (`quotePrefix` on a cell `xf`, ECMA-376 Part 1
+    /// §18.8.45). A cell-format flag only: differential formats and named cell styles never carry it.
+    #[serde(default)]
+    pub quote_prefix: bool,
     /// Differential formats only.
     #[serde(default)]
     pub dxf_stated: DxfStated,

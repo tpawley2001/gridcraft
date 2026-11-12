@@ -455,7 +455,16 @@ pub fn read_styles(root: &El, checkboxes: &[bool], minor_font: &str, theme_fonts
     let borders: Vec<Borders> = root.child("borders").map(|f| f.kids("border").map(|e| read_border(e, &palette)).collect()).unwrap_or_default();
     let xfs = root
         .child("cellXfs")
-        .map(|x| x.kids("xf").map(|xf| read_xf(xf, &fonts, &fills, &borders, &shared_fmts, checkboxes)).collect())
+        .map(|x| {
+            x.kids("xf")
+                .map(|xf| {
+                    // The quote prefix is a cell-format flag; named cell styles never carry it.
+                    let mut s = read_xf(xf, &fonts, &fills, &borders, &shared_fmts, checkboxes);
+                    s.quote_prefix = xf.flag("quotePrefix", false);
+                    s
+                })
+                .collect()
+        })
         .unwrap_or_default();
     let style_xfs: Vec<Style> = root
         .child("cellStyleXfs")
@@ -961,6 +970,9 @@ pub fn write_styles(wb: &Workbook, dxfs: &[Style], extra_fmts: &[String]) -> (St
         let checkbox = st.num_fmt.as_str() == "checkbox";
         let fmt = if checkbox { 0 } else { nf.id(st.num_fmt.as_str()) };
         let _ = write!(xfs, "<xf numFmtId=\"{fmt}\" fontId=\"{font}\" fillId=\"{fill}\" borderId=\"{border}\" xfId=\"0\"");
+        if st.quote_prefix {
+            xfs.push_str(" quotePrefix=\"1\"");
+        }
         if fmt != 0 {
             xfs.push_str(" applyNumberFormat=\"1\"");
         }
