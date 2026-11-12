@@ -197,7 +197,13 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
             let (Some(rband), Some(cband)) = (lay.row_bands.get(*ri).copied(), lay.col_bands.get(*ci).copied()) else { continue };
             let rsegs = segments(lay.title_rows, rband);
             let csegs = segments(lay.title_cols, cband);
-            let content_w = (lay.heading_w + csegs.iter().map(|s| seg_size(sh, *s, false)).sum::<f32>()) * k;
+            // A piece of a column wider than the page: the band is drawn shifted left by the
+            // piece's offset and clipped to the printable width.
+            let (shift, split) = (lay.col_offset(*ci) * k, lay.col_split(*ci));
+            let mut content_w = (lay.heading_w + csegs.iter().map(|s| seg_size(sh, *s, false)).sum::<f32>()) * k - shift;
+            if split {
+                content_w = content_w.min(aw);
+            }
             let content_h = (lay.heading_h + rsegs.iter().map(|s| seg_size(sh, *s, true)).sum::<f32>()) * k;
             let ox = lay.margins[0] + if lay.settings.center_h { ((aw - content_w) / 2.0).max(0.0) } else { 0.0 };
             let oy = lay.margins[2] + if lay.settings.center_v { ((ah - content_h) / 2.0).max(0.0) } else { 0.0 };
@@ -205,15 +211,33 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
             let pg = doc.add_page(lay.page_w, lay.page_h);
             let mut y = oy + lay.heading_h * k;
             let mut body: Option<Block> = None;
+            // The left edge of the body columns and the clip of a split band's pieces.
+            let titles_w: f32 = csegs.iter().take(csegs.len().saturating_sub(1)).map(|s| seg_size(sh, *s, false)).sum::<f32>() * k;
+            let body_left = ox + lay.heading_w * k + titles_w;
+            let clip = split.then(|| (body_left, 0.0, (lay.margins[0] + aw - body_left).max(0.0), lay.page_h));
             for (rsi, rs) in rsegs.iter().enumerate() {
                 let mut x = ox + lay.heading_w * k;
                 for (csi, cs) in csegs.iter().enumerate() {
-                    let b = make_block(wb, lay.sheet, sh, *rs, *cs, (x, y), lay);
+                    let last = csi + 1 == csegs.len();
+                    let bx = if last { x - shift } else { x };
+                    let b = make_block(wb, lay.sheet, sh, *rs, *cs, (bx, y), lay);
+                    let clipped = clip.filter(|_| last);
+                    if let Some((cx, cy, cw, ch)) = clipped {
+                        pg.save();
+                        pg.clip_rect(cx, cy, cw, ch);
+                    }
                     draw_block(pg, &b, lay.settings.gridlines, &mut cf);
                     draw_block_links(pg, &b, page_index, &mut pending_links);
-                    printed_blocks.push(PrintedBlock { page: page_index, sheet: lay.sheet, rows: *rs, cols: *cs, x, y, k });
+                    printed_blocks.push(PrintedBlock { page: page_index, sheet: lay.sheet, rows: *rs, cols: *cs, x: bx, y, k });
                     if lay.settings.headings {
-                        draw_headings(pg, &b, rsi == 0, csi == 0, (ox, oy), (lay.heading_w * k, lay.heading_h * k));
+                        draw_headings(pg, &b, rsi == 0, csi == 0 && clipped.is_none(), (ox, oy), (lay.heading_w * k, lay.heading_h * k));
+                    }
+                    if clipped.is_some() {
+                        pg.restore();
+                        // Row headings sit left of the clip.
+                        if lay.settings.headings && csi == 0 {
+                            draw_headings(pg, &b, false, true, (ox, oy), (lay.heading_w * k, lay.heading_h * k));
+                        }
                     }
                     x += seg_size(sh, *cs, false) * k;
                     if rsi + 1 == rsegs.len() && csi + 1 == csegs.len() {
@@ -223,7 +247,14 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
                 y += seg_size(sh, *rs, true) * k;
             }
             if let Some(b) = &body {
+                if let Some((cx, cy, cw, ch)) = clip {
+                    pg.save();
+                    pg.clip_rect(cx, cy, cw, ch);
+                }
                 draw_objects(pg, wb, lay.sheet, sh, b, &mut pics);
+                if clip.is_some() {
+                    pg.restore();
+                }
             }
             if lay.settings.headings {
                 let fill = [0xF2, 0xF2, 0xF2];
@@ -321,7 +352,7 @@ fn print_preview(s: &mut Session, p: &Json) -> Result<Json> {
             n += 1;
             let (Some(rb), Some(cb)) = (lay.row_bands.get(*ri), lay.col_bands.get(*ci)) else { continue };
             let r = RangeRef::new(CellRef::new(rb.0, cb.0), CellRef::new(rb.1, cb.1));
-            list.push(json!({
+            let mut entry = json!({
                 "page": n,
                 "sheet": name,
                 "range": r.a1(),
@@ -333,7 +364,14 @@ fn print_preview(s: &mut Session, p: &Json) -> Result<Json> {
                 "pageOrder": lay.settings.page_order.id(),
                 "width": lay.page_w,
                 "height": lay.page_h,
-            }));
+            });
+            // A continuation piece of a column wider than the page: where it starts, in points
+            // into the column at sheet scale.
+            let off = lay.col_offset(*ci);
+            if off > 0.0 {
+                entry["columnOffset"] = json!(((off * PX_TO_PT) as f64 * 100.0).round() / 100.0);
+            }
+            list.push(entry);
         }
     }
     if let Some(page) = u32_param(p, "page") {
@@ -545,3 +583,5 @@ mod shape_outline_tests;
 mod shape_shadow_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wide_column_split_tests;
