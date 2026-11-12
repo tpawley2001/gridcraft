@@ -5402,6 +5402,7 @@ fn filtered_copy_with_many_runs_moves_notes_and_merges_with_their_rows() {
             note_box: None,
             picture_fill: None,
             note_shape: None,
+            note_runs: None,
         };
         sh.comments.insert(CellRef::new(r - 1, 0), note);
     }

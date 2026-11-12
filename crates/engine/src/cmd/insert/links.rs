@@ -111,6 +111,7 @@ pub(super) fn comment(s: &mut Session, p: &Json, threaded: bool) -> Result<Json>
                 note_box: None,
                 picture_fill: None,
                 note_shape: None,
+                note_runs: None,
             },
         );
         Ok(json!({"cell": at.a1()}))

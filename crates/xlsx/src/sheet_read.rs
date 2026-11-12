@@ -23,7 +23,7 @@ use crate::xml::{self, El};
 mod parts;
 mod rules;
 
-pub(crate) use parts::{NOTE_FILL_ATTRS, NotePictures, TABLE_COMMENT_MAX, read_note_shapes, read_threaded};
+pub(crate) use parts::{NOTE_FILL_ATTRS, NOTE_RUN_PROPS, NotePictures, TABLE_COMMENT_MAX, read_note_shapes, read_threaded};
 pub use parts::{read_autofilter, read_table};
 use parts::{read_comments, read_hyperlinks};
 use rules::{read_cf, read_validation};

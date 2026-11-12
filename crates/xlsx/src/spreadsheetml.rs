@@ -254,6 +254,7 @@ impl Import {
                     note_box: None,
                     picture_fill: None,
                     note_shape: None,
+                    note_runs: None,
                 };
                 sheet.comments.insert(at, comment);
             }

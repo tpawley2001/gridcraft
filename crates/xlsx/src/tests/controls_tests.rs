@@ -28,6 +28,7 @@ fn note(author: &str, text: &str) -> Comment {
         note_box: None,
         picture_fill: None,
         note_shape: None,
+        note_runs: None,
     }
 }
 

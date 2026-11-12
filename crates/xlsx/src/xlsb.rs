@@ -2322,6 +2322,7 @@ fn comments(bytes: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Resul
                         note_box: None,
                         picture_fill: None,
                         note_shape: None,
+                        note_runs: None,
                     },
                 ));
             }

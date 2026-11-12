@@ -44,6 +44,7 @@ mod tests {
                 note_box: None,
                 picture_fill: None,
                 note_shape: None,
+                note_runs: None,
             },
         );
         s.hyperlinks.insert(c3, Hyperlink { target: "Sheet1!A1".into(), tooltip: Some("jump".into()), external: false });
