@@ -24,6 +24,7 @@ use crate::xml::{El, esc, esc_attr};
 mod blip_ext;
 pub use blip_ext::write as write_blip_ext;
 mod ink;
+pub(crate) mod shape_style;
 
 /// The chart's own theme is optional and stays opaque (ECMA-376 Part 1 §14.2.8).
 fn read_theme_override(cx: &mut Ctx<'_>, chart_part: &str) -> Result<Option<Arc<Vec<u8>>>, IoError> {
@@ -222,13 +223,13 @@ pub(crate) fn dml_color_resolved(e: &El, theme: &[u32; 12]) -> Option<Color> {
 }
 
 /// ST_SchemeColorVal (ECMA-376 Part 1 §20.1.10.54).
-const SCHEME_COLOR_VALS: [&str; 17] = [
+pub(crate) const SCHEME_COLOR_VALS: [&str; 17] = [
     "bg1", "tx1", "bg2", "tx2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6", "hlink", "folHlink", "phClr", "dk1", "lt1", "dk2",
     "lt2",
 ];
 
 /// The colour transform elements (ECMA-376 Part 1 §20.1.2.3) and whether each has a `val`.
-const DML_COLOR_TRANSFORMS: [(&str, bool); 28] = [
+pub(crate) const DML_COLOR_TRANSFORMS: [(&str, bool); 28] = [
     ("tint", true),
     ("shade", true),
     ("comp", false),
@@ -486,7 +487,7 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                     }
                 }
                 "sp" | "cxnSp" => {
-                    if let Some(mut s) = read_shape(obj, anchor, &cx.theme_colors) {
+                    if let Some(mut s) = read_shape(obj, anchor, &cx.theme_colors, &cx.format_scheme) {
                         s.hidden =
                             obj.path(&["nvSpPr", "cNvPr"]).or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"])).is_some_and(|p| p.flag("hidden", false));
                         s.no_print = no_print;
@@ -651,7 +652,7 @@ fn write_custom_geometry(s: &mut String, paths: &[GeometryPath]) {
     s.push_str("</a:pathLst></a:custGeom>");
 }
 
-fn read_shape(obj: &El, anchor: Anchor, theme: &[u32; 12]) -> Option<Shape> {
+fn read_shape(obj: &El, anchor: Anchor, theme: &[u32; 12], scheme: &shape_style::FormatScheme) -> Option<Shape> {
     let sp = obj.child("spPr")?;
     if let Some(shape) = ink::read(obj, anchor) {
         return Some(shape);
@@ -736,6 +737,7 @@ fn read_shape(obj: &El, anchor: Anchor, theme: &[u32; 12]) -> Option<Shape> {
     format.no_fill = sp.child("noFill").is_some();
     // ST_LineWidth: 0..=20116800 EMU; anything else keeps the default width.
     format.line_width_emu = ln.and_then(|l| l.attr("w")).and_then(|w| w.parse::<i32>().ok()).filter(|w| (0..=20_116_800).contains(w));
+    format.style = obj.child("style").map(|st| shape_style::read(st, sp, ln, theme, scheme));
     Some(Shape {
         hidden: false,
         no_print: false,
@@ -1208,6 +1210,9 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                     s.push_str("</a:ln>");
                 }
                 s.push_str("</xdr:spPr>");
+                if let Some(st) = &sh.format.style {
+                    shape_style::write(&mut s, st);
+                }
                 if !sh.text.is_empty() {
                     let f = &sh.format;
                     let anchor = match f.anchor {

@@ -248,14 +248,15 @@ fn draw_sparklines(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, b: &Bloc
 }
 
 fn draw_shape(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Block, (x, y, w, h): (f32, f32, f32, f32)) {
-    let fill = rgb_of(shp.fill, wb);
+    // The shape's own fill and outline, else what its theme style gives them.
+    let fill = rgb_of(shp.drawn_fill(), wb);
     // `a:ln w` is in EMU (12700 per point), scaled like every other printed length; without it
     // the outline keeps the default hairline.
-    let width = match shp.format.line_width_emu {
+    let width = match shp.drawn_line_width_emu() {
         Some(emu) => (emu.max(0) as f32 / 12700.0 * b.scale).clamp(0.0, 1600.0),
         None => (0.75 * b.k).max(0.25),
     };
-    let line = rgb_of(shp.line, wb).filter(|_| !shp.format.no_line).map(|c| (c, width));
+    let line = rgb_of(shp.drawn_line(), wb).filter(|_| !shp.format.no_line && !shp.style_hides_line()).map(|c| (c, width));
     match shp.kind {
         ShapeKind::Ellipse => {
             let pts: Vec<[f32; 2]> = (0..72)
@@ -292,7 +293,7 @@ fn draw_shape(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b: &Bl
     let text_box = shp.kind == ShapeKind::TextBox;
     let size = fm.font_size.unwrap_or(11.0).clamp(1.0, 4000.0) * b.scale;
     let font = Font::styled(Font::family_for(fm.font.as_deref().unwrap_or("")), fm.bold, fm.italic);
-    let color = fm.text_color.and_then(|c| rgb_of(c, wb)).unwrap_or([0, 0, 0]);
+    let color = shp.drawn_text_color().and_then(|c| rgb_of(c, wb)).unwrap_or([0, 0, 0]);
     let align = fm.align.unwrap_or(if text_box { ShapeTextAlign::Left } else { ShapeTextAlign::Center });
     let anchor = fm.anchor.unwrap_or(if text_box { ShapeTextAnchor::Top } else { ShapeTextAnchor::Middle });
     // `a:bodyPr` insets in EMU (§21.1.2.1.1 defaults: 91440 left and right, 45720 top and

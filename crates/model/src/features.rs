@@ -1872,6 +1872,163 @@ pub struct ShapeFormat {
     /// The outline's DrawingML colour as the file gave it, like [`ShapeFormat::fill_source`]
     /// for `Shape::line`.
     pub line_source: Option<KeptDmlColor>,
+    /// The shape's style (`xdr:style`): references into the theme's format scheme that give the
+    /// fill, outline, effects and text colour the shape's own properties leave unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style: Option<ShapeStyle>,
+}
+
+/// A shape's style element (`xdr:style`, CT_ShapeStyle, ECMA-376 Part 1 §20.5.2.30): each
+/// reference picks an entry of the theme's format scheme (§20.1.4.1.14) and the colour that
+/// stands in for its placeholder colour. A reference missing from the file is `None`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShapeStyle {
+    /// `a:lnRef` (§20.1.4.2.19): an entry of `lnStyleLst`, 1-based; 0 is no outline.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<ShapeStyleRef>,
+    /// `a:fillRef` (§20.1.4.2.10): an entry of `fillStyleLst` (1..), or of `bgFillStyleLst`
+    /// (1001..); 0 is no fill.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill: Option<ShapeStyleRef>,
+    /// `a:effectRef` (§20.1.4.2.8): an entry of `effectStyleLst`; 0 is no effect.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect: Option<ShapeStyleRef>,
+    /// `a:fontRef` (§20.1.4.1.17): the theme font and the text colour.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font: Option<ShapeFontRef>,
+    /// Whether the shape's own properties (`xdr:spPr`) state a fill (any kind, `a:noFill`
+    /// included): the style's fill then doesn't show.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub own_fill: bool,
+    /// Whether the shape's own outline (`a:ln`) states a fill: the style's outline colour then
+    /// doesn't show.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub own_line: bool,
+}
+
+/// One style matrix reference (CT_StyleMatrixReference): the entry index and its colour.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShapeStyleRef {
+    pub idx: u32,
+    /// The colour child as the file gave it (`xml` empty when the reference has none), and the
+    /// colour it resolves to (`Color::Auto` when it can't be drawn).
+    pub color: KeptDmlColor,
+    /// Whether the theme entry it picks draws anything (false for index 0, an entry the theme
+    /// doesn't have, or an `a:noFill` entry).
+    pub draws: bool,
+    /// The entry's own colour, when it doesn't use the placeholder colour.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme_color: Option<Color>,
+    /// The entry's outline width in EMU (`lnStyleLst`), when it states one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width_emu: Option<i32>,
+}
+
+impl ShapeStyleRef {
+    /// The colour this reference draws, `None` when it draws nothing.
+    pub fn drawn(&self) -> Option<Color> {
+        if !self.draws || self.idx == 0 {
+            return None;
+        }
+        let c = self.theme_color.unwrap_or(self.color.color);
+        (c != Color::Auto).then_some(c)
+    }
+}
+
+/// The theme font a style picks (ST_FontCollectionIndex).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShapeFontIdx {
+    Major,
+    #[default]
+    Minor,
+    None,
+}
+
+impl ShapeFontIdx {
+    /// The `idx` attribute value.
+    pub fn xml(self) -> &'static str {
+        match self {
+            Self::Major => "major",
+            Self::Minor => "minor",
+            Self::None => "none",
+        }
+    }
+
+    /// The value of an `idx` attribute; `None` for anything outside the schema's list.
+    pub fn from_xml(s: &str) -> Option<Self> {
+        Some(match s {
+            "major" => Self::Major,
+            "minor" => Self::Minor,
+            "none" => Self::None,
+            _ => return None,
+        })
+    }
+}
+
+/// `a:fontRef`: the theme font and the text colour (`color` absent when the file gives none).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShapeFontRef {
+    pub idx: ShapeFontIdx,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<KeptDmlColor>,
+}
+
+impl Shape {
+    /// The fill drawn: the shape's own fill, else its style's (`Color::Auto`: no fill).
+    pub fn drawn_fill(&self) -> Color {
+        if self.format.no_fill {
+            return Color::Auto;
+        }
+        if self.fill != Color::Auto {
+            return self.fill;
+        }
+        match &self.format.style {
+            Some(st) if !st.own_fill => st.fill.as_ref().and_then(ShapeStyleRef::drawn).unwrap_or(Color::Auto),
+            _ => Color::Auto,
+        }
+    }
+
+    /// The style's outline, when the shape's own outline leaves it to the style.
+    fn style_line(&self) -> Option<&ShapeStyleRef> {
+        if self.format.no_line || self.line != Color::Auto {
+            return None;
+        }
+        self.format.style.as_ref().filter(|st| !st.own_line).and_then(|st| st.line.as_ref())
+    }
+
+    /// Whether the shape's outline comes from its style and the style draws none, so nothing is
+    /// outlined (a shape without a style keeps the application's default outline).
+    pub fn style_hides_line(&self) -> bool {
+        if self.format.no_line || self.line != Color::Auto {
+            return false;
+        }
+        match &self.format.style {
+            Some(st) if !st.own_line => st.line.as_ref().and_then(ShapeStyleRef::drawn).is_none(),
+            _ => false,
+        }
+    }
+
+    /// The outline colour drawn: the shape's own, else its style's (`Color::Auto`: the
+    /// application's default, or none when [`Shape::style_hides_line`]).
+    pub fn drawn_line(&self) -> Color {
+        self.style_line().and_then(ShapeStyleRef::drawn).unwrap_or(self.line)
+    }
+
+    /// The outline width in EMU: the shape's own, else the style's theme entry's.
+    pub fn drawn_line_width_emu(&self) -> Option<i32> {
+        self.format.line_width_emu.or_else(|| self.style_line().filter(|r| r.drawn().is_some()).and_then(|r| r.width_emu))
+    }
+
+    /// The text colour drawn: the text's own, else the style's font colour.
+    pub fn drawn_text_color(&self) -> Option<Color> {
+        self.format.text_color.or_else(|| {
+            let c = self.format.style.as_ref()?.font.as_ref()?.color.as_ref()?.color;
+            (c != Color::Auto).then_some(c)
+        })
+    }
 }
 
 /// A DrawingML colour choice kept from a file (ECMA-376 Part 1 §20.1.2.3): `color` is the
@@ -2326,5 +2483,84 @@ mod equation_cache_tests {
         let took = start.elapsed();
         assert_eq!(HASHES.with(|h| h.get()), 0, "a thousand lookups read nothing");
         assert!(took < std::time::Duration::from_millis(500), "{took:?}");
+    }
+}
+
+#[cfg(test)]
+mod shape_style_drawn_tests {
+    use super::*;
+
+    fn shape(style: Option<ShapeStyle>) -> Shape {
+        Shape {
+            hidden: false,
+            no_print: false,
+            hyperlink: None,
+            name: None,
+            alt: String::new(),
+            id: 1,
+            kind: ShapeKind::default(),
+            geometry: None,
+            anchor: Anchor::default(),
+            fill: Color::Auto,
+            line: Color::Auto,
+            text: String::new(),
+            format: ShapeFormat { style, ..ShapeFormat::default() },
+            math: EquationCache::default(),
+        }
+    }
+
+    fn r(idx: u32, color: Color) -> Option<ShapeStyleRef> {
+        Some(ShapeStyleRef { idx, color: KeptDmlColor { color, xml: String::new() }, draws: idx != 0, theme_color: None, width_emu: Some(12700) })
+    }
+
+    fn styled() -> ShapeStyle {
+        ShapeStyle {
+            line: r(2, Color::Rgb(0x112233)),
+            fill: r(1, Color::Theme(4, 0)),
+            effect: r(0, Color::Theme(4, 0)),
+            font: Some(ShapeFontRef { idx: ShapeFontIdx::Minor, color: Some(KeptDmlColor { color: Color::Theme(0, 0), xml: String::new() }) }),
+            own_fill: false,
+            own_line: false,
+        }
+    }
+
+    #[test]
+    fn a_theme_styled_shape_draws_its_style() {
+        let sh = shape(Some(styled()));
+        assert_eq!(sh.drawn_fill(), Color::Theme(4, 0));
+        assert_eq!(sh.drawn_line(), Color::Rgb(0x112233));
+        assert_eq!(sh.drawn_line_width_emu(), Some(12700));
+        assert_eq!(sh.drawn_text_color(), Some(Color::Theme(0, 0)));
+        assert!(!sh.style_hides_line());
+    }
+
+    #[test]
+    fn the_shapes_own_properties_win() {
+        let mut sh = shape(Some(styled()));
+        sh.fill = Color::Rgb(0xFF0000);
+        sh.line = Color::Rgb(0x00FF00);
+        sh.format.line_width_emu = Some(3175);
+        sh.format.text_color = Some(Color::Rgb(0x0000FF));
+        assert_eq!(
+            (sh.drawn_fill(), sh.drawn_line(), sh.drawn_line_width_emu(), sh.drawn_text_color()),
+            (Color::Rgb(0xFF0000), Color::Rgb(0x00FF00), Some(3175), Some(Color::Rgb(0x0000FF)))
+        );
+        sh.format.no_fill = true;
+        assert_eq!(sh.drawn_fill(), Color::Auto);
+        // A gradient or picture fill of its own (not modelled) hides the style's fill too.
+        let mut own = shape(Some(ShapeStyle { own_fill: true, ..styled() }));
+        own.fill = Color::Auto;
+        assert_eq!(own.drawn_fill(), Color::Auto);
+    }
+
+    #[test]
+    fn index_zero_draws_no_fill_or_outline_and_no_style_is_unchanged() {
+        let sh = shape(Some(ShapeStyle { fill: r(0, Color::Theme(4, 0)), line: r(0, Color::Theme(4, 0)), ..styled() }));
+        assert_eq!(sh.drawn_fill(), Color::Auto);
+        assert!(sh.style_hides_line());
+        assert_eq!(sh.drawn_line_width_emu(), None);
+        let plain = shape(None);
+        assert_eq!((plain.drawn_fill(), plain.drawn_line(), plain.drawn_text_color()), (Color::Auto, Color::Auto, None));
+        assert!(!plain.style_hides_line(), "a shape without a style keeps the application's default outline");
     }
 }
