@@ -97,6 +97,7 @@ mod shape_body_props_kept_tests;
 mod shape_line_dash_effects_tests;
 mod shape_outline_width_tests;
 mod shape_preset_geometry;
+mod shape_rich_text_kept_tests;
 mod shape_style_refs_kept_tests;
 mod shape_text_rtl;
 mod shape_theme_color_kept_tests;
