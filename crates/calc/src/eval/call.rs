@@ -118,19 +118,29 @@ impl<'h> Evaluator<'h> {
             }
             "MAP" | "REDUCE" | "SCAN" | "BYROW" | "BYCOL" | "MAKEARRAY" => self.higher_order(name, args),
             "GROUPBY" | "PIVOTBY" => {
-                // The aggregation may be a function given by name (`SUM`): pass it as its name.
+                // The aggregation may be a function given by name (`SUM`), or several stacked
+                // (`HSTACK(SUM,MAX)`): pass their names.
                 let i = if name == "GROUPBY" { 2 } else { 3 };
-                match args.get(i).and_then(|a| self.function_by_name(a)) {
+                match args.get(i).and_then(|a| self.functions_by_name(a)) {
                     Some(f) => {
                         let mut args = args.to_vec();
                         if let Some(a) = args.get_mut(i) {
-                            *a = Expr::Text(f.into());
+                            *a = f;
                         }
                         self.builtin(name, &args)
                     }
                     None => self.builtin(name, args),
                 }
             }
+            // A LAMBDA that is not called is a value of its own kind (TYPE 128), not an error.
+            "TYPE" | "ERROR.TYPE" | "ISERROR" | "ISERR" if args.len() == 1 => match self.eval(&args[0]) {
+                Ev::L(_) => match name {
+                    "TYPE" => Ev::V(Value::Number(128.0)),
+                    "ERROR.TYPE" => err(CellError::NA),
+                    _ => Ev::V(Value::Bool(false)),
+                },
+                ev => self.builtin_evaluated(name, args, ev),
+            },
             "NOW" | "TODAY" | "RAND" | "RANDBETWEEN" | "RANDARRAY" => {
                 self.host.note_volatile();
                 self.builtin(name, args)
@@ -337,6 +347,19 @@ impl<'h> Evaluator<'h> {
         }
         let (criteria, lambda) = (state.criteria, state.lambda);
         Ev::V(self.call_builtin(spec, &evaluated, criteria, lambda))
+    }
+
+    /// A one-argument worksheet function whose argument `args[0]` is already evaluated to `ev`.
+    fn builtin_evaluated(&mut self, name: &str, args: &[Expr], ev: Ev) -> Ev {
+        let Some(spec) = gridcraft_functions::lookup(name) else { return err(CellError::Name) };
+        if args.len() < spec.min_args || args.len() > spec.max_args {
+            return err(CellError::Value);
+        }
+        let mut state = ArgState::default();
+        let missing = matches!(args.first(), Some(Expr::Missing));
+        let arg = self.builtin_arg(spec, args.len(), 0, ev, missing, &mut state);
+        let (criteria, lambda) = (state.criteria, state.lambda);
+        Ev::V(self.call_builtin(spec, &[arg], criteria, lambda))
     }
 
     /// One evaluated argument of a worksheet function, read into the value the function gets.
@@ -554,6 +577,25 @@ impl<'h> Evaluator<'h> {
     /// A worksheet function given by name where a function is expected (`BYROW(A1:C3,SUM)`,
     /// `GROUPBY(A2:A9,B2:B9,SUM)`): its name, unless a LET/LAMBDA variable or a defined name has
     /// that name.
+    /// GROUPBY/PIVOTBY's function argument given by name: one function (as its name), or
+    /// `HSTACK`/`VSTACK` of functions given by name (as an array of their names, in order).
+    fn functions_by_name(&self, e: &Expr) -> Option<Expr> {
+        if let Some(f) = self.function_by_name(e) {
+            return Some(Expr::Text(f.into()));
+        }
+        let Expr::Call(n, items) = e else { return None };
+        let n = n.to_ascii_uppercase();
+        let n = n.strip_prefix("_XLFN.").unwrap_or(&n);
+        if !matches!(n, "HSTACK" | "VSTACK") || items.is_empty() {
+            return None;
+        }
+        let mut names = Vec::with_capacity(items.len());
+        for item in items {
+            names.push(Expr::Text(self.function_by_name(item)?.into()));
+        }
+        Some(Expr::Array(if n == "HSTACK" { vec![names] } else { names.into_iter().map(|x| vec![x]).collect() }))
+    }
+
     pub(super) fn function_by_name(&self, e: &Expr) -> Option<String> {
         let Expr::Name(n) = e else { return None };
         if self.env.iter().any(|(k, _)| gridcraft_formula::same_name(k, n)) || self.host.workbook().name(n, self.sheet).is_some() {

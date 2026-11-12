@@ -158,6 +158,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-11 | minor | G0314: a LAMBDA that is not called is a value of its own kind: TYPE gives 128, ERROR.TYPE `#N/A`, ISERROR/ISERR FALSE (a cell left holding one still shows `#CALC!`); GROUPBY and PIVOTBY take PERCENTOF (each group's sum over the total of the filtered values) and `HSTACK`/`VSTACK` of functions (one value column per function, headed by its name), as Excel does (`lambda_value_groupby_excel.rs`) |
 | 2026-11-11 | minor | PRICEMAT and YIELDMAT with basis 1 use one year length for all three fractions, the one YEARFRAC(issue, settlement, 1) divides by (365 or 366 within a year, else the average of the calendar years spanned), as Excel does (`pricemat_yieldmat_excel.rs`) |
 | 2026-11-11 | minor | G0306: PRICE, YIELD, DURATION and MDURATION count settlement to the next coupon as E - A under actual/360 and actual/365 (not actual days); YIELD with one period left counts settlement to redemption on the 30/360 calendar for bases 0 and 4 and in actual days for bases 2 and 3; COUPDAYSNC basis 4 counts 30E/360 days directly, as in Excel (`bond_dsc_tests.rs`) |
 | 2026-11-11 | minor | DISC, INTRATE, RECEIVED, PRICEDISC and YIELDDISC with basis 1 over more than a year divide by the average length of the calendar years spanned, like YEARFRAC (365.3 for 2008-2017), as Excel does (`disc_family_basis`) |
