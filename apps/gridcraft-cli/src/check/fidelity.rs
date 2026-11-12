@@ -1,3 +1,5 @@
+use gridcraft_engine::io::has_macro_only_names;
+
 use super::calc::formula_text;
 use super::package::{REBUILT_KINDS, relationship_kinds, validate_package};
 use super::{BTreeSet, Category, Cell, CellError, CellRef, Diffs, Options, RoundTrip, Sheet, Value, Workbook, number_text, quote_sheet};
@@ -14,14 +16,19 @@ pub fn round_trip(wb: &Workbook, source: &[u8], opts: &Options) -> RoundTrip {
 /// writes it (`.xlsm`, `.xltm`, `.xltx`), otherwise `.xlsx`. A workbook that carries a VBA project
 /// (`wb.vba_project`) is saved as `.xlsm` unless its source was a macro template, whatever the
 /// source was named (an `.xlsb` with macros, a macro workbook named `.xlsx`): an `.xlsx` save drops
-/// the project by design, which is not a loss of the file being checked.
+/// the project by design, which is not a loss of the file being checked. The same holds for names
+/// calling Excel 4.0 macro functions (and names using them), which a macro-free save leaves out
+/// ([`gridcraft_engine::io::has_macro_only_names`]): such a workbook is saved as `.xlsm`, or `.xltm`
+/// when its source was an `.xltx` template without a VBA project.
 pub(super) fn round_trip_name(source_name: &str, wb: &Workbook) -> &'static str {
     let ext = source_name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
     match ext.as_str() {
         "xlsm" => "roundtrip.xlsm",
         "xltm" => "roundtrip.xltm",
-        "xltx" if wb.vba_project.is_none() => "roundtrip.xltx",
-        _ if wb.vba_project.is_some() => "roundtrip.xlsm",
+        "xltx" if wb.vba_project.is_some() => "roundtrip.xlsm",
+        "xltx" if has_macro_only_names(wb) => "roundtrip.xltm",
+        "xltx" => "roundtrip.xltx",
+        _ if wb.vba_project.is_some() || has_macro_only_names(wb) => "roundtrip.xlsm",
         _ => "roundtrip.xlsx",
     }
 }

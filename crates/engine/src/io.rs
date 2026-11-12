@@ -9,6 +9,8 @@ use crate::{EngineError, Result};
 
 mod sylk;
 
+pub use gridcraft_xlsx::has_macro_only_names;
+
 /// The function library's answers to what the XLSX and XLS readers and the XLSX writer need to know about functions
 /// (which names are built in, which parameters take a single value).
 pub const XLSX_FUNCTIONS: gridcraft_xlsx::FunctionInfo = gridcraft_xlsx::FunctionInfo {

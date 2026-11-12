@@ -79,6 +79,13 @@ pub(crate) fn calls_xlm(formula: &str) -> bool {
     false
 }
 
+/// Whether the workbook has defined names a macro-free save (`.xlsx`, `.xltx`) leaves out: names
+/// whose formula calls an Excel 4.0 macro function, and names that use such a name. A
+/// macro-enabled save (`.xlsm`, `.xltm`) keeps them.
+pub fn has_macro_only_names(wb: &Workbook) -> bool {
+    !omitted_names(wb).is_empty()
+}
+
 /// Follows reverse dependency edges iteratively, so chains and cycles need no recursion.
 pub(crate) fn omitted_names(wb: &Workbook) -> HashSet<usize> {
     let mut lookup = HashMap::new();
@@ -182,6 +189,16 @@ mod tests {
         };
         let omitted = omitted_names(&wb);
         assert_eq!(omitted, HashSet::from([0, 3, 4, 8, 9]));
+    }
+
+    #[test]
+    fn macro_only_names_are_detected_directly_and_through_users() {
+        let calls = Workbook { names: vec![name("Macro", None, "INDEX(GET.WORKSPACE(37),17)")], ..Default::default() };
+        assert!(has_macro_only_names(&calls));
+        let uses = Workbook { names: vec![name("User", None, "REPT(Macro,2)"), name("Macro", None, "GET.WORKSPACE(37)")], ..Default::default() };
+        assert!(has_macro_only_names(&uses));
+        let plain = Workbook { names: vec![name("Plain", None, "SUM(1,2)")], ..Default::default() };
+        assert!(!has_macro_only_names(&plain));
     }
 
     #[test]
