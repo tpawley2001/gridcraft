@@ -62,7 +62,8 @@ pub struct CellStyleId {
 }
 
 /// The workbook's custom table and PivotTable styles (ECMA-376 Part 1 §18.8.42 `tableStyles`), kept
-/// so an open + save keeps them. Not drawn yet: tables naming one keep the name.
+/// so an open + save keeps them. A table naming one is drawn from its elements
+/// (`gridcraft_engine::tables::table_cell_style`).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TableStyles {

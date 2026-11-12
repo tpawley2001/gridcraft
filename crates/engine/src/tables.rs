@@ -2,7 +2,9 @@
 //! `TableStyleLight1…21 / Medium1…28 / Dark1…11` names so files round-trip).
 
 use gridcraft_core::{CellRef, RangeRef};
-use gridcraft_model::{BorderLine, BorderStyle, Cell, Color, Fill, Formula, PatternType, Style, Table, Workbook};
+use gridcraft_model::{
+    BorderLine, BorderStyle, Borders, Cell, Color, CustomTableStyle, Fill, Formula, PatternType, Style, Table, Underline, Workbook,
+};
 
 /// (family, number) from a style name, e.g. `TableStyleMedium2` → ("Medium", 2).
 pub fn parse_style_name(name: &str) -> (&'static str, u32) {
@@ -81,6 +83,9 @@ pub fn look(style: &str) -> TableLook {
 /// The style a table gives a cell (merged over the cell's own style: explicit fills/fonts win).
 pub fn table_cell_style(wb: &Workbook, sheet: usize, t: &Table, c: CellRef) -> Style {
     let own = wb.sheet(sheet).map(|sh| wb.styles.get(sh.style_id(c)).clone()).unwrap_or_default();
+    if let Some(custom) = wb.table_styles.styles.iter().find(|x| x.name == t.style) {
+        return custom_cell_style(custom, t, c, own);
+    }
     let mut s = own.clone();
     let lk = look(&t.style);
     let is_header = t.header_row && c.row == t.range.start.row;
@@ -131,6 +136,133 @@ pub fn table_cell_style(wb: &Workbook, sheet: usize, t: &Table, c: CellRef) -> S
         s.font.color = Color::Theme(0, 0);
     }
     s
+}
+
+/// A rectangle of cells, inclusive: (first row, first column, last row, last column).
+type Region = (u32, u32, u32, u32);
+
+/// The band of a stripe pair holding index `i` (0-based from `first`, which runs to `last`):
+/// `(band start, band end, is_first_stripe)`, the band clipped to `last`.
+fn stripe_band(i: u32, first: u32, last: u32, s1: u32, s2: u32) -> (u32, u32, bool) {
+    let period = s1.saturating_add(s2).max(1);
+    let pos = i % period;
+    let start = first.saturating_add(i - pos);
+    let (start, len, is_first) = if pos < s1 { (start, s1, true) } else { (start.saturating_add(s1), s2, false) };
+    (start, start.saturating_add(len - 1).min(last), is_first)
+}
+
+/// How a cell of table `t` looks when the table uses the workbook's custom style `cs`
+/// (ECMA-376 Part 1 §18.8.40-§18.8.41): the style's elements that cover the cell, layered in
+/// the order of Excel's Modify Table Style list, each setting only what its format sets. The
+/// cell's own fill, font colour, bold and border sides win.
+fn custom_cell_style(cs: &CustomTableStyle, t: &Table, c: CellRef, own: Style) -> Style {
+    let (r0, c0, r1, c1) = (t.range.start.row, t.range.start.col, t.range.end.row, t.range.end.col);
+    let head = t.header_row.then_some(r0);
+    let total = t.totals_row.then_some(r1).filter(|r| head != Some(*r));
+    let d0 = r0.saturating_add(u32::from(head.is_some()));
+    let d1 = if total.is_some() { r1.saturating_sub(1) } else { r1 };
+    let in_data = head != Some(c.row) && total != Some(c.row) && c.row >= d0 && c.row <= d1;
+    let elem = |kind: &str| cs.elements.iter().find(|e| e.kind == kind);
+    let size = |kind: &str| elem(kind).map_or(1, |e| e.size.max(1));
+
+    // (element kind, region) for each element that covers the cell, in layering order.
+    let mut layers: Vec<(&str, Region)> = vec![("wholeTable", (r0, c0, r1, c1))];
+    if t.banded_cols && in_data {
+        let (a, b, first) = stripe_band(c.col.saturating_sub(c0), c0, c1, size("firstColumnStripe"), size("secondColumnStripe"));
+        layers.push((if first { "firstColumnStripe" } else { "secondColumnStripe" }, (d0, a, d1, b)));
+    }
+    if t.banded_rows && in_data {
+        let (a, b, first) = stripe_band(c.row - d0, d0, d1, size("firstRowStripe"), size("secondRowStripe"));
+        layers.push((if first { "firstRowStripe" } else { "secondRowStripe" }, (a, c0, b, c1)));
+    }
+    if t.last_col && c.col == c1 {
+        layers.push(("lastColumn", (r0, c1, r1, c1)));
+    }
+    if t.first_col && c.col == c0 {
+        layers.push(("firstColumn", (r0, c0, r1, c0)));
+    }
+    if let Some(h) = head.filter(|h| *h == c.row) {
+        layers.push(("headerRow", (h, c0, h, c1)));
+        if t.first_col && c.col == c0 {
+            layers.push(("firstHeaderCell", (h, c0, h, c0)));
+        }
+        if t.last_col && c.col == c1 {
+            layers.push(("lastHeaderCell", (h, c1, h, c1)));
+        }
+    }
+    if let Some(tr) = total.filter(|tr| *tr == c.row) {
+        layers.push(("totalRow", (tr, c0, tr, c1)));
+        if t.first_col && c.col == c0 {
+            layers.push(("firstTotalCell", (tr, c0, tr, c0)));
+        }
+        if t.last_col && c.col == c1 {
+            layers.push(("lastTotalCell", (tr, c1, tr, c1)));
+        }
+    }
+    // Keep the header/total cell elements after the whole header and total rows.
+    layers.sort_by_key(|(k, _)| match *k {
+        "firstHeaderCell" | "lastHeaderCell" => 1,
+        "firstTotalCell" | "lastTotalCell" => 2,
+        _ => 0,
+    });
+
+    let mut s = own.clone();
+    let mut fill: Option<Fill> = None;
+    let mut color: Option<Color> = None;
+    let mut borders = Borders::default();
+    for (kind, region) in layers {
+        let Some(d) = elem(kind).and_then(|e| e.dxf.as_ref()) else { continue };
+        if d.fill.pattern != PatternType::None {
+            fill = Some(d.fill);
+        }
+        if d.font.color != Color::Auto {
+            color = Some(d.font.color);
+        }
+        s.font.bold |= d.font.bold;
+        s.font.italic |= d.font.italic;
+        s.font.strike |= d.font.strike;
+        if d.font.underline != Underline::default() && own.font.underline == Underline::default() {
+            s.font.underline = d.font.underline;
+        }
+        region_borders(&mut borders, &d.borders, region, c);
+    }
+    if let Some(f) = fill
+        && own.fill.pattern == PatternType::None
+    {
+        s.fill = f;
+    }
+    if let Some(col) = color
+        && own.font.color == Color::Auto
+    {
+        s.font.color = col;
+    }
+    for (mine, theirs) in [
+        (&mut s.borders.left, borders.left),
+        (&mut s.borders.right, borders.right),
+        (&mut s.borders.top, borders.top),
+        (&mut s.borders.bottom, borders.bottom),
+    ] {
+        if mine.style == BorderStyle::None && theirs.style != BorderStyle::None {
+            *mine = theirs;
+        }
+    }
+    s
+}
+
+/// Lays the borders of an element's format over `acc` for cell `c` of the element's `region`:
+/// outer sides on the region's edges, `horizontal` / `vertical` between its rows / columns.
+fn region_borders(acc: &mut Borders, b: &Borders, (ra, ca, rb, cb): Region, c: CellRef) {
+    let put = |side: &mut BorderLine, line: BorderLine, here: bool| {
+        if here && line.style != BorderStyle::None {
+            *side = line;
+        }
+    };
+    put(&mut acc.left, b.left, c.col == ca);
+    put(&mut acc.right, b.vertical, c.col < cb);
+    put(&mut acc.right, b.right, c.col == cb);
+    put(&mut acc.top, b.top, c.row == ra);
+    put(&mut acc.bottom, b.horizontal, c.row < rb);
+    put(&mut acc.bottom, b.bottom, c.row == rb);
 }
 
 /// Gallery list of style names.
