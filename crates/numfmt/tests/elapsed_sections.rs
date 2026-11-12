@@ -17,3 +17,10 @@ fn mixed_elapsed_units_keep_section_scope_width_and_rounding() {
         assert_eq!(text_function(&Value::Number(value), code, DateSystem::D1900), Ok(want.to_string()), "{code}");
     }
 }
+
+#[test]
+fn second_elapsed_token_or_larger_plain_unit_before_it_is_invalid() {
+    for code in ["[h]:[mm]", "[m] [s]", "[h]:mm:[ss]", "h [m]", "[ss] [h]", "[h]:mm [s]"] {
+        assert_eq!(text_function(&Value::Number(2.75), code, DateSystem::D1900), Err(gridcraft_core::CellError::Value), "{code}");
+    }
+}
