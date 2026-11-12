@@ -116,6 +116,7 @@ mod sheet_sort_state;
 mod sheet_view_flags_tests;
 mod signature_line_vml_tests;
 mod smartart_passthrough;
+mod smartart_strict_kept_tests;
 mod smooth_roundtrip;
 mod sparkline_group_tests;
 mod spreadsheetml_tests;
