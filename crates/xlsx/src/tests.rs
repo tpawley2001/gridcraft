@@ -72,6 +72,7 @@ mod page_order;
 mod page_setup_scale_zero;
 mod paper_size_ids;
 mod passthrough_tests;
+mod per_view_zoom_tests;
 mod phonetic_tests;
 mod picture_effects;
 mod picture_locks_tests;
