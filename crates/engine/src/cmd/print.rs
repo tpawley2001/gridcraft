@@ -344,6 +344,21 @@ fn print_preview(s: &mut Session, p: &Json) -> Result<Json> {
     Ok(json!({"pages": n, "pageList": list}))
 }
 
+/// Switches Fit To off. A sheet keeps the counts it was fitting to (`pageSetup fitToWidth` /
+/// `fitToHeight` without `pageSetUpPr fitToPage`), so turning Fit To back on starts from them;
+/// the default (1, 1) is kept as `None`. Already off: the kept counts stay as they are.
+pub(super) fn fit_to_off(pr: &mut PrintSettings) {
+    if let Some(c) = pr.fit_to.take() {
+        pr.fit_to_stored = (c != (1, 1)).then_some(c);
+    }
+}
+
+/// Switches Fit To on with these (wide, tall) counts; they replace any kept counts.
+pub(super) fn fit_to_on(pr: &mut PrintSettings, counts: (u16, u16)) {
+    pr.fit_to = Some(counts);
+    pr.fit_to_stored = None;
+}
+
 fn page_setup(s: &mut Session, p: &Json) -> Result<Json> {
     const CMD: &str = "pageLayout.pageSetup";
     let si = target_sheet(s, p)?;
@@ -462,15 +477,18 @@ fn page_setup(s: &mut Session, p: &Json) -> Result<Json> {
         }
         if let Some(sc) = scale {
             pr.scale = sc;
-            pr.fit_to = None;
+            fit_to_off(pr);
         }
         if fit_w.is_some() || fit_h.is_some() {
-            let (cw, ch) = pr.fit_to.unwrap_or((1, 1));
-            pr.fit_to = Some((fit_w.unwrap_or(cw), fit_h.unwrap_or(ch)));
+            let (cw, ch) = pr.fit_to.or(pr.fit_to_stored).unwrap_or((1, 1));
+            fit_to_on(pr, (fit_w.unwrap_or(cw), fit_h.unwrap_or(ch)));
         }
         match fit_page {
-            Some(true) => pr.fit_to = Some((1, 1)),
-            Some(false) => pr.fit_to = None,
+            Some(true) => {
+                let counts = pr.fit_to.or(pr.fit_to_stored).unwrap_or((1, 1));
+                fit_to_on(pr, counts);
+            }
+            Some(false) => fit_to_off(pr),
             None => {}
         }
         for (i, v) in flags {

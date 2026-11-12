@@ -374,10 +374,11 @@ fn scale_fit(s: &mut Session, p: &Json) -> Result<Json> {
         let pr = &mut cx.sheet_mut(si)?.print;
         if let Some(sc) = f64_param(p, "scale") {
             pr.scale = sc.clamp(10.0, 400.0) as u16;
-            pr.fit_to = None;
+            super::print::fit_to_off(pr);
         }
         if p.get("width").is_some() || p.get("height").is_some() {
-            pr.fit_to = Some((u32_param(p, "width").unwrap_or(0).min(32767) as u16, u32_param(p, "height").unwrap_or(0).min(32767) as u16));
+            let counts = (u32_param(p, "width").unwrap_or(0).min(32767) as u16, u32_param(p, "height").unwrap_or(0).min(32767) as u16);
+            super::print::fit_to_on(pr, counts);
         }
         Ok(Json::Null)
     })
