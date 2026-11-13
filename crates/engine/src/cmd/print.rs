@@ -581,6 +581,8 @@ mod fit_manual_breaks_tests;
 #[cfg(test)]
 mod indent_width_tests;
 #[cfg(test)]
+mod page_limit_tests;
+#[cfg(test)]
 mod shape_hole_tests;
 #[cfg(test)]
 #[allow(clippy::collapsible_if)] // the acceptance tests' PDF path parser nests its checks
