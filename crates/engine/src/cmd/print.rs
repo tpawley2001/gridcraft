@@ -194,6 +194,7 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
         let (aw, ah) = lay.avail();
         let continues = prev_sheet == Some(lay.sheet);
         prev_sheet = Some(lay.sheet);
+        let run_ons = lay.cut_run_ons();
         for (pi, (ri, ci)) in lay.pages.iter().enumerate() {
             page_no += 1;
             let (Some(rband), Some(cband)) = (lay.row_bands.get(*ri).copied(), lay.col_bands.get(*ci).copied()) else { continue };
@@ -247,6 +248,19 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
                     x += seg_size(sh, *cs, false) * k;
                     if rsi + 1 == rsegs.len() && csi + 1 == csegs.len() {
                         body = Some(b);
+                    }
+                }
+                // Text running on past a column cut to the page continues across the pages of
+                // the columns printed after it, shifted left by one printable width per page.
+                if let Some((col, n, width)) = run_ons.get(*ci).copied().flatten().filter(|_| !split) {
+                    let cut_pt = width * k;
+                    // Text runs on at most about 20,000 points past the cut (`cut_text_reach`, plus
+                    // one column): pages further on show none of it, so skip the cell scan.
+                    if n > 0 && cut_pt > 0.0 && (n as f32 - 1.0) * cut_pt <= 40_000.0 {
+                        let left = lay.margins[0] + lay.heading_w * k + titles_w - n as f32 * cut_pt;
+                        let mut b = make_block(wb, lay.sheet, sh, *rs, (col, col), (left, y), lay);
+                        b.cut_column((n as f32 + 1.0) * cut_pt, Some(cut_pt));
+                        draw_block(pg, &b, false, &mut cf);
                     }
                 }
                 y += seg_size(sh, *rs, true) * k;
@@ -594,6 +608,8 @@ fn page_setup(s: &mut Session, p: &Json) -> Result<Json> {
 
 #[cfg(test)]
 mod cut_column_draw_tests;
+#[cfg(test)]
+mod cut_continuation_tests;
 #[cfg(test)]
 mod empty_pages_before_last_tests;
 #[cfg(test)]
