@@ -41,9 +41,14 @@ fn a_control_far_down_an_empty_sheet_prints_every_page_from_a1_down_to_it() {
     let p = pages(&mut s);
     assert!(p.len() > 1, "blank pages above the control print too: {p:?}");
     assert_eq!(rows(&p[0]).0, 1, "printing starts at row 1: {p:?}");
+    // The 20 px check box sits at the top of row 517 and its bottom edge lies on row 518's top,
+    // which counts toward the printed range like an anchor ending at a cell's top-left corner.
+    // At 47 rows a page (Calibri 11), row 517 ends page 11 and row 518 is alone on the last page.
     let last = p.last().unwrap();
-    let (a, b) = rows(last);
-    assert!(a <= 517 && 517 <= b, "the last page holds row 517: {last:?}");
+    assert_eq!(rows(last), (518, 518), "the last page holds the row the control's edge reaches: {last:?}");
+    let before = &p[p.len() - 2];
+    let (a, b) = rows(before);
+    assert!(a <= 517 && 517 <= b, "the page before holds row 517, the control's row: {before:?}");
     let cols = p[0]["columns"].as_str().unwrap();
     assert!(cols.starts_with("A:") && cols != "A:A" && cols != "A:B", "columns reach the control in C: {cols}");
 }
