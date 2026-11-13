@@ -225,3 +225,66 @@ fn wide_column_split_leaves_a_column_that_fits_an_empty_page_whole() {
     assert_eq!(ranges(&list), ["A1", "B1"]);
     assert_eq!(offsets(&list), [None, None]);
 }
+
+/// Column A 250 characters wide, 0.5 in side margins, A1 = 40 words centred: Excel's probe sheet
+/// `fit200center` (Microsoft 365 Excel's own PDF print, 2026-11-13).
+fn centred_words(n: usize) -> Session {
+    let mut s = probe_sheet("A", 250.0);
+    s.execute("cell.set", json!({"cell": "A1", "input": words(n)})).unwrap();
+    s.execute("home.alignCenter", json!({"range": "A1"})).unwrap();
+    s
+}
+
+#[test]
+fn wide_column_split_continues_centred_text_past_the_cut() {
+    // Excel: 2 pages. The line is centred on the cut column (the printable width), so it runs on
+    // past the page's right edge by about (1090 - 540) / 2 pt and continues on one more page.
+    let mut s = centred_words(40);
+    let list = preview(&mut s);
+    assert_eq!(ranges(&list), ["A1", "A1"], "Excel prints the centred line on 2 pages");
+    let offsets = offsets(&list);
+    assert_eq!(offsets[0], None);
+    assert!(near(offsets[1], PROBE_PRINTABLE_WIDTH), "{:?}", offsets[1]);
+    let r = s.execute("file.exportPdf", json!({})).unwrap();
+    assert_eq!(r["pages"], 2);
+}
+
+#[test]
+fn wide_column_split_draws_centred_text_centred_on_the_cut_and_shifted_on_the_next_page() {
+    // Excel page 1: the line starts at x = -239.0 (its first nine words are clipped off the left
+    // of the page; it is centred on x = 306, the middle of the printable area, not of the
+    // 250-character column). Page 2: the same line shifted left by exactly the printable width.
+    let text = words(40);
+    let mut s = centred_words(40);
+    let pages = pdf_pages(&mut s);
+    assert_eq!(pages.len(), 2);
+    let first = text_x(&pages[0], &text).expect("the line is drawn on page 1");
+    // Centred on the 250-character column instead, the line would start right of the margin.
+    // The range allows for small text-width differences (GridCraft measured 2026-11-13: -279.4).
+    assert!((-330.0..-200.0).contains(&first), "centred on the cut column (Excel: -239.0): {first}");
+    let second = text_x(&pages[1], &text).expect("the line is drawn again on page 2");
+    assert!(
+        (second - (first - PROBE_PRINTABLE_WIDTH as f32)).abs() < 0.5,
+        "page 2 shows the line shifted left by the printable width: page 1 {first}, page 2 {second}"
+    );
+}
+
+#[test]
+fn wide_column_split_keeps_centred_text_within_the_cut_on_one_page() {
+    // 15 words = 74 characters, about 400 pt: centred inside the 540 pt cut, nothing runs on.
+    let mut s = centred_words(15);
+    let list = preview(&mut s);
+    assert_eq!(ranges(&list), ["A1"]);
+    assert_eq!(offsets(&list), [None]);
+}
+
+#[test]
+fn wide_column_split_centred_text_stops_at_a_filled_neighbour() {
+    // B1 holds a value: the centred line cannot run on over it, so no continuation page (as for
+    // left-aligned text); B starts the next page.
+    let mut s = centred_words(40);
+    s.execute("cell.set", json!({"cell": "B1", "input": "2"})).unwrap();
+    let list = preview(&mut s);
+    assert_eq!(ranges(&list), ["A1", "B1"]);
+    assert_eq!(offsets(&list), [None, None]);
+}
