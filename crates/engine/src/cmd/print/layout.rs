@@ -196,6 +196,10 @@ fn used_print_range(sh: &Sheet) -> Option<RangeRef> {
     for c in sh.controls.iter().filter(|o| o.print) {
         grow(&c.anchor);
     }
+    // Embedded (OLE) objects and ActiveX controls aren't drawn, but they print and take room.
+    for o in sh.embedded_objects.iter().filter(|o| o.print) {
+        grow(&o.anchor);
+    }
     // Without a print area Excel prints from A1: leading empty rows and columns print as blank
     // space, and pages that fall wholly inside them print as blank pages.
     r.map(|r| RangeRef::new(CellRef::new(0, 0), r.end))
@@ -562,6 +566,9 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
     }
     for c in sh.controls.iter().filter(|o| o.print) {
         object(&c.anchor);
+    }
+    for o in sh.embedded_objects.iter().filter(|o| o.print) {
+        object(&o.anchor);
     }
     // Sweep from the right: a band prints down to the lowest occupied band at or right of it.
     let mut reach = vec![0usize; last.len()];

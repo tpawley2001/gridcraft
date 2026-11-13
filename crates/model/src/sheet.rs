@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::cell::{Cell, CellPicture};
 use crate::features::{
-    Anchor, AutoFilter, Chart, Comment, CondFormat, FormControl, Hyperlink, Image, LineInfo, ObjKind, ObjRef, PivotTable, PrintSettings, Shape,
-    ShapeKind, SheetProtection, Slicer, Sparkline, Table, TableSort, Validation,
+    Anchor, AutoFilter, Chart, Comment, CondFormat, EmbeddedObject, FormControl, Hyperlink, Image, LineInfo, ObjKind, ObjRef, PivotTable,
+    PrintSettings, Shape, ShapeKind, SheetProtection, Slicer, Sparkline, Table, TableSort, Validation,
 };
 use crate::store::CellStore;
 use crate::style::{Color, StyleId};
@@ -233,6 +233,10 @@ pub struct Sheet {
     /// take clicks first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub controls: Vec<FormControl>,
+    /// Embedded (OLE) objects and ActiveX controls: the file keeps them, GridCraft doesn't draw
+    /// them, but their place counts toward the printed range. Never written into a file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub embedded_objects: Vec<EmbeddedObject>,
     /// PivotTables whose output lives on this sheet.
     #[serde(default)]
     pub pivots: Vec<PivotTable>,
@@ -363,6 +367,7 @@ impl Sheet {
             data_tables: vec![],
             slicers: vec![],
             controls: vec![],
+            embedded_objects: vec![],
             pivots: vec![],
             protection: None,
             inactive_protection: None,
@@ -484,7 +489,8 @@ impl Sheet {
         }
     }
 
-    /// Every floating object's anchor in a fixed order (charts, images, shapes, slicers, controls)
+    /// Every floating object's anchor in a fixed order (charts, images, shapes, slicers, controls,
+    /// embedded objects)
     /// that [`Sheet::object_anchors_mut`] repeats, so a pass can compute new anchors from the old
     /// ones and write them back in step.
     pub fn object_anchors(&self) -> impl Iterator<Item = &Anchor> {
@@ -495,6 +501,7 @@ impl Sheet {
             .chain(self.shapes.iter().map(|o| &o.anchor))
             .chain(self.slicers.iter().map(|o| &o.anchor))
             .chain(self.controls.iter().map(|o| &o.anchor))
+            .chain(self.embedded_objects.iter().map(|o| &o.anchor))
     }
 
     pub fn object_anchors_mut(&mut self) -> impl Iterator<Item = &mut Anchor> {
@@ -505,6 +512,7 @@ impl Sheet {
             .chain(self.shapes.iter_mut().map(|o| &mut o.anchor))
             .chain(self.slicers.iter_mut().map(|o| &mut o.anchor))
             .chain(self.controls.iter_mut().map(|o| &mut o.anchor))
+            .chain(self.embedded_objects.iter_mut().map(|o| &mut o.anchor))
     }
     /// Displayed value of a cell: its own value, or a spilled value.
     pub fn value(&self, c: CellRef) -> Value {

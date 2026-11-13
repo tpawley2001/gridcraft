@@ -21,7 +21,8 @@ use std::fmt::Write as _;
 
 use gridcraft_core::CellRef;
 use gridcraft_model::{
-    Anchor, AnchorMode, CONTROL_MAX, ControlAction, ControlKind, DEFAULT_DROP_LINES, FormControl, ListSelection, MacroInput, Sheet,
+    Anchor, AnchorMode, CONTROL_MAX, ControlAction, ControlKind, DEFAULT_DROP_LINES, EmbeddedObject, EmbeddedObjectKind, FormControl, ListSelection,
+    MacroInput, Sheet,
 };
 
 use crate::package::Rel;
@@ -562,13 +563,21 @@ fn build(p: Props, kind: ControlKind, anchor: Anchor, name: Option<&str>, id: u3
 /// The `<control>` elements one child of a `<controls>` element holds: the child itself, or those
 /// inside its `mc:AlternateContent` (the Choice, else the Fallback).
 fn controls_of_child(k: &El) -> Vec<&El> {
+    entries_of_child(k, "control")
+}
+
+/// The `name` elements one child of a list element holds: the child itself, or those inside its
+/// `mc:AlternateContent` (the Choice, else the Fallback), so an entry is never taken twice.
+fn entries_of_child<'a>(k: &'a El, name: &'static str) -> Vec<&'a El> {
+    if k.name == name {
+        return vec![k];
+    }
     match k.name.as_str() {
-        "control" => vec![k],
         "AlternateContent" => k
             .child("Choice")
-            .filter(|c| c.child("control").is_some())
+            .filter(|c| c.child(name).is_some())
             .or_else(|| k.child("Fallback"))
-            .map(|inner| inner.kids("control").collect())
+            .map(|inner| inner.kids(name).collect())
             .unwrap_or_default(),
         _ => Vec::new(),
     }
@@ -578,6 +587,32 @@ fn controls_of_child(k: &El) -> Vec<&El> {
 /// (the Choice, else the Fallback).
 fn controls_in(e: &El) -> Vec<&El> {
     e.children.iter().flat_map(controls_of_child).collect()
+}
+
+/// The `<oleObjects>` element of a worksheet child (`oleObjects`, or one inside AlternateContent).
+pub fn ole_objects_of(e: &El) -> Option<&El> {
+    match e.name.as_str() {
+        "oleObjects" => Some(e),
+        "AlternateContent" => {
+            e.child("Choice").and_then(|c| c.child("oleObjects")).or_else(|| e.child("Fallback").and_then(|c| c.child("oleObjects")))
+        }
+        _ => None,
+    }
+}
+
+/// The most embedded objects and ActiveX controls kept per sheet.
+const MAX_EMBEDDED: usize = 10_000;
+
+/// An embedded object's or ActiveX control's place and "Print object" setting: from its
+/// properties element (`objectPr` / `controlPr`) when that has an anchor, else from its VML shape.
+/// `None` when neither gives a usable anchor.
+fn embedded_object(pr: Option<&El>, shape: Option<&El>, sheet: &Sheet, kind: EmbeddedObjectKind, prog_id: &str) -> Option<EmbeddedObject> {
+    let anchor =
+        pr.and_then(|pr| pr.child("anchor")).and_then(|a| anchor_from_markers(a, sheet)).or_else(|| shape.and_then(|s| vml_anchor(s, sheet)))?;
+    let vml_print =
+        shape.and_then(|s| s.child("ClientData")).and_then(|d| d.child("PrintObject")).map(|p| !p.text.trim().eq_ignore_ascii_case("false"));
+    let print = pr.and_then(|pr| pr.attr_bool("print")).or(vml_print).unwrap_or(true);
+    Some(EmbeddedObject { anchor, print, kind, prog_id: prog_id.to_string() })
 }
 
 /// The `<controls>` element of a worksheet child (`controls`, or one inside AlternateContent).
@@ -641,7 +676,18 @@ pub(crate) fn is_note_data(data: &El) -> bool {
 /// part, else its VML shape, and VML shapes the sheet doesn't list (files that only have VML).
 /// The shapes come from the VML drawing with relationship id `vml_rid` (`<legacyDrawing r:id>`).
 /// Returns the shape numbers of the controls it read, so pass-through keeps only the others.
-pub fn read(cx: &mut Ctx<'_>, controls: Option<&El>, vml_rid: Option<&str>, rels: &[Rel], sheet: &mut Sheet) -> ReadControls {
+///
+/// Listed controls that are not form controls (ActiveX) and the entries of `ole_objects` are
+/// kept in [`Sheet::embedded_objects`] for their place on the sheet; their XML stays with
+/// pass-through.
+pub fn read(
+    cx: &mut Ctx<'_>,
+    controls: Option<&El>,
+    ole_objects: Option<&El>,
+    vml_rid: Option<&str>,
+    rels: &[Rel],
+    sheet: &mut Sheet,
+) -> ReadControls {
     let mut read = HashSet::new();
     let vml = match vml_rid.and_then(|id| rels.iter().find(|r| r.id == id && r.kind == "vmlDrawing")) {
         Some(r) => cx.pkg.read_vml(&r.target).ok().flatten(),
@@ -669,6 +715,9 @@ pub fn read(cx: &mut Ctx<'_>, controls: Option<&El>, vml_rid: Option<&str>, rels
     let mut props_by_part: HashMap<&str, Option<Props>> = HashMap::new();
     // Every shape the sheet lists, read here or not.
     let mut listed: HashSet<u64> = HashSet::new();
+    // Listed controls not read as form controls, with their VML shape and the relationship type
+    // of their properties part.
+    let mut unmodelled: Vec<(&El, Option<&El>, Option<&str>)> = Vec::new();
     for ctl in controls.map(controls_in).unwrap_or_default() {
         let Some(n) = ctl.attr("shapeId").and_then(shape_number) else { continue };
         listed.insert(n);
@@ -677,7 +726,9 @@ pub fn read(cx: &mut Ctx<'_>, controls: Option<&El>, vml_rid: Option<&str>, rels
         }
         let shape = shape_of(n);
         let vml_props = shape.and_then(props_from_vml);
-        let prop_part = ctl.attr("id").and_then(|id| rel_by_id.get(id)).map(|r| r.target.as_str());
+        let prop_rel = ctl.attr("id").and_then(|id| rel_by_id.get(id));
+        let prop_kind = prop_rel.map(|r| r.kind.as_str());
+        let prop_part = prop_rel.map(|r| r.target.as_str());
         let file_props = match prop_part {
             Some(t) => props_by_part
                 .entry(t)
@@ -698,7 +749,10 @@ pub fn read(cx: &mut Ctx<'_>, controls: Option<&El>, vml_rid: Option<&str>, rels
                 f
             }
             (None, Some(v)) => v,
-            (None, None) => continue,
+            (None, None) => {
+                unmodelled.push((ctl, shape, prop_kind));
+                continue;
+            }
         };
         if let Some(pr) = pr {
             if let Some(m) = pr.attr("macro").filter(|m| !m.trim().is_empty()) {
@@ -708,7 +762,10 @@ pub fn read(cx: &mut Ctx<'_>, controls: Option<&El>, vml_rid: Option<&str>, rels
             p.locked = pr.attr_bool("locked").or(p.locked);
         }
         // Other kinds (an edit box, a dialog frame) stay with pass-through.
-        let Some(kind) = p.kind else { continue };
+        let Some(kind) = p.kind else {
+            unmodelled.push((ctl, shape, prop_kind));
+            continue;
+        };
         let anchor =
             pr.and_then(|pr| pr.child("anchor")).and_then(|a| anchor_from_markers(a, sheet)).or_else(|| shape.and_then(|s| vml_anchor(s, sheet)));
         let Some(anchor) = anchor else { continue };
@@ -740,6 +797,27 @@ pub fn read(cx: &mut Ctx<'_>, controls: Option<&El>, vml_rid: Option<&str>, rels
         });
         if modelled.is_none() && unlisted_kept(s) {
             vml_only_unmodelled = true;
+        }
+    }
+    // ActiveX controls (a properties part that isn't a form control's `ctrlProp`) and embedded
+    // objects: only their place, for printing.
+    for (ctl, shape, prop_kind) in unmodelled {
+        if prop_kind == Some("ctrlProp") || sheet.embedded_objects.len() >= MAX_EMBEDDED {
+            continue;
+        }
+        if let Some(o) = embedded_object(ctl.child("controlPr"), shape, sheet, EmbeddedObjectKind::ActiveX, "") {
+            sheet.embedded_objects.push(o);
+        }
+    }
+    let oles = ole_objects.map(|e| e.children.iter().flat_map(|k| entries_of_child(k, "oleObject")).collect::<Vec<_>>()).unwrap_or_default();
+    for ole in oles {
+        if sheet.embedded_objects.len() >= MAX_EMBEDDED {
+            break;
+        }
+        let shape = ole.attr("shapeId").and_then(shape_number).and_then(shape_of);
+        let prog_id = ole.attr("progId").unwrap_or_default();
+        if let Some(o) = embedded_object(ole.child("objectPr"), shape, sheet, EmbeddedObjectKind::Ole, prog_id) {
+            sheet.embedded_objects.push(o);
         }
     }
     ReadControls { modelled: read, vml_only_unmodelled, data_consolidate: false }
