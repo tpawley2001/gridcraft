@@ -573,6 +573,8 @@ fn page_setup(s: &mut Session, p: &Json) -> Result<Json> {
 #[cfg(test)]
 mod empty_pages_more_tests;
 #[cfg(test)]
+mod empty_pages_overflow_tests;
+#[cfg(test)]
 mod empty_pages_tests;
 #[cfg(test)]
 mod fit_manual_breaks_tests;
