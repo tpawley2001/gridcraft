@@ -441,11 +441,6 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
     let trim_empty = range_override.is_none() && sh.print.print_areas().is_empty();
     let paginate = |lay: &mut SheetLayout| {
         (lay.row_bands, lay.col_bands, lay.col_offsets) = split_bands_pieces(sh, lay, MAX_PAGES);
-        let reach = if trim_empty { printed_reach(wb, sh, lay) } else { None };
-        lay.pages = match reach {
-            Some(reach) => printed_page_sequence(&reach, lay.settings.page_order, MAX_PAGES),
-            None => page_sequence(lay.row_bands.len(), lay.col_bands.len(), lay.settings.page_order, MAX_PAGES),
-        };
     };
     match fit {
         Some((fw, fh)) => {
@@ -471,6 +466,13 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
         }
         None => paginate(&mut lay),
     }
+    // The printed pages, once the bands (and Fit To's scale) are settled: `printed_reach` visits
+    // every stored cell and object, so it does not run on each of Fit To's tries.
+    let reach = if trim_empty { printed_reach(wb, sh, &lay) } else { None };
+    lay.pages = match reach {
+        Some(reach) => printed_page_sequence(&reach, lay.settings.page_order, MAX_PAGES),
+        None => page_sequence(lay.row_bands.len(), lay.col_bands.len(), lay.settings.page_order, MAX_PAGES),
+    };
     Some(lay)
 }
 

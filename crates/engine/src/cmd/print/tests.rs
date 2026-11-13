@@ -1233,3 +1233,26 @@ fn picture_border_prints_as_a_stroke_on_its_bounds() {
     assert_eq!(strokes.len(), 1, "one solid 3 pt red stroke");
     assert!(strokes.first().unwrap().lines().nth(1).unwrap().ends_with(" re S"), "a rectangle stroke");
 }
+
+#[test]
+fn preview_lists_the_first_pages_and_reaches_any_page() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "top"})).unwrap();
+    s.execute("cell.set", json!({"cell": "A200000", "input": "end"})).unwrap();
+    let pv = s.execute("file.printPreview", json!({})).unwrap();
+    let n = pv["pages"].as_u64().unwrap() as usize;
+    assert!(n > MAX_PAGE_LIST, "{n}");
+    assert_eq!(pv["pageList"].as_array().unwrap().len(), MAX_PAGE_LIST);
+    assert_eq!(pv["pageListTruncated"], true);
+    let last = s.execute("file.printPreview", json!({"page": n})).unwrap();
+    assert_eq!(last["page"]["page"], n);
+    assert!(last["page"]["rows"].as_str().unwrap().ends_with(":200000"), "{}", last["page"]);
+    assert!(s.execute("file.printPreview", json!({"page": n + 1})).is_err());
+    // A short sheet's list is whole and unmarked.
+    let mut t = Session::new();
+    t.new_workbook();
+    t.execute("cell.set", json!({"cell": "A120", "input": "end"})).unwrap();
+    let pv = t.execute("file.printPreview", json!({})).unwrap();
+    assert_eq!(pv["pageList"].as_array().unwrap().len() as u64, pv["pages"].as_u64().unwrap());
+    assert!(pv.get("pageListTruncated").is_none());
+}
