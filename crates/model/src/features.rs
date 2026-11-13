@@ -574,6 +574,31 @@ pub struct Anchor {
     pub mode: AnchorMode,
 }
 
+/// What an [`EmbeddedObject`] is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EmbeddedObjectKind {
+    /// An embedded or linked OLE object (Insert > Object).
+    #[default]
+    Ole,
+    /// An ActiveX control.
+    ActiveX,
+}
+
+/// An embedded or linked OLE object, or an ActiveX control: not drawn or edited here, but its
+/// place on the sheet counts toward the printed range like any other object. The file keeps the
+/// object itself; this is only what printing needs to know about it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EmbeddedObject {
+    pub anchor: Anchor,
+    /// "Print object" (on unless the file turns it off).
+    pub print: bool,
+    pub kind: EmbeddedObjectKind,
+    /// The object's program id (`Word.Document.12`); empty for ActiveX controls and when the file
+    /// gives none.
+    pub prog_id: String,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ChartKind {
     #[default]

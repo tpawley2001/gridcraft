@@ -394,11 +394,17 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
 /// Buttons, scroll bars and spin buttons: the `<controls>` list (also inside
 /// `mc:AlternateContent`) with its properties parts, else the shapes of the VML drawing that
 /// `<legacyDrawing r:id>` names (not the header and footer drawing of `<legacyDrawingHF>`).
+/// Embedded objects (`<oleObjects>`) and ActiveX controls are kept for their place only.
 /// Returns the VML shape numbers read, so pass-through keeps only the others.
 fn read_form_controls(cx: &mut Ctx<'_>, root: &El, rels: &[Rel], sheet: &mut Sheet) -> crate::controls::ReadControls {
     let controls = root.children.iter().filter_map(crate::controls::controls_of).next_back();
+    let ole_objects = root.children.iter().filter_map(crate::controls::ole_objects_of).next_back();
     let vml = root.child("legacyDrawing").and_then(|e| e.attr("id"));
-    if controls.is_some() || vml.is_some() { crate::controls::read(cx, controls, vml, rels, sheet) } else { Default::default() }
+    if controls.is_some() || ole_objects.is_some() || vml.is_some() {
+        crate::controls::read(cx, controls, ole_objects, vml, rels, sheet)
+    } else {
+        Default::default()
+    }
 }
 
 /// A protection password hash: the iterated attributes (`algorithmName`, `hashValue`,
