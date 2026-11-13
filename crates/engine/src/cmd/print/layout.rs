@@ -441,7 +441,7 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
     let trim_empty = range_override.is_none() && sh.print.print_areas().is_empty();
     let paginate = |lay: &mut SheetLayout| {
         (lay.row_bands, lay.col_bands, lay.col_offsets) = split_bands_pieces(sh, lay, MAX_PAGES);
-        let reach = if trim_empty { printed_reach(sh, &lay.row_bands, &lay.col_bands) } else { None };
+        let reach = if trim_empty { printed_reach(wb, sh, lay) } else { None };
         lay.pages = match reach {
             Some(reach) => printed_page_sequence(&reach, lay.settings.page_order, MAX_PAGES),
             None => page_sequence(lay.row_bands.len(), lay.col_bands.len(), lay.settings.page_order, MAX_PAGES),
@@ -496,9 +496,11 @@ pub(crate) fn page_sequence(rows: usize, cols: usize, order: PageOrder, cap: usi
 /// Per column band, the number of row bands printed in it: page (r, c) prints when some page
 /// at or below and at or to the right of it (r2 >= r, c2 >= c) has something on it (a stored
 /// cell, a spill range, a merged range whose anchor cell is stored, or a printing drawing
-/// object). The counts never grow from left to right. `None` when nothing lies on any page (the
-/// caller then prints the full grid).
-fn printed_reach(sh: &Sheet, row_bands: &[(u32, u32)], col_bands: &[(u32, u32)]) -> Option<Vec<usize>> {
+/// object, part of a table's range, or text overflowing into it from a cell in an earlier column,
+/// as the drawing lets it). The counts never grow from left to right. `None` when nothing lies on
+/// any page (the caller then prints the full grid).
+fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usize>> {
+    let (row_bands, col_bands) = (&lay.row_bands, &lay.col_bands);
     // The lowest occupied row band of each column band.
     let mut last: Vec<Option<usize>> = vec![None; col_bands.len()];
     // Marks the rectangle ending in row r1 over columns c0..=c1 (only its lowest row matters). Bands stop at a page cap, so what lies
@@ -523,8 +525,17 @@ fn printed_reach(sh: &Sheet, row_bands: &[(u32, u32)], col_bands: &[(u32, u32)])
             }
         }
     };
-    for (c, _) in sh.cells.iter() {
-        mark(c.row, c.col, c.col);
+    // Text overflows rightward only (overflow to the left lands on bands the cell's own band
+    // already keeps), and only matters when a later band of columns exists.
+    let last_band_start = col_bands.last().map_or(0, |b| b.0);
+    let page_scale = (lay.k(), lay.scale);
+    let mut fonts = None;
+    for (c, cell) in sh.cells.iter() {
+        let end = if c.col < last_band_start { super::text::right_overflow_end(wb, sh, (c, cell), &sh.merges, page_scale, &mut fonts) } else { None };
+        mark(c.row, c.col, end.map_or(c.col, |e| e.max(c.col)));
+    }
+    for t in &sh.tables {
+        mark(t.range.end.row, t.range.start.col, t.range.end.col);
     }
     for r in sh.spill_ranges.values() {
         mark(r.end.row, r.start.col, r.end.col);

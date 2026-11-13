@@ -132,6 +132,92 @@ fn extend_text_bounds(sh: &Sheet, c: CellRef, merges: &[RangeRef], k: f32, need:
     (clip_l, clip_r)
 }
 
+/// The last column the text of `c` runs into to its right when printed at page scale `scale`
+/// (`k` points per sheet pixel), by the same rule [`draw_text`] clips it with: single-line text
+/// (not a number) wider than its cell spills over the empty cells to its right, up to the first
+/// non-empty one. Wrapped, shrunk-to-fit, filled, right-aligned, upright and merged cells, and
+/// Center Across Selection runs, stay in place (`None`). The text is measured only when the
+/// right neighbour is empty, so a sheet of short or packed text costs one lookup per cell.
+/// `fonts` remembers the printed font of the style last measured (cells in a run share styles).
+pub(super) fn right_overflow_end(
+    wb: &gridcraft_model::Workbook,
+    sh: &Sheet,
+    (c, cell): (CellRef, &gridcraft_model::Cell),
+    merges: &[RangeRef],
+    (k, scale): (f32, f32),
+    fonts: &mut Option<(gridcraft_model::StyleId, Font)>,
+) -> Option<u32> {
+    let value = &cell.value;
+    if value.is_empty() || matches!(value, Value::Number(_)) || c.col + 1 >= MAX_COLS {
+        return None;
+    }
+    let right = CellRef::new(c.row, c.col + 1);
+    if sh.value_ref(right).is_some_and(|v| !v.is_empty()) {
+        return None;
+    }
+    let sid = cell.style;
+    let st = wb.styles.get(sid);
+    let a = &st.align;
+    if a.wrap || a.shrink || a.h == HAlign::Fill || a.rotation.abs() == 90 {
+        return None;
+    }
+    let h_align = text_align(a.h, value);
+    if h_align == HAlign::Right {
+        return None;
+    }
+    if a.h == HAlign::CenterAcross && center_across_width(&wb.styles, sh, c, merges) > 0.0 {
+        return None;
+    }
+    // Plain text in a General cell is measured where it lies; anything else is formatted first.
+    let code = st.num_fmt.as_str();
+    let formatted;
+    let text: &str = match value {
+        Value::Text(t) if !sh.show_formulas && (code == "General" || code == "@") => crate::display::displayed_prefix(t),
+        _ => {
+            let v = crate::display::displayed_value(value.clone());
+            let mut t = if sh.show_formulas { crate::display::cell_text(wb, sh, c) } else { crate::display::value_text_as(wb, &v, code) };
+            crate::display::truncate_displayed(&mut t);
+            formatted = t;
+            &formatted
+        }
+    };
+    if text.is_empty() {
+        return None;
+    }
+    let size = st.font.size.clamp(1.0, 409.0) * scale;
+    let font = match *fonts {
+        Some((id, f)) if id == sid => f,
+        _ => {
+            let f = font_for(st);
+            *fonts = Some((sid, f));
+            f
+        }
+    };
+    // Line breaks print as spaces (as in `draw_text`).
+    let width_of = |ch: char| u64::from(font.char_width(if ch == '\n' || ch == '\r' { ' ' } else { ch }));
+    let tw = text.chars().map(width_of).sum::<u64>() as f32 * size / 1000.0;
+    let indent = if a.indent == 0 { 0.0 } else { f32::from(a.indent) * indent_level_pt(wb) };
+    let w = sh.col_width(c.col) * k;
+    let over = tw + 2.0 * PAD_PX * k + indent - w;
+    if over <= 0.0 || merges.iter().any(|m| m.contains(c) || m.contains(right)) {
+        return None;
+    }
+    let mut remaining = if h_align == HAlign::Center { over / 2.0 } else { over };
+    let (mut col, mut ext, mut last) = (c.col + 1, 0.0f32, None);
+    while remaining > 0.0 && col < MAX_COLS && ext <= 20_000.0 {
+        let nc = CellRef::new(c.row, col);
+        if !empty_for_overflow(sh, nc, merges) {
+            break;
+        }
+        let width = sh.col_width(col) * k;
+        ext += width;
+        remaining -= width;
+        last = Some(col);
+        col += 1;
+    }
+    last
+}
+
 /// Unscaled width of the empty Center Across Selection cells right of `c`, which its text is centred over too.
 pub(super) fn center_across_width(styles: &StyleTable, sh: &Sheet, c: CellRef, merges: &[RangeRef]) -> f32 {
     let mut ext = 0.0;
