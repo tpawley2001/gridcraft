@@ -180,21 +180,23 @@ pub(super) fn insert(app: &mut SheetApp, ui: &mut Ui) {
             "insert.optionButton",
         ),
     ];
-    // Three to a column, as the ribbon's small buttons stack; the second column shows icons only,
-    // so the group stays narrow.
-    for (n, column) in controls.chunks(3).enumerate() {
-        ui.vertical(|ui| {
-            for &(icon, kind, label, tip, id) in column {
-                let on = placing == Some(kind);
-                let r = if n == 0 { small_toggle_button(ui, icon, label, tip, on) } else { small_toggle_icon(ui, icon, label, tip, on) };
-                control_keytip(app, ui, &r, id);
-                if r.clicked() {
-                    app.grid.placing = if placing == Some(kind) { None } else { Some(kind) };
-                    app.selected_object = None;
+    // Three rows, as the ribbon's small buttons stack. The check box and the option button are icons
+    // beside the two shorter labels, so the group is no wider than its longest label.
+    ui.vertical(|ui| {
+        for row in 0..3 {
+            ui.horizontal(|ui| {
+                for (n, &(icon, kind, label, tip, id)) in [controls.get(row), controls.get(row + 3)].into_iter().flatten().enumerate() {
+                    let on = placing == Some(kind);
+                    let r = if n == 0 { small_toggle_button(ui, icon, label, tip, on) } else { small_toggle_icon(ui, icon, label, tip, on) };
+                    control_keytip(app, ui, &r, id);
+                    if r.clicked() {
+                        app.grid.placing = if placing == Some(kind) { None } else { Some(kind) };
+                        app.selected_object = None;
+                    }
                 }
-            }
-        });
-    }
+            });
+        }
+    });
     sep(ui);
     // Cell Controls.
     if big_button(ui, Icon::Checkbox, "Checkbox", "Insert checkboxes in the selected cells", false).clicked() {
