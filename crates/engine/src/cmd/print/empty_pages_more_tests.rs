@@ -5,7 +5,7 @@ use serde_json::json;
 
 use super::*;
 
-/// A1:A200 filled: five pages down in the first band of columns (45 rows a page).
+/// A1:A200 filled: five pages down in the first band of columns (47 rows a page).
 fn two_hundred_rows() -> Session {
     let mut s = Session::new();
     s.new_workbook();
@@ -35,7 +35,7 @@ fn a_shape_alone_on_a_later_bands_page_prints_it() {
     // A small rectangle at P60 (the second page down of P's band).
     s.execute("insert.shape", json!({"kind": "rectangle", "at": "P60", "width": 20, "height": 10})).unwrap();
     let p = pages(&mut s);
-    assert_eq!(rows_of(&p), ["1:45", "46:90", "91:135", "136:180", "181:200", "1:45", "46:90"], "{p:?}");
+    assert_eq!(rows_of(&p), ["1:47", "48:94", "95:141", "142:188", "189:200", "1:47", "48:94"], "{p:?}");
     assert!(p[5..].iter().all(|x| x.0 != p[0].0), "{p:?}");
 }
 
@@ -46,7 +46,7 @@ fn a_merged_range_reaching_into_a_page_prints_it() {
     s.execute("home.mergeCenter", json!({})).unwrap();
     s.execute("cell.set", json!({"cell": "P40", "input": "merged"})).unwrap();
     let p = pages(&mut s);
-    assert_eq!(rows_of(&p), ["1:45", "46:90", "91:135", "136:180", "181:200", "1:45", "46:90", "91:135"], "{p:?}");
+    assert_eq!(rows_of(&p), ["1:47", "48:94", "95:141", "142:188", "189:200", "1:47", "48:94", "95:141"], "{p:?}");
 }
 
 #[test]
@@ -70,9 +70,9 @@ fn over_then_down_prints_the_same_pages() {
     s.execute("pageLayout.pageSetup", json!({"pageOrder": "overThenDown"})).unwrap();
     let mut over = pages(&mut s);
     assert_eq!(over.len(), 9, "{over:?}");
-    // Over then down: every row band before the last prints both bands (the blank K:P 136:180
-    // comes before the last page with anything on it), then A's 181:200.
-    assert_eq!(rows_of(&over), ["1:45", "1:45", "46:90", "46:90", "91:135", "91:135", "136:180", "136:180", "181:200"], "{over:?}");
+    // Over then down: every row band before the last prints both bands (the blank K:P 142:188
+    // comes before the last page with anything on it), then A's 189:200.
+    assert_eq!(rows_of(&over), ["1:47", "1:47", "48:94", "48:94", "95:141", "95:141", "142:188", "142:188", "189:200"], "{over:?}");
     // The same pages as down then over, plus that one blank page.
     let extra = over.get(7).cloned();
     down.sort();

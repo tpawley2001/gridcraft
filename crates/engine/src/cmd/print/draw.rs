@@ -172,6 +172,8 @@ pub(super) struct Block<'a> {
     pub(super) ys: Vec<f32>,
     pub(super) k: f32,
     pub(super) scale: f32,
+    /// Rows print at their printed pitch, not at `k` times their height.
+    pitch: super::metrics::RowPitch<'a>,
     /// A continuation page of a column cut to the page: the cut width in points. Only text
     /// running on past the cut is drawn.
     continued: Option<f32>,
@@ -185,11 +187,22 @@ impl Block<'_> {
         let x0 = self.xs.first().copied().unwrap_or(0.0);
         x0 + ((self.sh.col_left(col) - self.sh.col_left(self.cols.0)) as f32) * self.k
     }
-    fn y(&self, row: u32) -> f32 {
+    /// Page y of the top of `row` (rows outside the block continue at their printed pitch; far
+    /// away, at their sheet height).
+    pub(super) fn y(&self, row: u32) -> f32 {
         if row >= self.rows.0 && row <= self.rows.1 + 1 {
             return self.ys.get((row - self.rows.0) as usize).copied().unwrap_or(0.0);
         }
+        /// Rows outside the block summed one by one at most.
+        const NEAR: u32 = 4096;
         let y0 = self.ys.first().copied().unwrap_or(0.0);
+        if row < self.rows.0 && self.rows.0 - row <= NEAR {
+            return y0 - self.pitch.span_pt((row, self.rows.0 - 1));
+        }
+        let end = self.rows.1 + 1;
+        if row > end && row - end <= NEAR {
+            return self.ys.last().copied().unwrap_or(y0) + self.pitch.span_pt((end, row - 1));
+        }
         y0 + ((self.sh.row_top(row) - self.sh.row_top(self.rows.0)) as f32) * self.k
     }
     pub(super) fn rect(&self, r: RangeRef) -> (f32, f32, f32, f32) {
@@ -616,14 +629,16 @@ pub(super) fn make_block<'a>(
         acc += sh.col_width(c) * k;
         xs.push(acc);
     }
+    let pitch = super::metrics::RowPitch::new(wb, sh, lay.scale);
     let mut ys = Vec::with_capacity((rows.1 - rows.0 + 2) as usize);
-    let mut acc = y;
-    ys.push(acc);
+    // Summed in dots, so a long page has no drift.
+    let mut dots = 0u64;
+    ys.push(y);
     for r in rows.0..=rows.1 {
-        acc += sh.row_height(r) * k;
-        ys.push(acc);
+        dots += u64::from(pitch.dots(r));
+        ys.push(y + dots as f32 * super::metrics::DOT_PT);
     }
-    Block { wb, si, sh, rows, cols, xs, ys, k, scale: lay.scale, continued: None }
+    Block { wb, si, sh, rows, cols, xs, ys, k, scale: lay.scale, pitch, continued: None }
 }
 
 #[cfg(test)]

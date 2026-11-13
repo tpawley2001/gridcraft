@@ -39,10 +39,21 @@ const MAX_BREAKS: usize = 4096;
 pub(super) struct PageState {
     pub fit_to_page: bool,
     pub fit: Option<(u16, u16)>,
+    /// Which of LeftMargin, RightMargin, TopMargin, BottomMargin the substream has.
+    margins: [bool; 4],
 }
+
+/// The margins (left, right, top, bottom, inches) of a worksheet substream without the margin
+/// records: Excel's old defaults, as Excel prints such a file and writes it back.
+const DEFAULT_MARGINS: [f32; 4] = [0.75, 0.75, 1.0, 1.0];
 
 impl PageState {
     pub(super) fn finish(&self, pr: &mut PrintSettings) {
+        for ((seen, default), m) in self.margins.iter().zip(DEFAULT_MARGINS).zip(pr.margins.iter_mut()) {
+            if !seen {
+                *m = default;
+            }
+        }
         if self.fit_to_page
             && let Some(fit) = self.fit
         {
@@ -64,7 +75,12 @@ pub(super) fn read(
     let mut c = Cursor::new(&rec.parts);
     let ok = match rec.id {
         SETUP => setup(&mut c, pr, page),
-        LEFT_MARGIN | RIGHT_MARGIN | TOP_MARGIN | BOTTOM_MARGIN => margin(&mut c, rec.id, pr),
+        LEFT_MARGIN | RIGHT_MARGIN | TOP_MARGIN | BOTTOM_MARGIN => {
+            if let Some(seen) = page.margins.get_mut(margin_slot(rec.id)) {
+                *seen = true;
+            }
+            margin(&mut c, rec.id, pr)
+        }
         HEADER => header_footer_text(&mut c, biff5).map(|t| pr.header = t),
         FOOTER => header_footer_text(&mut c, biff5).map(|t| pr.footer = t),
         HEADER_FOOTER => header_footer(&mut c, pr),
@@ -136,14 +152,18 @@ fn inches(v: f64) -> f32 {
 /// LeftMargin, RightMargin, TopMargin, BottomMargin: one Xnum in inches.
 fn margin(c: &mut Cursor<'_, '_>, id: u16, pr: &mut PrintSettings) -> Option<()> {
     let v = c.f64().ok()?;
-    let slot = match id {
+    *pr.margins.get_mut(margin_slot(id))? = inches(v);
+    Some(())
+}
+
+/// The print settings' margin slot of a margin record.
+fn margin_slot(id: u16) -> usize {
+    match id {
         LEFT_MARGIN => 0,
         RIGHT_MARGIN => 1,
         TOP_MARGIN => 2,
         _ => 3,
-    };
-    *pr.margins.get_mut(slot)? = inches(v);
-    Some(())
+    }
 }
 
 /// Header / Footer (2.4.136, 2.4.124): empty for none, else an XLUnicodeString; in BIFF5 a

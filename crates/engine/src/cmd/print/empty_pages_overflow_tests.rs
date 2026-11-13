@@ -2,7 +2,7 @@
 //! columns before it, or part of a table, has something on it and is printed, as Excel prints
 //! (measured from Excel's PDFs: a workbook whose second band of columns carries only the text
 //! running over from the first band prints that band down to the last such row).
-//! Letter portrait with default margins, column widths and row heights: 45 rows per page, and
+//! Letter portrait with default margins, column widths and row heights: 47 rows per page, and
 //! column P is in a later band of columns than column A.
 use serde_json::json;
 
@@ -36,25 +36,25 @@ fn first_band_rows(pages: &[(String, String)]) -> Vec<&str> {
     pages.iter().filter(|p| p.0 == pages[0].0).map(|p| p.1.as_str()).collect()
 }
 
-const FIVE: [&str; 5] = ["1:45", "46:90", "91:135", "136:180", "181:200"];
+const FIVE: [&str; 5] = ["1:47", "48:94", "95:141", "142:188", "189:200"];
 
 #[test]
 fn without_overflowing_text_the_later_band_prints_one_page() {
     let mut s = sheet();
     let pages = page_list(&mut s);
     assert_eq!(first_band_rows(&pages), FIVE, "{pages:?}");
-    assert_eq!(rows_of_p_band(&pages), ["1:45"], "{pages:?}");
+    assert_eq!(rows_of_p_band(&pages), ["1:47"], "{pages:?}");
 }
 
 /// A long text in A150 runs over the empty cells to its right, into the later bands of columns:
-/// their pages down to rows 136:180 hold that text and are printed.
+/// their pages down to rows 142:188 hold that text and are printed.
 #[test]
 fn text_overflowing_into_a_later_band_prints_that_bands_page() {
     let mut s = sheet();
     s.execute("cell.set", json!({"cell": "A150", "input": "overflowing words ".repeat(24)})).unwrap();
     let pages = page_list(&mut s);
     assert_eq!(first_band_rows(&pages), FIVE, "{pages:?}");
-    assert_eq!(rows_of_p_band(&pages), ["1:45", "46:90", "91:135", "136:180"], "{pages:?}");
+    assert_eq!(rows_of_p_band(&pages), ["1:47", "48:94", "95:141", "142:188"], "{pages:?}");
 }
 
 /// A value in B150 cuts the text off inside the first band: nothing reaches the later band.
@@ -64,7 +64,7 @@ fn text_cut_off_by_a_neighbour_does_not_count() {
     s.execute("cell.set", json!({"cell": "A150", "input": "overflowing words ".repeat(24)})).unwrap();
     s.execute("cell.set", json!({"cell": "B150", "input": "stop"})).unwrap();
     let pages = page_list(&mut s);
-    assert_eq!(rows_of_p_band(&pages), ["1:45"], "{pages:?}");
+    assert_eq!(rows_of_p_band(&pages), ["1:47"], "{pages:?}");
 }
 
 /// Wrapped text stays inside its own column.
@@ -84,17 +84,17 @@ fn a_long_number_does_not_count() {
     let mut s = sheet();
     s.execute("cell.set", json!({"cell": "A150", "input": "123456789012345678"})).unwrap();
     let pages = page_list(&mut s);
-    assert_eq!(rows_of_p_band(&pages), ["1:45"], "{pages:?}");
+    assert_eq!(rows_of_p_band(&pages), ["1:47"], "{pages:?}");
 }
 
-/// A table over N130:P140 with empty body rows: its rows 136:140 lie on the fourth page down of
-/// P's band, which is printed.
+/// A table over N150:P160 with empty body rows: its rows lie on the fourth page down of P's
+/// band, which is printed.
 #[test]
 fn a_tables_range_counts_as_something_on_the_page() {
     let mut s = sheet();
-    s.execute("range.setValues", json!({"range": "N130", "values": [["a", "b", "c"]]})).unwrap();
-    s.execute("insert.table", json!({"range": "N130:P140", "header": true})).unwrap();
+    s.execute("range.setValues", json!({"range": "N150", "values": [["a", "b", "c"]]})).unwrap();
+    s.execute("insert.table", json!({"range": "N150:P160", "header": true})).unwrap();
     let pages = page_list(&mut s);
     assert_eq!(first_band_rows(&pages), FIVE, "{pages:?}");
-    assert_eq!(rows_of_p_band(&pages), ["1:45", "46:90", "91:135", "136:180"], "{pages:?}");
+    assert_eq!(rows_of_p_band(&pages), ["1:47", "48:94", "95:141", "142:188"], "{pages:?}");
 }

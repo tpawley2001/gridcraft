@@ -69,7 +69,7 @@ impl PageGrid {
         let end_row = need_row.max(printed.area.end.row).min(MAX_ROWS - 1);
         let end_col = need_col.max(printed.area.end.col).min(MAX_COLS - 1);
         lay.area = RangeRef::new(CellRef::new(0, 0), CellRef::new(end_row, end_col));
-        let (row_bands, col_bands) = print::split_bands(sh, &lay, MAX_ROWS as usize);
+        let (row_bands, col_bands) = print::split_bands(wb, sh, &lay, MAX_ROWS as usize);
         let s = f64::from(lay.scale.clamp(0.1, 4.0));
         let to_layout = |pt: f32| f64::from(pt) / f64::from(PX_TO_PT) / s;
         let margins = lay.margins.map(to_layout);

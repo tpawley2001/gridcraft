@@ -198,6 +198,8 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<(Sheet, cr
     let bytes = cx.pkg.read(part)?.ok_or_else(|| IoError::Format(format!("missing part {part}")))?;
     let rels = cx.pkg.rels(part)?;
     let mut sheet = Sheet::new(name);
+    // Excel prints a row stored without customHeight at the height that fits its content.
+    sheet.fit_auto_row_heights_in_print = true;
     let mut st = RowState::default();
     let res = xml::parse_streaming(&bytes, &["sheetFormatPr", "row"], &mut |row| {
         if row.name == "sheetFormatPr" {

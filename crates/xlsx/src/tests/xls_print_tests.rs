@@ -90,6 +90,14 @@ fn xls_fit_to_one_page_wide_and_automatic_tall() {
     assert_eq!(sh.print.fit_to, None);
 }
 
+/// The print settings of a worksheet substream without page setup records: the defaults, with
+/// Excel's old .xls margins (left/right 0.75 in, top/bottom 1.0 in).
+fn xls_default() -> PrintSettings {
+    let mut d = PrintSettings::default();
+    d.margins[..4].copy_from_slice(&[0.75, 0.75, 1.0, 1.0]);
+    d
+}
+
 #[test]
 fn xls_margins_and_print_options() {
     let records = cat(&[
@@ -110,9 +118,9 @@ fn xls_margins_and_print_options() {
     assert_eq!((p.gridlines, p.headings, p.center_h, p.center_v), (true, true, true, false));
     assert_eq!(via_xlsx(&records).0, *p);
 
-    // Absent: the defaults.
+    // Absent: the defaults, with Excel's old .xls margins (0.75 in sides, 1.0 in top and bottom).
     let (sh, _) = sheet(&[]);
-    assert_eq!(sh.print, PrintSettings::default());
+    assert_eq!(sh.print, xls_default());
 }
 
 #[test]
@@ -183,7 +191,7 @@ fn xls_damaged_page_setup_records_are_skipped_with_a_warning() {
     // The fields read end with numFtr, 32 bytes in.
     for len in 0..32 {
         let (sh, warnings) = sheet(&rec(0x00A1, &full[4..4 + len]));
-        assert_eq!(sh.print, PrintSettings::default(), "length {len}");
+        assert_eq!(sh.print, xls_default(), "length {len}");
         assert_eq!(warnings.iter().filter(|w| w.contains("page setup")).count(), 1, "{warnings:?}");
     }
     // Every other kind, truncated: skipped, never a panic.

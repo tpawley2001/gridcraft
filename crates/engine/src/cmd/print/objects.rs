@@ -85,7 +85,10 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
     let (bx, by) = (b.xs.first().copied().unwrap_or(0.0), b.ys.first().copied().unwrap_or(0.0));
     let (bw, bh) = (b.xs.last().copied().unwrap_or(bx) - bx, b.ys.last().copied().unwrap_or(by) - by);
     let visible = |r: (f64, f64, f64, f64)| r.2 > 0.0 && r.3 > 0.0 && r.0 < sx1 && r.0 + r.2 > sx0 && r.1 < sy1 && r.1 + r.3 > sy0;
-    let place = |r: (f64, f64, f64, f64)| (bx + ((r.0 - sx0) as f32) * b.k, by + ((r.1 - sy0) as f32) * b.k, r.2 as f32 * b.k, r.3 as f32 * b.k);
+    // An object moves with the row it is anchored to (rows print at their printed pitch); its
+    // own size scales like every printed length.
+    let place =
+        |a: &Anchor, r: (f64, f64, f64, f64)| (bx + ((r.0 - sx0) as f32) * b.k, b.y(a.cell.row) + a.dy * b.k, r.2 as f32 * b.k, r.3 as f32 * b.k);
     pg.save();
     pg.clip_rect(bx, by, bw, bh);
     draw_sparklines(pg, wb, si, sh, b, block);
@@ -95,7 +98,7 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
         if !visible(r) {
             continue;
         }
-        let (x, y, w, h) = place(r);
+        let (x, y, w, h) = place(&im.anchor, r);
         // About 150 dpi is plenty for print.
         let (mw, mh) = (((w / 72.0) * 150.0).ceil().clamp(1.0, 4000.0) as u32, ((h / 72.0) * 150.0).ceil().clamp(1.0, 4000.0) as u32);
         let decoded = pics.decoded.entry((si, imi)).or_insert_with(|| decode_image(&im.data, mw, mh));
@@ -116,7 +119,7 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
         if !visible(r) {
             continue;
         }
-        let (x, y, w, h) = place(r);
+        let (x, y, w, h) = place(&shp.anchor, r);
         if shp.kind == ShapeKind::Equation {
             let ink = rgb_of(shp.line, wb).unwrap_or([0, 0, 0]);
             match shp.math.get(&shp.text) {
@@ -143,7 +146,7 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
         if !visible(r) {
             continue;
         }
-        let (x, y, _, _) = place(r);
+        let (x, y, _, _) = place(&ch.anchor, r);
         // As for pictures, each page gets its own copy of the drawing commands.
         let prims = pics.chart((si, chi), || {
             let data = gridcraft_chart::resolve(wb, si, ch);
@@ -159,7 +162,7 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
         if !visible(r) {
             continue;
         }
-        draw_control(pg, c, b, place(r));
+        draw_control(pg, c, b, place(&c.anchor, r));
     }
     pg.restore();
 }

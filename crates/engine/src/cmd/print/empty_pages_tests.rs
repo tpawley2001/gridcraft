@@ -1,7 +1,7 @@
 //! Pages of the page grid with nothing on them, below them or to their right are not printed, as
 //! Excel prints (measured from Excel's PDFs of workbooks whose second band of columns ends far
 //! above the first one's last row: Excel prints that band down to its last cell only).
-//! Letter portrait with default margins, column widths and row heights: 45 rows per page, and
+//! Letter portrait with default margins, column widths and row heights: 47 rows per page, and
 //! column P is in the second band of columns across.
 use serde_json::json;
 
@@ -40,7 +40,7 @@ fn rows_of(pages: &[(String, String)]) -> Vec<&str> {
 fn one_band_of_columns_is_unchanged() {
     let mut s = two_hundred_rows();
     let pages = page_list(&mut s);
-    assert_eq!(rows_of(&pages), ["1:45", "46:90", "91:135", "136:180", "181:200"], "{pages:?}");
+    assert_eq!(rows_of(&pages), ["1:47", "48:94", "95:141", "142:188", "189:200"], "{pages:?}");
     assert!(pages.iter().all(|p| p.0 == "A:A"), "{pages:?}");
 }
 
@@ -51,7 +51,7 @@ fn the_empty_pages_below_a_later_bands_last_cell_are_left_out() {
     let mut s = two_hundred_rows();
     s.execute("range.setValues", json!({"range": "P1", "values": [["x"]]})).unwrap();
     let pages = page_list(&mut s);
-    assert_eq!(rows_of(&pages), ["1:45", "46:90", "91:135", "136:180", "181:200", "1:45"], "{pages:?}");
+    assert_eq!(rows_of(&pages), ["1:47", "48:94", "95:141", "142:188", "189:200", "1:47"], "{pages:?}");
     assert!(pages[..5].iter().all(|p| p.0 == pages[0].0 && p.0.starts_with("A:")), "{pages:?}");
     assert!(pages[5].0 != pages[0].0 && pages[5].0.ends_with(":P"), "{pages:?}");
 }
@@ -63,7 +63,7 @@ fn the_empty_pages_above_a_later_bands_last_cell_still_print() {
     let mut s = two_hundred_rows();
     s.execute("range.setValues", json!({"range": "P100", "values": [["x"]]})).unwrap();
     let pages = page_list(&mut s);
-    assert_eq!(rows_of(&pages), ["1:45", "46:90", "91:135", "136:180", "181:200", "1:45", "46:90", "91:135"], "{pages:?}");
+    assert_eq!(rows_of(&pages), ["1:47", "48:94", "95:141", "142:188", "189:200", "1:47", "48:94", "95:141"], "{pages:?}");
     assert!(pages[..5].iter().all(|p| p.0 == pages[0].0 && p.0.starts_with("A:")), "{pages:?}");
     assert!(pages[5..].iter().all(|p| p.0 != pages[0].0 && p.0.ends_with(":P")), "{pages:?}");
 }

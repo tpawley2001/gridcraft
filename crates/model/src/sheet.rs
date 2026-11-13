@@ -139,6 +139,12 @@ pub struct Sheet {
     /// Explicit sheetFormatPr customHeight; None lets new sheets infer it from the height.
     #[serde(default)]
     pub default_row_custom_height: Option<bool>,
+    /// Rows whose height is not custom print at the height that fits their content rather than
+    /// at their stored height: set for sheets read from `.xlsx`, where Excel prints them that way
+    /// (ECMA-376 Part 1, 18.3.1.73 `row@customHeight`). The stored heights are kept for the
+    /// screen and for saving.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fit_auto_row_heights_in_print: bool,
     pub merges: Vec<RangeRef>,
     /// The sheet's default phonetic (furigana) settings: ISO/IEC 29500-1 §18.4.3 `phoneticPr`
     /// as a child of the worksheet. `None` when the file had none.
@@ -326,6 +332,7 @@ impl Sheet {
             default_row_height: DEFAULT_ROW_HEIGHT,
             default_rows_hidden: None,
             default_row_custom_height: None,
+            fit_auto_row_heights_in_print: false,
             merges: vec![],
             phonetic_props: None,
             freeze: None,

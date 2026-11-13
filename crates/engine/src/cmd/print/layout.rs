@@ -1,4 +1,5 @@
 use super::header_footer::HF_FIXED_SIDE_MARGIN;
+use super::metrics::{DOT_PT, RowPitch, page_dots};
 use super::{
     Anchor, CellRef, Json, MAX_COLS, MAX_PAGES, MAX_ROWS, Orientation, PX_TO_PT, PageOrder, PrintSettings, RangeRef, Result, Sheet, Visibility,
     Workbook, bad, bool_param, split_sheet, str_param,
@@ -336,7 +337,7 @@ pub struct ColCut {
 /// ([`bands_cut_wide`]), unless the sheet is fitted to a number of pages wide. Returns the row
 /// bands, the column bands and each column band's [`ColCut`].
 pub(crate) fn split_bands_pieces(wb: &Workbook, sh: &Sheet, lay: &SheetLayout, cap: usize) -> (Bands, Bands, Vec<ColCut>) {
-    let (rows, cols) = split_bands(sh, lay, cap);
+    let (rows, cols) = split_bands(wb, sh, lay, cap);
     let k = lay.k();
     let aw = lay.avail().0 / k;
     let title_w = |start: u32| -> f32 {
@@ -496,14 +497,17 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
     match fit {
         Some((fw, fh)) => {
             let total_w: f32 = (area.start.col..=area.end.col).map(|c| sh.col_width(c)).sum::<f32>() + heading_w;
-            let total_h: f32 = if area.height() > 200_000 {
+            // The sheet's printed height at 100 %, in points: rows at their printed pitch.
+            let total_h_pt: f32 = if area.height() > 200_000 {
                 f32::INFINITY
             } else {
-                (area.start.row..=area.end.row).map(|r| sh.row_height(r)).sum::<f32>() + heading_h
+                let pitch = RowPitch::new(wb, sh, 1.0);
+                let head = if heading_h > 0.0 { pitch.dots_px(heading_h) as f32 * DOT_PT } else { 0.0 };
+                pitch.span_pt((area.start.row, area.end.row)) + head
             };
             let (aw, ah) = lay.avail();
             let sw = if fw > 0 { aw * fw as f32 / (total_w * PX_TO_PT).max(1.0) } else { f32::INFINITY };
-            let sh_ = if fh > 0 { ah * fh as f32 / (total_h * PX_TO_PT).max(1.0) } else { f32::INFINITY };
+            let sh_ = if fh > 0 { ah * fh as f32 / total_h_pt.max(1.0) } else { f32::INFINITY };
             lay.scale = sw.min(sh_).min(1.0).clamp(0.1, 1.0);
             for _ in 0..40 {
                 paginate(&mut lay);
@@ -672,10 +676,15 @@ pub(crate) type Bands = Vec<(u32, u32)>;
 /// Splits a layout's area into row and column bands that fit its pages (at most `cap` of each),
 /// honouring manual breaks (per axis, `lay.manual_row_breaks` / `lay.manual_col_breaks`), print headings and repeated titles. The
 /// one pagination rule shared by printing, PDF export, Page Break Preview and Page Layout view.
-pub(crate) fn split_bands(sh: &Sheet, lay: &SheetLayout, cap: usize) -> (Bands, Bands) {
+/// Rows are cut on their printed height in printer dots ([`RowPitch`]), columns on their width
+/// in sheet pixels.
+pub(crate) fn split_bands(wb: &Workbook, sh: &Sheet, lay: &SheetLayout, cap: usize) -> (Bands, Bands) {
     let k = lay.k();
     let (aw, ah) = lay.avail();
-    let (aw, ah) = (aw / k, ah / k);
+    let aw = aw / k;
+    let pitch = RowPitch::new(wb, sh, lay.scale);
+    let page = page_dots(ah) as f32;
+    let head = if lay.heading_h > 0.0 { pitch.dots_px(lay.heading_h) as f32 } else { 0.0 };
     let st = &lay.settings;
     let mut rb: Vec<u32> = if lay.manual_row_breaks { st.row_breaks.clone() } else { vec![] };
     let mut cb: Vec<u32> = if lay.manual_col_breaks { st.col_breaks.clone() } else { vec![] };
@@ -684,7 +693,7 @@ pub(crate) fn split_bands(sh: &Sheet, lay: &SheetLayout, cap: usize) -> (Bands, 
     let (title_rows, title_cols) = (lay.title_rows, lay.title_cols);
     let title_h = |start: u32| -> f32 {
         match title_rows {
-            Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|r| sh.row_height(r)).sum(),
+            Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|r| pitch.dots(r) as f32).sum(),
             _ => 0.0,
         }
     };
@@ -695,7 +704,7 @@ pub(crate) fn split_bands(sh: &Sheet, lay: &SheetLayout, cap: usize) -> (Bands, 
         }
     };
     let area = lay.area;
-    let rows = bands(area.start.row, area.end.row, |r| sh.row_height(r), |start| (ah - lay.heading_h - title_h(start)).max(1.0), &rb, cap);
+    let rows = bands(area.start.row, area.end.row, |r| pitch.dots(r) as f32, |start| (page - head - title_h(start)).max(1.0), &rb, cap);
     let cols = bands(area.start.col, area.end.col, |c| sh.col_width(c), |start| (aw - lay.heading_w - title_w(start)).max(1.0), &cb, cap);
     (rows, cols)
 }
