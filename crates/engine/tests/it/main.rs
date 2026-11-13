@@ -106,6 +106,7 @@ mod view_zoom_per_view;
 mod workbook_author;
 mod wrap_row_height;
 mod xls_pivot_refresh;
+mod xls_unshown_picture_print;
 mod xlsb_arrays_recalc;
 mod xlsb_list_recalc;
 mod xlsb_names_recalc;

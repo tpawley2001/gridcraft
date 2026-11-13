@@ -194,6 +194,7 @@ mod xls_tests;
 mod xls_textbox_format_tests;
 mod xls_textbox_tests;
 mod xls_theme_tests;
+mod xls_unshown_picture_extent_tests;
 mod xls_user_password_tests;
 mod xls_user_xor_password_tests;
 mod xls_vba_tests;
