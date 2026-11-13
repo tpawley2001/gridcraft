@@ -21,9 +21,9 @@ use gridcraft_core::CellRef;
 use gridcraft_core::color::INDEXED;
 use gridcraft_formula::{Expr, RefKind, Reference, SheetSel};
 use gridcraft_model::{
-    Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, ControlKind, FormControl, GeometryPath, Image, LegendPos,
-    ListSelection, Orientation, PathCommand, PreservedPart, PreservedRel, PreservedSheet, PrintSettings, Series, Shape, ShapeFormat, ShapeGeometry,
-    ShapeKind, Sheet, Visibility, Workbook,
+    Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, ControlKind, EmbeddedObject, EmbeddedObjectKind,
+    FormControl, GeometryPath, Image, LegendPos, ListSelection, Orientation, PathCommand, PreservedPart, PreservedRel, PreservedSheet, PrintSettings,
+    Series, Shape, ShapeFormat, ShapeGeometry, ShapeKind, Sheet, Visibility, Workbook,
 };
 
 use super::drawing::{self, BStore, Blip, ShapeProps};
@@ -48,6 +48,8 @@ const MAX_EXTERNS: usize = 4096;
 const MAX_DEPTH: usize = 256;
 /// OfficeArt records walked per MsoDrawing record at most.
 const MAX_ART_RECORDS: usize = 100_000;
+/// Embedded objects kept per sheet at most (as for `.xlsx`).
+const MAX_EMBEDDED: usize = 10_000;
 
 // Chart substream record types ([MS-XLS] 2.3).
 const EXTERN_SHEET: u16 = 0x0017;
@@ -128,6 +130,8 @@ const F_LOCKED: u16 = 0x0001;
 const OT_GROUP: u16 = 0x0000;
 /// The Office Art shape type of a text box (msosptTextBox, [MS-ODRAW] 2.4.24).
 const SPT_TEXT_BOX: u16 = 202;
+/// msosptHostControl ([MS-ODRAW] 2.4.24): an ActiveX control's shape.
+const SPT_HOST_CONTROL: u16 = 201;
 /// OfficeArtClientAnchorSheet record type ([MS-XLS] 2.5.193).
 const CLIENT_ANCHOR: u16 = 0xF010;
 /// OfficeArt record types ([MS-ODRAW] 2.2): a group's container, a shape's container, a group's
@@ -609,8 +613,8 @@ pub(super) struct Embedded {
     pending_biff5_picture: Option<(ClientAnchor, Option<String>)>,
     /// BIFF5 pictures: anchor, name and PNG bytes.
     biff5_pictures: Vec<(ClientAnchor, Option<String>, Vec<u8>)>,
-    /// Whether a BIFF5 picture's image was in a format that isn't imported.
-    biff5_skipped: bool,
+    /// The anchors of BIFF5 pictures whose image is in a format that isn't imported.
+    biff5_skipped: Vec<ClientAnchor>,
     /// The workbook's colour table, for the shapes' palette colours.
     palette: Palette,
     fonts: Vec<(gridcraft_model::Font, u16)>,
@@ -865,7 +869,7 @@ impl Embedded {
         })();
         match png {
             Some(png) => self.biff5_pictures.push((anchor, name, png)),
-            None => self.biff5_skipped = true,
+            None => self.biff5_skipped.push(anchor),
         }
     }
 
@@ -918,7 +922,8 @@ impl Embedded {
 
     /// Places the charts, pictures, text boxes and drawn shapes on the sheet (its column widths
     /// and row heights are known by now). Pictures whose blip isn't a PNG or JPEG in the store are
-    /// skipped with one warning.
+    /// not shown (one warning), but keep their place as an [`EmbeddedObject`] so that they still
+    /// count toward the printed range.
     pub(super) fn finish(mut self, sheet: &mut Sheet, store: &BStore, report: &mut ReadReport) {
         self.flush_shape();
         self.next_record(EOF, report);
@@ -932,6 +937,14 @@ impl Embedded {
         for (a, props) in self.pictures {
             let Some(Blip::Picture { data, mime }) = props.pib.and_then(|pib| store.get(pib)) else {
                 skipped = true;
+                // The preview of an embedded object or an ActiveX control (nearly always an EMF),
+                // or a picture whose blip can't be read: nothing is drawn, but its place counts
+                // when the sheet is printed. A hidden shape counts for nothing.
+                if !props.hidden && sheet.embedded_objects.len() < MAX_EMBEDDED {
+                    let kind = if props.shape_type == SPT_HOST_CONTROL { EmbeddedObjectKind::ActiveX } else { EmbeddedObjectKind::Ole };
+                    let anchor = place_at(sheet, &a);
+                    sheet.embedded_objects.push(EmbeddedObject { anchor, print: !props.no_print, kind, prog_id: String::new() });
+                }
                 continue;
             };
             let anchor = place_at(sheet, &a);
@@ -971,7 +984,15 @@ impl Embedded {
                 link: None,
             });
         }
-        if (skipped && !store.damaged) || self.biff5_skipped {
+        let biff5_skipped = !self.biff5_skipped.is_empty();
+        for a in self.biff5_skipped {
+            if sheet.embedded_objects.len() >= MAX_EMBEDDED {
+                break;
+            }
+            let anchor = place(sheet, &a);
+            sheet.embedded_objects.push(EmbeddedObject { anchor, print: true, kind: EmbeddedObjectKind::Ole, prog_id: String::new() });
+        }
+        if (skipped && !store.damaged) || biff5_skipped {
             report.warn("Some pictures in .xls files use a format that isn't imported (only PNG and JPEG are).");
         }
         let table = self.palette.0;

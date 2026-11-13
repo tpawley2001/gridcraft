@@ -10,11 +10,11 @@ use crate::{read_xls, read_xlsx, write_xlsx};
 use super::xls_chart_tests::{bof, cat, cells, column_chart, eof, obj, rec, u16s};
 use super::xls_tests::compound;
 
-const FORMAT_WARNING: &str = "Some pictures in .xls files use a format that isn't imported (only PNG and JPEG are).";
+pub(super) const FORMAT_WARNING: &str = "Some pictures in .xls files use a format that isn't imported (only PNG and JPEG are).";
 const DAMAGED_WARNING: &str = "The pictures of this .xls file are damaged and were not imported.";
 
 /// Bytes starting with the PNG signature (the reader doesn't decode them).
-fn png() -> Vec<u8> {
+pub(super) fn png() -> Vec<u8> {
     cat(&[&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A], b"not really a picture"])
 }
 
@@ -23,17 +23,17 @@ fn jpeg() -> Vec<u8> {
 }
 
 /// An OfficeArt record: version and instance, type, then the body.
-fn art(ver: u16, inst: u16, ty: u16, body: &[u8]) -> Vec<u8> {
+pub(super) fn art(ver: u16, inst: u16, ty: u16, body: &[u8]) -> Vec<u8> {
     cat(&[&u16s(&[ver | (inst << 4), ty]), &(body.len() as u32).to_le_bytes(), body])
 }
 
 /// A blip record of type `ty` and instance `inst` with `uids` UIDs.
-fn blip(ty: u16, inst: u16, uids: usize, file: &[u8]) -> Vec<u8> {
+pub(super) fn blip(ty: u16, inst: u16, uids: usize, file: &[u8]) -> Vec<u8> {
     art(0, inst, ty, &cat(&[&vec![0xAB; 16 * uids], &[0xFF], file]))
 }
 
 /// An OfficeArtFBSE embedding `blip`.
-fn fbse(blip: &[u8]) -> Vec<u8> {
+pub(super) fn fbse(blip: &[u8]) -> Vec<u8> {
     let mut head = vec![6, 6];
     head.extend([0x11; 16]);
     head.extend(u16s(&[0xFF]));
@@ -45,14 +45,14 @@ fn fbse(blip: &[u8]) -> Vec<u8> {
 }
 
 /// An MsoDrawingGroup holding an OfficeArtDggContainer with an FDGG and a BStore of `entries`.
-fn drawing_group(entries: &[Vec<u8>]) -> Vec<u8> {
+pub(super) fn drawing_group(entries: &[Vec<u8>]) -> Vec<u8> {
     let fdgg = art(0, 0, 0xF006, &[0; 16]);
     let store = art(0xF, entries.len() as u16, 0xF001, &entries.concat());
     rec(0x00EB, &art(0xF, 0, 0xF000, &cat(&[&fdgg, &store])))
 }
 
 /// FOPT properties: simple `(opid, op)` pairs, then complex ones `(opid, data)`.
-fn fopt(simple: &[(u16, u32)], complex: &[(u16, Vec<u8>)]) -> Vec<u8> {
+pub(super) fn fopt(simple: &[(u16, u32)], complex: &[(u16, Vec<u8>)]) -> Vec<u8> {
     let mut table = vec![];
     for (id, op) in simple {
         table.extend(u16s(&[*id]));
@@ -86,7 +86,7 @@ fn picture(pib: u32) -> Vec<u8> {
 }
 
 /// A one-sheet workbook whose globals end with `extra`.
-fn book(extra: &[u8], sheet_records: &[u8]) -> Vec<u8> {
+pub(super) fn book(extra: &[u8], sheet_records: &[u8]) -> Vec<u8> {
     let sheet = cat(&[&bof(0x0010), &cells(), sheet_records, &eof()]);
     let globals = |pos: u32| {
         cat(&[
@@ -102,7 +102,7 @@ fn book(extra: &[u8], sheet_records: &[u8]) -> Vec<u8> {
     compound("Workbook", &cat(&[&globals(len), &sheet]))
 }
 
-fn read(file: &[u8]) -> (Workbook, Vec<String>) {
+pub(super) fn read(file: &[u8]) -> (Workbook, Vec<String>) {
     let (wb, report) = read_xls(file).unwrap();
     (wb, report.warnings)
 }
