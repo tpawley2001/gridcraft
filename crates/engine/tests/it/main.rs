@@ -62,6 +62,7 @@ mod logical_text_args;
 mod long_operator_chains;
 mod makearray_size_excel;
 mod match_binary_search_excel;
+mod merged_selection_keys;
 mod number_text_sigma_excel;
 mod ods_matrix_formulas;
 mod offset_overflow;

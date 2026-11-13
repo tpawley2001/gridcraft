@@ -711,8 +711,17 @@ fn read_shape(obj: &El, anchor: Anchor, theme: &[u32; 12], scheme: &shape_style:
     let tx_box = obj.path(&["nvSpPr", "cNvSpPr"]).is_some_and(|c| c.flag("txBox", false));
     let ln = sp.child("ln");
     let arrow = ln.is_some_and(|l| l.child("tailEnd").or_else(|| l.child("headEnd")).is_some_and(|t| t.attr("type").is_some_and(|v| v != "none")));
+    // WordArt: our marker, a text body with the non-warping text warp `textNoShape`, on a rectangle
+    // that is a text box (as the writer saves it) or has no fill and no outline of its own (as
+    // WordArt usually comes). `textNoShape` is the standard "no warp" value, so on an ordinary
+    // shape (an ellipse, a filled rectangle) it, like any other warp, leaves the shape what its
+    // geometry says.
+    let word_art = prst == "rect"
+        && (tx_box || (sp.child("noFill").is_some() && !ln.is_some_and(|l| l.child("solidFill").is_some())))
+        && obj.path(&["txBody", "bodyPr", "prstTxWarp"]).is_some_and(|w| w.attr("prst") == Some("textNoShape"));
     let kind = match prst {
         _ if custom.is_some() => ShapeKind::Freeform,
+        _ if word_art => ShapeKind::WordArt,
         _ if tx_box => ShapeKind::TextBox,
         "roundRect" => ShapeKind::RoundedRectangle,
         "ellipse" => ShapeKind::Ellipse,
@@ -867,6 +876,7 @@ fn read_text_format(body: Option<&El>) -> ShapeFormat {
         f.italic = r.flag("i", false);
         f.font = r.child("latin").and_then(|l| l.attr("typeface")).filter(|t| !t.is_empty() && !t.starts_with('+')).map(str::to_string);
         f.text_color = r.child("solidFill").and_then(dml_color);
+        f.text_shadow = r.child("effectLst").and_then(|e| e.child("outerShdw")).and_then(dml_color);
         f.text_outline = r.child("ln").and_then(|l| {
             let c = l.child("solidFill").and_then(dml_color)?;
             // Width in EMU (12700 per point); Excel's default hairline is 0.75 pt.
@@ -978,7 +988,9 @@ fn holds_written_text(tb: &El, src: &str) -> bool {
 /// A shape's `xdr:txBody`: the kept body while the text is unedited, else one run per line in
 /// the shape's one format. A shape without text has none.
 fn write_text_body(s: &mut String, sh: &Shape, theme: &Theme) {
-    if sh.text.is_empty() {
+    // A WordArt with no text still writes its body, which carries the WordArt marker.
+    let word_art = sh.kind == ShapeKind::WordArt;
+    if sh.text.is_empty() && !word_art {
         return;
     }
     let f = &sh.format;
@@ -990,7 +1002,7 @@ fn write_text_body(s: &mut String, sh: &Shape, theme: &Theme) {
         None => "",
     };
     s.push_str("<xdr:txBody>");
-    write_body_pr(s, f, anchor);
+    write_body_pr(s, f, anchor, word_art);
     match f.kept_text_xml(&sh.text) {
         Some(kept) => s.push_str(kept),
         None => write_plain_text(s, &sh.text, f, theme),
@@ -1024,7 +1036,9 @@ fn write_plain_text(s: &mut String, text: &str, f: &ShapeFormat, theme: &Theme) 
 
 /// A shape's `a:bodyPr`: text rotation, overflow, direction, wrapping, insets, upright text and
 /// the autofit child as read (absent ones stay absent) and the vertical anchor attribute `anchor`.
-fn write_body_pr(s: &mut String, f: &ShapeFormat, anchor: &str) {
+/// `word_art` adds our WordArt marker: a (non-warping) text warp, which the reader maps back to
+/// WordArt.
+fn write_body_pr(s: &mut String, f: &ShapeFormat, anchor: &str, word_art: bool) {
     s.push_str("<a:bodyPr");
     if let Some(r) = f.text_rotation {
         let _ = write!(s, " rot=\"{r}\"");
@@ -1042,6 +1056,7 @@ fn write_body_pr(s: &mut String, f: &ShapeFormat, anchor: &str) {
     match f.wrap {
         Some(ShapeTextWrap::None) => s.push_str(" wrap=\"none\""),
         Some(ShapeTextWrap::Square) => s.push_str(" wrap=\"square\""),
+        None if word_art => s.push_str(" wrap=\"square\""),
         None => {}
     }
     for (k, v) in [("lIns", f.inset_left), ("tIns", f.inset_top), ("rIns", f.inset_right), ("bIns", f.inset_bottom)] {
@@ -1053,12 +1068,21 @@ fn write_body_pr(s: &mut String, f: &ShapeFormat, anchor: &str) {
     if f.upright {
         s.push_str(" upright=\"1\"");
     }
+    // ECMA-376 Part 1 §21.1.2.1.1: `prstTxWarp` comes before the autofit child.
+    let warp = if word_art { "<a:prstTxWarp prst=\"textNoShape\"><a:avLst/></a:prstTxWarp>" } else { "" };
     match f.autofit {
+        None if word_art => {
+            let _ = write!(s, ">{warp}</a:bodyPr>");
+        }
         None => s.push_str("/>"),
-        Some(ShapeTextAutofit::None) => s.push_str("><a:noAutofit/></a:bodyPr>"),
-        Some(ShapeTextAutofit::Shape) => s.push_str("><a:spAutoFit/></a:bodyPr>"),
+        Some(ShapeTextAutofit::None) => {
+            let _ = write!(s, ">{warp}<a:noAutofit/></a:bodyPr>");
+        }
+        Some(ShapeTextAutofit::Shape) => {
+            let _ = write!(s, ">{warp}<a:spAutoFit/></a:bodyPr>");
+        }
         Some(ShapeTextAutofit::Normal { font_scale, line_reduction }) => {
-            s.push_str("><a:normAutofit");
+            let _ = write!(s, ">{warp}<a:normAutofit");
             if let Some(v) = font_scale {
                 let _ = write!(s, " fontScale=\"{v}\"");
             }
@@ -1326,7 +1350,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                     ShapeKind::Triangle => ("triangle", false),
                     ShapeKind::Line | ShapeKind::Arrow => ("line", false),
                     // Equations are written by `write_equation`; this arm keeps the match whole.
-                    ShapeKind::TextBox | ShapeKind::Equation => ("rect", true),
+                    ShapeKind::TextBox | ShapeKind::WordArt | ShapeKind::Equation => ("rect", true),
                     ShapeKind::Icon | ShapeKind::Ink | ShapeKind::Freeform => ("rect", false),
                 };
                 let _ = write!(
@@ -1408,6 +1432,12 @@ fn run_props(f: &ShapeFormat, theme: &Theme) -> (String, String) {
     }
     if let Some(c) = f.text_color.as_ref().and_then(|c| srgb(c, theme)) {
         let _ = write!(body, "<a:solidFill>{c}</a:solidFill>");
+    }
+    if let Some(c) = f.text_shadow.as_ref().and_then(|c| srgb(c, theme)) {
+        let _ = write!(
+            body,
+            "<a:effectLst><a:outerShdw blurRad=\"38100\" dist=\"38100\" dir=\"2700000\" algn=\"tl\" rotWithShape=\"0\">{c}</a:outerShdw></a:effectLst>"
+        );
     }
     if let Some(font) = &f.font {
         let _ = write!(body, "<a:latin typeface=\"{}\"/>", esc_attr(font));

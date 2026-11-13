@@ -26,14 +26,11 @@ fn red_fills(s: &mut Session) -> Vec<(usize, String)> {
     let r = s.execute("file.exportPdf", json!({})).unwrap();
     let bytes = crate::io::base64_decode(r["base64"].as_str().unwrap()).unwrap();
     let text = String::from_utf8_lossy(&bytes).into_owned();
-    let mut out = Vec::new();
-    for part in text.split("1 0 0 rg\n").skip(1) {
-        let toks: Vec<&str> = part.split_whitespace().collect();
-        let Some(end) = toks.iter().position(|t| matches!(*t, "f" | "f*" | "B" | "B*" | "S" | "n")) else { continue };
-        let moves = toks[..end].iter().filter(|t| **t == "m").count();
-        out.push((moves, toks[end].to_string()));
-    }
-    out
+    tests::pdf_paints(&text)
+        .into_iter()
+        .filter(|p| p.fills() && p.fill == Some([1.0, 0.0, 0.0]))
+        .map(|p| (p.path.split_whitespace().filter(|t| *t == "m").count(), p.op))
+        .collect()
 }
 
 fn preset(name: &str) -> ShapeGeometry {

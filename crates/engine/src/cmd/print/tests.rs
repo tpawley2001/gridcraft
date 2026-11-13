@@ -1229,9 +1229,12 @@ fn picture_border_prints_as_a_stroke_on_its_bounds() {
     wb.sheet_mut(0).unwrap().images.push(pic);
     let (pdf, _) = pdf_of(&mut s, json!({}));
     let text = String::from_utf8_lossy(&pdf);
-    let strokes: Vec<&str> = text.split("1 0 0 RG\n").skip(1).filter(|t| t.starts_with("3 w [] 0 d\n")).collect();
+    let strokes: Vec<PdfPaint> = pdf_paints(&text)
+        .into_iter()
+        .filter(|p| p.strokes() && p.stroke == Some([1.0, 0.0, 0.0]) && p.width == Some(3.0) && p.dash.is_empty())
+        .collect();
     assert_eq!(strokes.len(), 1, "one solid 3 pt red stroke");
-    assert!(strokes.first().unwrap().lines().nth(1).unwrap().ends_with(" re S"), "a rectangle stroke");
+    assert!(strokes.first().unwrap().path.ends_with(" re S"), "a rectangle stroke");
 }
 
 #[test]
@@ -1255,4 +1258,121 @@ fn preview_lists_the_first_pages_and_reaches_any_page() {
     let pv = t.execute("file.printPreview", json!({})).unwrap();
     assert_eq!(pv["pageList"].as_array().unwrap().len() as u64, pv["pages"].as_u64().unwrap());
     assert!(pv.get("pageListTruncated").is_none());
+}
+
+/// One path-painting operation of a PDF content stream with the graphics state in effect for it.
+/// The writer leaves out a colour, width or dash operator that repeats the one already in effect,
+/// so tests read the state here instead of looking for the operators next to each path.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct PdfPaint {
+    /// The fill colour (`r g b` of the last `rg`), if one was set.
+    pub fill: Option<[f32; 3]>,
+    /// The stroke colour (`r g b` of the last `RG`), if one was set.
+    pub stroke: Option<[f32; 3]>,
+    /// The line width (`w`), if one was set.
+    pub width: Option<f32>,
+    /// The dash array as written between the brackets of `[…] 0 d` (empty when solid or unset).
+    pub dash: String,
+    /// The path and its painting operator, single-spaced: `x y m x y l h f`.
+    pub path: String,
+    /// The painting operator: `f`, `f*`, `B`, `B*` or `S`.
+    pub op: String,
+}
+
+impl PdfPaint {
+    pub fn fills(&self) -> bool {
+        matches!(self.op.as_str(), "f" | "f*" | "B" | "B*")
+    }
+    pub fn strokes(&self) -> bool {
+        matches!(self.op.as_str(), "S" | "B" | "B*")
+    }
+    /// The fill colour as its operator line (`1 0 0 rg`), for a painted fill.
+    pub fn fill_op(&self) -> String {
+        self.fill.map(|c| format!("{} {} {} rg", c[0], c[1], c[2])).unwrap_or_default()
+    }
+    /// The stroke colour as its operator line (`0 0 1 RG`), for a painted stroke.
+    pub fn stroke_op(&self) -> String {
+        self.stroke.map(|c| format!("{} {} {} RG", c[0], c[1], c[2])).unwrap_or_default()
+    }
+}
+
+/// Every path painted in the PDF text `text`, in order, each with the fill colour, stroke colour,
+/// line width and dash in effect when it is painted (`q`/`Q` save and restore them; each content
+/// stream starts with none).
+pub(super) fn pdf_paints(text: &str) -> Vec<PdfPaint> {
+    #[derive(Clone, Default)]
+    struct State {
+        fill: Option<[f32; 3]>,
+        stroke: Option<[f32; 3]>,
+        width: Option<f32>,
+        dash: String,
+    }
+    let nums = |ops: &[&str], n: usize| -> Option<Vec<f32>> {
+        let tail = ops.get(ops.len().checked_sub(n)?..)?;
+        tail.iter().map(|t| t.parse::<f32>().ok()).collect()
+    };
+    let mut out = Vec::new();
+    let (mut st, mut stack) = (State::default(), Vec::<State>::new());
+    let mut ops: Vec<&str> = Vec::new();
+    let mut path: Vec<&str> = Vec::new();
+    for tok in text.split_whitespace() {
+        match tok {
+            "stream" | "endstream" => {
+                st = State::default();
+                stack.clear();
+                path.clear();
+            }
+            "q" => stack.push(st.clone()),
+            "Q" => st = stack.pop().unwrap_or_default(),
+            "rg" | "RG" => {
+                if let Some(v) = nums(&ops, 3) {
+                    let c = Some([v[0], v[1], v[2]]);
+                    if tok == "rg" { st.fill = c } else { st.stroke = c }
+                }
+            }
+            "w" => {
+                if let Some(v) = nums(&ops, 1) {
+                    st.width = Some(v[0]);
+                }
+            }
+            "d" => {
+                let joined = ops.join(" ");
+                if let (Some(a), Some(b)) = (joined.rfind('['), joined.rfind(']'))
+                    && a < b
+                {
+                    st.dash = joined[a + 1..b].trim().to_string();
+                }
+            }
+            "m" | "l" | "c" | "re" => {
+                let n = match tok {
+                    "c" => 6,
+                    "re" => 4,
+                    _ => 2,
+                };
+                if nums(&ops, n).is_some() {
+                    path.extend_from_slice(&ops[ops.len() - n..]);
+                    path.push(tok);
+                }
+            }
+            "h" => {
+                if !path.is_empty() {
+                    path.push(tok);
+                }
+            }
+            "f" | "f*" | "B" | "B*" | "S" => {
+                if !path.is_empty() {
+                    let line = format!("{} {tok}", path.join(" "));
+                    out.push(PdfPaint { fill: st.fill, stroke: st.stroke, width: st.width, dash: st.dash.clone(), path: line, op: tok.to_string() });
+                }
+                path.clear();
+            }
+            "n" => path.clear(),
+            _ => {
+                ops.push(tok);
+                continue;
+            }
+        }
+        ops.clear();
+    }
+    out
 }
