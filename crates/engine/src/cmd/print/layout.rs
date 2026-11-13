@@ -74,10 +74,10 @@ pub struct SheetLayout {
     pub area: RangeRef,
     pub row_bands: Vec<(u32, u32)>,
     pub col_bands: Vec<(u32, u32)>,
-    /// Per column band, how far into its first column (sheet pixels) the page starts: above 0
-    /// for the continuation pieces of a column wider than the page, which is printed in pieces
-    /// across pages. Missing entries are 0.
-    pub col_offsets: Vec<f32>,
+    /// Per column band, how it prints a column wider than the page ([`ColCut`]): such a column
+    /// is cut to the page's width, and text running on past the cut continues on following
+    /// pages. Missing entries are not cut.
+    pub col_cuts: Vec<ColCut>,
     /// Pages in print order: (row band, column band).
     pub pages: Vec<(usize, usize)>,
     pub title_rows: Option<(u32, u32)>,
@@ -101,16 +101,9 @@ impl SheetLayout {
     pub(super) fn k(&self) -> f32 {
         PX_TO_PT * self.scale
     }
-    /// How far into its first column (sheet pixels) column band `ci` starts (0 unless it
-    /// continues a column wider than the page).
-    pub(crate) fn col_offset(&self, ci: usize) -> f32 {
-        self.col_offsets.get(ci).copied().unwrap_or(0.0)
-    }
-    /// Column band `ci` is a piece of a column wider than the page: it continues one, or the
-    /// next band continues it.
-    pub(crate) fn col_split(&self, ci: usize) -> bool {
-        self.col_offset(ci) > 0.0
-            || (self.col_offset(ci + 1) > 0.0 && self.col_bands.get(ci).zip(self.col_bands.get(ci + 1)).is_some_and(|(a, b)| a.1 == b.0))
+    /// How column band `ci` prints a column wider than the page (not cut when it holds none).
+    pub(crate) fn col_cut(&self, ci: usize) -> ColCut {
+        self.col_cuts.get(ci).copied().unwrap_or_default()
     }
     pub(crate) fn avail(&self) -> (f32, f32) {
         let [l, r, t, b, ..] = self.margins;
@@ -247,70 +240,82 @@ pub(super) fn bands(start: u32, end: u32, size: impl Fn(u32) -> f32, avail: impl
 }
 
 /// [`bands`] for columns, except that a line wider than an empty page's room (`avail` at that
-/// line, when positive) is printed in pieces of that room, each a band of its own (Excel prints
-/// such a column across pages). Returns the bands and, per band, the offset into its first line
-/// where it starts. The line after the last piece joins its page when it fits in what is left.
-pub(super) fn bands_split_wide(
+/// line, when positive) is cut to that room and printed alone on its page, as Excel prints such
+/// a column; `more(line, room)` continuation pages follow it, for text running on past the cut.
+/// The line after it starts a new page. Returns the bands and, per band, its [`ColCut`].
+pub(super) fn bands_cut_wide(
     start: u32,
     end: u32,
     size: impl Fn(u32) -> f32,
     avail: impl Fn(u32) -> f32,
     breaks: &[u32],
     cap: usize,
-) -> (Vec<(u32, u32)>, Vec<f32>) {
+    more: impl Fn(u32, f32) -> usize,
+) -> (Vec<(u32, u32)>, Vec<ColCut>) {
     let mut out = Vec::new();
-    let mut offs = Vec::new();
+    let mut cuts = Vec::new();
     let mut cur = start;
-    let mut cur_off = 0.0f32;
     let mut used = 0.0f32;
     let mut room = avail(start).max(1.0);
     let mut line = start;
     loop {
         let sz = size(line);
+        let empty_room = avail(line);
+        let wide = sz.is_finite() && empty_room > 0.0 && sz > empty_room + 0.01;
         let manual = line > cur && breaks.binary_search(&line).is_ok();
-        if line > cur && (manual || used + sz > room + 0.01) {
+        if line > cur && (manual || wide || used + sz > room + 0.01) {
             out.push((cur, line - 1));
-            offs.push(cur_off);
+            cuts.push(ColCut::default());
             if out.len() >= cap {
-                return (out, offs);
+                return (out, cuts);
             }
             cur = line;
-            cur_off = 0.0;
             used = 0.0;
             room = avail(line).max(1.0);
         }
-        // A line on an empty page that is wider than the page: every piece but the last is a
-        // page of its own; the last stays open for the lines after it.
-        let empty_room = avail(line);
-        if line == cur && used == 0.0 && sz.is_finite() && empty_room > 0.0 && sz > empty_room + 0.01 {
-            let mut off = 0.0f32;
-            while sz - off > room + 0.01 {
+        if wide {
+            // The cut line's page, then one page per further printable width its text reaches.
+            for i in 0..=more(line, empty_room) {
                 out.push((line, line));
-                offs.push(off);
+                cuts.push(ColCut { offset: i as f32 * empty_room, width: empty_room });
                 if out.len() >= cap {
-                    return (out, offs);
+                    return (out, cuts);
                 }
-                off += room;
             }
-            cur_off = off;
-            used = sz - off;
-        } else {
-            used += sz;
+            if line >= end {
+                return (out, cuts);
+            }
+            line += 1;
+            cur = line;
+            used = 0.0;
+            room = avail(line).max(1.0);
+            continue;
         }
+        used += sz;
         if line >= end {
             break;
         }
         line += 1;
     }
     out.push((cur, end));
-    offs.push(cur_off);
-    (out, offs)
+    cuts.push(ColCut::default());
+    (out, cuts)
+}
+
+/// How a band of columns prints a column wider than the page (sheet pixels): `width` is the
+/// width the column is cut to (0 when the band is not cut) and `offset` how far into the column's
+/// text a continuation page starts (0 on the cut column's own page).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ColCut {
+    pub offset: f32,
+    pub width: f32,
 }
 
 /// [`split_bands`] for printing: the same bands, except that a column wider than the page is
-/// split into pieces across pages ([`bands_split_wide`]) unless the sheet is fitted to a number
-/// of pages wide. Returns the row bands, the column bands and each column band's offset.
-pub(crate) fn split_bands_pieces(sh: &Sheet, lay: &SheetLayout, cap: usize) -> (Bands, Bands, Vec<f32>) {
+/// cut to the page's width, followed by pages for the text running on past the cut
+/// ([`bands_cut_wide`]), unless the sheet is fitted to a number of pages wide. Returns the row
+/// bands, the column bands and each column band's [`ColCut`].
+pub(crate) fn split_bands_pieces(wb: &Workbook, sh: &Sheet, lay: &SheetLayout, cap: usize) -> (Bands, Bands, Vec<ColCut>) {
     let (rows, cols) = split_bands(sh, lay, cap);
     let k = lay.k();
     let aw = lay.avail().0 / k;
@@ -321,18 +326,36 @@ pub(crate) fn split_bands_pieces(sh: &Sheet, lay: &SheetLayout, cap: usize) -> (
         }
     };
     let room = |start: u32| aw - lay.heading_w - title_w(start);
-    // Fit To a page count wide picks the scale so the columns fit: no pieces (as before).
+    // Fit To a page count wide picks the scale so the columns fit: no cut (as before).
     // `manual_col_breaks` is off exactly when the sheet is fitted to a page count wide.
     let wide = |&(a, b): &(u32, u32)| (a..=b).any(|c| room(c) > 0.0 && sh.col_width(c) > room(c) + 0.01);
     if !lay.manual_col_breaks || !cols.iter().any(wide) {
-        let offs = vec![0.0; cols.len()];
-        return (rows, cols, offs);
+        let cuts = vec![ColCut::default(); cols.len()];
+        return (rows, cols, cuts);
     }
     let mut cb: Vec<u32> = lay.settings.col_breaks.clone();
     cb.sort_unstable();
     let area = lay.area;
-    let (cols, offs) = bands_split_wide(area.start.col, area.end.col, |c| sh.col_width(c), room, &cb, cap);
-    (rows, cols, offs)
+    // Continuation pages: as many printable widths as the longest text of the column (in the
+    // printed rows) runs on past the cut.
+    let more = |col: u32, cut: f32| -> usize {
+        let cut_pt = cut * k;
+        if cut_pt.is_nan() || cut_pt <= 0.0 {
+            return 0;
+        }
+        let column = RangeRef::new(CellRef::new(area.start.row, col), CellRef::new(area.end.row, col));
+        let mut fonts = None;
+        let reach = sh
+            .cells
+            .iter_range(column)
+            .filter(|(c, _)| sh.row_height(c.row) > 0.0)
+            .filter_map(|cell| super::text::cut_text_reach(wb, sh, cell, &sh.merges, (k, lay.scale), cut_pt, &mut fonts))
+            .fold(0.0f32, f32::max);
+        // Saturating float-to-int conversion: a hostile reach only meets the page cap.
+        ((reach / cut_pt).ceil() as usize).saturating_sub(1)
+    };
+    let (cols, cuts) = bands_cut_wide(area.start.col, area.end.col, |c| sh.col_width(c), room, &cb, cap, more);
+    (rows, cols, cuts)
 }
 
 fn title_span(t: Option<(u32, u32)>, max: u32) -> Option<(u32, u32)> {
@@ -381,7 +404,7 @@ fn layout_chart_sheet(wb: &Workbook, ci: usize) -> Option<SheetLayout> {
         area: RangeRef::cell(CellRef::new(0, 0)),
         row_bands: vec![(0, 0)],
         col_bands: vec![(0, 0)],
-        col_offsets: vec![],
+        col_cuts: vec![],
         pages: vec![(0, 0)],
         title_rows: None,
         title_cols: None,
@@ -428,7 +451,7 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
         area,
         row_bands: vec![],
         col_bands: vec![],
-        col_offsets: vec![],
+        col_cuts: vec![],
         pages: vec![],
         title_rows,
         title_cols,
@@ -444,7 +467,7 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
     // out (Excel prints each band of columns down to its last cell); a print area prints its grid.
     let trim_empty = range_override.is_none() && sh.print.print_areas().is_empty();
     let paginate = |lay: &mut SheetLayout| {
-        (lay.row_bands, lay.col_bands, lay.col_offsets) = split_bands_pieces(sh, lay, MAX_PAGES);
+        (lay.row_bands, lay.col_bands, lay.col_cuts) = split_bands_pieces(wb, sh, lay, MAX_PAGES);
     };
     match fit {
         Some((fw, fh)) => {
@@ -748,19 +771,27 @@ mod tests {
     }
 
     #[test]
-    fn a_wide_line_is_split_and_the_next_joins_its_last_piece() {
-        // Room 100: line 0 is 250 wide (pieces at 0, 100, 200; 50 left on the last), line 1
-        // (40) fits after it, line 2 (40) does not.
+    fn a_wide_line_is_cut_to_the_room_and_the_next_starts_a_new_band() {
+        // Room 100: line 0 is 250 wide, cut to 100; its text needs two more pages. Line 1 (40)
+        // starts a new band and line 2 (40) joins it.
         let w = [250.0f32, 40.0, 40.0];
         let size = |c: u32| w.get(c as usize).copied().unwrap_or(0.0);
-        let (b, o) = bands_split_wide(0, 2, size, |_| 100.0, &[], 100);
-        assert_eq!(b, [(0, 0), (0, 0), (0, 1), (2, 2)]);
-        assert_eq!(o, [0.0, 100.0, 200.0, 0.0]);
-        // A manual break after the wide line still applies; no room means no split.
-        let (b, _) = bands_split_wide(0, 2, size, |_| 100.0, &[1], 100);
+        let cut = |offset: f32| ColCut { offset, width: 100.0 };
+        let (b, o) = bands_cut_wide(0, 2, size, |_| 100.0, &[], 100, |_, _| 2);
         assert_eq!(b, [(0, 0), (0, 0), (0, 0), (1, 2)]);
-        let (b, o) = bands_split_wide(0, 2, size, |_| 0.0, &[], 100);
+        assert_eq!(o, [cut(0.0), cut(100.0), cut(200.0), ColCut::default()]);
+        // Without long text the cut line takes one band; a manual break still applies.
+        let (b, o) = bands_cut_wide(0, 2, size, |_| 100.0, &[2], 100, |_, _| 0);
+        assert_eq!(b, [(0, 0), (1, 1), (2, 2)]);
+        assert_eq!(o, [cut(0.0), ColCut::default(), ColCut::default()]);
+        // A wide line after a narrow one moves to a band of its own.
+        let (b, _) = bands_cut_wide(0, 2, |c| [40.0f32, 250.0, 40.0].get(c as usize).copied().unwrap_or(0.0), |_| 100.0, &[], 100, |_, _| 0);
+        assert_eq!(b, [(0, 0), (1, 1), (2, 2)]);
+        // No room means no cut; the page cap holds for continuation pages too.
+        let (b, o) = bands_cut_wide(0, 2, size, |_| 0.0, &[], 100, |_, _| 0);
         assert_eq!(b, bands(0, 2, size, |_| 1.0, &[], 100));
-        assert!(o.iter().all(|x| *x == 0.0));
+        assert!(o.iter().all(|x| *x == ColCut::default()));
+        let (b, _) = bands_cut_wide(0, 2, size, |_| 100.0, &[], 3, |_, _| usize::MAX);
+        assert_eq!(b.len(), 3);
     }
 }

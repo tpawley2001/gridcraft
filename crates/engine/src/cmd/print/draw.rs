@@ -1,6 +1,6 @@
 use super::layout::{DENSE_BLOCK, SheetLayout};
 use super::objects::draw_cell_picture;
-use super::text::{TextPlacement, draw_text};
+use super::text::{TextPlacement, cut_text_reach, draw_text};
 use super::{
     BorderLine, BorderStyle, Borders, CellRef, Color, Font, Page, PatternType, Point, RangeRef, Rgb, Sheet, Style, StyleId, Underline, Value,
     Workbook, split_sheet,
@@ -172,6 +172,9 @@ pub(super) struct Block<'a> {
     pub(super) ys: Vec<f32>,
     pub(super) k: f32,
     pub(super) scale: f32,
+    /// A continuation page of a column cut to the page: the cut width in points. Only text
+    /// running on past the cut is drawn.
+    continued: Option<f32>,
 }
 
 impl Block<'_> {
@@ -192,6 +195,15 @@ impl Block<'_> {
     pub(super) fn rect(&self, r: RangeRef) -> (f32, f32, f32, f32) {
         let (x0, y0) = (self.x(r.start.col), self.y(r.start.row));
         (x0, y0, self.x(r.end.col.saturating_add(1)) - x0, self.y(r.end.row.saturating_add(1)) - y0)
+    }
+    /// Prints the block's single column `width` points wide (a column cut to the page width,
+    /// widened by the offset of a continuation page); `continued` is the cut width on a
+    /// continuation page.
+    pub(super) fn cut_column(&mut self, width: f32, continued: Option<f32>) {
+        if let ([x0, x1], true) = (self.xs.as_mut_slice(), self.cols.0 == self.cols.1) {
+            *x1 = *x0 + width.max(0.0);
+            self.continued = continued;
+        }
     }
     pub(super) fn range(&self) -> RangeRef {
         RangeRef::new(CellRef::new(self.rows.0, self.cols.0), CellRef::new(self.rows.1, self.cols.1))
@@ -311,6 +323,10 @@ pub(super) fn draw_block(pg: &mut Page, b: &Block, gridlines: bool, cf: &mut Opt
     if bw <= 0.0 || bh <= 0.0 {
         return;
     }
+    if let Some(cut) = b.continued {
+        draw_continued_text(pg, b, cut, cf);
+        return;
+    }
     let block = b.range();
     let sh = b.sh;
     let merges = block_merges(sh, block);
@@ -426,6 +442,31 @@ pub(super) fn draw_block(pg: &mut Page, b: &Block, gridlines: bool, cf: &mut Opt
         } else {
             draw_text(pg, b, TextPlacement { cell: *c, look: l, rect: (x, y, w, h), merged, merges: &merges, limits: (bx, bx + bw) });
         }
+    }
+    pg.restore();
+}
+
+/// A continuation page of a column cut to `cut` points: only the text running on past the cut,
+/// as far as it reaches.
+fn draw_continued_text(pg: &mut Page, b: &Block, cut: f32, cf: &mut Option<crate::cf::CfCache>) {
+    let (bx, by) = (b.xs.first().copied().unwrap_or(0.0), b.ys.first().copied().unwrap_or(0.0));
+    let (bw, bh) = (b.xs.last().copied().unwrap_or(bx) - bx, b.ys.last().copied().unwrap_or(by) - by);
+    if bw <= 0.0 || bh <= 0.0 {
+        return;
+    }
+    let sh = b.sh;
+    pg.save();
+    pg.clip_rect(bx, by, bw, bh);
+    let mut fonts = None;
+    for (c, cell) in sh.cells.iter_range(b.range()) {
+        let Some(reach) = cut_text_reach(b.wb, sh, (c, cell), &sh.merges, (b.k, b.scale), cut, &mut fonts) else { continue };
+        let (x, y, w, h) = b.rect(RangeRef::cell(c));
+        if w <= 0.0 || h <= 0.0 {
+            continue;
+        }
+        let look = cell_look(b.wb, b.si, sh, c, cf);
+        let limits = (bx, (x + reach).min(bx + bw));
+        draw_text(pg, b, TextPlacement { cell: c, look: &look, rect: (x, y, w, h), merged: false, merges: &sh.merges, limits });
     }
     pg.restore();
 }
@@ -579,7 +620,7 @@ pub(super) fn make_block<'a>(
         acc += sh.row_height(r) * k;
         ys.push(acc);
     }
-    Block { wb, si, sh, rows, cols, xs, ys, k, scale: lay.scale }
+    Block { wb, si, sh, rows, cols, xs, ys, k, scale: lay.scale, continued: None }
 }
 
 #[cfg(test)]
