@@ -105,6 +105,26 @@ impl SheetLayout {
     pub(crate) fn col_cut(&self, ci: usize) -> ColCut {
         self.col_cuts.get(ci).copied().unwrap_or_default()
     }
+    /// Per column band, the column cut to the page ([`ColCut`]) whose text runs on across that
+    /// band's pages, as Excel prints it: (the cut column, how many printable widths the band's
+    /// page lies past the cut column's own page, the cut width in sheet pixels). Bands after the
+    /// nearest cut column carry it; the cut column's own bands and those before any cut have none.
+    pub(crate) fn cut_run_ons(&self) -> Vec<Option<(u32, usize, f32)>> {
+        let mut last: Option<(u32, usize, f32)> = None;
+        let mut out = Vec::with_capacity(self.col_bands.len());
+        for (ci, &(c0, c1)) in self.col_bands.iter().enumerate() {
+            let cut = self.col_cut(ci);
+            if cut.width > 0.0 {
+                if cut.offset <= 0.0 && c0 == c1 {
+                    last = Some((c0, ci, cut.width));
+                }
+                out.push(None);
+            } else {
+                out.push(last.map(|(col, first, width)| (col, ci.saturating_sub(first), width)));
+            }
+        }
+        out
+    }
     pub(crate) fn avail(&self) -> (f32, f32) {
         let [l, r, t, b, ..] = self.margins;
         ((self.page_w - l - r).max(36.0), (self.page_h - t - b).max(36.0))
@@ -337,7 +357,7 @@ pub(crate) fn split_bands_pieces(wb: &Workbook, sh: &Sheet, lay: &SheetLayout, c
     cb.sort_unstable();
     let area = lay.area;
     // Continuation pages: as many printable widths as the longest text of the column (in the
-    // printed rows) runs on past the cut.
+    // printed rows) runs on past the cut and past the columns printed after it.
     let more = |col: u32, cut: f32| -> usize {
         let cut_pt = cut * k;
         if cut_pt.is_nan() || cut_pt <= 0.0 {
@@ -351,8 +371,12 @@ pub(crate) fn split_bands_pieces(wb: &Workbook, sh: &Sheet, lay: &SheetLayout, c
             .filter(|(c, _)| sh.row_height(c.row) > 0.0)
             .filter_map(|cell| super::text::cut_text_reach(wb, sh, cell, &sh.merges, (k, lay.scale), cut_pt, &mut fonts))
             .fold(0.0f32, f32::max);
-        // Saturating float-to-int conversion: a hostile reach only meets the page cap.
-        ((reach / cut_pt).ceil() as usize).saturating_sub(1)
+        // The columns printed after the cut one carry the text on across their own pages (as
+        // Excel prints it): only text reaching past the last of them needs pages of its own.
+        let rest: f32 = (col.saturating_add(1)..=area.end.col).map(|c| sh.col_width(c) * k).sum();
+        // Saturating float-to-int conversion: a hostile reach only meets the page cap, and a
+        // negative count is 0.
+        ((reach - cut_pt - rest) / cut_pt).ceil().max(0.0) as usize
     };
     let (cols, cuts) = bands_cut_wide(area.start.col, area.end.col, |c| sh.col_width(c), room, &cb, cap, more);
     (rows, cols, cuts)
