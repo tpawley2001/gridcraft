@@ -578,23 +578,32 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
     below.map(|_| reach)
 }
 
-/// [`page_sequence`] over only the printed pages: `reach[c]` row bands of column band `c`
-/// (non-increasing in `c`). Over-then-down prints the same pages in a different sequence.
+/// [`page_sequence`] cut after the last page that holds anything, as Excel prints a sheet:
+/// blank pages before that page are kept. `reach[c]` is how many row bands column band `c` or
+/// any band to its right reaches (non-increasing in `c`). Down-then-over prints every row band
+/// of each column band before the last and `reach[last]` of the last; over-then-down prints every
+/// column band of each row band before the last and, on the last, the bands that reach it. The
+/// two orders can therefore print different sets of pages.
 fn printed_page_sequence(reach: &[usize], order: PageOrder, cap: usize) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
+    let rows = reach.first().copied().unwrap_or(0);
+    let bands = reach.len();
     match order {
         PageOrder::DownThenOver => {
             for (c, &n) in reach.iter().enumerate() {
+                if out.len() >= cap {
+                    break;
+                }
+                let n = if c + 1 < bands { rows } else { n };
                 out.extend((0..n).map(|r| (r, c)).take(cap.saturating_sub(out.len())));
             }
         }
         PageOrder::OverThenDown => {
-            let rows = reach.first().copied().unwrap_or(0);
             for r in 0..rows {
                 if out.len() >= cap {
                     break;
                 }
-                let cols = reach.partition_point(|&n| n > r);
+                let cols = if r + 1 < rows { bands } else { reach.partition_point(|&n| n > r) };
                 out.extend((0..cols).map(|c| (r, c)).take(cap.saturating_sub(out.len())));
             }
         }
