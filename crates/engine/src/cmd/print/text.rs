@@ -83,7 +83,7 @@ fn indent_level_pt(wb: &gridcraft_model::Workbook) -> f32 {
     3.0 * em * size
 }
 
-fn text_align(align: HAlign, value: &Value) -> HAlign {
+pub(super) fn text_align(align: HAlign, value: &Value) -> HAlign {
     match align {
         HAlign::General => match value {
             Value::Number(_) => HAlign::Right,
@@ -173,7 +173,9 @@ pub(super) fn right_overflow_end(
 /// How far (points from the cell's left edge, at page scale `k`) the text of `c` reaches when
 /// its column is printed cut to `cut` points (a column wider than the page): left-aligned,
 /// single-line, unrotated text wider than the cut runs on over the empty cells to its right, up
-/// to the first non-empty one. `None` when the text stays within the cut or cannot run on.
+/// to the first non-empty one. Centred text is laid out centred on the cut (not on the whole
+/// column), so it reaches `cut / 2 + need / 2`, limited the same way. `None` when the text stays
+/// within the cut or cannot run on.
 pub(super) fn cut_text_reach(
     wb: &gridcraft_model::Workbook,
     sh: &Sheet,
@@ -188,7 +190,12 @@ pub(super) fn cut_text_reach(
         return None;
     }
     let (need, h_align) = spilling_text(wb, sh, (c, cell), merges, (k, scale), fonts)?;
-    if h_align != HAlign::Left || need <= cut + 0.01 {
+    let need = match h_align {
+        HAlign::Left => need,
+        HAlign::Center => cut / 2.0 + need / 2.0,
+        _ => return None,
+    };
+    if need.is_nan() || need <= cut + 0.01 {
         return None;
     }
     let (mut reach, mut col) = (cut, c.col + 1);

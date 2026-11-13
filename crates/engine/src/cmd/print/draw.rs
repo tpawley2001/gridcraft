@@ -1,8 +1,8 @@
 use super::layout::{DENSE_BLOCK, SheetLayout};
 use super::objects::draw_cell_picture;
-use super::text::{TextPlacement, cut_text_reach, draw_text};
+use super::text::{TextPlacement, cut_text_reach, draw_text, text_align};
 use super::{
-    BorderLine, BorderStyle, Borders, CellRef, Color, Font, Page, PatternType, Point, RangeRef, Rgb, Sheet, Style, StyleId, Underline, Value,
+    BorderLine, BorderStyle, Borders, CellRef, Color, Font, HAlign, Page, PatternType, Point, RangeRef, Rgb, Sheet, Style, StyleId, Underline, Value,
     Workbook, split_sheet,
 };
 
@@ -465,6 +465,9 @@ fn draw_continued_text(pg: &mut Page, b: &Block, cut: f32, cf: &mut Option<crate
             continue;
         }
         let look = cell_look(b.wb, b.si, sh, c, cf);
+        // Centred text stays centred on the cut, as on the column's first page; the block is
+        // shifted left by this page's offset, so it lands that much further left.
+        let w = if text_align(look.style.align.h, &cell.value) == HAlign::Center { cut } else { w };
         let limits = (bx, (x + reach).min(bx + bw));
         draw_text(pg, b, TextPlacement { cell: c, look: &look, rect: (x, y, w, h), merged: false, merges: &sh.merges, limits });
     }
