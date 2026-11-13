@@ -30,9 +30,8 @@ fn page_stream(s: &mut Session) -> String {
 fn red_paths(s: &mut Session) -> Vec<Vec<(f32, f32)>> {
     let text = page_stream(s);
     let mut out = Vec::new();
-    for part in text.split("1 0 0 rg\n").skip(1) {
-        let end = [" B", " f", " S"].iter().filter_map(|op| part.find(op)).min().unwrap_or(part.len());
-        let toks: Vec<&str> = part[..end].split_whitespace().collect();
+    for paint in tests::pdf_paints(&text).into_iter().filter(|p| p.fills() && p.fill == Some([1.0, 0.0, 0.0])) {
+        let toks: Vec<&str> = paint.path.split_whitespace().collect();
         let mut pts = Vec::new();
         for i in 2..toks.len() {
             if toks[i] == "m" || toks[i] == "l" {
@@ -194,18 +193,19 @@ fn triangle_preset_prints_three_points_with_a_centred_apex() {
     assert_eq!(distinct(p[0].iter().map(|v| v.1)), 2, "{p:?}");
 }
 
-/// Each painted path's colour operator line and its path line (`… m … l … h f`), in order.
+/// Each painted path's colour operator line and its path line (`… m … l … h f`), in order: with
+/// ` rg` the paths that are only filled, with ` RG` the stroked ones. The colour is the one in
+/// effect for the path (the writer does not repeat an unchanged colour operator).
 fn painted(text: &str, op: &str) -> Vec<(String, String)> {
-    let lines: Vec<&str> = text.lines().collect();
-    let mut out = Vec::new();
-    for (i, l) in lines.iter().enumerate() {
-        if l.ends_with(op) {
-            if let Some(p) = lines[i + 1..].iter().take(2).find(|p| p.contains(" m ")) {
-                out.push((l.to_string(), p.to_string()));
-            }
-        }
-    }
-    out
+    tests::pdf_paints(text)
+        .into_iter()
+        .filter(|p| p.path.contains(" m "))
+        .filter_map(|p| match op {
+            " rg" if matches!(p.op.as_str(), "f" | "f*") => Some((p.fill_op(), p.path)),
+            " RG" if p.strokes() => Some((p.stroke_op(), p.path)),
+            _ => None,
+        })
+        .collect()
 }
 
 fn rgb(op: &str) -> [f32; 3] {

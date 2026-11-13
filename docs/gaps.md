@@ -213,7 +213,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - Ink strokes now survive XLSX save/reopen as editable polylines. Inserted icons still lose their
   identity/artwork on save (#551); native Office InkML import is not implemented.
 - SmartArt and grouped drawing objects are kept through XLSX open + save but not shown, printed or editable;
-  WordArt, signature line, objects, 3-D models, screenshot; most of Excel's ~170 preset shapes still show as a
+  signature line, objects, 3-D models, screenshot; most of Excel's ~170 preset shapes still show as a
   rectangle (see the presets bullet); pictures in cells (#61, PR #105). Equations exist (LaTeX source with a live
   preview, Office Math in xlsx); there is no structured (WYSIWYG) equation editing and no ink equations.
   **Estimate:** 25–40 h.

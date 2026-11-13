@@ -180,21 +180,23 @@ pub(super) fn insert(app: &mut SheetApp, ui: &mut Ui) {
             "insert.optionButton",
         ),
     ];
-    // Three to a column, as the ribbon's small buttons stack; the second column shows icons only,
-    // so the group stays narrow.
-    for (n, column) in controls.chunks(3).enumerate() {
-        ui.vertical(|ui| {
-            for &(icon, kind, label, tip, id) in column {
-                let on = placing == Some(kind);
-                let r = if n == 0 { small_toggle_button(ui, icon, label, tip, on) } else { small_toggle_icon(ui, icon, label, tip, on) };
-                control_keytip(app, ui, &r, id);
-                if r.clicked() {
-                    app.grid.placing = if placing == Some(kind) { None } else { Some(kind) };
-                    app.selected_object = None;
+    // Three rows, as the ribbon's small buttons stack. The check box and the option button are icons
+    // beside the two shorter labels, so the group is no wider than its longest label.
+    ui.vertical(|ui| {
+        for row in 0..3 {
+            ui.horizontal(|ui| {
+                for (n, &(icon, kind, label, tip, id)) in [controls.get(row), controls.get(row + 3)].into_iter().flatten().enumerate() {
+                    let on = placing == Some(kind);
+                    let r = if n == 0 { small_toggle_button(ui, icon, label, tip, on) } else { small_toggle_icon(ui, icon, label, tip, on) };
+                    control_keytip(app, ui, &r, id);
+                    if r.clicked() {
+                        app.grid.placing = if placing == Some(kind) { None } else { Some(kind) };
+                        app.selected_object = None;
+                    }
                 }
-            }
-        });
-    }
+            });
+        }
+    });
     sep(ui);
     // Cell Controls.
     if big_button(ui, Icon::Checkbox, "Checkbox", "Insert checkboxes in the selected cells", false).clicked() {
@@ -217,6 +219,12 @@ pub(super) fn insert(app: &mut SheetApp, ui: &mut Ui) {
     if __k.clicked() {
         act(app, "insert.textBox", json!({}));
     }
+    // Two lines like its neighbours, so the Insert tab stays as wide as before; the translated label is split, the catalog key is one line.
+    let label = app.ui.language.tr("Decorative Text").replacen(' ', "\n", 1);
+    let wa = big_button(ui, Icon::WordArt, &label, "Decorative Text", true);
+    anchor_keytip(app, ui, &wa, &["insert.wordArt"]);
+    // Menu invocation shows the style gallery; the command itself never opens a dialog.
+    egui::Popup::menu(&wa).show(|ui| crate::wordart::gallery(app, ui));
     let __k = big_button(ui, Icon::PageLayout, "Header &\nFooter", "Header & Footer", false);
     control_keytip(app, ui, &__k, "dialog:headerFooter");
     if __k.clicked() {
