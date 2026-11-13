@@ -24,6 +24,7 @@ use super::{CommandSpec, Result, Session, bad, bool_param, cmd, edit, f64_param,
 mod draw;
 mod header_footer;
 mod layout;
+mod metrics;
 mod objects;
 mod text;
 
@@ -624,6 +625,8 @@ mod fit_manual_breaks_tests;
 mod indent_width_tests;
 #[cfg(test)]
 mod page_limit_tests;
+#[cfg(test)]
+mod row_pitch_tests;
 #[cfg(test)]
 mod shape_hole_tests;
 #[cfg(test)]
