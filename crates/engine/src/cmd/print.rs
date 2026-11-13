@@ -130,7 +130,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Print Preview",
             ["File"],
             None,
-            "{page? (1-based), sheets?: active|all, range?, fitToPage?} → {pages, pageList: [{page, sheet, range, rows, columns, scale, paper, orientation, pageOrder, width, height}]} in print order; a chart sheet's page (sheets: all) has chart: true instead of range, rows and columns",
+            "{page? (1-based), sheets?: active|all, range?, fitToPage?} → {pages, pageList: [{page, sheet, range, rows, columns, scale, paper, orientation, pageOrder, width, height}]} in print order (the first 2,000 pages, with pageListTruncated: true when there are more; `page` reaches any page); a chart sheet's page (sheets: all) has chart: true instead of range, rows and columns",
             has_doc,
             print_preview
         ),
@@ -148,8 +148,10 @@ pub fn specs() -> Vec<CommandSpec> {
 
 /// Sheet geometry is in pixels at 96 dpi; PDF units are points.
 pub(crate) const PX_TO_PT: f32 = 0.75;
-/// Most pages one export produces.
-pub const MAX_PAGES: usize = 2000;
+/// Most pages one export produces: a defence against hostile page setups (one cell in XFD1048576
+/// at 400 % with wide margins is billions of pages), set well above any real workbook (Excel
+/// printed 72,034 pages of the longest measured), which prints whole.
+pub const MAX_PAGES: usize = 200_000;
 
 /// Renders laid-out sheets to a PDF.
 pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str) -> (Vec<u8>, usize) {
@@ -325,31 +327,44 @@ fn print(s: &mut Session, p: &Json) -> Result<Json> {
     Ok(out)
 }
 
+/// Most pages `file.printPreview` lists in `pageList` (the first ones, in print order); `pages`
+/// counts them all and `page` reaches any of them. Without it a hostile page setup's list would be
+/// tens of megabytes of JSON.
+pub const MAX_PAGE_LIST: usize = 2000;
+
 fn print_preview(s: &mut Session, p: &Json) -> Result<Json> {
     let opts = PrintOptions::from_params(p, "file.printPreview")?;
     let d = s.doc()?;
     let lays = layouts(&d.wb, &opts);
+    let wanted = u32_param(p, "page").map(|page| (page as usize).max(1));
+    // Builds the entry of page `n` only when it is listed or asked for.
+    let keep = |n: usize| wanted.map_or(n <= MAX_PAGE_LIST, |w| w == n);
     let mut list = Vec::new();
     let mut n = 0usize;
     for lay in &lays {
         let orientation = if lay.settings.orientation == Orientation::Landscape { "landscape" } else { "portrait" };
         if let Some(cs) = lay.chart_sheet.and_then(|ci| d.wb.chart_sheets.get(ci)) {
             n += 1;
-            list.push(json!({
-                "page": n,
-                "sheet": cs.name,
-                "chart": true,
-                "scale": 100.0,
-                "paper": lay.settings.paper,
-                "orientation": orientation,
-                "width": lay.page_w,
-                "height": lay.page_h,
-            }));
+            if keep(n) {
+                list.push(json!({
+                    "page": n,
+                    "sheet": cs.name,
+                    "chart": true,
+                    "scale": 100.0,
+                    "paper": lay.settings.paper,
+                    "orientation": orientation,
+                    "width": lay.page_w,
+                    "height": lay.page_h,
+                }));
+            }
             continue;
         }
         let name = d.wb.sheet(lay.sheet).map(|s| s.name.clone()).unwrap_or_default();
         for (ri, ci) in &lay.pages {
             n += 1;
+            if !keep(n) {
+                continue;
+            }
             let (Some(rb), Some(cb)) = (lay.row_bands.get(*ri), lay.col_bands.get(*ci)) else { continue };
             let r = RangeRef::new(CellRef::new(rb.0, cb.0), CellRef::new(rb.1, cb.1));
             let mut entry = json!({
@@ -374,12 +389,15 @@ fn print_preview(s: &mut Session, p: &Json) -> Result<Json> {
             list.push(entry);
         }
     }
-    if let Some(page) = u32_param(p, "page") {
-        let one =
-            list.get((page as usize).saturating_sub(1)).cloned().ok_or_else(|| bad("file.printPreview", format!("there are only {n} pages")))?;
+    if wanted.is_some() {
+        let one = list.pop().ok_or_else(|| bad("file.printPreview", format!("there are only {n} pages")))?;
         return Ok(json!({"pages": n, "page": one}));
     }
-    Ok(json!({"pages": n, "pageList": list}))
+    let mut out = json!({"pages": n, "pageList": list});
+    if n > MAX_PAGE_LIST {
+        out["pageListTruncated"] = json!(true);
+    }
+    Ok(out)
 }
 
 /// Switches Fit To off. A sheet keeps the counts it was fitting to (`pageSetup fitToWidth` /
