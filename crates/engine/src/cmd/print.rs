@@ -99,7 +99,7 @@ const MAX_CHART_PRIMS: usize = 4_000_000;
 #[cfg(test)]
 use layout::bands;
 pub(crate) use layout::split_bands;
-pub use layout::{PrintOptions, SheetLayout, layout_sheet, layouts, paper_size, print_range, print_ranges};
+pub use layout::{ColCut, PrintOptions, SheetLayout, layout_sheet, layouts, paper_size, print_range, print_ranges};
 use layout::{known_paper, seg_size, segments};
 use objects::draw_objects;
 #[cfg(test)]
@@ -199,13 +199,13 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
             let (Some(rband), Some(cband)) = (lay.row_bands.get(*ri).copied(), lay.col_bands.get(*ci).copied()) else { continue };
             let rsegs = segments(lay.title_rows, rband);
             let csegs = segments(lay.title_cols, cband);
-            // A piece of a column wider than the page: the band is drawn shifted left by the
-            // piece's offset and clipped to the printable width.
-            let (shift, split) = (lay.col_offset(*ci) * k, lay.col_split(*ci));
-            let mut content_w = (lay.heading_w + csegs.iter().map(|s| seg_size(sh, *s, false)).sum::<f32>()) * k - shift;
-            if split {
-                content_w = content_w.min(aw);
-            }
+            // A column wider than the page is cut to the printable width; a continuation page of
+            // its text draws the band shifted left by the page's offset, clipped to that width.
+            let cut = lay.col_cut(*ci);
+            let split = cut.width > 0.0;
+            let shift = cut.offset * k;
+            let band_w = |last: bool, cs: (u32, u32)| if last && split { cut.width } else { seg_size(sh, cs, false) };
+            let content_w = (lay.heading_w + csegs.iter().enumerate().map(|(i, s)| band_w(i + 1 == csegs.len(), *s)).sum::<f32>()) * k;
             let content_h = (lay.heading_h + rsegs.iter().map(|s| seg_size(sh, *s, true)).sum::<f32>()) * k;
             let ox = lay.margins[0] + if lay.settings.center_h { ((aw - content_w) / 2.0).max(0.0) } else { 0.0 };
             let oy = lay.margins[2] + if lay.settings.center_v { ((ah - content_h) / 2.0).max(0.0) } else { 0.0 };
@@ -222,7 +222,10 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
                 for (csi, cs) in csegs.iter().enumerate() {
                     let last = csi + 1 == csegs.len();
                     let bx = if last { x - shift } else { x };
-                    let b = make_block(wb, lay.sheet, sh, *rs, *cs, (bx, y), lay);
+                    let mut b = make_block(wb, lay.sheet, sh, *rs, *cs, (bx, y), lay);
+                    if last && split {
+                        b.cut_column((cut.offset + cut.width) * k, (cut.offset > 0.0).then_some(cut.width * k));
+                    }
                     let clipped = clip.filter(|_| last);
                     if let Some((cx, cy, cw, ch)) = clipped {
                         pg.save();
@@ -248,7 +251,8 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
                 }
                 y += seg_size(sh, *rs, true) * k;
             }
-            if let Some(b) = &body {
+            // Continuation pages carry only the text running on past the cut.
+            if let Some(b) = body.as_ref().filter(|_| cut.offset <= 0.0) {
                 if let Some((cx, cy, cw, ch)) = clip {
                     pg.save();
                     pg.clip_rect(cx, cy, cw, ch);
@@ -380,9 +384,9 @@ fn print_preview(s: &mut Session, p: &Json) -> Result<Json> {
                 "width": lay.page_w,
                 "height": lay.page_h,
             });
-            // A continuation piece of a column wider than the page: where it starts, in points
-            // into the column at sheet scale.
-            let off = lay.col_offset(*ci);
+            // A continuation page of the text in a column wider than the page: where it starts,
+            // in points into the column at sheet scale.
+            let off = lay.col_cut(*ci).offset;
             if off > 0.0 {
                 entry["columnOffset"] = json!(((off * PX_TO_PT) as f64 * 100.0).round() / 100.0);
             }
@@ -588,6 +592,8 @@ fn page_setup(s: &mut Session, p: &Json) -> Result<Json> {
     Ok(serde_json::to_value(&pr).unwrap_or(Json::Null))
 }
 
+#[cfg(test)]
+mod cut_column_draw_tests;
 #[cfg(test)]
 mod empty_pages_before_last_tests;
 #[cfg(test)]

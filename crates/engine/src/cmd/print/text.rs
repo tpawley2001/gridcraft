@@ -147,6 +147,64 @@ pub(super) fn right_overflow_end(
     (k, scale): (f32, f32),
     fonts: &mut Option<(gridcraft_model::StyleId, Font)>,
 ) -> Option<u32> {
+    let right = spill_candidate(sh, (c, cell))?;
+    let (need, h_align) = spilling_text(wb, sh, (c, cell), merges, (k, scale), fonts)?;
+    let w = sh.col_width(c.col) * k;
+    let over = need - w;
+    if over <= 0.0 || merges.iter().any(|m| m.contains(c) || m.contains(right)) {
+        return None;
+    }
+    let mut remaining = if h_align == HAlign::Center { over / 2.0 } else { over };
+    let (mut col, mut ext, mut last) = (c.col + 1, 0.0f32, None);
+    while remaining > 0.0 && col < MAX_COLS && ext <= 20_000.0 {
+        let nc = CellRef::new(c.row, col);
+        if !empty_for_overflow(sh, nc, merges) {
+            break;
+        }
+        let width = sh.col_width(col) * k;
+        ext += width;
+        remaining -= width;
+        last = Some(col);
+        col += 1;
+    }
+    last
+}
+
+/// How far (points from the cell's left edge, at page scale `k`) the text of `c` reaches when
+/// its column is printed cut to `cut` points (a column wider than the page): left-aligned,
+/// single-line, unrotated text wider than the cut runs on over the empty cells to its right, up
+/// to the first non-empty one. `None` when the text stays within the cut or cannot run on.
+pub(super) fn cut_text_reach(
+    wb: &gridcraft_model::Workbook,
+    sh: &Sheet,
+    (c, cell): (CellRef, &gridcraft_model::Cell),
+    merges: &[RangeRef],
+    (k, scale): (f32, f32),
+    cut: f32,
+    fonts: &mut Option<(gridcraft_model::StyleId, Font)>,
+) -> Option<f32> {
+    let right = spill_candidate(sh, (c, cell))?;
+    if wb.styles.get(cell.style).align.rotation != 0 || merges.iter().any(|m| m.contains(c) || m.contains(right)) {
+        return None;
+    }
+    let (need, h_align) = spilling_text(wb, sh, (c, cell), merges, (k, scale), fonts)?;
+    if h_align != HAlign::Left || need <= cut + 0.01 {
+        return None;
+    }
+    let (mut reach, mut col) = (cut, c.col + 1);
+    while reach < need && col < MAX_COLS && reach - cut <= 20_000.0 {
+        if !empty_for_overflow(sh, CellRef::new(c.row, col), merges) {
+            break;
+        }
+        reach += sh.col_width(col) * k;
+        col += 1;
+    }
+    Some(need.min(reach)).filter(|r| *r > cut + 0.01)
+}
+
+/// The cell right of `c` when `c` holds non-numeric text that could run over it: that cell is
+/// empty and inside the grid.
+fn spill_candidate(sh: &Sheet, (c, cell): (CellRef, &gridcraft_model::Cell)) -> Option<CellRef> {
     let value = &cell.value;
     if value.is_empty() || matches!(value, Value::Number(_)) || c.col + 1 >= MAX_COLS {
         return None;
@@ -155,6 +213,21 @@ pub(super) fn right_overflow_end(
     if sh.value_ref(right).is_some_and(|v| !v.is_empty()) {
         return None;
     }
+    Some(right)
+}
+
+/// The printed width (points at page scale `k`, padding and indent included) and alignment of
+/// the single-line text of `c`, when that text may spill past its cell: not wrapped, shrunk,
+/// filled, upright, right-aligned or a Center Across Selection run.
+fn spilling_text(
+    wb: &gridcraft_model::Workbook,
+    sh: &Sheet,
+    (c, cell): (CellRef, &gridcraft_model::Cell),
+    merges: &[RangeRef],
+    (k, scale): (f32, f32),
+    fonts: &mut Option<(gridcraft_model::StyleId, Font)>,
+) -> Option<(f32, HAlign)> {
+    let value = &cell.value;
     let sid = cell.style;
     let st = wb.styles.get(sid);
     let a = &st.align;
@@ -197,25 +270,7 @@ pub(super) fn right_overflow_end(
     let width_of = |ch: char| u64::from(font.char_width(if ch == '\n' || ch == '\r' { ' ' } else { ch }));
     let tw = text.chars().map(width_of).sum::<u64>() as f32 * size / 1000.0;
     let indent = if a.indent == 0 { 0.0 } else { f32::from(a.indent) * indent_level_pt(wb) };
-    let w = sh.col_width(c.col) * k;
-    let over = tw + 2.0 * PAD_PX * k + indent - w;
-    if over <= 0.0 || merges.iter().any(|m| m.contains(c) || m.contains(right)) {
-        return None;
-    }
-    let mut remaining = if h_align == HAlign::Center { over / 2.0 } else { over };
-    let (mut col, mut ext, mut last) = (c.col + 1, 0.0f32, None);
-    while remaining > 0.0 && col < MAX_COLS && ext <= 20_000.0 {
-        let nc = CellRef::new(c.row, col);
-        if !empty_for_overflow(sh, nc, merges) {
-            break;
-        }
-        let width = sh.col_width(col) * k;
-        ext += width;
-        remaining -= width;
-        last = Some(col);
-        col += 1;
-    }
-    last
+    Some((tw + 2.0 * PAD_PX * k + indent, h_align))
 }
 
 /// Unscaled width of the empty Center Across Selection cells right of `c`, which its text is centred over too.

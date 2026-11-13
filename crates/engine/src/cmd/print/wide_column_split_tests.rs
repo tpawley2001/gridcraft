@@ -1,13 +1,14 @@
-//! A column wider than the printable page is split across pages, as Excel prints it (measured
-//! from Excel's own PDFs of real workbooks: Letter portrait, 0.7 in side margins, one used column
-//! 108.57 characters wide; Excel prints two pages, the second showing the same cells shifted left
-//! by the printable width, 511.2 pt).
+//! A column wider than the printable page is cut to the page width; only text longer than the cut
+//! column continues on following pages (measured from Microsoft 365 Excel's own PDF print of a
+//! probe workbook, 2026-11-12: Letter portrait, 0.5 in side margins = 540 pt printable, column A
+//! 108.57 or 250 characters wide. A number alone in that column prints one page with the number
+//! against the page's right edge; a 30-word text prints two pages, the second showing the same
+//! line shifted left by the printable width).
 use serde_json::json;
 
 use super::*;
 
-/// Letter portrait with the default 0.7 in side margins: 612 - 2 * 50.4.
-const PRINTABLE_WIDTH: f64 = 511.2;
+/// Letter portrait with the default 0.7 in side margins: the printable area is x = 50.4..561.6.
 const LEFT_MARGIN: f32 = 50.4;
 const RIGHT_EDGE: f32 = 561.6;
 
@@ -63,64 +64,153 @@ fn wide_column() -> Session {
     s
 }
 
+/// Letter portrait with 0.5 in side margins, as in the measured workbook: 612 - 2 * 36.
+const PROBE_PRINTABLE_WIDTH: f64 = 540.0;
+const PROBE_RIGHT_EDGE: f32 = 576.0;
+
+/// A new workbook with 0.5 in side margins and column `col` 108.57 characters wide.
+fn probe_sheet(col: &str, chars: f64) -> Session {
+    let mut s = s();
+    s.execute("pageLayout.pageSetup", json!({"left": 0.5, "right": 0.5})).unwrap();
+    s.execute("home.columnWidth", json!({"cols": format!("{col}:{col}"), "chars": chars})).unwrap();
+    s
+}
+
+/// `w001 w002 ...`: one text of `n` four-letter words, far longer than a page when `n` is 30.
+fn words(n: usize) -> String {
+    (1..=n).map(|i| format!("w{i:03}")).collect::<Vec<_>>().join(" ")
+}
+
+/// B1:L1 = 2..12.
+fn numbers_b_to_l(s: &mut Session) {
+    let row: Vec<Json> = (2..=12).map(|i| json!(i)).collect();
+    s.execute("range.setValues", json!({"range": "B1", "values": [row]})).unwrap();
+}
+
 #[test]
-fn wide_column_split_prints_two_pages_for_one_over_wide_column() {
+fn wide_column_split_prints_one_page_when_nothing_is_longer_than_the_page() {
     let mut s = wide_column();
     s.execute("range.setValues", json!({"range": "A1", "values": [["HEAD"], ["TAIL"]]})).unwrap();
     let list = preview(&mut s);
-    assert_eq!(list.len(), 2, "Excel prints the column's rest on a second page");
-    assert_eq!(list[0]["range"], list[1]["range"]);
+    assert_eq!(ranges(&list), ["A1:A2"], "Excel prints the cut column on one page");
     assert_eq!(list[0]["columns"], "A:A");
-    assert_eq!(list[1]["columns"], "A:A");
-    assert_eq!(list[0]["rows"], list[1]["rows"]);
+    assert_eq!(offsets(&list), [None]);
+    let r = s.execute("file.exportPdf", json!({})).unwrap();
+    assert_eq!(r["pages"], 1);
+}
+
+#[test]
+fn wide_column_split_draws_right_aligned_text_at_the_page_edge() {
+    let mut s = wide_column();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["HEAD"], ["TAIL"]]})).unwrap();
+    s.execute("home.alignRight", json!({"range": "A2"})).unwrap();
+    let pages = pdf_pages(&mut s);
+    assert_eq!(pages.len(), 1);
+    let head = text_x(&pages[0], "HEAD").expect("HEAD is drawn on page 1");
+    assert!((LEFT_MARGIN..LEFT_MARGIN + 10.0).contains(&head), "HEAD at the left margin of page 1: {head}");
+    // The column is laid out one printable width wide, so right-aligned text ends at the page's
+    // right edge (4 letters of an 11 pt font start within 45 pt of it).
+    let tail = text_x(&pages[0], "TAIL").expect("TAIL is drawn on page 1");
+    assert!((RIGHT_EDGE - 45.0..RIGHT_EDGE).contains(&tail), "TAIL against the right edge of page 1: {tail}");
+}
+
+#[test]
+fn wide_column_split_draws_a_number_at_the_page_edge() {
+    // Excel: the number 1 is drawn at x = 569.0..574.6 of a page whose printable area ends at 576.
+    for chars in [108.57, 250.0] {
+        let mut s = probe_sheet("A", chars);
+        s.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
+        let pages = pdf_pages(&mut s);
+        assert_eq!(pages.len(), 1, "one page for a {chars}-character column");
+        let one = text_x(&pages[0], "1").expect("the number is drawn on page 1");
+        assert!((PROBE_RIGHT_EDGE - 12.0..PROBE_RIGHT_EDGE).contains(&one), "{chars} characters: the number at {one}");
+    }
+}
+
+#[test]
+fn wide_column_split_prints_one_page_for_a_filled_cell() {
+    let mut s = probe_sheet("A", 108.57);
+    s.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
+    s.execute("home.fillColor", json!({"range": "A1", "color": "#FFFF00"})).unwrap();
+    let list = preview(&mut s);
+    assert_eq!(ranges(&list), ["A1"], "the fill is cut to the page too: no second page");
+    assert_eq!(offsets(&list), [None]);
+}
+
+#[test]
+fn wide_column_split_prints_one_page_however_wide_the_column_is() {
+    let mut s = s();
+    // 250 characters = 1755 px = 1316.25 pt, more than two printable widths.
+    s.execute("home.columnWidth", json!({"cols": "A:A", "chars": 250})).unwrap();
+    s.execute("cell.set", json!({"cell": "A1", "input": "x"})).unwrap();
+    let list = preview(&mut s);
+    assert_eq!(ranges(&list), ["A1"]);
+    assert_eq!(offsets(&list), [None]);
+}
+
+#[test]
+fn wide_column_split_pairs_the_cut_column_with_every_row_band() {
+    let mut s = wide_column();
+    let rows: Vec<Vec<Json>> = (1..=60).map(|i| vec![json!(i)]).collect();
+    s.execute("range.setValues", json!({"range": "A1", "values": rows})).unwrap();
+    // 45 rows of 15 pt per page; numbers never continue past the cut column.
+    let list = preview(&mut s);
+    assert_eq!(ranges(&list), ["A1:A45", "A46:A60"]);
+    assert_eq!(offsets(&list), [None, None]);
+}
+
+#[test]
+fn wide_column_split_continues_long_text_on_a_second_page() {
+    // Excel: 2 pages; page 2 shows the same line shifted left by the printable width.
+    let mut s = probe_sheet("A", 108.57);
+    s.execute("cell.set", json!({"cell": "A1", "input": words(30)})).unwrap();
+    let list = preview(&mut s);
+    assert_eq!(ranges(&list), ["A1", "A1"]);
     let offsets = offsets(&list);
-    assert_eq!(offsets[0], None, "the first piece has no columnOffset");
-    assert!(near(offsets[1], PRINTABLE_WIDTH), "the second piece starts one printable width into the column: {:?}", offsets[1]);
+    assert_eq!(offsets[0], None);
+    assert!(near(offsets[1], PROBE_PRINTABLE_WIDTH), "{:?}", offsets[1]);
     let r = s.execute("file.exportPdf", json!({})).unwrap();
     assert_eq!(r["pages"], 2);
 }
 
 #[test]
-fn wide_column_split_draws_the_rest_of_the_column_on_the_next_page() {
-    let mut s = wide_column();
-    s.execute("range.setValues", json!({"range": "A1", "values": [["HEAD"], ["TAIL"]]})).unwrap();
-    // Right-aligned text sits wholly in the part of the column past the first page.
-    s.execute("home.alignRight", json!({"range": "A2"})).unwrap();
-    let pages = pdf_pages(&mut s);
-    assert_eq!(pages.len(), 2);
-    let head = text_x(&pages[0], "HEAD").expect("HEAD is drawn on page 1");
-    assert!((LEFT_MARGIN..LEFT_MARGIN + 10.0).contains(&head), "HEAD at the left margin of page 1: {head}");
-    let tail = text_x(&pages[1], "TAIL").expect("TAIL is drawn on page 2");
-    assert!((LEFT_MARGIN..RIGHT_EDGE).contains(&tail), "TAIL inside page 2's printable area: {tail}");
-    // The column's rest is narrower than half a page, so the text is in page 2's left half.
-    assert!(tail < 306.0, "TAIL in the column's rest, shifted left by the printable width: {tail}");
+fn wide_column_split_stops_long_text_at_a_filled_neighbour() {
+    // Excel: 2 pages, A (the text clipped at the page edge) then B.
+    let mut s = probe_sheet("A", 108.57);
+    s.execute("cell.set", json!({"cell": "A1", "input": words(30)})).unwrap();
+    s.execute("cell.set", json!({"cell": "B1", "input": "2"})).unwrap();
+    let list = preview(&mut s);
+    assert_eq!(ranges(&list), ["A1", "B1"]);
+    assert_eq!(offsets(&list), [None, None]);
 }
 
 #[test]
-fn wide_column_split_makes_as_many_pieces_as_the_column_needs() {
-    let mut s = s();
-    // 250 characters = 1755 px = 1316.25 pt: three pieces of 511.2 pt.
-    s.execute("home.columnWidth", json!({"cols": "A:A", "chars": 250})).unwrap();
-    s.execute("cell.set", json!({"cell": "A1", "input": "x"})).unwrap();
-    let list = preview(&mut s);
-    assert_eq!(list.len(), 3);
-    let offsets = offsets(&list);
-    assert_eq!(offsets[0], None);
-    assert!(near(offsets[1], PRINTABLE_WIDTH), "{:?}", offsets[1]);
-    assert!(near(offsets[2], 2.0 * PRINTABLE_WIDTH), "{:?}", offsets[2]);
+fn wide_column_split_starts_the_next_columns_on_a_new_page() {
+    // Excel: A alone on page 1, B onwards from page 2, with a short number or a long text in A1.
+    for input in ["1".to_string(), words(30)] {
+        let mut s = probe_sheet("A", 108.57);
+        s.execute("cell.set", json!({"cell": "A1", "input": input})).unwrap();
+        numbers_b_to_l(&mut s);
+        let list = preview(&mut s);
+        let ranges = ranges(&list);
+        assert_eq!(ranges[0], "A1", "{ranges:?}");
+        assert!(ranges[1].starts_with("B1"), "B starts page 2: {ranges:?}");
+        assert!(ranges.iter().skip(1).all(|r| !r.starts_with("A1")), "A is on page 1 only: {ranges:?}");
+        assert!(offsets(&list).iter().all(Option::is_none), "no continuation pages: {:?}", offsets(&list));
+    }
 }
 
 #[test]
-fn wide_column_split_pairs_every_piece_with_every_row_band() {
-    let mut s = wide_column();
-    let rows: Vec<Vec<Json>> = (1..=60).map(|i| vec![json!(i)]).collect();
-    s.execute("range.setValues", json!({"range": "A1", "values": rows})).unwrap();
-    // 45 rows of 15 pt per page; down, then over.
+fn wide_column_split_continues_long_text_after_a_narrow_column() {
+    // Excel: 3 pages, A | B | the rest of B1's text.
+    let mut s = probe_sheet("B", 108.57);
+    s.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
+    s.execute("cell.set", json!({"cell": "B1", "input": words(30)})).unwrap();
     let list = preview(&mut s);
-    assert_eq!(ranges(&list), ["A1:A45", "A46:A60", "A1:A45", "A46:A60"]);
+    assert_eq!(ranges(&list), ["A1", "B1", "B1"]);
     let offsets = offsets(&list);
     assert_eq!(&offsets[..2], [None, None]);
-    assert!(near(offsets[2], PRINTABLE_WIDTH) && near(offsets[3], PRINTABLE_WIDTH), "{offsets:?}");
+    assert!(near(offsets[2], PROBE_PRINTABLE_WIDTH), "{:?}", offsets[2]);
 }
 
 #[test]
