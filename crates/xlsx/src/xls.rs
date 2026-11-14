@@ -1583,6 +1583,10 @@ fn read_row(c: &mut Cursor<'_, '_>, st: &mut SheetState<'_>) -> Result<(), IoErr
     let height = c.u16()?;
     c.skip(4)?;
     let flags = c.u32()?;
+    // A row without fUnsynced was never sized by the user: Excel re-fits it to its largest cell
+    // font when it opens the file, with no floor at the Normal font's default row height.
+    st.sheet.fit_auto_row_heights_in_print = true;
+    st.sheet.fit_print_rows_without_default_floor = true;
     // [MS-XLS] 2.4.221: miyRw MUST be 2..=8192 twips. Outside it (0, or 0x8000 in real
     // files) the record carries no height, so the row keeps the sheet default height (as
     // Excel opens it) instead of collapsing to 0.

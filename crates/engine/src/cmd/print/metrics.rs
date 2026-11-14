@@ -163,6 +163,11 @@ impl<'a> RowPitch<'a> {
     /// without `customHeight` covers, 18.3.1.81). A row with wrapped text, or with a font bigger
     /// than the Normal font whose default row is not known, keeps its stored height. Other sheets
     /// print the stored height.
+    ///
+    /// With `fit_print_rows_without_default_floor` (sheets read from `.xls`, whose ROW records
+    /// without fUnsynced Excel re-fits on open, [MS-XLS] 2.4.221) a non-custom row prints at the
+    /// largest default row height of its cell fonts with no lower bound; a row with no cells that
+    /// count keeps its stored height, else the sheet default.
     pub(crate) fn row_px(&self, r: u32) -> f32 {
         let sh = self.sh;
         if !sh.fit_auto_row_heights_in_print {
@@ -170,6 +175,12 @@ impl<'a> RowPitch<'a> {
         }
         if sh.is_row_hidden(r) {
             return 0.0;
+        }
+        if sh.fit_print_rows_without_default_floor {
+            if let Some(i) = sh.rows.get(&r).filter(|i| i.custom) {
+                return i.size.unwrap_or(sh.default_row_height);
+            }
+            return self.fitted_px_no_floor(r).unwrap_or_else(|| sh.row_height(r));
         }
         let default = if sh.default_row_custom_height == Some(true) { sh.default_row_height } else { self.default_px() };
         let stored = match sh.rows.get(&r) {
@@ -198,17 +209,41 @@ impl<'a> RowPitch<'a> {
             if !matters {
                 continue;
             }
-            // Like the screen autofit: a cell in a hidden or zero-width column, or inside a merged
-            // range of more than one cell, never fits its row.
-            if sh.cols.get(&c).is_some_and(|i| i.hidden || i.size.is_some_and(|w| w <= 0.0))
-                || sh.merges.iter().any(|m| !m.is_single() && m.contains(gridcraft_core::CellRef::new(r, c)))
-            {
+            if self.skipped(r, c) {
                 continue;
             }
             // A bigger font whose default row is not known: the row keeps its stored height.
             need = px? as f32;
         }
         Some(need)
+    }
+
+    /// The largest default row height among row `r`'s cell fonts, with no lower bound: `None` when
+    /// no cell counts, or when a counted cell wraps text or has a font whose default row height is
+    /// not known (the row then keeps its stored height).
+    fn fitted_px_no_floor(&self, r: u32) -> Option<f32> {
+        let sh = self.sh;
+        let mut need: Option<f32> = None;
+        for (c, cell) in sh.cells.row(r, 0, gridcraft_core::MAX_COLS - 1) {
+            if self.skipped(r, c) {
+                continue;
+            }
+            let st = self.wb.styles.get(cell.style);
+            if st.align.wrap {
+                return None;
+            }
+            let px = cell_font_px(&st.font.name, st.font.size)? as f32;
+            need = Some(need.map_or(px, |n| n.max(px)));
+        }
+        need
+    }
+
+    /// Like the screen autofit: a cell in a hidden or zero-width column, or inside a merged range of
+    /// more than one cell, never fits its row.
+    fn skipped(&self, r: u32, c: u32) -> bool {
+        let sh = self.sh;
+        sh.cols.get(&c).is_some_and(|i| i.hidden || i.size.is_some_and(|w| w <= 0.0))
+            || sh.merges.iter().any(|m| !m.is_single() && m.contains(gridcraft_core::CellRef::new(r, c)))
     }
 
     /// Printed dots, at the print scale, of a row `px` screen pixels tall.

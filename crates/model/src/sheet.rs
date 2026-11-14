@@ -145,6 +145,13 @@ pub struct Sheet {
     /// screen and for saving.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fit_auto_row_heights_in_print: bool,
+    /// With `fit_auto_row_heights_in_print`: a non-custom row with cells prints at its largest cell
+    /// font's default row height even below the Normal font's default (and below its stored height),
+    /// and a row without cells keeps its stored / the sheet default height. Set by the `.xls` reader
+    /// for worksheets with ROW records, whose rows without fUnsynced ([MS-XLS] 2.4.221) Excel re-fits
+    /// on open; the `.xlsx` reader leaves it off (its rows keep the Normal default as a floor).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fit_print_rows_without_default_floor: bool,
     pub merges: Vec<RangeRef>,
     /// The sheet's default phonetic (furigana) settings: ISO/IEC 29500-1 §18.4.3 `phoneticPr`
     /// as a child of the worksheet. `None` when the file had none.
@@ -333,6 +340,7 @@ impl Sheet {
             default_rows_hidden: None,
             default_row_custom_height: None,
             fit_auto_row_heights_in_print: false,
+            fit_print_rows_without_default_floor: false,
             merges: vec![],
             phonetic_props: None,
             freeze: None,
