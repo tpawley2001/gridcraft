@@ -47,6 +47,24 @@ const FONTS: &[(&str, f32, u32, u32)] = &[
 /// Calibri 11's pair, for fonts outside [`FONTS`].
 const FALLBACK: (u32, u32) = (20, 121);
 
+/// (font name, size in points, P = default row height in screen pixels) for fonts whose printed
+/// dots D are not measured, so they cannot go in [`FONTS`]. Only a cell font's P is needed: the
+/// row it fits still prints with the Normal font's pitch.
+const ROW_PX: &[(&str, f32, u32)] = &[
+    // A Calibri 11 sheet with cells in Calibri 20 prints 26 rows a page (35 or 36 px both give 26).
+    ("Calibri", 20.0, 35),
+    // Sheets whose Normal font is Trebuchet MS 11 store `defaultRowHeight="16.5"` (22 px).
+    ("Trebuchet MS", 11.0, 22),
+];
+
+/// The default row height in screen pixels of a cell font (P), from [`FONTS`] or [`ROW_PX`];
+/// `None` when neither lists it.
+fn cell_font_px(font_name: &str, font_size: f32) -> Option<u32> {
+    let name = font_name.trim();
+    let same = |n: &str, s: f32| n.eq_ignore_ascii_case(name) && (s - font_size).abs() < 0.01;
+    FONTS.iter().find(|(n, s, ..)| same(n, *s)).map(|&(_, _, p, _)| p).or_else(|| ROW_PX.iter().find(|(n, s, _)| same(n, *s)).map(|&(_, _, p)| p))
+}
+
 /// The Normal font's (P, D): default row height in screen pixels and its printed dots.
 fn font_pair(font_name: &str, font_size: f32) -> (u32, u32) {
     let name = font_name.trim();
@@ -120,9 +138,11 @@ impl<'a> RowPitch<'a> {
 
     /// Row `r`'s height in screen pixels for printing. A sheet read from an `.xlsx` file prints
     /// a row whose height is not custom (ECMA-376 Part 1, 18.3.1.73 `row@customHeight`) at the
-    /// height that fits its content, not at the stored height: a row of Normal-sized, unwrapped
-    /// text prints at the Normal font's default row (likewise the rows a `defaultRowHeight`
-    /// without `customHeight` covers, 18.3.1.81). Other sheets print the stored height.
+    /// height that fits its content, not at the stored height: the default row height of the
+    /// largest font in it, never below the sheet's default (likewise the rows a `defaultRowHeight`
+    /// without `customHeight` covers, 18.3.1.81). A row with wrapped text, or with a font bigger
+    /// than the Normal font whose default row is not known, keeps its stored height. Other sheets
+    /// print the stored height.
     pub(crate) fn row_px(&self, r: u32) -> f32 {
         let sh = self.sh;
         if !sh.fit_auto_row_heights_in_print {
@@ -132,19 +152,43 @@ impl<'a> RowPitch<'a> {
             return 0.0;
         }
         let default = if sh.default_row_custom_height == Some(true) { sh.default_row_height } else { self.default_px() };
-        match sh.rows.get(&r) {
-            Some(i) if i.custom => i.size.unwrap_or(default),
-            Some(gridcraft_model::LineInfo { size: Some(h), .. }) if !self.plain_row(r) => *h,
-            _ => default,
-        }
+        let stored = match sh.rows.get(&r) {
+            Some(i) if i.custom => return i.size.unwrap_or(default),
+            Some(i) => i.size,
+            None => None,
+        };
+        self.fitted_px(r, default).unwrap_or_else(|| stored.unwrap_or(default))
     }
 
-    /// Every cell of row `r` is in a font no bigger than the Normal font and does not wrap.
-    fn plain_row(&self, r: u32) -> bool {
-        self.sh.cells.row(r, 0, gridcraft_core::MAX_COLS - 1).all(|(_, cell)| {
+    /// The height row `r` fits its fonts to, at least `default`: `None` when the row wraps text or
+    /// holds a font bigger than the Normal font whose default row height is not known.
+    fn fitted_px(&self, r: u32, default: f32) -> Option<f32> {
+        let sh = self.sh;
+        let mut need = default;
+        for (c, cell) in sh.cells.row(r, 0, gridcraft_core::MAX_COLS - 1) {
             let st = self.wb.styles.get(cell.style);
-            st.font.size <= self.normal_size + 0.01 && !st.align.wrap
-        })
+            if st.align.wrap {
+                return None;
+            }
+            let px = cell_font_px(&st.font.name, st.font.size);
+            let matters = match px {
+                Some(p) => p as f32 > need,
+                None => st.font.size > self.normal_size + 0.01,
+            };
+            if !matters {
+                continue;
+            }
+            // Like the screen autofit: a cell in a hidden or zero-width column, or inside a merged
+            // range of more than one cell, never fits its row.
+            if sh.cols.get(&c).is_some_and(|i| i.hidden || i.size.is_some_and(|w| w <= 0.0))
+                || sh.merges.iter().any(|m| !m.is_single() && m.contains(gridcraft_core::CellRef::new(r, c)))
+            {
+                continue;
+            }
+            // A bigger font whose default row is not known: the row keeps its stored height.
+            need = px? as f32;
+        }
+        Some(need)
     }
 
     /// Printed dots, at the print scale, of a row `px` screen pixels tall.
