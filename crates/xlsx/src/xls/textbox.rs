@@ -67,6 +67,39 @@ pub(super) fn read(parts: &[&[u8]], report: &mut ReadReport) -> Option<Text> {
     Some(Text { text, font, align: align(flags), anchor: anchor(flags), rotation: rot })
 }
 
+/// The part and byte after the declared characters and formatting runs. Character parts
+/// each have a compression flag; run bytes have none ([MS-XLS] 2.4.329). This only locates
+/// trailing drawing data and does not decode or repair text.
+pub(super) fn text_end(parts: &[&[u8]]) -> Option<(usize, usize)> {
+    let head = parts.first()?;
+    let mut characters = usize::from(u16_at(head, 10)?);
+    let mut runs = usize::from(u16_at(head, 12)?);
+    for (index, part) in parts.iter().enumerate().skip(1) {
+        let mut used = 0;
+        if characters != 0 {
+            let (&flag, body) = part.split_first()?;
+            let width = if flag & 1 != 0 { 2 } else { 1 };
+            let count = characters.min(body.len() / width);
+            characters -= count;
+            used = 1 + count * width;
+            if characters != 0 {
+                // A partial character cannot establish a reliable drawing boundary.
+                if used != part.len() || count == 0 {
+                    return None;
+                }
+                continue;
+            }
+        }
+        let count = runs.min(part.len().saturating_sub(used));
+        runs -= count;
+        used += count;
+        if runs == 0 {
+            return Some((index, used));
+        }
+    }
+    None
+}
+
 /// The horizontal alignment in the TxO's first flags word.
 fn align(flags: u16) -> Option<ShapeTextAlign> {
     match (flags >> 1) & 0x7 {
@@ -148,6 +181,35 @@ mod tests {
 
     fn text(parts: &[&[u8]], cch: usize) -> (String, bool) {
         chars(parts, cch)
+    }
+
+    #[test]
+    fn drawing_boundary_counts_characters_and_split_runs() {
+        let mut head = [0u8; 18];
+        head[10..12].copy_from_slice(&4u16.to_le_bytes());
+        head[12..14].copy_from_slice(&16u16.to_le_bytes());
+        let parts: [&[u8]; 6] = [&head, &[0, b'a', b'b'], &[1, b'c', 0, b'd', 0], &[0; 3], &[0; 13], &[15, 0, 4, 240]];
+        assert_eq!(text_end(&parts), Some((4, 13)));
+    }
+
+    #[test]
+    fn drawing_boundary_can_be_inside_a_part() {
+        let mut head = [0u8; 18];
+        head[10..12].copy_from_slice(&2u16.to_le_bytes());
+        head[12..14].copy_from_slice(&16u16.to_le_bytes());
+        let mut part = vec![0, b'h', b'i'];
+        part.extend([0; 16]);
+        part.extend([15, 0, 4, 240]);
+        assert_eq!(text_end(&[&head, &part]), Some((1, 19)));
+    }
+
+    #[test]
+    fn truncated_text_or_runs_have_no_drawing_boundary() {
+        let mut head = [0u8; 18];
+        head[10..12].copy_from_slice(&2u16.to_le_bytes());
+        head[12..14].copy_from_slice(&16u16.to_le_bytes());
+        assert_eq!(text_end(&[&head, &[1, b'a']]), None);
+        assert_eq!(text_end(&[&head, &[0, b'h', b'i'], &[0; 15]]), None);
     }
 
     #[test]

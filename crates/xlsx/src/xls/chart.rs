@@ -642,7 +642,11 @@ impl Embedded {
     /// shape's text-box client data comes between its Obj and its TxO. A group's own shape, or a
     /// grouped shape that can't be placed, leaves no anchor for its Obj.
     pub(super) fn drawing(&mut self, rec: &Record<'_>) {
-        if let Some(found) = self.art.record(&rec.parts.concat()) {
+        self.drawing_data(&rec.parts.concat());
+    }
+
+    fn drawing_data(&mut self, data: &[u8]) {
+        if let Some(found) = self.art.record(data) {
             self.flush_shape();
             self.anchor = match found {
                 Found::Shape(Some(place), props) => Some((place, props)),
@@ -876,7 +880,22 @@ impl Embedded {
     /// A TxO record: the text of the text box, drawn shape or button whose Obj record came before
     /// it. A TxO without one is another form control's, which isn't imported.
     pub(super) fn txo(&mut self, rec: &Record<'_>, report: &mut ReadReport) {
-        let text = textbox::read(&rec.parts, report);
+        let continued = (|| {
+            let (index, used) = textbox::text_end(&rec.parts)?;
+            let part = rec.parts.get(index)?;
+            let mut trailing = vec![part.get(used..)?];
+            trailing.extend_from_slice(rec.parts.get(index.checked_add(1)?..)?);
+            let data = trailing.concat();
+            // Only shape/group containers can begin drawing data after TxO runs. Other
+            // surplus bytes remain ignored, rather than changing drawing-stream state.
+            if u16_at(&data, 0)? & 0xF != 0xF || !matches!(u16_at(&data, 2)?, SPGR_CONTAINER | SP_CONTAINER) || data.len() < 8 {
+                return None;
+            }
+            let mut text_parts = rec.parts.get(..index)?.to_vec();
+            text_parts.push(part.get(..used)?);
+            Some((text_parts, data))
+        })();
+        let text = textbox::read(continued.as_ref().map_or(rec.parts.as_slice(), |(parts, _)| parts.as_slice()), report);
         if let Some(PendingTextBox { anchor, props }) = self.pending_text.take() {
             if let Some(text) = text {
                 self.text_boxes.push((anchor, props, text));
@@ -893,6 +912,9 @@ impl Embedded {
                 button.control.text = text.map_or(String::new(), |t| t.text);
             }
             self.buttons.push(button);
+        }
+        if let Some((_, data)) = continued {
+            self.drawing_data(&data);
         }
     }
 
