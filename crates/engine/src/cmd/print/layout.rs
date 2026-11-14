@@ -96,9 +96,21 @@ pub struct SheetLayout {
     /// The page is a chart sheet's (an index into [`Workbook::chart_sheets`]): one page holding
     /// its chart scaled to the printable area. `sheet` is then the worksheet before it.
     pub chart_sheet: Option<usize>,
+    /// The pages are a macro sheet's (an index into [`Workbook::macro_sheets`]), laid out like a
+    /// worksheet's. `sheet` is then the worksheet before it; read the printed sheet through
+    /// [`SheetLayout::sheet_in`].
+    pub macro_sheet: Option<usize>,
 }
 
 impl SheetLayout {
+    /// The sheet whose cells these pages print: the macro sheet's detached sheet for a macro
+    /// sheet's layout, otherwise the workbook's sheet `sheet`.
+    pub(crate) fn sheet_in<'a>(&self, wb: &'a Workbook) -> Option<&'a Sheet> {
+        match self.macro_sheet {
+            Some(mi) => wb.macro_sheets.get(mi).map(|m| &m.sheet),
+            None => wb.sheet(self.sheet),
+        }
+    }
     pub(super) fn k(&self) -> f32 {
         PX_TO_PT * self.scale
     }
@@ -439,12 +451,25 @@ fn layout_chart_sheet(wb: &Workbook, ci: usize) -> Option<SheetLayout> {
         manual_row_breaks: false,
         manual_col_breaks: false,
         chart_sheet: Some(ci),
+        macro_sheet: None,
     })
 }
 
 /// Paginates one sheet.
 pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_override: Option<RangeRef>) -> Option<SheetLayout> {
-    let sh = wb.sheet(si)?;
+    layout_of(wb, wb.sheet(si)?, (si, None), opts, range_override)
+}
+
+/// Paginates a visible macro sheet's used range over its own page setup, like a worksheet's.
+fn layout_macro_sheet(wb: &Workbook, mi: usize, opts: &PrintOptions) -> Option<SheetLayout> {
+    let ms = wb.macro_sheets.get(mi)?;
+    let si = ms.before.min(wb.sheets.len().saturating_sub(1));
+    layout_of(wb, &ms.sheet, (si, Some(mi)), opts, None)
+}
+
+/// Paginates `sh`: the workbook's sheet `si`, or macro sheet `mi` when `at` is `(si, Some(mi))`.
+fn layout_of(wb: &Workbook, sh: &Sheet, at: (usize, Option<usize>), opts: &PrintOptions, range_override: Option<RangeRef>) -> Option<SheetLayout> {
+    let (si, macro_sheet) = at;
     let st = sh.print.clone();
     let (pw, ph, margins) = page_geometry(&st);
     let area = match range_override {
@@ -487,6 +512,7 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
         manual_row_breaks: fit.is_none_or(|(_, h)| h == 0),
         manual_col_breaks: fit.is_none_or(|(w, _)| w == 0),
         chart_sheet: None,
+        macro_sheet,
     };
     // Without a print area the pages below and to the right of everything on the sheet are left
     // out (Excel prints each band of columns down to its last cell); a print area prints its grid.
@@ -709,32 +735,64 @@ pub(crate) fn split_bands(wb: &Workbook, sh: &Sheet, lay: &SheetLayout, cap: usi
     (rows, cols)
 }
 
+/// A tab printing covers.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Tab {
+    /// A macro sheet (an index into [`Workbook::macro_sheets`]).
+    Macro(usize),
+    /// A chart sheet (an index into [`Workbook::chart_sheets`]).
+    Chart(usize),
+    /// A worksheet (an index into [`Workbook::sheets`]).
+    Sheet(usize),
+}
+
+/// The visible chart and macro sheets in tab order, each with the number of worksheets before it
+/// (at most `n`, the worksheet count: past the end means last).
+fn other_tabs(wb: &Workbook, n: usize) -> Vec<(usize, Tab)> {
+    // Sort key: (worksheets before, chart sheets before, macro before chart, index). A macro sheet
+    // with `k` chart sheets before it sits just before chart sheet `k`.
+    let charts = wb
+        .chart_sheets
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.visibility == Visibility::Visible)
+        .map(|(ci, c)| ((c.before.min(n), ci, 1), Tab::Chart(ci)));
+    let macros = wb
+        .macro_sheets
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.visibility == Visibility::Visible)
+        .map(|(mi, m)| ((m.before.min(n), m.charts_before, 0), Tab::Macro(mi)));
+    let mut all: Vec<((usize, usize, u8), Tab)> = charts.chain(macros).collect();
+    all.sort();
+    all.into_iter().map(|((before, ..), tab)| (before, tab)).collect()
+}
+
 /// Lays out every sheet a print command covers. Printing the whole workbook also prints each
-/// visible chart sheet as one page, in tab order.
+/// visible chart sheet as one page and each visible macro sheet like a worksheet, in tab order.
 pub fn layouts(wb: &Workbook, opts: &PrintOptions) -> Vec<SheetLayout> {
     let mut out = Vec::new();
     let mut pages = 0usize;
-    // Tabs in order: `Ok(sheet)` for a worksheet, `Err(chart sheet)` for a chart sheet.
-    let mut tabs: Vec<std::result::Result<usize, usize>> = Vec::new();
+    let mut tabs: Vec<Tab> = Vec::new();
     if opts.all_sheets {
         let n = wb.sheets.len();
+        let others = other_tabs(wb, n);
         for i in 0..=n {
-            // A chart sheet sits before the worksheet `before` counts up to; past the end, last.
-            let charts = wb.chart_sheets.iter().enumerate().filter(|(_, c)| c.visibility == Visibility::Visible);
-            tabs.extend(charts.filter(|(_, c)| if i == n { c.before >= n } else { c.before == i }).map(|(ci, _)| Err(ci)));
+            // A chart or macro sheet sits before the worksheet `before` counts up to.
+            tabs.extend(others.iter().filter(|(before, _)| *before == i).map(|(_, tab)| *tab));
             if wb.sheet(i).is_some_and(|s| s.visibility == Visibility::Visible) {
-                tabs.push(Ok(i));
+                tabs.push(Tab::Sheet(i));
             }
         }
     } else {
-        tabs.push(Ok(wb.active_sheet()));
+        tabs.push(Tab::Sheet(wb.active_sheet()));
     }
     for tab in tabs {
         if pages >= MAX_PAGES {
             break;
         }
         let lay = match tab {
-            Ok(si) => {
+            Tab::Sheet(si) => {
                 let ovr = if si == wb.active_sheet() { opts.range } else { None };
                 if ovr.is_some() {
                     layout_sheet(wb, si, opts, ovr).into_iter().collect()
@@ -746,7 +804,12 @@ pub fn layouts(wb: &Workbook, opts: &PrintOptions) -> Vec<SheetLayout> {
                     sheet_layouts(wb, si, opts, &ranges)
                 }
             }
-            Err(ci) => layout_chart_sheet(wb, ci).into_iter().collect(),
+            Tab::Chart(ci) => layout_chart_sheet(wb, ci).into_iter().collect(),
+            // A macro sheet without cells prints nothing, like an empty worksheet.
+            Tab::Macro(mi) => match wb.macro_sheets.get(mi) {
+                Some(m) if !print_ranges(&m.sheet).is_empty() => layout_macro_sheet(wb, mi, opts).into_iter().collect(),
+                _ => continue,
+            },
         };
         for mut l in lay {
             if pages >= MAX_PAGES {

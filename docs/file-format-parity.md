@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-14 · **Change:** minor (G0384: BIFF5/BIFF8 `.xls` worksheets without DefaultRowHeight use the measured Normal-font default height; unknown fonts and explicit records keep their existing behavior. Earlier: G0376: `.xls` picture objects whose image is not imported keep their place for printing; earlier: G0372: printing and PDF export print every page of a long workbook, up to a 200,000-page guard, instead of stopping at 2,000; earlier: G0364: Dell Data Protection package-root parts kept on XLSX save)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-14 · **Change:** minor (G0385: Excel 4.0 macro sheets read from `.xlsx`/`.xlsm`/`.xlsb`/`.xls` print in their tab place when printing the entire workbook; earlier: G0376: `.xls` picture objects whose image is not imported keep their place for printing; earlier: G0372: printing and PDF export print every page of a long workbook, up to a 200,000-page guard, instead of stopping at 2,000)
 
 
 Legacy VML captions accept HTML-style `br` line breaks, preserving buttons, macro assignments and shown notes through open + save (`vml_html_br_tests.rs`).
@@ -230,6 +230,7 @@ Wrong checksums. In an intact `.xlsx`, `.xlsm`, `.xlsb` or `.ods` package, a par
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-14 | minor | G0385: Excel 4.0 macro sheets (`.xlsx`/`.xlsm` `xlMacrosheet`/`xlIntlMacrosheet` parts, `.xlsb`, `.xls` BoundSheet8 `dt = 1`) keep a print-only copy of their cells, layout, page setup and show-formulas flag (`Workbook::macro_sheets`), so printing the entire workbook prints each visible one in its tab place, with its formula text; the kept parts are saved unchanged |
 | 2026-11-14 | minor | G0384: BIFF5/BIFF8 `.xls` worksheets without DefaultRowHeight use the measured Normal-font default height; unknown fonts and explicit records keep their existing behavior. |
 | 2026-11-14 | minor | G0383: `.xls` Normal uses FONT record 0 even when its style XF names another font; cell XFs keep their own fonts. The shared BIFF5/BIFF8 path applies the same rule (BIFF5 behaviour unverified in Excel). |
 | 2026-11-12 | minor | G0376: `.xls` a picture object whose image is not imported (an embedded object's EMF/WMF preview, an ActiveX control, a blip missing from the store, a BIFF5 picture that isn't a bitmap) keeps its place as an embedded object, so the sheet prints as far as it reaches, as Excel prints; nothing is drawn or saved for it |

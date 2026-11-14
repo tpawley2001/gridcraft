@@ -230,7 +230,7 @@ const REWRITTEN: &[&str] = &[
 /// sheets: chart sheets, Excel 5 dialog sheets and Excel 4.0 macro sheets. None is modelled.
 pub const KEPT_SHEET_KINDS: &[&str] = &["chartsheet", "dialogsheet", "xlMacrosheet", "xlIntlMacrosheet"];
 /// The kept sheet kinds that are macros: written only into macro-enabled packages.
-const MACRO_SHEET_KINDS: &[&str] = &["xlMacrosheet", "xlIntlMacrosheet"];
+pub(crate) const MACRO_SHEET_KINDS: &[&str] = &["xlMacrosheet", "xlIntlMacrosheet"];
 
 /// Relationship kinds a kept sheet reaches that are otherwise rewritten: its drawing, chart and
 /// their style, colour and shape parts, and the VML of its controls and notes, are kept byte for

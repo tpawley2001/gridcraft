@@ -220,3 +220,26 @@ fn xls_macro_command_dialog_form_gets_a_question_mark() {
     let (xml, _) = command_macro_xml();
     assert!(xml.contains("<c r=\"A4\"><f>SAVE.AS?()</f>"), "{xml}");
 }
+
+#[test]
+fn xls_macro_sheet_gets_a_print_copy_in_its_tab_place() {
+    // WINDOW2 with fDspFmla (bit 0) set, as Excel writes it for macro sheets.
+    let window2 = rec(0x023E, &cat(&[&u16s(&[0x06B7, 0, 0]), &64u32.to_le_bytes(), &u16s(&[0, 0]), &[0; 4]]));
+    let (wb, _) = read_xls(&book(&cat(&[&returning_macro(), &window2]), false)).unwrap();
+    assert_eq!(wb.sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Data", "Last"]);
+    assert_eq!(wb.macro_sheets.len(), 1);
+    let ms = &wb.macro_sheets[0];
+    assert_eq!((ms.name.as_str(), ms.visibility, ms.before, ms.charts_before), ("Macro1", Visibility::Hidden, 1, 0));
+    assert_eq!(ms.sheet.name, "Macro1");
+    assert!(ms.sheet.show_formulas);
+    let at = |a1: &str| gridcraft_core::CellRef::parse(a1).unwrap();
+    assert_eq!(ms.sheet.value(at("A1")), Value::Number(1.0));
+    assert_eq!(ms.sheet.cell(at("A2")).and_then(|c| c.formula.as_ref()).map(|f| f.text.as_str()), Some("RETURN()"));
+}
+
+#[test]
+fn xls_macro_sheet_without_window2_does_not_show_formulas() {
+    let (wb, _) = read_xls(&book(&returning_macro(), false)).unwrap();
+    assert_eq!(wb.macro_sheets.len(), 1);
+    assert!(!wb.macro_sheets[0].sheet.show_formulas);
+}

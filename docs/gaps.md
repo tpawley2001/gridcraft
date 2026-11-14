@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-14 · **Change:** minor (G0384: BIFF5/BIFF8 `.xls` worksheets without DefaultRowHeight use the measured Normal-font default height; unknown fonts and explicit records keep their existing behavior. Earlier: G0372: a long workbook prints all its pages, not only the first 2,000; earlier: G0300: §17: snip-and-round rectangle, left-right ribbon and multidocument flowchart presets draw and print their own outline; earlier: G0271: printing with Fit To an automatic page count on one axis (such as 1 page wide by automatic tall) still splits pages at that axis' manual page breaks, like Excel)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-14 · **Change:** minor (G0385: visible Excel 4.0 macro sheets print in their tab place when printing the entire workbook; earlier: G0372: a long workbook prints all its pages, not only the first 2,000; earlier: G0300: §17: snip-and-round rectangle, left-right ribbon and multidocument flowchart presets draw and print their own outline)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -273,6 +273,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-14 | minor | G0385: §14: printing the entire workbook prints each visible Excel 4.0 macro sheet like a worksheet, in its tab place, showing its formulas as its view does; hidden and empty macro sheets print nothing |
 | 2026-11-14 | minor | G0384: BIFF5/BIFF8 `.xls` worksheets without DefaultRowHeight use the measured Normal-font default height; unknown fonts and explicit records keep their existing behavior. |
 | 2026-11-14 | minor | G0383: `.xls` Normal uses FONT record 0 even when its style XF names another font; cell XFs keep their own fonts. The shared BIFF5/BIFF8 path applies the same rule (BIFF5 behaviour unverified in Excel). |
 | 2026-11-12 | minor | G0372: §14: printing and PDF export print every page of a long workbook instead of stopping silently at page 2,000; a 200,000-page guard remains against hostile page setups. |
