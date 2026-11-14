@@ -631,6 +631,12 @@ mod empty_pages_tests;
 #[cfg(test)]
 mod fit_manual_breaks_tests;
 #[cfg(test)]
+mod format_only_cells_more_tests;
+#[cfg(test)]
+mod format_only_cells_tests;
+#[cfg(test)]
+mod format_only_merges_tests;
+#[cfg(test)]
 mod indent_width_tests;
 #[cfg(test)]
 mod macro_sheet_print_tests;
