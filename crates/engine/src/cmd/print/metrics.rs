@@ -89,6 +89,11 @@ fn script_extra_px(_font_size: f32) -> f32 {
 /// and add nothing.
 const THICK_BOTTOM_EXTRA_PX: f32 = 1.0;
 
+/// Pixels a thick top border (`row@thickTop`) adds to a fitted `.xlsx` row. Measured for
+/// Trebuchet MS 11 (22 -> 23 px, 16.5 -> 17.25 pt); with a thick bottom border too the row is
+/// 24 px (18 pt): the two add up.
+const THICK_TOP_EXTRA_PX: f32 = 1.0;
+
 /// The default row height in screen pixels of a cell font (P), from [`FONTS`] or [`ROW_PX`];
 /// `None` when neither lists it.
 pub(crate) fn cell_font_px(font_name: &str, font_size: f32) -> Option<u32> {
@@ -209,12 +214,14 @@ impl<'a> RowPitch<'a> {
     ///
     /// A counted cell whose font is superscript or subscript, or whose string has such a run, needs
     /// its font's default row plus [`script_extra_px`]; a counted cell with a thick bottom border
-    /// adds [`THICK_BOTTOM_EXTRA_PX`] once to the row's plain font need. The larger need wins.
+    /// adds [`THICK_BOTTOM_EXTRA_PX`] once to the row's plain font need, and one with a thick top
+    /// border adds [`THICK_TOP_EXTRA_PX`] once (the two add up). The larger need wins.
     fn fitted_px(&self, r: u32, default: f32) -> Option<f32> {
         let sh = self.sh;
         let mut need = default;
         let mut script_need = 0.0f32;
         let mut thick_bottom = false;
+        let mut thick_top = false;
         for (c, cell) in sh.cells.row(r, 0, gridcraft_core::MAX_COLS - 1) {
             let st = self.wb.styles.get(cell.style);
             if st.align.wrap {
@@ -222,7 +229,9 @@ impl<'a> RowPitch<'a> {
             }
             let script = st.font.vert != gridcraft_model::VertAlign::Baseline
                 || (!sh.script_run_cells.is_empty() && sh.script_run_cells.contains(&gridcraft_core::CellRef::new(r, c)));
-            let thick = st.borders.bottom.style == gridcraft_model::BorderStyle::Thick;
+            let thick_bot_cell = st.borders.bottom.style == gridcraft_model::BorderStyle::Thick;
+            let thick_top_cell = st.borders.top.style == gridcraft_model::BorderStyle::Thick;
+            let thick = thick_bot_cell || thick_top_cell;
             let px = cell_font_px(&st.font.name, st.font.size);
             let matters = match px {
                 Some(p) => p as f32 > need || script || thick,
@@ -240,9 +249,16 @@ impl<'a> RowPitch<'a> {
             if script {
                 script_need = script_need.max(p + script_extra_px(st.font.size));
             }
-            thick_bottom |= thick;
+            thick_bottom |= thick_bot_cell;
+            thick_top |= thick_top_cell;
         }
-        let plain = if thick_bottom { need + THICK_BOTTOM_EXTRA_PX } else { need };
+        let mut plain = need;
+        if thick_bottom {
+            plain += THICK_BOTTOM_EXTRA_PX;
+        }
+        if thick_top {
+            plain += THICK_TOP_EXTRA_PX;
+        }
         Some(plain.max(script_need))
     }
 

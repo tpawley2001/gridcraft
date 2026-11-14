@@ -633,6 +633,8 @@ mod fit_manual_breaks_tests;
 #[cfg(test)]
 mod fit_sup_border_tests;
 #[cfg(test)]
+mod fit_thick_top_tests;
+#[cfg(test)]
 mod format_only_cells_more_tests;
 #[cfg(test)]
 mod format_only_cells_tests;
