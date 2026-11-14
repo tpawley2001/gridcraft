@@ -645,3 +645,5 @@ mod shape_shadow_tests;
 mod tests;
 #[cfg(test)]
 mod wide_column_split_tests;
+#[cfg(test)]
+mod xls_row_refit_tests;
