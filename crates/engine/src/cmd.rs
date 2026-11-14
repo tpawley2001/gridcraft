@@ -968,6 +968,9 @@ impl Ctx<'_> {
 }
 
 #[cfg(test)]
+mod row_fit_font_tests;
+
+#[cfg(test)]
 mod merge_sweep_tests {
     use super::*;
 
