@@ -145,9 +145,11 @@ pub struct Sheet {
     /// screen and for saving.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fit_auto_row_heights_in_print: bool,
-    /// With `fit_auto_row_heights_in_print`: a row with cells fits its largest cell font even below
-    /// the Normal font's default, and a row without cells keeps its stored / the sheet default height
-    /// (legacy .xls ROW records without fUnsynced, [MS-XLS] 2.4.221). Stub: P04-060 implements it.
+    /// With `fit_auto_row_heights_in_print`: a non-custom row with cells prints at its largest cell
+    /// font's default row height even below the Normal font's default (and below its stored height),
+    /// and a row without cells keeps its stored / the sheet default height. Set by the `.xls` reader
+    /// for worksheets with ROW records, whose rows without fUnsynced ([MS-XLS] 2.4.221) Excel re-fits
+    /// on open; the `.xlsx` reader leaves it off (its rows keep the Normal default as a floor).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fit_print_rows_without_default_floor: bool,
     pub merges: Vec<RangeRef>,
