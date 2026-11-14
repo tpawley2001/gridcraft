@@ -166,9 +166,9 @@ impl<'a> RowPitch<'a> {
     ///
     /// With `fit_print_rows_without_default_floor` (sheets read from `.xls`, whose ROW records
     /// without fUnsynced Excel re-fits on open, [MS-XLS] 2.4.221) a non-custom row prints at the
-    /// largest default row height of its cell fonts, and of the column formats on its columns without
-    /// a cell, with no lower bound; a row with no cells that count keeps its stored height, else the
-    /// sheet default.
+    /// largest default row height of its cell fonts, and of the format its empty cells show (the row's
+    /// own format, else the column formats on its columns without a cell), with no lower bound; a row
+    /// with no cells that count keeps its stored height, else the sheet default.
     pub(crate) fn row_px(&self, r: u32) -> f32 {
         let sh = self.sh;
         if !sh.fit_auto_row_heights_in_print {
@@ -223,9 +223,10 @@ impl<'a> RowPitch<'a> {
     /// no cell counts, or when a counted cell wraps text or has a font whose default row height is
     /// not known (the row then keeps its stored height).
     ///
-    /// When the row has cells, the font of every column format (COLINFO ixfe, [MS-XLS] 2.4.53) on a
-    /// column with no cell in the row counts too: that empty cell shows the column's format. An
-    /// unknown font there also keeps the stored height; wrap on a column format is ignored (no text).
+    /// When a cell in the row counts, the empty cells of the row count too, through the format they
+    /// show: the row's own format when it has one (ROW fGhostDirty + ixfe, [MS-XLS] 2.4.221), else the
+    /// column format (COLINFO ixfe, [MS-XLS] 2.4.53) of each formatted column with no cell in the row.
+    /// An unknown font there also keeps the stored height; wrap on a format is ignored (no text).
     fn fitted_px_no_floor(&self, r: u32) -> Option<f32> {
         let sh = self.sh;
         let mut need: Option<f32> = None;
@@ -242,21 +243,27 @@ impl<'a> RowPitch<'a> {
             let px = cell_font_px(&st.font.name, st.font.size)? as f32;
             need = Some(need.map_or(px, |n| n.max(px)));
         }
-        // A row with no cells keeps its stored height: empty rows are not fitted.
-        if cell_cols.is_empty() {
-            return need;
+        // A row where no cell counts (none at all, or only cells inside merges) keeps its stored height.
+        let cells_need = need?;
+        let font_px = |id: gridcraft_model::StyleId| {
+            let font = &self.wb.styles.get(id).font;
+            cell_font_px(&font.name, font.size).map(|p| p as f32)
+        };
+        if let Some(id) = sh.rows.get(&r).and_then(|i| i.style) {
+            // The row's own format, not the column formats, is what its empty cells show.
+            let has_empty = cell_cols.len() < gridcraft_core::MAX_COLS as usize;
+            return Some(if has_empty { cells_need.max(font_px(id)?) } else { cells_need });
         }
         cell_cols.sort_unstable();
+        let mut need = cells_need;
         for (&c, info) in &sh.cols {
             let Some(id) = info.style else { continue };
             if cell_cols.binary_search(&c).is_ok() || self.skipped(r, c) {
                 continue;
             }
-            let font = &self.wb.styles.get(id).font;
-            let px = cell_font_px(&font.name, font.size)? as f32;
-            need = Some(need.map_or(px, |n| n.max(px)));
+            need = need.max(font_px(id)?);
         }
-        need
+        Some(need)
     }
 
     /// Like the screen autofit: a cell in a hidden or zero-width column, or inside a merged range of
