@@ -715,23 +715,20 @@ pub(super) fn ext_ignored(r: &StyleRecords) -> bool {
     r.bad_ext || r.exts.keys().any(|i| usize::from(*i) >= r.xfs.len())
 }
 
-/// Imports the formatting: sets the workbook's default (Normal) font and named cell styles, and
-/// returns the model style of every XF in file order.
-/// The Normal style's font (name, size in points): the font of the XF the built-in Normal
-/// style names, else of XF 0, else the first font.
+/// The Normal style's font (name, size in points) is FONT record 0, regardless of the font
+/// index in the Normal style's XF. Excel rewrites XF 0's font index to 0 when saving.
+/// No FONT records means no Normal font is supplied.
 pub(super) fn normal_font(r: &StyleRecords) -> Option<(String, f32)> {
-    let normal_xf = r.styles.iter().find(|s| s.builtin == Some(0)).map_or(0, |s| usize::from(s.ixf));
-    let font = r.xfs.get(normal_xf).map(|xf| xf_font(xf.ifnt, &r.fonts)).or_else(|| r.fonts.first().cloned())?;
-    Some((font.name, font.size))
+    r.fonts.first().map(|font| (font.name.clone(), font.size))
 }
 
+/// Imports the formatting: sets the workbook's default (Normal) font and named cell styles, and
+/// returns the model style of every XF in file order.
 pub(super) fn build(r: &StyleRecords, formats: &HashMap<u16, String>, wb: &mut Workbook) -> Vec<StyleId> {
     let table = r.color_table();
     let fonts: Vec<Font> = r.fonts.iter().zip(r.font_colors.iter()).map(|(f, icv)| Font { color: color(*icv, &table), ..f.clone() }).collect();
-    // The Normal style's font is what every unformatted cell shows.
-    let normal_xf = r.styles.iter().find(|s| s.builtin == Some(0)).map_or(0, |s| usize::from(s.ixf));
-    let normal_font = r.xfs.get(normal_xf).map(|xf| xf_font(xf.ifnt, &fonts)).or_else(|| fonts.first().cloned());
-    if let Some(font) = normal_font {
+    // Normal uses FONT record 0; each cell XF below still uses its own font index.
+    if let Some(font) = fonts.first().cloned() {
         wb.styles = StyleTable::with_default(Style { font, ..Style::default() });
     }
     let out = r.xfs.iter().enumerate().map(|(i, xf)| wb.styles.intern(xf_style(xf, ext_of(r, i), &fonts, formats, &table))).collect();
