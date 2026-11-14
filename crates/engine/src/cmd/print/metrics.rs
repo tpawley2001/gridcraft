@@ -185,10 +185,8 @@ impl<'a> RowPitch<'a> {
             {
                 continue;
             }
-            match px {
-                Some(p) => need = p as f32,
-                None => return None,
-            }
+            // A bigger font whose default row is not known: the row keeps its stored height.
+            need = px? as f32;
         }
         Some(need)
     }
