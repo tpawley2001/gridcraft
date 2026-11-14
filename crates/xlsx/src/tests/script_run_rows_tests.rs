@@ -36,3 +36,19 @@ fn superscript_and_subscript_runs_are_recorded_per_cell() {
     assert_eq!(got, [at("A2"), at("A4")]);
     assert_eq!(s.value(at("A2")), gridcraft_core::Value::text("m2"));
 }
+
+#[test]
+fn script_run_fonts_are_recorded_per_cell() {
+    use gridcraft_model::ScriptRunFont;
+    let body = r#"<sheetFormatPr defaultRowHeight="12.75"/><sheetData>
+      <row r="1"><c r="A1" t="s"><v>1</v></c></row>
+      <row r="2"><c r="A2" t="inlineStr"><is><r><t>H</t></r><r><rPr><vertAlign val="superscript"/><sz val="14"/><rFont val="Arial"/></rPr><t>1</t></r><r><rPr><vertAlign val="subscript"/><sz val="-3"/></rPr><t>2</t></r></is></c></row>
+    </sheetData>"#;
+    let bytes = minimal(body, &[("xl/styles.xml", STYLES), ("xl/sharedStrings.xml", SST)], RELS, "");
+    let (wb, _) = read_xlsx(&bytes).unwrap();
+    let s = wb.sheet(0).unwrap();
+    assert!(s.rows.get(&0).is_none_or(|i| i.size.is_none()), "a row without ht stores no height");
+    let sup = |name: Option<&str>, size: Option<f32>, subscript: bool| ScriptRunFont { name: name.map(str::to_string), size, subscript };
+    assert_eq!(s.script_run_fonts.get(&at("A1")), Some(&vec![sup(Some("Arial"), Some(10.0), false)]));
+    assert_eq!(s.script_run_fonts.get(&at("A2")), Some(&vec![sup(Some("Arial"), Some(14.0), false), sup(None, None, true)]));
+}

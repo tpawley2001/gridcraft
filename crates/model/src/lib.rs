@@ -28,7 +28,8 @@ pub use preserved::{
 };
 pub use python::{PyCode, PyOutput};
 pub use sheet::{
-    DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, DataTable, LineIndex, Sheet, SheetSplit, SheetUid, SheetViewMode, Visibility, points_to_chars,
+    DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, DataTable, LineIndex, MAX_SCRIPT_RUN_FONTS, ScriptRunFont, Sheet, SheetSplit, SheetUid, SheetViewMode,
+    Visibility, points_to_chars,
 };
 pub use store::CellStore;
 pub use style::{
