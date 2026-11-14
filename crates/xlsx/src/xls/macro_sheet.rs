@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use gridcraft_core::{CellError, CellRef, Value};
-use gridcraft_model::{Cell, LineInfo, PreservedPart, PreservedRel, PreservedSheet, Sheet, Visibility, Workbook};
+use gridcraft_model::{Cell, LineInfo, MacroSheetPrint, PreservedPart, PreservedRel, PreservedSheet, Sheet, Visibility, Workbook};
 
 use crate::tables::{px_to_col_width, px_to_pt};
 use crate::xml::{encode_xstring, esc, esc_attr, num, push_a1};
@@ -45,7 +45,7 @@ pub(crate) fn kept_warning(name: &str) -> String {
 
 /// Adds the macro sheets to the workbook's kept parts. `chart_bounds` gives the BoundSheet8
 /// position of each kept chart sheet already there (in order), so every kept sheet stays in
-/// file order.
+/// file order. Each also gets a print copy in `wb.macro_sheets`.
 pub(crate) fn add_macro_sheets(wb: &mut Workbook, sheets: Vec<MacroSheet>, chart_bounds: &[usize]) {
     if sheets.is_empty() {
         return;
@@ -53,16 +53,16 @@ pub(crate) fn add_macro_sheets(wb: &mut Workbook, sheets: Vec<MacroSheet>, chart
     let mut kept = wb.preserved.as_deref().cloned().unwrap_or_default();
     let mut order: Vec<(usize, PreservedSheet)> =
         std::mem::take(&mut kept.sheets).into_iter().enumerate().map(|(i, s)| (chart_bounds.get(i).copied().unwrap_or(usize::MAX), s)).collect();
+    let mut prints = Vec::with_capacity(sheets.len());
     for (i, ms) in sheets.into_iter().enumerate() {
         let n = i + 1;
+        // A copy for printing the whole workbook, placed after the chart sheets before it.
+        let charts_before = chart_bounds.iter().filter(|b| **b < ms.bound).count();
+        let xml = macro_sheet_xml(&ms.sheet);
+        prints.push(MacroSheetPrint::new(ms.name.clone(), ms.visibility, ms.before, charts_before, ms.sheet));
         let (content_type, rel_type) = if ms.intl { (CT_INTL_MACRO_SHEET, REL_INTL_MACRO_SHEET) } else { (CT_MACRO_SHEET, REL_MACRO_SHEET) };
         let part = format!("xl/macrosheets/sheet{n}.xml");
-        kept.parts.push(PreservedPart {
-            name: part.clone(),
-            content_type: content_type.into(),
-            data: Arc::from(macro_sheet_xml(&ms.sheet).into_bytes()),
-            rels: vec![],
-        });
+        kept.parts.push(PreservedPart { name: part.clone(), content_type: content_type.into(), data: Arc::from(xml.into_bytes()), rels: vec![] });
         let rel_id = format!("rIdXlsMacroSheet{n}");
         kept.rels.push(PreservedRel { id: rel_id.clone(), rel_type: rel_type.into(), target: part, external: false });
         order.push((ms.bound, PreservedSheet { name: ms.name, visibility: ms.visibility, rel_id, before: ms.before, sheet_id: 0 }));
@@ -70,6 +70,7 @@ pub(crate) fn add_macro_sheets(wb: &mut Workbook, sheets: Vec<MacroSheet>, chart
     order.sort_by_key(|(bound, _)| *bound);
     kept.sheets = order.into_iter().map(|(_, s)| s).collect();
     wb.preserved = Some(Arc::new(kept));
+    wb.macro_sheets = Arc::new(prints);
 }
 
 /// A row's layout and its cells.

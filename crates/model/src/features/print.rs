@@ -417,6 +417,48 @@ pub struct ChartSheetPrint {
     pub print: PrintSettings,
 }
 
+/// What printing needs of an Excel 4.0 macro sheet ([MS-XLSX] 2.1.11 `xl/macrosheets/sheetN.xml`,
+/// [MS-XLS] BoundSheet8 `dt = 1`) read from a file. Macro sheets aren't modelled as sheets: their
+/// parts are kept and written back unchanged, and this read-only copy lets Print Entire Workbook
+/// print each visible one like a worksheet, in its tab place. Its formulas are never evaluated.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MacroSheetPrint {
+    pub name: String,
+    pub visibility: crate::Visibility,
+    /// How many worksheets come before it: its position among the model's sheets.
+    pub before: usize,
+    /// How many of the workbook's [`ChartSheetPrint`]s come before it, for the order among the
+    /// chart sheets in the same place.
+    pub charts_before: usize,
+    /// Its cells, column widths, row heights, page setup and `show_formulas`, detached from the
+    /// workbook (it is not in `Workbook::sheets` and nothing refers to it by index).
+    pub sheet: crate::Sheet,
+}
+
+impl MacroSheetPrint {
+    /// The print copy of a macro sheet read into `sheet`. What printing would look up through a
+    /// sheet index (tables, conditional formats, links, comments, drawn objects) is dropped: the
+    /// sheet has no index, and a lookup by index would read another sheet's.
+    pub fn new(name: String, visibility: crate::Visibility, before: usize, charts_before: usize, mut sheet: crate::Sheet) -> Self {
+        sheet.name.clone_from(&name);
+        sheet.visibility = visibility;
+        sheet.tables.clear();
+        sheet.cond_formats.clear();
+        sheet.hyperlinks.clear();
+        sheet.comments.clear();
+        sheet.charts.clear();
+        sheet.images.clear();
+        sheet.shapes.clear();
+        sheet.sparklines.clear();
+        sheet.slicers.clear();
+        sheet.controls.clear();
+        sheet.embedded_objects.clear();
+        sheet.pivots.clear();
+        sheet.cell_pictures.clear();
+        Self { name, visibility, before, charts_before, sheet }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

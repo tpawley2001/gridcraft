@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-12 · **Change:** minor (G0372: a long workbook prints all its pages, not only the first 2,000; earlier: G0300: §17: snip-and-round rectangle, left-right ribbon and multidocument flowchart presets draw and print their own outline; earlier: G0271: printing with Fit To an automatic page count on one axis (such as 1 page wide by automatic tall) still splits pages at that axis' manual page breaks, like Excel; earlier: G0249: §17: curved ribbons, moon, cloud callout and swoosh arrow presets draw and print their own outline, keeping the parts outside the box)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-14 · **Change:** minor (G0385: visible Excel 4.0 macro sheets print in their tab place when printing the entire workbook; earlier: G0372: a long workbook prints all its pages, not only the first 2,000; earlier: G0300: §17: snip-and-round rectangle, left-right ribbon and multidocument flowchart presets draw and print their own outline; earlier: G0271: printing with Fit To an automatic page count on one axis (such as 1 page wide by automatic tall) still splits pages at that axis' manual page breaks, like Excel; earlier: G0249: §17: curved ribbons, moon, cloud callout and swoosh arrow presets draw and print their own outline, keeping the parts outside the box)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -271,6 +271,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-14 | minor | G0385: §14: printing the entire workbook prints each visible Excel 4.0 macro sheet like a worksheet, in its tab place, showing its formulas as its view does; hidden and empty macro sheets print nothing |
 | 2026-11-12 | minor | G0372: §14: printing and PDF export print every page of a long workbook instead of stopping silently at page 2,000; a 200,000-page guard remains against hostile page setups. |
 | 2026-11-11 | minor | G0300: §17: the snip-and-round rectangle (`snipRoundRect`), left-right ribbon (`leftRightRibbon`, shaded fold) and multidocument flowchart (`flowChartMultidocument`) presets kept from XLSX draw and print their own outline. One hundred and seventy-two presets in all; connectors still show as a rectangle. |
 | 2026-11-10 | minor | G0271: printing: Fit To with an automatic page count tall (or wide) keeps that axis' manual page breaks, as Excel prints; an axis with a page count still ignores them. |

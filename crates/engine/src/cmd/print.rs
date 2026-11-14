@@ -170,7 +170,7 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
     let mut pics = PicCache::default();
     // The worksheet the previous layout printed: a print area's later ranges continue its sheet,
     // so they don't get the first-page header and footer again.
-    let mut prev_sheet: Option<usize> = None;
+    let mut prev_sheet: Option<(usize, Option<usize>)> = None;
     for lay in layouts {
         if let Some(cs) = lay.chart_sheet.and_then(|ci| wb.chart_sheets.get(ci)) {
             prev_sheet = None;
@@ -189,12 +189,16 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
             draw_header_footer(pg, lay, lay.settings.hf_page(true, page_no), &cx);
             continue;
         }
-        let Some(sh) = wb.sheet(lay.sheet) else { continue };
-        let mut cf = if sh.cond_formats.is_empty() { None } else { Some(crate::cf::CfCache::new()) };
+        let Some(sh) = lay.sheet_in(wb) else { continue };
+        // A macro sheet's cells only: what is looked up by sheet index (conditional formats,
+        // links, drawn objects) belongs to the workbook's sheets.
+        let worksheet = lay.macro_sheet.is_none();
+        let mut cf = if sh.cond_formats.is_empty() || !worksheet { None } else { Some(crate::cf::CfCache::new()) };
         let k = lay.k();
         let (aw, ah) = lay.avail();
-        let continues = prev_sheet == Some(lay.sheet);
-        prev_sheet = Some(lay.sheet);
+        let tab = (lay.sheet, lay.macro_sheet);
+        let continues = prev_sheet == Some(tab);
+        prev_sheet = Some(tab);
         let run_ons = lay.cut_run_ons();
         for (pi, (ri, ci)) in lay.pages.iter().enumerate() {
             page_no += 1;
@@ -237,8 +241,10 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
                         pg.clip_rect(cx, cy, cw, ch);
                     }
                     draw_block(pg, &b, lay.settings.gridlines, &mut cf);
-                    draw_block_links(pg, &b, page_index, &mut pending_links);
-                    printed_blocks.push(PrintedBlock { page: page_index, sheet: lay.sheet, rows: *rs, cols: *cs, x: bx, y, k });
+                    if worksheet {
+                        draw_block_links(pg, &b, page_index, &mut pending_links);
+                        printed_blocks.push(PrintedBlock { page: page_index, sheet: lay.sheet, rows: *rs, cols: *cs, x: bx, y, k });
+                    }
                     if lay.settings.headings {
                         draw_headings(pg, &b, rsi == 0, csi == 0 && clipped.is_none(), (ox, oy), (lay.heading_w * k, heading_h));
                     }
@@ -270,7 +276,7 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
                 y += pitch.span_pt(*rs);
             }
             // Continuation pages carry only the text running on past the cut.
-            if let Some(b) = body.as_ref().filter(|_| cut.offset <= 0.0) {
+            if let Some(b) = body.as_ref().filter(|_| cut.offset <= 0.0 && worksheet) {
                 if let Some((cx, cy, cw, ch)) = clip {
                     pg.save();
                     pg.clip_rect(cx, cy, cw, ch);
@@ -381,7 +387,7 @@ fn print_preview(s: &mut Session, p: &Json) -> Result<Json> {
             }
             continue;
         }
-        let name = d.wb.sheet(lay.sheet).map(|s| s.name.clone()).unwrap_or_default();
+        let name = lay.sheet_in(&d.wb).map(|s| s.name.clone()).unwrap_or_default();
         for (ri, ci) in &lay.pages {
             n += 1;
             if !keep(n) {
@@ -628,6 +634,8 @@ mod fit_manual_breaks_tests;
 mod indent_width_tests;
 #[cfg(test)]
 mod macro_sheet_print_tests;
+#[cfg(test)]
+mod macro_sheet_text_tests;
 #[cfg(test)]
 mod normal_font_pairs_tests;
 #[cfg(test)]

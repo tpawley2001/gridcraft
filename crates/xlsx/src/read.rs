@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use gridcraft_core::{DateSystem, RangeRef};
 use gridcraft_model::{
-    CalcMode, Chart, ChartSheetPrint, DefinedName, PhoneticString, PrintSettings, Sheet, ShowObjects, Style, StyleId, StyleTable, UpdateLinks,
-    Visibility, WindowRect, Workbook, WorkbookOptions, WorkbookView,
+    CalcMode, Chart, ChartSheetPrint, DefinedName, MacroSheetPrint, PhoneticString, PrintSettings, Sheet, ShowObjects, Style, StyleId, StyleTable,
+    UpdateLinks, Visibility, WindowRect, Workbook, WorkbookOptions, WorkbookView,
 };
 
 use crate::package::{Package, Rel};
@@ -407,6 +407,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
     // Sheets. `file_to_model[i]` maps the i-th <sheet> to a model sheet index.
     let mut file_to_model: Vec<Option<usize>> = vec![];
     let mut chart_sheets: Vec<ChartSheetPrint> = vec![];
+    let mut macro_sheets: Vec<MacroSheetPrint> = vec![];
     // Legacy formula cells per model sheet, rewritten once names and tables are known.
     let mut legacy_formulas: Vec<(usize, Vec<gridcraft_core::CellRef>)> = vec![];
     let mut pivot_caches = crate::pivot::CachesIn::new(&wb_xml, &wb_rels);
@@ -428,6 +429,10 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
                 && let Some((chart, print)) = read_chart_sheet(&mut cx, &rel.target)?
             {
                 chart_sheets.push(ChartSheetPrint { name, visibility: visibility(se), before: wb.sheets.len(), chart, print });
+            } else if crate::passthrough::MACRO_SHEET_KINDS.iter().any(|k| k.eq_ignore_ascii_case(&rel.kind))
+                && let Some(sheet) = read_macro_sheet(&mut cx, &rel.target, &name)
+            {
+                macro_sheets.push(MacroSheetPrint::new(name, visibility(se), wb.sheets.len(), chart_sheets.len(), sheet));
             }
             file_to_model.push(None);
             continue;
@@ -532,6 +537,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
         }
     }
     wb.chart_sheets = Arc::new(chart_sheets);
+    wb.macro_sheets = Arc::new(macro_sheets);
 
     read_doc_props(&mut cx.pkg, &root_rels, &mut wb.props);
 
@@ -621,6 +627,20 @@ fn visibility(se: &El) -> Visibility {
 /// `<pageSetup>` orientation and paper, `<pageMargins>` and `<headerFooter>`. `None` when the
 /// sheet, its drawing or its chart is missing or unreadable. Problems are not reported: the
 /// parts are kept for saving either way (see `passthrough`), which warns about them.
+/// An Excel 4.0 macro sheet's cells, layout and page setup, for printing: `CT_Macrosheet` has
+/// `CT_Worksheet`'s children ([MS-XLSX] 2.1.11), so the worksheet reader reads it. Its formulas
+/// are kept as text, never evaluated. A part that can't be read is `None` and prints nothing; the
+/// read adds no warnings (the kept part already has its own) and leaves object ids as they were.
+fn read_macro_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Option<Sheet> {
+    let warnings = cx.report.warnings.len();
+    let next_id = cx.next_id;
+    let read = crate::sheet_read::read_sheet(cx, part, name);
+    cx.report.warnings.truncate(warnings);
+    cx.next_id = next_id;
+    cx.legacy_formulas.clear();
+    read.ok().map(|(sheet, _)| sheet)
+}
+
 fn read_chart_sheet(cx: &mut Ctx<'_>, part: &str) -> Result<Option<(Chart, PrintSettings)>, IoError> {
     let warned = cx.report.warnings.len();
     let found = chart_sheet_parts(cx, part);
