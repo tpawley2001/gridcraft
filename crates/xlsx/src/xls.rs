@@ -1527,8 +1527,9 @@ fn read_fslv(fslv: bool, sheet: &mut Sheet) {
 
 /// ROW ([MS-XLS] 2.4.221): the row's height, hidden/outline flags and style.
 /// The default row height in twips Excel gives a Normal font (name compared without case), for
-/// the fonts it was measured on; `None` for others.
-fn normal_font_row_twips(name: &str, size: f32) -> Option<u16> {
+/// the fonts it was measured on; `None` for others. The localized names East Asian editions of
+/// Excel store resolve to their English names (matched exactly).
+pub(crate) fn normal_font_row_twips(name: &str, size: f32) -> Option<u16> {
     // (font, size in points, default row height in screen pixels; 1 px = 15 twips).
     const FONTS: &[(&str, f32, u16)] = &[
         ("Calibri", 10.0, 17),
@@ -1555,9 +1556,24 @@ fn normal_font_row_twips(name: &str, size: f32) -> Option<u16> {
         ("Verdana", 10.0, 17),
         ("Cambria", 11.0, 19),
         ("MS PGothic", 11.0, 18),
+        ("SimSun", 11.0, 18),
         ("SimSun", 12.0, 19),
+        ("Yu Gothic", 10.0, 22),
+        ("Yu Gothic", 11.0, 25),
+        ("DengXian", 11.0, 19),
+        ("PMingLiU", 11.0, 19),
+        ("PMingLiU", 12.0, 20),
+        ("Trebuchet MS", 11.0, 22),
+        ("Garamond", 11.0, 20),
+        ("Century Gothic", 9.0, 19),
+        ("Arial Cyr", 10.0, 17),
+        ("Calibri", 14.0, 25),
     ];
+    // (localized name, English name).
+    const ALIASES: &[(&str, &str)] =
+        &[("ＭＳ Ｐゴシック", "MS PGothic"), ("游ゴシック", "Yu Gothic"), ("宋体", "SimSun"), ("等线", "DengXian"), ("新細明體", "PMingLiU")];
     let name = name.trim();
+    let name = ALIASES.iter().find(|(local, _)| *local == name).map_or(name, |&(_, english)| english);
     FONTS.iter().find(|(n, s, _)| n.eq_ignore_ascii_case(name) && (s - size).abs() < 0.01).map(|&(_, _, px)| px * 15)
 }
 

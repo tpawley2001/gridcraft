@@ -81,3 +81,14 @@ fn an_unsynced_default_row_height_is_the_stored_one() {
     let h = default_height_pt(&book(&[default_row_height(1, 1026)]));
     assert!((h - 51.3).abs() < 0.01, "default row height {h} pt, stored 51.3");
 }
+
+/// The Normal font's default row height covers the newer measured fonts and the localized names.
+#[test]
+fn normal_font_row_twips_knows_the_newer_fonts_and_localized_names() {
+    use crate::xls::normal_font_row_twips;
+    assert_eq!(normal_font_row_twips("新細明體", 12.0), Some(300));
+    assert_eq!(normal_font_row_twips("宋体", 11.0), Some(270));
+    assert_eq!(normal_font_row_twips("Trebuchet MS", 11.0), Some(330));
+    assert_eq!(normal_font_row_twips("Calibri", 14.0), Some(375));
+    assert_eq!(normal_font_row_twips("Some Unknown Font", 11.0), None);
+}

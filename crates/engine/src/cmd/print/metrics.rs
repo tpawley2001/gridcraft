@@ -41,8 +41,30 @@ const FONTS: &[(&str, f32, u32, u32)] = &[
     ("Verdana", 10.0, 17, 108),
     ("Cambria", 11.0, 19, 115),
     ("MS PGothic", 11.0, 18, 102),
+    ("SimSun", 11.0, 18, 113),
     ("SimSun", 12.0, 19, 122),
+    ("Yu Gothic", 10.0, 22, 139),
+    ("Yu Gothic", 11.0, 25, 154),
+    ("DengXian", 11.0, 19, 104),
+    ("PMingLiU", 11.0, 19, 102),
+    ("PMingLiU", 12.0, 20, 110),
+    ("Trebuchet MS", 11.0, 22, 124),
+    ("Garamond", 11.0, 20, 111),
+    ("Century Gothic", 9.0, 19, 99),
+    ("Arial Cyr", 10.0, 17, 103),
+    ("Calibri", 14.0, 25, 150),
 ];
+
+/// (localized name, English name): the names East Asian editions of Excel store for fonts in
+/// [`FONTS`]. Matched exactly (full-width characters, no case folding).
+const ALIASES: &[(&str, &str)] =
+    &[("ＭＳ Ｐゴシック", "MS PGothic"), ("游ゴシック", "Yu Gothic"), ("宋体", "SimSun"), ("等线", "DengXian"), ("新細明體", "PMingLiU")];
+
+/// The trimmed font name, with a localized name in [`ALIASES`] replaced by its English name.
+fn english_name(font_name: &str) -> &str {
+    let name = font_name.trim();
+    ALIASES.iter().find(|(local, _)| *local == name).map_or(name, |&(_, english)| english)
+}
 
 /// Calibri 11's pair, for fonts outside [`FONTS`].
 const FALLBACK: (u32, u32) = (20, 121);
@@ -53,21 +75,19 @@ const FALLBACK: (u32, u32) = (20, 121);
 const ROW_PX: &[(&str, f32, u32)] = &[
     // A Calibri 11 sheet with cells in Calibri 20 prints 26 rows a page (35 or 36 px both give 26).
     ("Calibri", 20.0, 35),
-    // Sheets whose Normal font is Trebuchet MS 11 store `defaultRowHeight="16.5"` (22 px).
-    ("Trebuchet MS", 11.0, 22),
 ];
 
 /// The default row height in screen pixels of a cell font (P), from [`FONTS`] or [`ROW_PX`];
 /// `None` when neither lists it.
 fn cell_font_px(font_name: &str, font_size: f32) -> Option<u32> {
-    let name = font_name.trim();
+    let name = english_name(font_name);
     let same = |n: &str, s: f32| n.eq_ignore_ascii_case(name) && (s - font_size).abs() < 0.01;
     FONTS.iter().find(|(n, s, ..)| same(n, *s)).map(|&(_, _, p, _)| p).or_else(|| ROW_PX.iter().find(|(n, s, _)| same(n, *s)).map(|&(_, _, p)| p))
 }
 
 /// The Normal font's (P, D): default row height in screen pixels and its printed dots.
 fn font_pair(font_name: &str, font_size: f32) -> (u32, u32) {
-    let name = font_name.trim();
+    let name = english_name(font_name);
     FONTS.iter().find(|(n, s, ..)| n.eq_ignore_ascii_case(name) && (s - font_size).abs() < 0.01).map_or(FALLBACK, |&(_, _, p, d)| (p, d))
 }
 
