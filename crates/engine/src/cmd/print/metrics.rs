@@ -166,8 +166,9 @@ impl<'a> RowPitch<'a> {
     ///
     /// With `fit_print_rows_without_default_floor` (sheets read from `.xls`, whose ROW records
     /// without fUnsynced Excel re-fits on open, [MS-XLS] 2.4.221) a non-custom row prints at the
-    /// largest default row height of its cell fonts with no lower bound; a row with no cells that
-    /// count keeps its stored height, else the sheet default.
+    /// largest default row height of its cell fonts, and of the column formats on its columns without
+    /// a cell, with no lower bound; a row with no cells that count keeps its stored height, else the
+    /// sheet default.
     pub(crate) fn row_px(&self, r: u32) -> f32 {
         let sh = self.sh;
         if !sh.fit_auto_row_heights_in_print {
@@ -221,10 +222,16 @@ impl<'a> RowPitch<'a> {
     /// The largest default row height among row `r`'s cell fonts, with no lower bound: `None` when
     /// no cell counts, or when a counted cell wraps text or has a font whose default row height is
     /// not known (the row then keeps its stored height).
+    ///
+    /// When the row has cells, the font of every column format (COLINFO ixfe, [MS-XLS] 2.4.53) on a
+    /// column with no cell in the row counts too: that empty cell shows the column's format. An
+    /// unknown font there also keeps the stored height; wrap on a column format is ignored (no text).
     fn fitted_px_no_floor(&self, r: u32) -> Option<f32> {
         let sh = self.sh;
         let mut need: Option<f32> = None;
+        let mut cell_cols: Vec<u32> = Vec::new();
         for (c, cell) in sh.cells.row(r, 0, gridcraft_core::MAX_COLS - 1) {
+            cell_cols.push(c);
             if self.skipped(r, c) {
                 continue;
             }
@@ -233,6 +240,20 @@ impl<'a> RowPitch<'a> {
                 return None;
             }
             let px = cell_font_px(&st.font.name, st.font.size)? as f32;
+            need = Some(need.map_or(px, |n| n.max(px)));
+        }
+        // A row with no cells keeps its stored height: empty rows are not fitted.
+        if cell_cols.is_empty() {
+            return need;
+        }
+        cell_cols.sort_unstable();
+        for (&c, info) in &sh.cols {
+            let Some(id) = info.style else { continue };
+            if cell_cols.binary_search(&c).is_ok() || self.skipped(r, c) {
+                continue;
+            }
+            let font = &self.wb.styles.get(id).font;
+            let px = cell_font_px(&font.name, font.size)? as f32;
             need = Some(need.map_or(px, |n| n.max(px)));
         }
         need
