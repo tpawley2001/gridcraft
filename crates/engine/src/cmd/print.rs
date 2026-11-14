@@ -24,7 +24,7 @@ use super::{CommandSpec, Result, Session, bad, bool_param, cmd, edit, f64_param,
 mod draw;
 mod header_footer;
 mod layout;
-mod metrics;
+pub(crate) mod metrics;
 mod objects;
 mod text;
 

@@ -79,7 +79,7 @@ const ROW_PX: &[(&str, f32, u32)] = &[
 
 /// The default row height in screen pixels of a cell font (P), from [`FONTS`] or [`ROW_PX`];
 /// `None` when neither lists it.
-fn cell_font_px(font_name: &str, font_size: f32) -> Option<u32> {
+pub(crate) fn cell_font_px(font_name: &str, font_size: f32) -> Option<u32> {
     let name = english_name(font_name);
     let same = |n: &str, s: f32| n.eq_ignore_ascii_case(name) && (s - font_size).abs() < 0.01;
     FONTS.iter().find(|(n, s, ..)| same(n, *s)).map(|&(_, _, p, _)| p).or_else(|| ROW_PX.iter().find(|(n, s, _)| same(n, *s)).map(|&(_, _, p)| p))

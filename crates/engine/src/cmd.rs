@@ -928,9 +928,13 @@ pub(crate) fn fit_row_height(wb: &mut Workbook, si: usize, row: u32, sweep: &mut
         }
         let st = wb.styles.get(cell.style);
         let size = st.font.size;
-        // Scaled from an 11pt row's height, not the sheet's default: a sheet whose default
-        // already fits a bigger font (21pt rows for 16pt text) would otherwise scale it twice.
-        let line = (size * 1.8).round().max(gridcraft_model::DEFAULT_ROW_HEIGHT * size / gridcraft_model::DEFAULT_FONT_SIZE);
+        // A line takes the font's own default row height (Excel's, measured: Arial 10 = 17 px)
+        // when the table lists the font. Otherwise it is scaled from an 11pt row's height, not
+        // the sheet's default: a sheet whose default already fits a bigger font (21pt rows for
+        // 16pt text) would otherwise scale it twice.
+        let font_px = print::metrics::cell_font_px(&st.font.name, size).map(|p| p as f32);
+        let line =
+            font_px.unwrap_or_else(|| (size * 1.8).round().max(gridcraft_model::DEFAULT_ROW_HEIGHT * size / gridcraft_model::DEFAULT_FONT_SIZE));
         let mut lines = 1.0f32;
         if !cell.value.is_empty() || cell.formula.is_some() {
             // Only a wrapping cell is laid out over several lines: each explicit line break
@@ -944,7 +948,13 @@ pub(crate) fn fit_row_height(wb: &mut Workbook, si: usize, row: u32, sweep: &mut
         } else if st.font.size <= gridcraft_model::DEFAULT_FONT_SIZE {
             continue;
         }
-        let h = if lines > 1.0 { (size * 96.0 / 72.0 * 1.22 * lines + 5.0).ceil() } else { line };
+        // Several lines of a listed font are that many of its rows (an Arial 10 row of n lines
+        // is n x 12.75 pt); other fonts keep the estimate from the point size.
+        let h = match font_px {
+            _ if lines <= 1.0 => line,
+            Some(p) => p * lines,
+            None => (size * 96.0 / 72.0 * 1.22 * lines + 5.0).ceil(),
+        };
         need = need.max(h.min(546.0));
     }
     let Some(shm) = wb.sheet_mut(si) else { return };
