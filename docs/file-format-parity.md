@@ -1,9 +1,11 @@
 # File-format parity
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-12 · **Change:** minor (G0376: `.xls` picture objects whose image is not imported keep their place for printing; earlier: G0372: printing and PDF export print every page of a long workbook, up to a 200,000-page guard, instead of stopping at 2,000; earlier: G0364: Dell Data Protection package-root parts kept on XLSX save; earlier: G0357: a signed VBA project keeps its signature parts on XLSM save while the project bytes are unchanged; earlier: G0348: table columns keep their total function and label on XLSX save while the Total Row is off)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-14 · **Change:** minor (G0384: BIFF5/BIFF8 `.xls` worksheets without DefaultRowHeight use the measured Normal-font default height; unknown fonts and explicit records keep their existing behavior. Earlier: G0376: `.xls` picture objects whose image is not imported keep their place for printing; earlier: G0372: printing and PDF export print every page of a long workbook, up to a 200,000-page guard, instead of stopping at 2,000; earlier: G0364: Dell Data Protection package-root parts kept on XLSX save; earlier: G0357: a signed VBA project keeps its signature parts on XLSM save while the project bytes are unchanged; earlier: G0348: table columns keep their total function and label on XLSX save while the Total Row is off)
 
 
 Legacy VML captions accept HTML-style `br` line breaks, preserving buttons, macro assignments and shown notes through open + save (`vml_html_br_tests.rs`).
+
+BIFF5/BIFF8 `.xls` worksheets without DefaultRowHeight use the Normal font's measured default row height (`xls_missing_default_row_height_tests.rs`); fonts outside the measured table retain the model default.
 
 Every format Excel opens or saves, with GridCraft's read and write support, fidelity and tests.
 Part of [target-app-parity.md](target-app-parity.md). **File formats: ~50% ready, 80–120 h**
@@ -226,6 +228,7 @@ Wrong checksums. In an intact `.xlsx`, `.xlsm`, `.xlsb` or `.ods` package, a par
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-14 | minor | G0384: BIFF5/BIFF8 `.xls` worksheets without DefaultRowHeight use the measured Normal-font default height; unknown fonts and explicit records keep their existing behavior. |
 | 2026-11-12 | minor | G0376: `.xls` a picture object whose image is not imported (an embedded object's EMF/WMF preview, an ActiveX control, a blip missing from the store, a BIFF5 picture that isn't a bitmap) keeps its place as an embedded object, so the sheet prints as far as it reaches, as Excel prints; nothing is drawn or saved for it |
 | 2026-11-12 | minor | G0372: printing, Print Preview and PDF export print every page of a long workbook (two bands of 65,536 rows pass 2,000 pages) instead of stopping at page 2,000; the guard against hostile page setups is 200,000 pages per export. `&P`/`&N` and the page range count every page; `file.printPreview` lists the first 2,000 pages with `pageListTruncated` (`page_limit_tests.rs`). |
 | 2026-11-12 | minor | G0363: legacy `.xlsb` formulas (no dynamic-array cell metadata) are read with Excel's implicit `@`, as from `.xlsx` and `.xls` (`@INDEX(…)`, VBA and add-in function calls, `SQRT(@C1:C3)`), so their text no longer changes when the workbook is saved as `.xlsx` and reopened (`xlsb_legacy_at_tests.rs`). |
