@@ -182,26 +182,125 @@ impl PrintOptions {
     }
 }
 
-/// The range a sheet prints: its print area, else A1 to the end of the used range grown to cover
-/// visible drawing objects. `None` when there is nothing to print.
-pub fn print_range(sh: &Sheet) -> Option<RangeRef> {
-    print_ranges(sh).into_iter().next()
+/// The range a sheet prints: its print area, else A1 to the end of what prints on the sheet
+/// ([`print_ranges`]). `None` when there is nothing to print.
+pub fn print_range(wb: &Workbook, sh: &Sheet) -> Option<RangeRef> {
+    print_ranges(wb, sh).into_iter().next()
 }
 
 /// Every range a sheet prints, in print order: each range of its print area (Excel starts each
-/// one on a new page), else the one range [`print_range`] describes. Empty when there is
+/// one on a new page), else A1 to the end of the cells that put something on paper
+/// (formatting alone counts only as a fill or a border), merged ranges, spill ranges and visible drawing objects. Empty when there is
 /// nothing to print.
-pub fn print_ranges(sh: &Sheet) -> Vec<RangeRef> {
+pub fn print_ranges(wb: &Workbook, sh: &Sheet) -> Vec<RangeRef> {
     let areas = sh.print.print_areas();
     if !areas.is_empty() {
         return areas.into_iter().map(|a| trim_full(sh, a)).collect();
     }
-    used_print_range(sh).into_iter().collect()
+    used_print_range(wb, sh).into_iter().collect()
 }
 
-/// A1 to the end of the used range grown to cover visible drawing objects.
-fn used_print_range(sh: &Sheet) -> Option<RangeRef> {
-    let mut r = sh.used_range();
+/// Which stored cells put something on paper, as Excel decides where a sheet's printed range
+/// ends: a cell with a value or a formula (even one showing nothing), or an empty cell whose
+/// style shows (a fill or a border side). A cell carrying only a font, number format,
+/// alignment or protection prints nothing, so columns or rows formatted far past the data add
+/// no pages; nor does any cell in a hidden row. Styles are shared, so whether a style shows is
+/// worked out once per style id.
+struct OnPaper<'a> {
+    wb: &'a Workbook,
+    sh: &'a Sheet,
+    /// Per style id: not yet looked at, or whether it shows on paper.
+    styles: Vec<Option<bool>>,
+    hidden_row: Option<(u32, bool)>,
+}
+
+impl<'a> OnPaper<'a> {
+    fn new(wb: &'a Workbook, sh: &'a Sheet) -> Self {
+        OnPaper { wb, sh, styles: vec![None; wb.styles.len()], hidden_row: None }
+    }
+
+    /// Whether the stored cell `c` counts as something on a page.
+    fn counts(&mut self, c: CellRef, cell: &gridcraft_model::Cell) -> bool {
+        let hidden = match self.hidden_row {
+            Some((r, h)) if r == c.row => h,
+            _ => {
+                let h = self.sh.is_row_hidden(c.row);
+                self.hidden_row = Some((c.row, h));
+                h
+            }
+        };
+        if hidden {
+            return false;
+        }
+        if cell.has_content() {
+            return true;
+        }
+        let slot = self.styles.get_mut(cell.style.0 as usize);
+        match slot.as_deref().copied().flatten() {
+            Some(shows) => shows,
+            None => {
+                let shows = style_shows_on_paper(self.wb.styles.get(cell.style));
+                if let Some(slot) = slot {
+                    *slot = Some(shows);
+                }
+                shows
+            }
+        }
+    }
+}
+
+/// A style that marks an empty cell on paper: a fill or any border side.
+fn style_shows_on_paper(st: &gridcraft_model::Style) -> bool {
+    let b = &st.borders;
+    st.fill.pattern != gridcraft_model::PatternType::None || [b.left, b.right, b.top, b.bottom, b.diag_down, b.diag_up].iter().any(|l| !l.is_none())
+}
+
+/// A1 to the end of the cells that put something on paper, merged ranges, spill ranges and
+/// visible drawing objects; text overflowing past that reaches the columns it spills over, but
+/// no further than the last stored column.
+fn used_print_range(wb: &Workbook, sh: &Sheet) -> Option<RangeRef> {
+    let mut on_paper = OnPaper::new(wb, sh);
+    let mut end: Option<CellRef> = None;
+    let grow_to = |e: &mut Option<CellRef>, row: u32, col: u32| {
+        *e = Some(e.map_or(CellRef::new(row, col), |x| CellRef::new(x.row.max(row), x.col.max(col))));
+    };
+    // The last stored column: text may spill over formatting-only cells up to it.
+    let limit = sh.cells.used_range().map_or(0, |u| u.end.col);
+    // Counted cells left of that column holding a value that can spill (numbers never do).
+    let mut spill_from = Vec::new();
+    for (c, cell) in sh.cells.iter() {
+        if on_paper.counts(c, cell) {
+            grow_to(&mut end, c.row, c.col);
+            if c.col < limit && !cell.value.is_empty() && !matches!(cell.value, gridcraft_core::Value::Number(_)) {
+                spill_from.push(c);
+            }
+        }
+    }
+    for r in sh.spill_ranges.values() {
+        grow_to(&mut end, r.end.row, r.end.col);
+    }
+    for m in &sh.merges {
+        grow_to(&mut end, m.end.row, m.end.col);
+    }
+    // Text spilling over the empty cells right of the last counted column keeps printing, up to
+    // the last stored column (as far as the range reached before formatting-only cells stopped
+    // counting).
+    if let Some(e) = end.filter(|e| e.col < limit) {
+        let s = (sh.print.scale.clamp(10, 400) as f32) / 100.0;
+        let mut fonts = None;
+        let mut reach = e.col;
+        for c in spill_from {
+            if reach >= limit {
+                break;
+            }
+            let Some(cell) = sh.cells.get(c) else { continue };
+            if let Some(x) = super::text::right_overflow_end(wb, sh, (c, cell), &sh.merges, (PX_TO_PT * s, s), &mut fonts) {
+                reach = reach.max(x.min(limit));
+            }
+        }
+        grow_to(&mut end, e.row, reach);
+    }
+    let mut r = end.map(|e| RangeRef::new(CellRef::new(0, 0), e));
     let mut grow = |a: &Anchor| {
         let x = sh.col_left(a.cell.col) + a.dx as f64;
         let y = sh.row_top(a.cell.row) + a.dy as f64;
@@ -474,7 +573,7 @@ fn layout_of(wb: &Workbook, sh: &Sheet, at: (usize, Option<usize>), opts: &Print
     let (pw, ph, margins) = page_geometry(&st);
     let area = match range_override {
         Some(r) => trim_full(sh, r),
-        None => print_range(sh).unwrap_or(RangeRef::cell(CellRef::new(0, 0))),
+        None => print_range(wb, sh).unwrap_or(RangeRef::cell(CellRef::new(0, 0))),
     };
     // A print area from a file or JSON can name coordinates past the grid; pagination walks every
     // line of the area (zero-height rows never fill a band), so it is held to the grid first.
@@ -578,7 +677,7 @@ pub(crate) fn page_sequence(rows: usize, cols: usize, order: PageOrder, cap: usi
 
 /// Per column band, the number of row bands printed in it: page (r, c) prints when some page
 /// at or below and at or to the right of it (r2 >= r, c2 >= c) has something on it (a stored
-/// cell, a spill range, a merged range whose anchor cell is stored, or a printing drawing
+/// cell that puts something on paper ([`OnPaper`]), a spill range, a merged range, a printing drawing
 /// object, part of a table's range, or text overflowing into it from a cell in an earlier column,
 /// as the drawing lets it). The counts never grow from left to right. `None` when nothing lies on
 /// any page (the caller then prints the full grid).
@@ -613,7 +712,11 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
     let last_band_start = col_bands.last().map_or(0, |b| b.0);
     let page_scale = (lay.k(), lay.scale);
     let mut fonts = None;
+    let mut on_paper = OnPaper::new(wb, sh);
     for (c, cell) in sh.cells.iter() {
+        if !on_paper.counts(c, cell) {
+            continue;
+        }
         let end = if c.col < last_band_start { super::text::right_overflow_end(wb, sh, (c, cell), &sh.merges, page_scale, &mut fonts) } else { None };
         mark(c.row, c.col, end.map_or(c.col, |e| e.max(c.col)));
     }
@@ -623,7 +726,7 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
     for r in sh.spill_ranges.values() {
         mark(r.end.row, r.start.col, r.end.col);
     }
-    for m in sh.merges.iter().filter(|m| sh.cells.get(m.start).is_some()) {
+    for m in &sh.merges {
         mark(m.end.row, m.start.col, m.end.col);
     }
     let mut object = |a: &Anchor| {
@@ -797,7 +900,7 @@ pub fn layouts(wb: &Workbook, opts: &PrintOptions) -> Vec<SheetLayout> {
                 if ovr.is_some() {
                     layout_sheet(wb, si, opts, ovr).into_iter().collect()
                 } else {
-                    let ranges = wb.sheet(si).map(print_ranges).unwrap_or_default();
+                    let ranges = wb.sheet(si).map(|sh| print_ranges(wb, sh)).unwrap_or_default();
                     if opts.all_sheets && ranges.is_empty() {
                         continue;
                     }
@@ -807,7 +910,7 @@ pub fn layouts(wb: &Workbook, opts: &PrintOptions) -> Vec<SheetLayout> {
             Tab::Chart(ci) => layout_chart_sheet(wb, ci).into_iter().collect(),
             // A macro sheet without cells prints nothing, like an empty worksheet.
             Tab::Macro(mi) => match wb.macro_sheets.get(mi) {
-                Some(m) if !print_ranges(&m.sheet).is_empty() => layout_macro_sheet(wb, mi, opts).into_iter().collect(),
+                Some(m) if !print_ranges(wb, &m.sheet).is_empty() => layout_macro_sheet(wb, mi, opts).into_iter().collect(),
                 _ => continue,
             },
         };
