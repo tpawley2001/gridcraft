@@ -629,6 +629,8 @@ mod indent_width_tests;
 #[cfg(test)]
 mod page_limit_tests;
 #[cfg(test)]
+mod row_font_fit_tests;
+#[cfg(test)]
 mod row_pitch_tests;
 #[cfg(test)]
 mod shape_hole_tests;
