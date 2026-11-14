@@ -76,6 +76,12 @@ impl El {
 /// Text of a SpreadsheetML string item (`<si>`, `<is>`, comment `<text>`): `<t>` and rich text
 /// runs `<r><t>`, phonetic runs ignored (read them with [`phonetic_data`] instead — they are hints,
 /// not part of the text). Decodes `_xHHHH_` escapes.
+/// Whether a rich string (`CT_Rst`: `<si>` or `<is>`) has a run whose properties set a
+/// superscript or subscript `vertAlign` (ECMA-376 Part 1, 18.4.7 / 18.4.14).
+pub fn has_script_run(e: &El) -> bool {
+    e.kids("r").filter_map(|r| r.child("rPr")).filter_map(|p| p.child_val("vertAlign")).any(|v| matches!(v, "superscript" | "subscript"))
+}
+
 pub fn rich_text(e: &El) -> String {
     let mut s = String::new();
     for c in &e.children {

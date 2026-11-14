@@ -77,6 +77,18 @@ const ROW_PX: &[(&str, f32, u32)] = &[
     ("Calibri", 20.0, 35),
 ];
 
+/// Pixels a superscript or subscript (cell font or string run) adds to its font's default row
+/// height when Excel fits an `.xlsx` row. Measured for Arial 10 (17 -> 19 px, 12.75 -> 14.25 pt);
+/// unverified for subscript and other sizes, most likely the same at 10-11 pt.
+fn script_extra_px(_font_size: f32) -> f32 {
+    2.0
+}
+
+/// Pixels a thick bottom border (`row@thickBot`) adds to a fitted `.xlsx` row. Measured for
+/// Arial 10 (17 -> 18 px, 12.75 -> 13.5 pt); thin, medium and double borders are not measured
+/// and add nothing.
+const THICK_BOTTOM_EXTRA_PX: f32 = 1.0;
+
 /// The default row height in screen pixels of a cell font (P), from [`FONTS`] or [`ROW_PX`];
 /// `None` when neither lists it.
 pub(crate) fn cell_font_px(font_name: &str, font_size: f32) -> Option<u32> {
@@ -194,17 +206,26 @@ impl<'a> RowPitch<'a> {
 
     /// The height row `r` fits its fonts to, at least `default`: `None` when the row wraps text or
     /// holds a font bigger than the Normal font whose default row height is not known.
+    ///
+    /// A counted cell whose font is superscript or subscript, or whose string has such a run, needs
+    /// its font's default row plus [`script_extra_px`]; a counted cell with a thick bottom border
+    /// adds [`THICK_BOTTOM_EXTRA_PX`] once to the row's plain font need. The larger need wins.
     fn fitted_px(&self, r: u32, default: f32) -> Option<f32> {
         let sh = self.sh;
         let mut need = default;
+        let mut script_need = 0.0f32;
+        let mut thick_bottom = false;
         for (c, cell) in sh.cells.row(r, 0, gridcraft_core::MAX_COLS - 1) {
             let st = self.wb.styles.get(cell.style);
             if st.align.wrap {
                 return None;
             }
+            let script = st.font.vert != gridcraft_model::VertAlign::Baseline
+                || (!sh.script_run_cells.is_empty() && sh.script_run_cells.contains(&gridcraft_core::CellRef::new(r, c)));
+            let thick = st.borders.bottom.style == gridcraft_model::BorderStyle::Thick;
             let px = cell_font_px(&st.font.name, st.font.size);
             let matters = match px {
-                Some(p) => p as f32 > need,
+                Some(p) => p as f32 > need || script || thick,
                 None => st.font.size > self.normal_size + 0.01,
             };
             if !matters {
@@ -214,9 +235,15 @@ impl<'a> RowPitch<'a> {
                 continue;
             }
             // A bigger font whose default row is not known: the row keeps its stored height.
-            need = px? as f32;
+            let p = px? as f32;
+            need = need.max(p);
+            if script {
+                script_need = script_need.max(p + script_extra_px(st.font.size));
+            }
+            thick_bottom |= thick;
         }
-        Some(need)
+        let plain = if thick_bottom { need + THICK_BOTTOM_EXTRA_PX } else { need };
+        Some(plain.max(script_need))
     }
 
     /// The largest default row height among row `r`'s cell fonts, with no lower bound: `None` when

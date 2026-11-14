@@ -96,6 +96,7 @@ mod richdata_excel_package_tests;
 mod richdata_tests;
 mod richdata_types_part_tests;
 mod roundtrip;
+mod script_run_rows_tests;
 mod sensitivity_label;
 mod shape_block_arrow_tests;
 mod shape_body_props_kept_tests;

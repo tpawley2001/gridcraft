@@ -152,6 +152,12 @@ pub struct Sheet {
     /// on open; the `.xlsx` reader leaves it off (its rows keep the Normal default as a floor).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fit_print_rows_without_default_floor: bool,
+    /// Cells read from `.xlsx` whose string has a superscript or subscript run (`<r><rPr><vertAlign>`,
+    /// ECMA-376 Part 1, 18.4.7 / 18.4.14). Rich text is not modelled; printing only needs to know
+    /// that such a run makes the row fit taller, like a superscript cell font. Kept as read: not in
+    /// JSON, and not updated by edits.
+    #[serde(skip)]
+    pub script_run_cells: std::collections::BTreeSet<CellRef>,
     pub merges: Vec<RangeRef>,
     /// The sheet's default phonetic (furigana) settings: ISO/IEC 29500-1 §18.4.3 `phoneticPr`
     /// as a child of the worksheet. `None` when the file had none.
@@ -341,6 +347,7 @@ impl Sheet {
             default_row_custom_height: None,
             fit_auto_row_heights_in_print: false,
             fit_print_rows_without_default_floor: false,
+            script_run_cells: std::collections::BTreeSet::new(),
             merges: vec![],
             phonetic_props: None,
             freeze: None,
