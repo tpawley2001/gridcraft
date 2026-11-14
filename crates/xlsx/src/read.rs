@@ -622,11 +622,6 @@ fn visibility(se: &El) -> Visibility {
     }
 }
 
-/// The chart and page setup of a chart sheet part (ECMA-376 Part 1 §18.3.1.12), for printing:
-/// the chart behind its `<drawing>`, read with the embedded-chart reader, and its
-/// `<pageSetup>` orientation and paper, `<pageMargins>` and `<headerFooter>`. `None` when the
-/// sheet, its drawing or its chart is missing or unreadable. Problems are not reported: the
-/// parts are kept for saving either way (see `passthrough`), which warns about them.
 /// An Excel 4.0 macro sheet's cells, layout and page setup, for printing: `CT_Macrosheet` has
 /// `CT_Worksheet`'s children ([MS-XLSX] 2.1.11), so the worksheet reader reads it. Its formulas
 /// are kept as text, never evaluated. A part that can't be read is `None` and prints nothing; the
@@ -641,6 +636,11 @@ fn read_macro_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Option<Sheet> {
     read.ok().map(|(sheet, _)| sheet)
 }
 
+/// The chart and page setup of a chart sheet part (ECMA-376 Part 1 §18.3.1.12), for printing:
+/// the chart behind its `<drawing>`, read with the embedded-chart reader, and its
+/// `<pageSetup>` orientation and paper, `<pageMargins>` and `<headerFooter>`. `None` when the
+/// sheet, its drawing or its chart is missing or unreadable. Problems are not reported: the
+/// parts are kept for saving either way (see `passthrough`), which warns about them.
 fn read_chart_sheet(cx: &mut Ctx<'_>, part: &str) -> Result<Option<(Chart, PrintSettings)>, IoError> {
     let warned = cx.report.warnings.len();
     let found = chart_sheet_parts(cx, part);
