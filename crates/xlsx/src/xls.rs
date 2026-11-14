@@ -1526,6 +1526,41 @@ fn read_fslv(fslv: bool, sheet: &mut Sheet) {
 }
 
 /// ROW ([MS-XLS] 2.4.221): the row's height, hidden/outline flags and style.
+/// The default row height in twips Excel gives a Normal font (name compared without case), for
+/// the fonts it was measured on; `None` for others.
+fn normal_font_row_twips(name: &str, size: f32) -> Option<u16> {
+    // (font, size in points, default row height in screen pixels; 1 px = 15 twips).
+    const FONTS: &[(&str, f32, u16)] = &[
+        ("Calibri", 10.0, 17),
+        ("Calibri", 11.0, 20),
+        ("Calibri", 12.0, 21),
+        ("Arial", 8.0, 15),
+        ("Arial", 9.0, 16),
+        ("Arial", 10.0, 17),
+        ("Arial", 11.0, 19),
+        ("Arial", 12.0, 20),
+        ("Times New Roman", 8.0, 15),
+        ("Times New Roman", 10.0, 17),
+        ("Times New Roman", 11.0, 20),
+        ("Times New Roman", 12.0, 21),
+        ("Tahoma", 8.0, 14),
+        ("Tahoma", 10.0, 17),
+        ("Courier New", 8.0, 15),
+        ("Courier New", 10.0, 18),
+        ("Courier New", 12.0, 21),
+        ("Courier", 8.0, 16),
+        ("Aptos Narrow", 11.0, 20),
+        ("Aptos Narrow", 12.0, 21),
+        ("MS Sans Serif", 10.0, 17),
+        ("Verdana", 10.0, 17),
+        ("Cambria", 11.0, 19),
+        ("MS PGothic", 11.0, 18),
+        ("SimSun", 12.0, 19),
+    ];
+    let name = name.trim();
+    FONTS.iter().find(|(n, s, _)| n.eq_ignore_ascii_case(name) && (s - size).abs() < 0.01).map(|&(_, _, px)| px * 15)
+}
+
 fn read_row(c: &mut Cursor<'_, '_>, st: &mut SheetState<'_>) -> Result<(), IoError> {
     let r = c.u16()?;
     c.skip(4)?;
@@ -1729,6 +1764,14 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x0225 => {
             let flags = c.u16()?;
             let height = c.u16()?;
+            // DefaultRowHeight ([MS-XLS] 2.4.90): with fUnsynced clear the default height
+            // follows the Normal font, and Excel ignores the stored miyRw (its own re-saves
+            // write the font's height); a font outside the table keeps the stored value.
+            let height = if flags & 0x0001 == 0 {
+                styles::normal_font(&st.g.styles).and_then(|(name, size)| normal_font_row_twips(&name, size)).unwrap_or(height)
+            } else {
+                height
+            };
             if flags & 0x0002 == 0 && height > 0 {
                 st.sheet.default_row_height = pt_to_px(f64::from(height) / 20.0);
             }

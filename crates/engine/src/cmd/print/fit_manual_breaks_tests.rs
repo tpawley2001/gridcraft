@@ -25,7 +25,7 @@ fn three_hundred_rows() -> Session {
     s
 }
 
-/// Letter portrait, 15pt rows: 45 rows per page. One column is narrower than the page, so the
+/// Letter portrait, 15pt rows: 47 rows per page (121 printed dots each, Calibri 11). One column is narrower than the page, so the
 /// width fit keeps 100%; the manual break before row 11 still splits, then pages fill as usual.
 #[test]
 fn automatic_height_keeps_manual_row_breaks() {
@@ -34,9 +34,9 @@ fn automatic_height_keeps_manual_row_breaks() {
     let rows = page_list(&mut s, "rows");
     assert_eq!(rows.len(), 8, "{rows:?}");
     assert_eq!(rows[0], "1:10");
-    assert_eq!(rows[1], "11:55");
-    assert_eq!(rows[2], "56:100");
-    assert_eq!(rows[7], "281:300");
+    assert_eq!(rows[1], "11:57");
+    assert_eq!(rows[2], "58:104");
+    assert_eq!(rows[7], "293:300");
 }
 
 /// With a page count tall, the manual break is ignored: the rows are scaled onto two pages.

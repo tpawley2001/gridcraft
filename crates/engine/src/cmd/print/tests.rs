@@ -128,20 +128,21 @@ fn page_count_300_rows_letter_portrait() {
     let mut s = s();
     let rows: Vec<Vec<Json>> = (1..=300).map(|i| vec![json!(i)]).collect();
     s.execute("range.setValues", json!({"range": "A1", "values": rows})).unwrap();
-    // 684pt of printable height / 15pt rows = 45 rows per page → 7 pages.
+    // 684pt of printable height = 5700 printer dots, 5692 usable; 15pt Calibri 11 rows print
+    // 121 dots: 47 rows per page → 7 pages.
     let (pdf, pages) = pdf_of(&mut s, json!({}));
     assert_eq!(pages, 7);
     assert!(pdf.starts_with(b"%PDF-1.7"));
     assert!(contains(&pdf, "/Count 7"));
     let pv = s.execute("file.printPreview", json!({})).unwrap();
     assert_eq!(pv["pages"], 7);
-    assert_eq!(pv["pageList"][0]["rows"], "1:45");
-    assert_eq!(pv["pageList"][1]["rows"], "46:90");
-    assert_eq!(s.execute("file.printPreview", json!({"page": 7})).unwrap()["page"]["rows"], "271:300");
+    assert_eq!(pv["pageList"][0]["rows"], "1:47");
+    assert_eq!(pv["pageList"][1]["rows"], "48:94");
+    assert_eq!(s.execute("file.printPreview", json!({"page": 7})).unwrap()["page"]["rows"], "283:300");
     assert!(s.execute("file.printPreview", json!({"page": 8})).is_err());
-    // Landscape: 504pt / 15 = 33 rows per page → 10 pages.
+    // Landscape: 504pt = 4200 dots, 4192 usable / 121 = 34 rows per page → 9 pages.
     s.execute("pageLayout.pageSetup", json!({"orientation": "landscape"})).unwrap();
-    assert_eq!(pdf_of(&mut s, json!({})).1, 10);
+    assert_eq!(pdf_of(&mut s, json!({})).1, 9);
     // Fit to one page.
     assert_eq!(pdf_of(&mut s, json!({"fitToPage": true})).1, 1);
     s.execute("pageLayout.pageSetup", json!({"fitWidth": 1, "fitHeight": 2, "orientation": "portrait"})).unwrap();
@@ -150,8 +151,8 @@ fn page_count_300_rows_letter_portrait() {
     s.execute("pageLayout.pageSetup", json!({"scale": 100, "rowBreaks": [11], "titleRows": "1:1"})).unwrap();
     let pv = s.execute("file.printPreview", json!({})).unwrap();
     assert_eq!(pv["pageList"][0]["rows"], "1:10");
-    // Title row takes one line on later pages: 44 body rows.
-    assert_eq!(pv["pageList"][1]["rows"], "11:54");
+    // Title row takes one line on later pages: 46 body rows.
+    assert_eq!(pv["pageList"][1]["rows"], "11:56");
 }
 
 #[test]
@@ -160,11 +161,11 @@ fn wide_sheet_goes_down_then_over() {
     let rows: Vec<Vec<Json>> = (0..60).map(|r| (0..15).map(|c| json!(r * 100 + c)).collect()).collect();
     s.execute("range.setValues", json!({"range": "A1", "values": rows})).unwrap();
     let pv = s.execute("file.printPreview", json!({})).unwrap();
-    // 511.2pt / 48pt = 10 columns per page; 45 rows per page.
+    // 511.2pt / 48pt = 10 columns per page; 47 rows per page.
     assert_eq!(pv["pages"], 4);
-    assert_eq!(pv["pageList"][0]["range"], "A1:J45");
-    assert_eq!(pv["pageList"][1]["range"], "A46:J60");
-    assert_eq!(pv["pageList"][2]["range"], "K1:O45");
+    assert_eq!(pv["pageList"][0]["range"], "A1:J47");
+    assert_eq!(pv["pageList"][1]["range"], "A48:J60");
+    assert_eq!(pv["pageList"][2]["range"], "K1:O47");
 }
 
 /// The ranges of the printed pages, in print order.
@@ -285,7 +286,7 @@ fn page_order_without_breaks_and_with_print_titles() {
         s.execute("pageLayout.pageSetup", json!({"pageOrder": "downThenOver"})).unwrap();
         let down = page_ranges(&mut s);
         if !titles {
-            assert_eq!(down, ["A1:J45", "A46:J60", "K1:O45", "K46:O60"]);
+            assert_eq!(down, ["A1:J47", "A48:J60", "K1:O47", "K48:O60"]);
         }
         s.execute("pageLayout.pageSetup", json!({"pageOrder": "overThenDown"})).unwrap();
         let over = page_ranges(&mut s);

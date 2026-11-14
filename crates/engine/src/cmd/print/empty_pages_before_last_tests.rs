@@ -3,7 +3,7 @@
 //! page are printed; only the pages after it are left out (measured from Excel's PDFs: a workbook
 //! with cells only top-left, top-right and bottom-left of its used range prints every band of
 //! columns but the last at full height, then one page of the last band).
-//! Letter portrait with default margins, column widths and row heights: 45 rows per page, and the
+//! Letter portrait with default margins, column widths and row heights: 47 rows per page, and the
 //! bands of columns are A:J, K:T and U:AD.
 use serde_json::json;
 
@@ -54,22 +54,22 @@ fn expect(pages: &[(String, String)], want: &[(&str, &str)]) {
 
 /// Seven pages, down then over: both full bands before the last, then the last band's one page.
 const SEVEN_DOWN: [(&str, &str); 7] =
-    [("A:J", "1:45"), ("A:J", "46:90"), ("A:J", "91:120"), ("K:T", "1:45"), ("K:T", "46:90"), ("K:T", "91:120"), ("U:AD", "1:45")];
+    [("A:J", "1:47"), ("A:J", "48:94"), ("A:J", "95:120"), ("K:T", "1:47"), ("K:T", "48:94"), ("K:T", "95:120"), ("U:AD", "1:47")];
 
 /// Seven pages, over then down: both full rows of pages before the last, then the last row's one page.
 const SEVEN_OVER: [(&str, &str); 7] =
-    [("A:J", "1:45"), ("K:T", "1:45"), ("U:AD", "1:45"), ("A:J", "46:90"), ("K:T", "46:90"), ("U:AD", "46:90"), ("A:J", "91:120")];
+    [("A:J", "1:47"), ("K:T", "1:47"), ("U:AD", "1:47"), ("A:J", "48:94"), ("K:T", "48:94"), ("U:AD", "48:94"), ("A:J", "95:120")];
 
 const FULL_GRID: [(&str, &str); 9] = [
-    ("A:J", "1:45"),
-    ("A:J", "46:90"),
-    ("A:J", "91:120"),
-    ("K:T", "1:45"),
-    ("K:T", "46:90"),
-    ("K:T", "91:120"),
-    ("U:AD", "1:45"),
-    ("U:AD", "46:90"),
-    ("U:AD", "91:120"),
+    ("A:J", "1:47"),
+    ("A:J", "48:94"),
+    ("A:J", "95:120"),
+    ("K:T", "1:47"),
+    ("K:T", "48:94"),
+    ("K:T", "95:120"),
+    ("U:AD", "1:47"),
+    ("U:AD", "48:94"),
+    ("U:AD", "95:120"),
 ];
 
 /// Cells in three corners only: the middle band of columns holds nothing at all, and prints at
@@ -137,7 +137,7 @@ fn one_row_of_pages_is_unchanged() {
 fn one_band_of_columns_is_unchanged() {
     let cells: Vec<String> = (1..=120).map(|r| format!("A{r}")).collect();
     let mut s = sheet(&cells);
-    expect(&page_list(&mut s), &[("A:A", "1:45"), ("A:A", "46:90"), ("A:A", "91:120")]);
+    expect(&page_list(&mut s), &[("A:A", "1:47"), ("A:A", "48:94"), ("A:A", "95:120")]);
 }
 
 /// A print area always prints its full grid of pages.

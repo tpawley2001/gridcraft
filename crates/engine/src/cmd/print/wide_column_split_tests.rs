@@ -153,9 +153,9 @@ fn wide_column_split_pairs_the_cut_column_with_every_row_band() {
     let mut s = wide_column();
     let rows: Vec<Vec<Json>> = (1..=60).map(|i| vec![json!(i)]).collect();
     s.execute("range.setValues", json!({"range": "A1", "values": rows})).unwrap();
-    // 45 rows of 15 pt per page; numbers never continue past the cut column.
+    // 47 rows of 15 pt (121 printed dots) per page; numbers never continue past the cut column.
     let list = preview(&mut s);
-    assert_eq!(ranges(&list), ["A1:A45", "A46:A60"]);
+    assert_eq!(ranges(&list), ["A1:A47", "A48:A60"]);
     assert_eq!(offsets(&list), [None, None]);
 }
 

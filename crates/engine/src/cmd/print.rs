@@ -24,6 +24,7 @@ use super::{CommandSpec, Result, Session, bad, bool_param, cmd, edit, f64_param,
 mod draw;
 mod header_footer;
 mod layout;
+mod metrics;
 mod objects;
 mod text;
 
@@ -207,12 +208,15 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
             let shift = cut.offset * k;
             let band_w = |last: bool, cs: (u32, u32)| if last && split { cut.width } else { seg_size(sh, cs, false) };
             let content_w = (lay.heading_w + csegs.iter().enumerate().map(|(i, s)| band_w(i + 1 == csegs.len(), *s)).sum::<f32>()) * k;
-            let content_h = (lay.heading_h + rsegs.iter().map(|s| seg_size(sh, *s, true)).sum::<f32>()) * k;
+            // Rows print at their printed pitch ([`metrics::RowPitch`]), the heading row too.
+            let pitch = metrics::RowPitch::new(wb, sh, lay.scale);
+            let heading_h = if lay.heading_h > 0.0 { pitch.dots_px(lay.heading_h) as f32 * metrics::DOT_PT } else { 0.0 };
+            let content_h = heading_h + rsegs.iter().map(|s| pitch.span_pt(*s)).sum::<f32>();
             let ox = lay.margins[0] + if lay.settings.center_h { ((aw - content_w) / 2.0).max(0.0) } else { 0.0 };
             let oy = lay.margins[2] + if lay.settings.center_v { ((ah - content_h) / 2.0).max(0.0) } else { 0.0 };
             let page_index = doc.page_count();
             let pg = doc.add_page(lay.page_w, lay.page_h);
-            let mut y = oy + lay.heading_h * k;
+            let mut y = oy + heading_h;
             let mut body: Option<Block> = None;
             // The left edge of the body columns and the clip of a split band's pieces.
             let titles_w: f32 = csegs.iter().take(csegs.len().saturating_sub(1)).map(|s| seg_size(sh, *s, false)).sum::<f32>() * k;
@@ -236,13 +240,13 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
                     draw_block_links(pg, &b, page_index, &mut pending_links);
                     printed_blocks.push(PrintedBlock { page: page_index, sheet: lay.sheet, rows: *rs, cols: *cs, x: bx, y, k });
                     if lay.settings.headings {
-                        draw_headings(pg, &b, rsi == 0, csi == 0 && clipped.is_none(), (ox, oy), (lay.heading_w * k, lay.heading_h * k));
+                        draw_headings(pg, &b, rsi == 0, csi == 0 && clipped.is_none(), (ox, oy), (lay.heading_w * k, heading_h));
                     }
                     if clipped.is_some() {
                         pg.restore();
                         // Row headings sit left of the clip.
                         if lay.settings.headings && csi == 0 {
-                            draw_headings(pg, &b, false, true, (ox, oy), (lay.heading_w * k, lay.heading_h * k));
+                            draw_headings(pg, &b, false, true, (ox, oy), (lay.heading_w * k, heading_h));
                         }
                     }
                     x += seg_size(sh, *cs, false) * k;
@@ -263,7 +267,7 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
                         draw_block(pg, &b, false, &mut cf);
                     }
                 }
-                y += seg_size(sh, *rs, true) * k;
+                y += pitch.span_pt(*rs);
             }
             // Continuation pages carry only the text running on past the cut.
             if let Some(b) = body.as_ref().filter(|_| cut.offset <= 0.0) {
@@ -278,8 +282,8 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
             }
             if lay.settings.headings {
                 let fill = [0xF2, 0xF2, 0xF2];
-                pg.fill_rect(ox, oy, lay.heading_w * k, lay.heading_h * k, fill);
-                pg.rect_stroke(ox, oy, lay.heading_w * k, lay.heading_h * k, 0.3, [0xA0, 0xA0, 0xA0]);
+                pg.fill_rect(ox, oy, lay.heading_w * k, heading_h, fill);
+                pg.rect_stroke(ox, oy, lay.heading_w * k, heading_h, 0.3, [0xA0, 0xA0, 0xA0]);
             }
             let cx = HfContext {
                 page: page_no,
@@ -624,6 +628,8 @@ mod fit_manual_breaks_tests;
 mod indent_width_tests;
 #[cfg(test)]
 mod page_limit_tests;
+#[cfg(test)]
+mod row_pitch_tests;
 #[cfg(test)]
 mod shape_hole_tests;
 #[cfg(test)]

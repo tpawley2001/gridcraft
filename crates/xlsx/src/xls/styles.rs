@@ -717,6 +717,14 @@ pub(super) fn ext_ignored(r: &StyleRecords) -> bool {
 
 /// Imports the formatting: sets the workbook's default (Normal) font and named cell styles, and
 /// returns the model style of every XF in file order.
+/// The Normal style's font (name, size in points): the font of the XF the built-in Normal
+/// style names, else of XF 0, else the first font.
+pub(super) fn normal_font(r: &StyleRecords) -> Option<(String, f32)> {
+    let normal_xf = r.styles.iter().find(|s| s.builtin == Some(0)).map_or(0, |s| usize::from(s.ixf));
+    let font = r.xfs.get(normal_xf).map(|xf| xf_font(xf.ifnt, &r.fonts)).or_else(|| r.fonts.first().cloned())?;
+    Some((font.name, font.size))
+}
+
 pub(super) fn build(r: &StyleRecords, formats: &HashMap<u16, String>, wb: &mut Workbook) -> Vec<StyleId> {
     let table = r.color_table();
     let fonts: Vec<Font> = r.fonts.iter().zip(r.font_colors.iter()).map(|(f, icv)| Font { color: color(*icv, &table), ..f.clone() }).collect();
