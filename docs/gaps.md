@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-14 · **Change:** minor (G0387: `.xls` shapes whose drawing follows a text box’s TxO in CONTINUE records retain their anchors and text. Earlier: G0384: BIFF5/BIFF8 `.xls` worksheets without DefaultRowHeight use the measured Normal-font default height; unknown fonts and explicit records keep their existing behavior. Earlier: G0372: a long workbook prints all its pages, not only the first 2,000; earlier: G0300: §17: snip-and-round rectangle, left-right ribbon and multidocument flowchart presets draw and print their own outline; earlier: G0271: printing with Fit To an automatic page count on one axis (such as 1 page wide by automatic tall) still splits pages at that axis' manual page breaks, like Excel)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-14 · **Change:** minor (G0388: rows fitted to their content take each line's height from the font's measured default row height (Arial 10 = 12.75 pt); unlisted fonts keep the estimate. Earlier: G0387: `.xls` shapes whose drawing follows a text box’s TxO in CONTINUE records retain their anchors and text. Earlier: G0384: BIFF5/BIFF8 `.xls` worksheets without DefaultRowHeight use the measured Normal-font default height; unknown fonts and explicit records keep their existing behavior. Earlier: G0372: a long workbook prints all its pages, not only the first 2,000; earlier: G0300: §17: snip-and-round rectangle, left-right ribbon and multidocument flowchart presets draw and print their own outline; earlier: G0271: printing with Fit To an automatic page count on one axis (such as 1 page wide by automatic tall) still splits pages at that axis' manual page breaks, like Excel)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -104,6 +104,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 ### 7. Legacy `.xls` only partly read; encrypted workbooks can't be saved with a password (FF)
 - `.xls` shapes whose drawing spans CONTINUE records after a text box’s TxO import through the same OfficeArt path as MsoDrawing (`xls_drawing_in_continue_tests.rs`).
+- Rows fitted to their content (on open and after an edit) take each line's height from the font's measured default row height, n lines of a listed font being n of its rows (Arial 10 = 12.75 pt a line, as Excel stores them); fonts outside the measured table keep the size-scaled estimate (`row_fit_font_tests.rs`).
 - `.xls` worksheets without DefaultRowHeight use the Normal font's measured default row height (`xls_missing_default_row_height_tests.rs`); fonts outside the measured table retain the model default.
 - `.xls` Normal uses FONT record 0 regardless of the Normal style XF’s font index, including when STYLE is absent; synced default row heights use that font (`xls_normal_font_tests.rs`).
 - BIFF8 shapes whose OfficeArt data is in Continue records after the preceding Obj import in order with their anchors (`xls_shapes_continue_tests.rs`).
@@ -274,6 +275,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-14 | minor | G0388: fitted rows take each line's height from the font's measured default row height (Arial 10 = 12.75 pt, not 13.64 pt); fonts outside the table keep the estimate. |
 | 2026-11-14 | minor | G0387: `.xls` drawing data after TxO characters and formatting runs imports shapes with their anchors and text, including containers split across CONTINUE records. |
 | 2026-11-14 | minor | G0385: §14: printing the entire workbook prints each visible Excel 4.0 macro sheet like a worksheet, in its tab place, showing its formulas as its view does; hidden and empty macro sheets print nothing |
 | 2026-11-14 | minor | G0384: BIFF5/BIFF8 `.xls` worksheets without DefaultRowHeight use the measured Normal-font default height; unknown fonts and explicit records keep their existing behavior. |
