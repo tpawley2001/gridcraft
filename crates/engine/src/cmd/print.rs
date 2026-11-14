@@ -627,6 +627,8 @@ mod fit_manual_breaks_tests;
 #[cfg(test)]
 mod indent_width_tests;
 #[cfg(test)]
+mod normal_font_pairs_tests;
+#[cfg(test)]
 mod page_limit_tests;
 #[cfg(test)]
 mod row_font_fit_tests;
