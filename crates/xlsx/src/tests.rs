@@ -172,6 +172,7 @@ mod xls_label_tail_tests;
 mod xls_list_control_tests;
 mod xls_long_text_tests;
 mod xls_macro_sheet_tests;
+mod xls_normal_font_tests;
 mod xls_office_art_presets_tests;
 mod xls_picture_tests;
 mod xls_pivot_tests;
