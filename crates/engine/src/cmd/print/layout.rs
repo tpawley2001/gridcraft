@@ -212,29 +212,24 @@ struct OnPaper<'a> {
     /// Per style id: not yet looked at, or whether it shows on paper.
     styles: Vec<Option<bool>>,
     hidden_row: Option<(u32, bool)>,
+    /// Every stored cell counts: nothing on the sheet puts anything on paper by the rule above
+    /// (no value or formula, no fill or border, no merge, spill range, table or printing drawing
+    /// object). Such a sheet prints its block of stored cells, as Excel does (a sheet of empty
+    /// cells formatted only with number formats and fonts prints all of them).
+    all: bool,
 }
 
 impl<'a> OnPaper<'a> {
     fn new(wb: &'a Workbook, sh: &'a Sheet) -> Self {
-        OnPaper { wb, sh, styles: vec![None; wb.styles.len()], hidden_row: None }
+        let mut p = OnPaper { wb, sh, styles: vec![None; wb.styles.len()], hidden_row: None, all: false };
+        let other = !sh.merges.is_empty() || !sh.spill_ranges.is_empty() || !sh.tables.is_empty() || has_printing_objects(sh);
+        // Stops at the first cell that counts, so a sheet with data pays almost nothing here.
+        p.all = !other && !sh.cells.iter().any(|(_, cell)| cell.has_content() || p.style_shows(cell));
+        p
     }
 
-    /// Whether the stored cell `c` counts as something on a page.
-    fn counts(&mut self, c: CellRef, cell: &gridcraft_model::Cell) -> bool {
-        let hidden = match self.hidden_row {
-            Some((r, h)) if r == c.row => h,
-            _ => {
-                let h = self.sh.is_row_hidden(c.row);
-                self.hidden_row = Some((c.row, h));
-                h
-            }
-        };
-        if hidden {
-            return false;
-        }
-        if cell.has_content() {
-            return true;
-        }
+    /// Whether the style of an empty cell shows on paper, looked up once per style id.
+    fn style_shows(&mut self, cell: &gridcraft_model::Cell) -> bool {
         let slot = self.styles.get_mut(cell.style.0 as usize);
         match slot.as_deref().copied().flatten() {
             Some(shows) => shows,
@@ -247,6 +242,48 @@ impl<'a> OnPaper<'a> {
             }
         }
     }
+
+    /// Whether the stored cell `c` counts as something on a page.
+    fn counts(&mut self, c: CellRef, cell: &gridcraft_model::Cell) -> bool {
+        if self.all {
+            return true;
+        }
+        let hidden = match self.hidden_row {
+            Some((r, h)) if r == c.row => h,
+            _ => {
+                let h = self.sh.is_row_hidden(c.row);
+                self.hidden_row = Some((c.row, h));
+                h
+            }
+        };
+        if hidden {
+            return false;
+        }
+        cell.has_content() || self.style_shows(cell)
+    }
+}
+
+/// Whether the sheet holds a drawing object that prints.
+fn has_printing_objects(sh: &Sheet) -> bool {
+    sh.charts.iter().any(|o| !o.hidden && !o.no_print)
+        || sh.images.iter().any(|o| !o.hidden && !o.no_print)
+        || sh.shapes.iter().any(|o| !o.hidden && !o.no_print)
+        || sh.controls.iter().any(|o| o.print)
+        || sh.embedded_objects.iter().any(|o| o.print)
+}
+
+/// The part of a merged range that counts toward the printed range: a merge over whole columns
+/// does not reach down (it would end at the grid's last row), nor one over whole rows right.
+/// Each still counts in its other direction.
+fn merge_extent(m: &RangeRef) -> RangeRef {
+    let mut end = m.end;
+    if m.is_full_cols() {
+        end.row = m.start.row;
+    }
+    if m.is_full_rows() {
+        end.col = m.start.col;
+    }
+    RangeRef::new(m.start, end)
 }
 
 /// A style that marks an empty cell on paper: a fill or any border side.
@@ -279,7 +316,7 @@ fn used_print_range(wb: &Workbook, sh: &Sheet) -> Option<RangeRef> {
     for r in sh.spill_ranges.values() {
         grow_to(&mut end, r.end.row, r.end.col);
     }
-    for m in &sh.merges {
+    for m in sh.merges.iter().map(merge_extent) {
         grow_to(&mut end, m.end.row, m.end.col);
     }
     // Text spilling over the empty cells right of the last counted column keeps printing, up to
@@ -726,7 +763,7 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
     for r in sh.spill_ranges.values() {
         mark(r.end.row, r.start.col, r.end.col);
     }
-    for m in &sh.merges {
+    for m in sh.merges.iter().map(merge_extent) {
         mark(m.end.row, m.start.col, m.end.col);
     }
     let mut object = |a: &Anchor| {
