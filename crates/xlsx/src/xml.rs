@@ -79,6 +79,31 @@ pub fn has_script_run(e: &El) -> bool {
     e.kids("r").filter_map(|r| r.child("rPr")).filter_map(|p| p.child_val("vertAlign")).any(|v| matches!(v, "superscript" | "subscript"))
 }
 
+/// The distinct fonts of a string item's superscript and subscript runs (`<r><rPr>` with
+/// `vertAlign`, `sz`, `rFont`; ECMA-376 Part 1, 18.4.7), at most
+/// [`gridcraft_model::MAX_SCRIPT_RUN_FONTS`]. A size that is not a positive finite number counts
+/// as unset.
+pub fn script_run_fonts(e: &El) -> Vec<gridcraft_model::ScriptRunFont> {
+    let mut out: Vec<gridcraft_model::ScriptRunFont> = Vec::new();
+    for p in e.kids("r").filter_map(|r| r.child("rPr")) {
+        let subscript = match p.child_val("vertAlign") {
+            Some("superscript") => false,
+            Some("subscript") => true,
+            _ => continue,
+        };
+        let size = p.child_val("sz").and_then(|v| v.trim().parse::<f32>().ok()).filter(|v| v.is_finite() && *v > 0.0);
+        let name = p.child_val("rFont").map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+        let font = gridcraft_model::ScriptRunFont { name, size, subscript };
+        if !out.contains(&font) {
+            if out.len() >= gridcraft_model::MAX_SCRIPT_RUN_FONTS {
+                break;
+            }
+            out.push(font);
+        }
+    }
+    out
+}
+
 /// Text of a SpreadsheetML string item (`<si>`, `<is>`, comment `<text>`): `<t>` and rich text
 /// runs `<r><t>`, phonetic runs ignored (read them with [`phonetic_data`] instead — they are hints,
 /// not part of the text). Decodes `_xHHHH_` escapes.

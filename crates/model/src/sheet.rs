@@ -103,6 +103,21 @@ pub struct SheetSplit {
     pub active_pane: Option<String>,
 }
 
+/// Distinct script-run fonts kept per cell (input-sized: a string may have any number of runs).
+pub const MAX_SCRIPT_RUN_FONTS: usize = 8;
+
+/// The font of a superscript or subscript string run (`<r><rPr>`, ECMA-376 Part 1, 18.4.7): only
+/// what the print row fit needs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScriptRunFont {
+    /// `rFont`; `None` when the run names no font (it shows the cell font's).
+    pub name: Option<String>,
+    /// `sz` in points; `None` when the run sets no size (it shows the cell font's).
+    pub size: Option<f32>,
+    /// `true` for subscript, `false` for superscript.
+    pub subscript: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sheet {
     pub name: String,
@@ -158,6 +173,11 @@ pub struct Sheet {
     /// JSON, and not updated by edits.
     #[serde(skip)]
     pub script_run_cells: std::collections::BTreeSet<CellRef>,
+    /// The fonts of the superscript and subscript runs of [`Sheet::script_run_cells`] (distinct,
+    /// at most [`MAX_SCRIPT_RUN_FONTS`] per cell): a run's own size decides how tall the row fits.
+    /// Kept as read, like `script_run_cells`.
+    #[serde(skip)]
+    pub script_run_fonts: std::collections::BTreeMap<CellRef, Vec<ScriptRunFont>>,
     pub merges: Vec<RangeRef>,
     /// The sheet's default phonetic (furigana) settings: ISO/IEC 29500-1 §18.4.3 `phoneticPr`
     /// as a child of the worksheet. `None` when the file had none.
@@ -348,6 +368,7 @@ impl Sheet {
             fit_auto_row_heights_in_print: false,
             fit_print_rows_without_default_floor: false,
             script_run_cells: std::collections::BTreeSet::new(),
+            script_run_fonts: std::collections::BTreeMap::new(),
             merges: vec![],
             phonetic_props: None,
             freeze: None,

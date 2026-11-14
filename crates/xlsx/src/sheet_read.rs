@@ -613,13 +613,19 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
     let style = cx.style(c.attr_u32("s"));
     let v = c.child("v").map(|v| v.text.as_str());
     // A superscript or subscript run in the cell's string makes its row print taller.
-    let script_run = match c.attr("t") {
-        Some("s") => v.and_then(|v| v.trim().parse::<usize>().ok()).is_some_and(|i| cx.sst_script_runs.contains(&i)),
-        Some("inlineStr") => c.child("is").is_some_and(xml::has_script_run),
-        _ => false,
+    let script_runs = match c.attr("t") {
+        Some("s") => v
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|i| cx.sst_script_runs.contains(i))
+            .map(|i| cx.sst_script_run_fonts.get(&i).cloned().unwrap_or_default()),
+        Some("inlineStr") => c.child("is").filter(|is| xml::has_script_run(is)).map(xml::script_run_fonts),
+        _ => None,
     };
-    if script_run {
+    if let Some(fonts) = script_runs {
         sheet.script_run_cells.insert(pos);
+        if !fonts.is_empty() {
+            sheet.script_run_fonts.insert(pos, fonts);
+        }
     }
     let value = match c.attr("t").unwrap_or("n") {
         "s" => match v.and_then(|v| v.trim().parse::<usize>().ok()) {

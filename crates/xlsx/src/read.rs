@@ -21,6 +21,8 @@ pub struct Ctx<'a> {
     pub sst: Vec<Arc<str>>,
     /// Indexes into `sst` of the strings with a superscript or subscript run.
     pub sst_script_runs: std::collections::BTreeSet<usize>,
+    /// The script-run fonts of the strings in `sst_script_runs` ([`xml::script_run_fonts`]).
+    pub sst_script_run_fonts: std::collections::BTreeMap<usize, Vec<gridcraft_model::ScriptRunFont>>,
     /// Phonetic (furigana) data of the shared strings, one entry per base text.
     pub phonetics: Vec<PhoneticString>,
     /// Cell format index → model style.
@@ -66,6 +68,7 @@ impl<'a> Ctx<'a> {
             report: ReadReport::default(),
             sst: vec![],
             sst_script_runs: Default::default(),
+            sst_script_run_fonts: Default::default(),
             phonetics: vec![],
             xf_map: vec![],
             dxfs: vec![],
@@ -158,6 +161,7 @@ fn read_shared_strings(cx: &mut Ctx<'_>, wb_rels: &[Rel]) -> Result<(), IoError>
             Some(b) => {
                 let mut sst = Vec::new();
                 let mut script_runs = std::collections::BTreeSet::new();
+                let mut script_run_fonts = std::collections::BTreeMap::new();
                 let mut phonetics = Vec::new();
                 let mut dropped = 0usize;
                 let res = xml::parse_streaming(&b, &["si"], &mut |si| {
@@ -170,6 +174,7 @@ fn read_shared_strings(cx: &mut Ctx<'_>, wb_rels: &[Rel]) -> Result<(), IoError>
                     }
                     if xml::has_script_run(&si) {
                         script_runs.insert(sst.len());
+                        script_run_fonts.insert(sst.len(), xml::script_run_fonts(&si));
                     }
                     sst.push(Arc::from(text));
                     Ok(())
@@ -182,6 +187,7 @@ fn read_shared_strings(cx: &mut Ctx<'_>, wb_rels: &[Rel]) -> Result<(), IoError>
                 }
                 cx.sst = sst;
                 cx.sst_script_runs = script_runs;
+                cx.sst_script_run_fonts = script_run_fonts;
                 cx.keep_phonetics(phonetics);
             }
             None => cx.warn(format!("missing part {}", r.target)),
