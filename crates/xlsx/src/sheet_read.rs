@@ -612,6 +612,15 @@ fn read_row(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, row: &El) {
 fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos: CellRef) {
     let style = cx.style(c.attr_u32("s"));
     let v = c.child("v").map(|v| v.text.as_str());
+    // A superscript or subscript run in the cell's string makes its row print taller.
+    let script_run = match c.attr("t") {
+        Some("s") => v.and_then(|v| v.trim().parse::<usize>().ok()).is_some_and(|i| cx.sst_script_runs.contains(&i)),
+        Some("inlineStr") => c.child("is").is_some_and(xml::has_script_run),
+        _ => false,
+    };
+    if script_run {
+        sheet.script_run_cells.insert(pos);
+    }
     let value = match c.attr("t").unwrap_or("n") {
         "s" => match v.and_then(|v| v.trim().parse::<usize>().ok()) {
             Some(i) => match cx.sst.get(i) {

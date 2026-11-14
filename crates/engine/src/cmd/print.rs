@@ -631,6 +631,8 @@ mod empty_pages_tests;
 #[cfg(test)]
 mod fit_manual_breaks_tests;
 #[cfg(test)]
+mod fit_sup_border_tests;
+#[cfg(test)]
 mod format_only_cells_more_tests;
 #[cfg(test)]
 mod format_only_cells_tests;
@@ -667,3 +669,5 @@ mod xls_col_style_refit_tests;
 mod xls_row_format_refit_tests;
 #[cfg(test)]
 mod xls_row_refit_tests;
+#[cfg(test)]
+mod xlsx_script_run_fit_tests;
