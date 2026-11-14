@@ -159,6 +159,7 @@ mod xls_data_table_tests;
 mod xls_date_filter_tests;
 mod xls_default_password_tests;
 mod xls_doc_props_codepage_tests;
+mod xls_drawing_in_continue_tests;
 mod xls_dv_tests;
 mod xls_edit_ranges_tests;
 mod xls_extern_name_tests;
