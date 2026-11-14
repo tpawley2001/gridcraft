@@ -1080,6 +1080,7 @@ fn parsed(c: &mut Cursor<'_, '_>) -> Result<Parsed, IoError> {
 
 struct SheetState<'g> {
     macro_sheet: bool,
+    default_row_height_read: bool,
     protection: protection::Protection,
     g: &'g Globals,
     styles: &'g [StyleId],
@@ -1355,6 +1356,7 @@ fn worksheet<'g>(
     }
     let mut st = SheetState {
         macro_sheet,
+        default_row_height_read: false,
         protection: protection::Protection::default(),
         g,
         styles,
@@ -1426,6 +1428,14 @@ fn worksheet<'g>(
             }
         }
         sheet_record(&rec, &mut st, budget, report)?;
+    }
+    // A missing DefaultRowHeight follows the Normal font, like fUnsynced clear. Defer
+    // this until all ROW records are read so their stored sizes and custom flags stay unchanged.
+    if !st.macro_sheet
+        && !st.default_row_height_read
+        && let Some(twips) = styles::normal_font(&st.g.styles).and_then(|(name, size)| normal_font_row_twips(&name, size))
+    {
+        st.sheet.default_row_height = pt_to_px(f64::from(twips) / 20.0);
     }
     custom_views.finish(&mut st.sheet.preserved, report);
     st.sheet.protection = st.protection.sheet();
@@ -1782,6 +1792,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         }
         0x0208 => read_row(&mut c, st)?,
         0x0225 => {
+            st.default_row_height_read = true;
             let flags = c.u16()?;
             let height = c.u16()?;
             // DefaultRowHeight ([MS-XLS] 2.4.90): with fUnsynced clear the default height
