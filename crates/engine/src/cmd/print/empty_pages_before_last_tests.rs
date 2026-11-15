@@ -4,7 +4,9 @@
 //! with cells only top-left, top-right and bottom-left of its used range prints every band of
 //! columns but the last at full height, then one page of the last band).
 //! Letter portrait with default margins, column widths and row heights: 47 rows per page, and the
-//! bands of columns are A:J, K:T and U:AD.
+//! bands of columns are A:I, J:R, S:AA and AB:AD. A default column (64 px, 48pt on screen) prints
+//! 7.43% wider (Calibri 11: 47 dots = 5.64pt a character, not 5.25pt), 48 × 1.0743 = 51.57pt, and
+//! the 511.2pt printable width holds 511.2 / 51.57 = 9.9, so 9 columns a band (it held 10 at 48pt).
 use serde_json::json;
 
 use super::*;
@@ -52,73 +54,95 @@ fn expect(pages: &[(String, String)], want: &[(&str, &str)]) {
     assert_eq!(got, want);
 }
 
-/// Seven pages, down then over: both full bands before the last, then the last band's one page.
-const SEVEN_DOWN: [(&str, &str); 7] =
-    [("A:J", "1:47"), ("A:J", "48:94"), ("A:J", "95:120"), ("K:T", "1:47"), ("K:T", "48:94"), ("K:T", "95:120"), ("U:AD", "1:47")];
-
-/// Seven pages, over then down: both full rows of pages before the last, then the last row's one page.
-const SEVEN_OVER: [(&str, &str); 7] =
-    [("A:J", "1:47"), ("K:T", "1:47"), ("U:AD", "1:47"), ("A:J", "48:94"), ("K:T", "48:94"), ("U:AD", "48:94"), ("A:J", "95:120")];
-
-const FULL_GRID: [(&str, &str); 9] = [
-    ("A:J", "1:47"),
-    ("A:J", "48:94"),
-    ("A:J", "95:120"),
-    ("K:T", "1:47"),
-    ("K:T", "48:94"),
-    ("K:T", "95:120"),
-    ("U:AD", "1:47"),
-    ("U:AD", "48:94"),
-    ("U:AD", "95:120"),
+/// Ten pages, down then over: the three full bands before the last, then the last band's one page.
+const TEN_DOWN: [(&str, &str); 10] = [
+    ("A:I", "1:47"),
+    ("A:I", "48:94"),
+    ("A:I", "95:120"),
+    ("J:R", "1:47"),
+    ("J:R", "48:94"),
+    ("J:R", "95:120"),
+    ("S:AA", "1:47"),
+    ("S:AA", "48:94"),
+    ("S:AA", "95:120"),
+    ("AB:AD", "1:47"),
 ];
 
-/// Cells in three corners only: the middle band of columns holds nothing at all, and prints at
+/// Nine pages, over then down: both full rows of pages before the last, then the last row's one page.
+const NINE_OVER: [(&str, &str); 9] = [
+    ("A:I", "1:47"),
+    ("J:R", "1:47"),
+    ("S:AA", "1:47"),
+    ("AB:AD", "1:47"),
+    ("A:I", "48:94"),
+    ("J:R", "48:94"),
+    ("S:AA", "48:94"),
+    ("AB:AD", "48:94"),
+    ("A:I", "95:120"),
+];
+
+const FULL_GRID: [(&str, &str); 12] = [
+    ("A:I", "1:47"),
+    ("A:I", "48:94"),
+    ("A:I", "95:120"),
+    ("J:R", "1:47"),
+    ("J:R", "48:94"),
+    ("J:R", "95:120"),
+    ("S:AA", "1:47"),
+    ("S:AA", "48:94"),
+    ("S:AA", "95:120"),
+    ("AB:AD", "1:47"),
+    ("AB:AD", "48:94"),
+    ("AB:AD", "95:120"),
+];
+
+/// Cells in three corners only: the middle bands of columns hold nothing at all, and print at
 /// full height because the last band's first page comes after it.
 #[test]
 fn three_corners_print_the_blank_middle_band_in_full() {
     let mut s = sheet(&refs(&["A1", "AD1", "A120"]));
-    expect(&page_list(&mut s), &SEVEN_DOWN);
+    expect(&page_list(&mut s), &TEN_DOWN);
 }
 
 #[test]
 fn three_corners_over_then_down_print_two_full_rows_of_pages() {
     let mut s = sheet(&refs(&["A1", "AD1", "A120"]));
     over_then_down(&mut s);
-    expect(&page_list(&mut s), &SEVEN_OVER);
+    expect(&page_list(&mut s), &NINE_OVER);
 }
 
 #[test]
 fn an_l_shape_prints_the_blank_pages_below_its_middle_band() {
     let mut s = sheet(&l_shape());
-    expect(&page_list(&mut s), &SEVEN_DOWN);
+    expect(&page_list(&mut s), &TEN_DOWN);
 }
 
 #[test]
 fn an_l_shape_over_then_down_prints_two_full_rows_of_pages() {
     let mut s = sheet(&l_shape());
     over_then_down(&mut s);
-    expect(&page_list(&mut s), &SEVEN_OVER);
+    expect(&page_list(&mut s), &NINE_OVER);
 }
 
 /// The first band's only cell is on its third page, the last band's on its first.
 #[test]
 fn a_blank_middle_band_between_two_cells_prints_in_full() {
     let mut s = sheet(&refs(&["A120", "AD1"]));
-    expect(&page_list(&mut s), &SEVEN_DOWN);
+    expect(&page_list(&mut s), &TEN_DOWN);
 }
 
-/// The last band stops at its own last cell (row 60, its second page); the band before it is full.
+/// The last band stops at its own last cell (row 60, its second page); the bands before it are full.
 #[test]
 fn only_the_last_band_stops_at_its_own_last_cell() {
     let cells: Vec<String> = (1..=120).map(|r| format!("A{r}")).chain((1..=60).map(|r| format!("AD{r}"))).collect();
     let mut s = sheet(&cells);
-    expect(&page_list(&mut s), &FULL_GRID[..8]);
+    expect(&page_list(&mut s), &FULL_GRID[..11]);
 }
 
 #[test]
 fn a_middle_band_that_reaches_the_bottom_is_unchanged() {
     let mut s = sheet(&refs(&["A1", "A120", "M120", "AD60"]));
-    expect(&page_list(&mut s), &FULL_GRID[..8]);
+    expect(&page_list(&mut s), &FULL_GRID[..11]);
 }
 
 #[test]
@@ -130,7 +154,7 @@ fn a_cell_on_the_last_page_prints_the_full_grid() {
 #[test]
 fn one_row_of_pages_is_unchanged() {
     let mut s = sheet(&refs(&["A1", "AD1"]));
-    expect(&page_list(&mut s), &[("A:J", "1:1"), ("K:T", "1:1"), ("U:AD", "1:1")]);
+    expect(&page_list(&mut s), &[("A:I", "1:1"), ("J:R", "1:1"), ("S:AA", "1:1"), ("AB:AD", "1:1")]);
 }
 
 #[test]
