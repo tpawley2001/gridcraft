@@ -39,8 +39,11 @@ fn detached_controls_are_inert_and_original_vml_is_preserved() {
     assert_eq!(view.default_row_height, 8.0);
     let saved = write_xlsx(&wb).unwrap();
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(&saved)).unwrap();
+    // Pass-through allocates collision-free part names on save.
+    let vml_parts: Vec<_> = zip.file_names().filter(|name| name.ends_with(".vml")).map(str::to_owned).collect();
+    assert_eq!(vml_parts.len(), 1);
     let mut bytes = Vec::new();
-    zip.by_name("xl/drawings/b.vml").unwrap().read_to_end(&mut bytes).unwrap();
+    zip.by_name(&vml_parts[0]).unwrap().read_to_end(&mut bytes).unwrap();
     assert_eq!(bytes, VML.as_bytes());
     let (reopened, _) = read_xlsx(&saved).unwrap();
     assert_eq!(reopened.sheets.len(), 1);

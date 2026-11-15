@@ -439,6 +439,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
         if crate::passthrough::KEPT_SHEET_KINDS.iter().any(|k| k.eq_ignore_ascii_case(&rel.kind)) {
             // Chart, dialog and macro sheets are kept as they are and written back in place (see
             // `passthrough`); detached views also retain their printable content and page setup.
+            dialog_sheets.extend(read_dialog_sheet(&mut cx, &rel, &name, visibility(se), (wb.sheets.len(), chart_sheets.len(), macro_sheets.len())));
             if rel.kind.eq_ignore_ascii_case("chartsheet")
                 && let Some((chart, print)) = read_chart_sheet(&mut cx, &rel.target)?
             {
@@ -447,17 +448,6 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
                 && let Some(sheet) = read_print_sheet(&mut cx, &rel.target, &name)
             {
                 macro_sheets.push(MacroSheetPrint::new(name, visibility(se), wb.sheets.len(), chart_sheets.len(), sheet));
-            } else if rel.kind.eq_ignore_ascii_case("dialogsheet")
-                && let Some(sheet) = read_dialog_sheet(&mut cx, &rel.target, &name, visibility(se))
-            {
-                dialog_sheets.push(DialogSheetPrint {
-                    name,
-                    visibility: visibility(se),
-                    before: wb.sheets.len(),
-                    charts_before: chart_sheets.len(),
-                    macros_before: macro_sheets.len(),
-                    sheet,
-                });
             }
             file_to_model.push(None);
             continue;
@@ -664,9 +654,12 @@ fn read_print_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Option<Sheet> {
 
 /// Keep only inert controls in the dialog's print view. Index-dependent features belong to
 /// editable worksheets and must not resolve against the worksheet at this tab position.
-fn read_dialog_sheet(cx: &mut Ctx<'_>, part: &str, name: &str, visibility: Visibility) -> Option<Sheet> {
-    let mut sheet = read_print_sheet(cx, part, name)?;
-    crate::controls::read_dialog_frame(cx, part, &mut sheet);
+fn read_dialog_sheet(cx: &mut Ctx<'_>, rel: &Rel, name: &str, visibility: Visibility, order: (usize, usize, usize)) -> Option<DialogSheetPrint> {
+    if !rel.kind.eq_ignore_ascii_case("dialogsheet") {
+        return None;
+    }
+    let mut sheet = read_print_sheet(cx, &rel.target, name)?;
+    crate::controls::read_dialog_frame(cx, &rel.target, &mut sheet);
     let mut controls = std::mem::take(&mut sheet.controls);
     for control in &mut controls {
         control.action = None;
@@ -675,7 +668,7 @@ fn read_dialog_sheet(cx: &mut Ctx<'_>, part: &str, name: &str, visibility: Visib
     }
     let mut sheet = MacroSheetPrint::new(name.into(), visibility, 0, 0, sheet).sheet;
     sheet.controls = controls;
-    Some(sheet)
+    Some(DialogSheetPrint { name: name.into(), visibility, before: order.0, charts_before: order.1, macros_before: order.2, sheet })
 }
 
 /// The chart and page setup of a chart sheet part (ECMA-376 Part 1 §18.3.1.12), for printing:
