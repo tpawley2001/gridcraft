@@ -1081,6 +1081,13 @@ fn parsed(c: &mut Cursor<'_, '_>) -> Result<Parsed, IoError> {
 struct SheetState<'g> {
     macro_sheet: bool,
     default_row_height_read: bool,
+    /// DefColWidth ([MS-XLS] 2.4.89): the default column width in characters.
+    def_col_width: Option<u16>,
+    /// DxGCol ([MS-XLS] 2.4.98): the default column width in 1/256 character; wins over DefColWidth.
+    dxgcol: Option<u16>,
+    /// Columns whose ColInfo width was stored without fUserSet: the size is dropped when the sheet
+    /// ends if it equals the final default (DxGCol may follow the ColInfo records).
+    auto_width_cols: std::collections::BTreeSet<u32>,
     protection: protection::Protection,
     g: &'g Globals,
     styles: &'g [StyleId],
@@ -1357,6 +1364,9 @@ fn worksheet<'g>(
     let mut st = SheetState {
         macro_sheet,
         default_row_height_read: false,
+        def_col_width: None,
+        dxgcol: None,
+        auto_width_cols: std::collections::BTreeSet::new(),
         protection: protection::Protection::default(),
         g,
         styles,
@@ -1437,9 +1447,32 @@ fn worksheet<'g>(
     {
         st.sheet.default_row_height = pt_to_px(f64::from(twips) / 20.0);
     }
+    resolve_default_col_width(&mut st);
     custom_views.finish(&mut st.sheet.preserved, report);
     st.sheet.protection = st.protection.sheet();
     Ok(Some((st, filter)))
+}
+
+/// Sets the sheet's default column width from DefColWidth and DxGCol (DxGCol wins; 0 is ignored),
+/// then drops the ColInfo sizes without fUserSet that equal it.
+fn resolve_default_col_width(st: &mut SheetState<'_>) {
+    if let Some(w) = st.dxgcol.filter(|&w| w > 0) {
+        st.sheet.default_col_width = col_width_to_px(f64::from(w) / 256.0);
+    } else if let Some(n) = st.def_col_width {
+        // The same width the .xlsx reader gives baseColWidth n.
+        st.sheet.default_col_width = ((f64::from(n.min(255)) * 7.0 + 5.0) / 8.0).ceil() as f32 * 8.0;
+    }
+    let default = st.sheet.default_col_width;
+    for col in std::mem::take(&mut st.auto_width_cols) {
+        if let Some(info) = st.sheet.cols.get_mut(&col)
+            && info.size == Some(default)
+        {
+            info.size = None;
+            if *info == LineInfo::default() {
+                st.sheet.cols.remove(&col);
+            }
+        }
+    }
 }
 
 /// Attaches a sheet's shared and array formulas (their definitions follow the first cell that
@@ -1772,11 +1805,10 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
             if first > last {
                 return Ok(());
             }
-            let mut info = LineInfo::default();
-            let px = col_width_to_px(f64::from(width) / 256.0);
-            if flags & 0x0002 != 0 || px != st.sheet.default_col_width {
-                info.size = Some(px);
-            }
+            // The size is kept for now; one equal to the sheet's final default is dropped when the
+            // substream ends unless fUserSet is on (see `resolve_default_col_width`).
+            let mut info = LineInfo { size: Some(col_width_to_px(f64::from(width) / 256.0)), ..LineInfo::default() };
+            let user_set = flags & 0x0002 != 0;
             info.hidden = flags & 0x0001 != 0;
             info.outline = ((flags >> 8) & 7) as u8;
             info.collapsed = flags & 0x1000 != 0;
@@ -1784,12 +1816,17 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
             if style != StyleId::DEFAULT {
                 info.style = Some(style);
             }
-            if info != LineInfo::default() {
-                for col in first..=last {
-                    st.sheet.cols.insert(u32::from(col), info);
+            for col in first..=last {
+                st.sheet.cols.insert(u32::from(col), info);
+                if user_set {
+                    st.auto_width_cols.remove(&u32::from(col));
+                } else {
+                    st.auto_width_cols.insert(u32::from(col));
                 }
             }
         }
+        0x0055 => st.def_col_width = Some(c.u16()?),
+        0x0099 => st.dxgcol = Some(c.u16()?),
         0x0208 => read_row(&mut c, st)?,
         0x0225 => {
             st.default_row_height_read = true;
