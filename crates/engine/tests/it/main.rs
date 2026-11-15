@@ -77,6 +77,7 @@ mod print_from_a1;
 mod print_long_text;
 mod print_multi_area;
 mod print_nonvisual_only_sheets;
+mod print_overflow_past_last_col;
 mod range_fill_formats;
 mod recently_used;
 mod regression_one_cell_y_excel;

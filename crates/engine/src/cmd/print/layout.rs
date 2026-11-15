@@ -330,22 +330,20 @@ fn implicit_row_fill(wb: &Workbook, sh: &Sheet, mut visit: impl FnMut(u32, u32, 
 }
 
 /// A1 to the end of the cells that put something on paper, merged ranges, spill ranges and
-/// visible drawing objects; text overflowing past that reaches the columns it spills over, but
-/// no further than the last stored column.
+/// visible drawing objects; text overflowing past that widens the range to the columns its
+/// drawn text reaches (as Excel prints those column bands, blank pages included).
 fn used_print_range(wb: &Workbook, sh: &Sheet) -> Option<RangeRef> {
     let mut on_paper = OnPaper::new(wb, sh);
     let mut end: Option<CellRef> = None;
     let grow_to = |e: &mut Option<CellRef>, row: u32, col: u32| {
         *e = Some(e.map_or(CellRef::new(row, col), |x| CellRef::new(x.row.max(row), x.col.max(col))));
     };
-    // The last stored column: text may spill over formatting-only cells up to it.
-    let limit = sh.cells.used_range().map_or(0, |u| u.end.col);
-    // Counted cells left of that column holding a value that can spill (numbers never do).
+    // Counted cells holding a value that can spill (numbers never do).
     let mut spill_from = Vec::new();
     for (c, cell) in sh.cells.iter() {
         if on_paper.counts(c, cell) {
             grow_to(&mut end, c.row, c.col);
-            if c.col < limit && !cell.value.is_empty() && !matches!(cell.value, gridcraft_core::Value::Number(_)) {
+            if !cell.value.is_empty() && !matches!(cell.value, gridcraft_core::Value::Number(_)) {
                 spill_from.push(c);
             }
         }
@@ -357,23 +355,13 @@ fn used_print_range(wb: &Workbook, sh: &Sheet) -> Option<RangeRef> {
     for m in sh.merges.iter().map(merge_extent) {
         grow_to(&mut end, m.end.row, m.end.col);
     }
-    // Text spilling over the empty cells right of the last counted column keeps printing, up to
-    // the last stored column (as far as the range reached before formatting-only cells stopped
-    // counting).
-    if let Some(e) = end.filter(|e| e.col < limit) {
-        let s = (sh.print.scale.clamp(10, 400) as f32) / 100.0;
-        let mut fonts = None;
-        let mut reach = e.col;
-        for c in spill_from {
-            if reach >= limit {
-                break;
-            }
-            let Some(cell) = sh.cells.get(c) else { continue };
-            if let Some(x) = super::text::right_overflow_end(wb, sh, (c, cell), &sh.merges, (PX_TO_PT * s, s), &mut fonts) {
-                reach = reach.max(x.min(limit));
-            }
-        }
-        grow_to(&mut end, e.row, reach);
+    // Text spilling over the empty cells to its right prints where its drawn text reaches. When
+    // formatting-only cells are stored past the counted range, the text keeps printing over them
+    // up to the last stored column and no further (as Excel prints those sheets).
+    if let Some(e) = end {
+        let stored = sh.cells.used_range().map_or(0, |u| u.end.col);
+        let reach = overflow_reach(wb, sh, &spill_from, e.col);
+        grow_to(&mut end, e.row, if stored > e.col { reach.min(stored) } else { reach });
     }
     let mut r = end.map(|e| RangeRef::new(CellRef::new(0, 0), e));
     let mut grow = |a: &Anchor| {
@@ -403,6 +391,29 @@ fn used_print_range(wb: &Workbook, sh: &Sheet) -> Option<RangeRef> {
     // Without a print area Excel prints from A1: leading empty rows and columns print as blank
     // space, and pages that fall wholly inside them print as blank pages.
     r.map(|r| RangeRef::new(CellRef::new(0, 0), r.end))
+}
+
+/// The last column the drawn text of the cells `from` runs over, or `reach` when none passes
+/// it. A cell the drawing skips (in a hidden or zero-height row, or a hidden or zero-width
+/// column) spills nothing, and a column wider than the page runs its text on over its own
+/// continuation pages instead (Excel prints those two pages and no more). Measured at the
+/// sheet's print scale, as the pages are drawn.
+fn overflow_reach(wb: &Workbook, sh: &Sheet, from: &[CellRef], mut reach: u32) -> u32 {
+    let s = (sh.print.scale.clamp(10, 400) as f32) / 100.0;
+    let (pw, _, m) = page_geometry(&sh.print);
+    let room = (pw - m[0] - m[1]).max(36.0);
+    let mut fonts = None;
+    for &c in from {
+        let w = sh.col_width(c.col) * PX_TO_PT * s;
+        if sh.row_height(c.row) <= 0.0 || w <= 0.0 || w > room {
+            continue;
+        }
+        let Some(cell) = sh.cells.get(c) else { continue };
+        if let Some(x) = super::text::right_overflow_end(wb, sh, (c, cell), &sh.merges, (PX_TO_PT * s, s), &mut fonts) {
+            reach = reach.max(x);
+        }
+    }
+    reach
 }
 
 /// Whole rows/columns are trimmed to the used range.
@@ -589,7 +600,7 @@ fn title_span(t: Option<(u32, u32)>, max: u32) -> Option<(u32, u32)> {
 /// (any name starting with Helvetica), Geneva, Clear Sans and Droid Sans Fallback use Arial's
 /// printed digits too. Cambria uses the same width, measured from Excel's printed page counts.
 /// SimSun, NSimSun, MS Gothic and MS PGothic have half-width digits: half an em.
-fn digit_em(font: &str) -> Option<f32> {
+pub(super) fn digit_em(font: &str) -> Option<f32> {
     let name = font.trim().to_lowercase();
     let name = name
         .strip_prefix('\'')
@@ -850,7 +861,12 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
         if !on_paper.counts(c, cell) {
             continue;
         }
-        let end = if c.col < last_band_start { super::text::right_overflow_end(wb, sh, (c, cell), &sh.merges, page_scale, &mut fonts) } else { None };
+        let drawn = sh.row_height(c.row) > 0.0 && sh.col_width(c.col) > 0.0;
+        let end = if drawn && c.col < last_band_start {
+            super::text::right_overflow_end(wb, sh, (c, cell), &sh.merges, page_scale, &mut fonts)
+        } else {
+            None
+        };
         mark(c.row, c.col, end.map_or(c.col, |e| e.max(c.col)));
     }
     implicit_row_fill(wb, sh, &mut mark);
