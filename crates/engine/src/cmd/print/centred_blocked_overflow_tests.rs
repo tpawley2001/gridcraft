@@ -1,7 +1,8 @@
 //! A centred cell whose text is wider than its column spills nothing past the last used column
 //! when the cell to its left holds a value, so it adds no column band to the printed range (as
 //! Excel prints). Same probe page setup as `overflow_past_last_col_tests.rs`: Letter portrait,
-//! 0.5" margins, numbers in A1, L1 and A120, which print on 4 pages in the bands A:J and K:L.
+//! 0.5" margins, numbers in A1, L1 and A120 (bands A:J and K:L). Text in K120 makes the K band
+//! print on all three row bands, so the tests compare the printed column bands, not the page count.
 use serde_json::json;
 
 use super::*;
@@ -32,6 +33,18 @@ fn page_list(s: &mut Session) -> Vec<(String, String)> {
     list.iter().map(|p| (p["columns"].as_str().unwrap().to_string(), p["rows"].as_str().unwrap().to_string())).collect()
 }
 
+/// The pages when K120 holds text: A:J then `second` over the row bands 1:49, 50:98 and 99:120
+/// (K120's own page prints, and so does the blank K 50:98 page before it).
+fn with_k120_bands(second: &str) -> Vec<(String, String)> {
+    let mut v = Vec::new();
+    for cols in ["A:J", second] {
+        for rows in ["1:49", "50:98", "99:120"] {
+            v.push((cols.to_string(), rows.to_string()));
+        }
+    }
+    v
+}
+
 /// 200 characters of "abcdefghi " in K120 (a single line far wider than column K).
 fn long_text_in_k120(centred: bool) -> Session {
     let mut s = base();
@@ -47,16 +60,14 @@ fn long_text_in_k120(centred: bool) -> Session {
 fn centred_text_with_filled_left_neighbour_adds_no_band() {
     let mut s = long_text_in_k120(true);
     s.execute("cell.set", json!({"cell": "J120", "input": "1"})).unwrap();
-    let list = page_list(&mut s);
-    assert_eq!(list.len(), 4, "{list:?}");
+    assert_eq!(page_list(&mut s), with_k120_bands("K:L"));
 }
 
 #[test]
 fn centred_text_with_text_left_neighbour_adds_no_band() {
     let mut s = long_text_in_k120(true);
     set(&mut s, "J120", "x");
-    let list = page_list(&mut s);
-    assert_eq!(list.len(), 4, "{list:?}");
+    assert_eq!(page_list(&mut s), with_k120_bands("K:L"));
 }
 
 #[test]
@@ -70,6 +81,5 @@ fn left_aligned_text_with_filled_left_neighbour_still_widens() {
 #[test]
 fn centred_text_with_empty_left_neighbour_still_widens() {
     let mut s = long_text_in_k120(true);
-    let list = page_list(&mut s);
-    assert_eq!(list.len(), 6, "{list:?}");
+    assert_eq!(page_list(&mut s), with_k120_bands("K:T"));
 }
