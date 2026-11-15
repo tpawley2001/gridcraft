@@ -670,6 +670,8 @@ mod shape_outline_tests;
 #[cfg(test)]
 mod shape_shadow_tests;
 #[cfg(test)]
+mod small_spill_band_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod wide_column_split_tests;
