@@ -103,6 +103,7 @@ mod script_run_rows_tests;
 mod sensitivity_label;
 mod shape_block_arrow_tests;
 mod shape_body_props_kept_tests;
+mod shape_flip_rotation_kept_tests;
 mod shape_line_dash_effects_tests;
 mod shape_outline_width_tests;
 mod shape_preset_geometry;
