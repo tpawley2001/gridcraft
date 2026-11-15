@@ -969,10 +969,40 @@ pub fn layouts(wb: &Workbook, opts: &PrintOptions) -> Vec<SheetLayout> {
 /// One layout per range of a sheet's print area, in order (a print area of several ranges
 /// prints each range starting on a new page); the sheet's default layout when `ranges` is empty.
 fn sheet_layouts(wb: &Workbook, si: usize, opts: &PrintOptions, ranges: &[RangeRef]) -> Vec<SheetLayout> {
+    // Printing a whole workbook in which nothing prints gives one blank page, as Excel does, even
+    // when a sheet keeps a print area that would span several pages. That page goes to the first
+    // visible sheet with a print area, over its own page setup; the area itself is left as saved.
+    if opts.all_sheets && !ranges.is_empty() && workbook_prints_nothing(wb) {
+        let first = wb.sheets.iter().position(|s| s.visibility == Visibility::Visible && !s.print.print_areas().is_empty());
+        if first != Some(si) {
+            return vec![];
+        }
+        let corner = ranges.first().map_or(CellRef::new(0, 0), |r| r.start);
+        return layout_sheet(wb, si, opts, Some(RangeRef::cell(corner)))
+            .map(|mut l| {
+                l.pages.truncate(1);
+                l
+            })
+            .into_iter()
+            .collect();
+    }
     match ranges {
         [] | [_] => layout_sheet(wb, si, opts, None).into_iter().collect(),
         _ => ranges.iter().filter_map(|r| layout_sheet(wb, si, opts, Some(*r))).collect(),
     }
+}
+
+/// Whether printing the whole workbook puts nothing on paper: no visible chart or macro sheet, and
+/// no visible worksheet with a stored cell (of any kind), a merge, a spill range, a table or a
+/// printing drawing object. A saved print area alone does not count.
+fn workbook_prints_nothing(wb: &Workbook) -> bool {
+    !wb.chart_sheets.iter().any(|c| c.visibility == Visibility::Visible)
+        && !wb.macro_sheets.iter().any(|m| m.visibility == Visibility::Visible)
+        && wb
+            .sheets
+            .iter()
+            .filter(|s| s.visibility == Visibility::Visible)
+            .all(|sh| sh.cells.is_empty() && sh.merges.is_empty() && sh.spill_ranges.is_empty() && sh.tables.is_empty() && !has_printing_objects(sh))
 }
 
 /// Segments of a page along one axis: repeated titles (before the band) then the band.
