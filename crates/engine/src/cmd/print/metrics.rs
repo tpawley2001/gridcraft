@@ -203,8 +203,9 @@ impl<'a> RowPitch<'a> {
     /// largest font in it, never below the sheet's default (likewise the rows a `defaultRowHeight`
     /// without `customHeight` covers, 18.3.1.81). A non-custom sheet default counts at
     /// Normal's default row height, unless it is shorter than the Normal font itself
-    /// ([`Self::automatic_default_px`]). A row with wrapped text, or with a font bigger than Normal
-    /// whose default row is not known, keeps its stored height. Other sheets print the stored height.
+    /// ([`Self::automatic_default_px`]). Wrapped text with a value fits the lines it wraps to; a row
+    /// with wrapped cells that print no value, or with a font bigger than Normal whose default row
+    /// is not known, keeps its stored height. Other sheets print the stored height.
     ///
     /// With `fit_print_rows_without_default_floor` (sheets read from `.xls`, whose ROW records
     /// without fUnsynced Excel re-fits on open, [MS-XLS] 2.4.221) a non-custom row prints at the
@@ -234,9 +235,15 @@ impl<'a> RowPitch<'a> {
         self.fitted_px(r, default).unwrap_or_else(|| stored.unwrap_or(default))
     }
 
-    /// The height row `r` fits its fonts to, at least `default`: `None` when the row folds text
-    /// (wrapped, justified or distributed) or holds a font bigger than the Normal font whose
-    /// default row height is not known.
+    /// The height row `r` fits its fonts to, at least `default`: `None` when the row holds a font
+    /// bigger than the Normal font whose default row height is not known, or a cell that folds text
+    /// (wrapped, justified or distributed) but prints no value, is skipped, is rotated or has a font
+    /// whose default row is not known.
+    ///
+    /// A folding cell with a value needs the lines its text wraps to in its printed width (explicit
+    /// line breaks always break; [`super::text::folded_line_count`]) times its font's default row:
+    /// Excel re-fits such `.xlsx` rows without `customHeight` in both directions (measured: stored
+    /// 18 pt rows of one Arial 10 line print at 12.75 pt, 28 pt rows of two lines at 25.5 pt).
     ///
     /// A counted cell whose font is superscript or subscript needs its font's default row plus
     /// [`script_extra_px`]; a superscript or subscript run of its string needs the run font's default
@@ -254,11 +261,22 @@ impl<'a> RowPitch<'a> {
         let mut thick_top = false;
         for (c, cell) in sh.cells.row(r, 0, gridcraft_core::MAX_COLS - 1) {
             let st = self.wb.styles.get(cell.style);
+            let pos = gridcraft_core::CellRef::new(r, c);
             if st.align.folds() {
-                return None;
+                // Folded text with a value needs its lines at the cell font's default row each;
+                // without a value (or skipped, rotated, or in a font whose row is not known) the
+                // row keeps its stored height.
+                if self.skipped(r, c) {
+                    return None;
+                }
+                let lines = super::text::folded_line_count(self.wb, sh, pos, st)?;
+                if lines == 0 {
+                    return None;
+                }
+                let p = cell_font_px(&st.font.name, st.font.size)? as f32;
+                need = need.max(p * lines.min(u16::MAX as usize) as f32);
             }
             let font_script = st.font.vert != gridcraft_model::VertAlign::Baseline;
-            let pos = gridcraft_core::CellRef::new(r, c);
             let run_script = !sh.script_run_cells.is_empty() && sh.script_run_cells.contains(&pos);
             let thick_bot_cell = has_ht && st.borders.bottom.style == gridcraft_model::BorderStyle::Thick;
             let thick_top_cell = has_ht && st.borders.top.style == gridcraft_model::BorderStyle::Thick;
@@ -455,14 +473,16 @@ mod tests {
         sh.fit_auto_row_heights_in_print = true;
         sh.default_row_custom_height = Some(false);
         sh.default_row_height = 12.0;
-        for (row, style) in [(0, wrapped), (1, unknown)] {
-            sh.set_cell(CellRef::new(row, 0), Cell { style, value: Value::Number(1.0), ..Cell::default() });
+        for (row, style, value) in [(0, wrapped, Value::Empty), (1, unknown, Value::Number(1.0)), (3, wrapped, Value::Number(1.0))] {
+            sh.set_cell(CellRef::new(row, 0), Cell { style, value, ..Cell::default() });
             sh.rows.insert(row, LineInfo { size: Some(32.0), ..Default::default() });
         }
         let pitch = RowPitch::new(&wb, wb.sheet(0).unwrap(), 1.0);
         assert_eq!(pitch.row_px(0), 32.0);
         assert_eq!(pitch.row_px(1), 32.0);
         assert_eq!(pitch.row_px(2), 12.0);
+        // Wrapped text with a value fits its one line of the cell font (Calibri 11: 20 px).
+        assert_eq!(pitch.row_px(3), 20.0);
     }
 
     #[test]

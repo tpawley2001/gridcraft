@@ -62,6 +62,34 @@ pub(super) fn wrap_lines(text: &str, font: Font, size: f32, width: f32) -> Vec<S
     out
 }
 
+/// Lines the folded (wrapped, justified or distributed) text of cell `c` with style `st` takes
+/// when printed at 100 % in its own column: its displayed text wrapped by [`wrap_lines`] to the
+/// width [`draw_text`] gives it (explicit line breaks always break). `Some(0)` when the cell
+/// prints no value; `None` for rotated or stacked text, whose height the row fit does not model.
+pub(super) fn folded_line_count(wb: &gridcraft_model::Workbook, sh: &Sheet, c: CellRef, st: &Style) -> Option<usize> {
+    let v = crate::display::displayed_value(sh.value(c));
+    if v.is_empty() || (!sh.show_zeros && v.as_f64() == Some(0.0)) {
+        return Some(0);
+    }
+    if st.align.rotation != 0 {
+        return None;
+    }
+    // A number in a format prints on one line (General shortens it to fit, others show #).
+    if matches!(v, Value::Number(_)) && !sh.show_formulas {
+        return Some(1);
+    }
+    let mut text = if sh.show_formulas { crate::display::cell_text(wb, sh, c) } else { crate::display::value_text_as(wb, &v, st.num_fmt.as_str()) };
+    crate::display::truncate_displayed(&mut text);
+    if text.is_empty() {
+        return Some(0);
+    }
+    let k = super::PX_TO_PT;
+    let size = st.font.size.clamp(1.0, 409.0);
+    let indent = f32::from(st.align.indent) * indent_level_pt(wb);
+    let avail = (sh.col_width(c.col) * k - 2.0 * PAD_PX * k - indent).max(0.0);
+    Some(wrap_lines(&text, font_for(st), size, avail.max(size)).len())
+}
+
 fn font_for(style: &Style) -> Font {
     Font::styled(Font::family_for(&style.font.name), style.font.bold, style.font.italic)
 }
