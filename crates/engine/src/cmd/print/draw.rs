@@ -1,6 +1,6 @@
 use super::layout::{DENSE_BLOCK, SheetLayout};
 use super::objects::draw_cell_picture;
-use super::text::{TextPlacement, cut_text_reach, draw_text, text_align};
+use super::text::{TextPlacement, cut_text_reach, draw_text, right_overflow_end, text_align};
 use super::{
     BorderLine, BorderStyle, Borders, CellRef, Color, Font, HAlign, Page, PatternType, Point, RangeRef, Rgb, Sheet, Style, StyleId, Underline, Value,
     Workbook, split_sheet,
@@ -177,6 +177,13 @@ pub(super) struct Block<'a> {
     /// A continuation page of a column cut to the page: the cut width in points. Only text
     /// running on past the cut is drawn.
     continued: Option<f32>,
+    /// Text overflowing from cells left of the block is drawn on it (not on print-title blocks).
+    pub(super) spill_in: bool,
+    /// Print-title columns: their cells are not a source of text overflowing into the block.
+    pub(super) title_cols: Option<(u32, u32)>,
+    /// The first column whose text may overflow into the block: text from a column cut to the
+    /// page and the columns before it runs on through `draw_continued_text` instead.
+    pub(super) spill_min_col: u32,
 }
 
 impl Block<'_> {
@@ -456,7 +463,39 @@ pub(super) fn draw_block(pg: &mut Page, b: &Block, gridlines: bool, cf: &mut Opt
             draw_text(pg, b, TextPlacement { cell: *c, look: l, rect: (x, y, w, h), merged, merges: &merges, limits: (bx, bx + bw) });
         }
     }
+    if b.spill_in {
+        draw_text_from_left(pg, b, (bx, bx + bw), cf);
+    }
     pg.restore();
+}
+
+/// Text of cells left of the block that runs over the empty cells between them and into the
+/// block (by the rule of [`right_overflow_end`]): drawn where it would lie if the columns before
+/// the block were printed left of it, clipped to the block. Only the nearest non-empty cell left
+/// of the block in each row can reach it, found in the row's cell map.
+fn draw_text_from_left(pg: &mut Page, b: &Block, limits: (f32, f32), cf: &mut Option<crate::cf::CfCache>) {
+    let sh = b.sh;
+    let first = b.cols.0;
+    if first == 0 {
+        return;
+    }
+    let mut fonts = None;
+    for row in b.rows.0..=b.rows.1 {
+        let Some((col, cell)) = sh.cells.row(row, 0, first - 1).rev().find(|(_, cell)| !cell.value.is_empty()) else { continue };
+        if col < b.spill_min_col || b.title_cols.is_some_and(|(t0, t1)| (t0..=t1).contains(&col)) {
+            continue;
+        }
+        let c = CellRef::new(row, col);
+        let (x, y, w, h) = b.rect(RangeRef::cell(c));
+        if w <= 0.0 || h <= 0.0 {
+            continue;
+        }
+        if right_overflow_end(b.wb, sh, (c, cell), &sh.merges, (b.k, b.scale), &mut fonts).is_none_or(|last| last < first) {
+            continue;
+        }
+        let look = cell_look(b.wb, b.si, sh, c, cf);
+        draw_text(pg, b, TextPlacement { cell: c, look: &look, rect: (x, y, w, h), merged: false, merges: &sh.merges, limits });
+    }
 }
 
 /// A continuation page of a column cut to `cut` points: only the text running on past the cut,
@@ -638,7 +677,7 @@ pub(super) fn make_block<'a>(
         dots += u64::from(pitch.dots(r));
         ys.push(y + dots as f32 * super::metrics::DOT_PT);
     }
-    Block { wb, si, sh, rows, cols, xs, ys, k, scale: lay.scale, pitch, continued: None }
+    Block { wb, si, sh, rows, cols, xs, ys, k, scale: lay.scale, pitch, continued: None, spill_in: true, title_cols: None, spill_min_col: 0 }
 }
 
 #[cfg(test)]
