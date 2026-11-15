@@ -81,10 +81,13 @@ fn parse_xy(y: &Value, x: Option<&Value>) -> R<Xy> {
     let y_is_row = ya.rows == 1 && ya.cols > 1;
     let yv: Vec<f64> = ya.data.iter().map(strict_num).collect::<R<_>>()?;
     let (xs, k) = match x {
-        // One observation (a 1x1 known_y's): every cell of known_x's, whatever its shape, is its own x variable,
-        // in row-major order.
+        // One observation (a 1x1 known_y's): each cell in a single row or column of known_x's
+        // is its own x variable; a two-dimensional known_x's is a shape mismatch.
         Some(xv) if n == 1 => {
             let xa = as_array(xv);
+            if xa.rows > 1 && xa.cols > 1 {
+                return Err(CellError::Ref);
+            }
             let k = xa.data.len();
             if k == 0 {
                 return Err(CellError::Ref);
