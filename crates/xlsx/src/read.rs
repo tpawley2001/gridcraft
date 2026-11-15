@@ -197,10 +197,11 @@ fn read_shared_strings(cx: &mut Ctx<'_>, wb_rels: &[Rel]) -> Result<(), IoError>
     Ok(())
 }
 
-/// The theme's (heading, body) faces, when the file has a theme part for scheme-linked fonts to follow.
-fn theme_fonts(theme: &gridcraft_model::Theme, has_theme: bool) -> Option<(&str, &str)> {
-    has_theme.then_some((theme.major_font.as_str(), theme.minor_font.as_str()))
-}
+/// Excel's built-in default theme body (minor) face: what a scheme-linked font shows when the
+/// package has no theme part (ECMA-376 §18.8.35 `scheme`).
+const NO_THEME_MINOR_FONT: &str = "Aptos Narrow";
+/// Excel's built-in default theme heading (major) face, used when the package has no theme part.
+const NO_THEME_MAJOR_FONT: &str = "Aptos Display";
 
 fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], kept: &mut crate::passthrough::KeptReader) -> Result<(), IoError> {
     // Theme, then styles: a font's link to the theme's heading or body font is read against it.
@@ -221,6 +222,11 @@ fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], ke
         }
         has_theme = true;
     }
+    if !has_theme {
+        // No theme part: Excel links scheme fonts to its own built-in default theme's faces.
+        wb.theme.minor_font = NO_THEME_MINOR_FONT.to_string();
+        wb.theme.major_font = NO_THEME_MAJOR_FONT.to_string();
+    }
     // Cell checkboxes live in the feature property bags, which styles refer to.
     let mut checkboxes = Vec::new();
     if let Some(r) = find_rel(wb_rels, "FeaturePropertyBag").cloned()
@@ -231,7 +237,7 @@ fn read_workbook_styles(cx: &mut Ctx<'_>, wb: &mut Workbook, wb_rels: &[Rel], ke
     if let Some(r) = find_rel(wb_rels, "styles").cloned() {
         if let Some(x) = cx.optional_xml(&r.target)? {
             let StylesIn { xfs, dxfs, palette, named, named_ids, num_fmts, indexed_colors, mru_colors, table_styles } =
-                read_styles(&x, &checkboxes, &wb.theme.minor_font, theme_fonts(&wb.theme, has_theme));
+                read_styles(&x, &checkboxes, &wb.theme.minor_font, Some((&wb.theme.major_font, &wb.theme.minor_font)));
             cx.num_fmts = num_fmts;
             // Cell format 0 is the Normal cell format: everything on it (font, number format,
             // fill, borders, alignment, protection) is what a cell without its own format shows

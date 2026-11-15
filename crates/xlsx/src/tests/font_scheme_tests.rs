@@ -132,7 +132,7 @@ fn bold_keeps_the_heading_link_and_a_new_face_ends_it() {
 }
 
 #[test]
-fn without_a_theme_part_the_cached_face_is_kept() {
+fn without_a_theme_part_the_heading_link_takes_the_default_theme_face() {
     let styles = format!(
         r#"<styleSheet xmlns="{MAIN}"><fonts count="1"><font><sz val="11"/><name val="Cached Heading"/><scheme val="major"/></font></fonts><cellXfs count="1"><xf fontId="0"/></cellXfs></styleSheet>"#
     );
@@ -143,5 +143,5 @@ fn without_a_theme_part_the_cached_face_is_kept() {
         "",
     );
     let (wb, _) = read_xlsx(&bytes).unwrap();
-    assert_eq!(wb.styles.get(gridcraft_model::StyleId::DEFAULT).font.name, "Cached Heading");
+    assert_eq!(wb.styles.get(gridcraft_model::StyleId::DEFAULT).font.name, "Aptos Display");
 }

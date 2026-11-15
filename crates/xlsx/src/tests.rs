@@ -302,6 +302,7 @@ mod codex_day_worksheet_settings;
 mod codex_day_xls_textboxes;
 mod codex_day_xlsb_cell_parameter;
 mod font_scheme_tests;
+mod no_theme_font_tests;
 mod revision_history;
 mod table_sort_tests;
 mod web_publishing_tests;

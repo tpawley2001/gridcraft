@@ -1779,7 +1779,8 @@ fn default_font_survives_a_round_trip() {
     let b1 = &back.styles.get(s.cell(at("B1")).unwrap().style).font;
     assert!(b1.bold && b1.size == 14.0, "an explicit font is still its own: {b1:?}");
 
-    // Excel's own Normal font follows the theme's body font; the scheme link survives too.
+    // Excel's own Normal font follows the theme's body font; the scheme link survives too. This
+    // package has no theme part, so the body face is Excel's built-in default one.
     let file = super::minimal(
         body,
         &[("xl/styles.xml", &styles(r#"<name val="Calibri"/><family val="2"/><color theme="1"/><sz val="12"/><scheme val="minor"/>"#))],
@@ -1787,7 +1788,7 @@ fn default_font_survives_a_round_trip() {
         "",
     );
     let saved = write_xlsx(&read_xlsx(&file).unwrap().0).unwrap();
-    assert_eq!(font0(&saved), (Some("12".into()), Some("Calibri".into()), Some("2".into()), Some("minor".into())));
+    assert_eq!(font0(&saved), (Some("12".into()), Some("Aptos Narrow".into()), Some("2".into()), Some("minor".into())));
 }
 
 /// Every font that follows the theme's body font keeps `<scheme val="minor"/>`, not only font 0,
