@@ -695,3 +695,5 @@ mod xls_row_refit_tests;
 mod xlsx_fit_probe_1114_tests;
 #[cfg(test)]
 mod xlsx_script_run_fit_tests;
+#[cfg(test)]
+mod xlsx_wrap_refit_tests;
