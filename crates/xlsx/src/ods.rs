@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use gridcraft_core::date::{days_in_month, serial_from_ymd};
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{Cell, DefinedName, NumFmt, Sheet, StyleId, Workbook};
+use gridcraft_model::{Cell, DefinedName, LineInfo, NumFmt, Sheet, StyleId, Workbook};
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
@@ -30,6 +30,10 @@ const MAX_CELL_TEXT: usize = 1024 * 1024;
 const MAX_TEXT: u64 = 64 * 1024 * 1024;
 const MAX_SHEETS: usize = 1024;
 const MAX_NAMES: usize = 10_000;
+/// An empty row run past the last row with content, or the part of a column run past the last
+/// column with content, longer than this is not stored line by line (writers repeat a styled
+/// run to the sheet edge).
+const MAX_TRAILING_LINES: u32 = 1024;
 
 const MAX_MANIFEST: u64 = 1024 * 1024;
 
@@ -117,6 +121,7 @@ pub fn read_ods_with(bytes: &[u8], known_function: &dyn Fn(&str) -> bool) -> Res
     }
     let content = package.read("content.xml")?.ok_or_else(|| IoError::Format("ODS content.xml is missing".into()))?;
     let mut import = Import::new();
+    import.lines = crate::ods_page::content_line_styles(&content);
     import.parse(&content)?;
     import.settle_formulas(known_function);
     if import.wb.sheets.is_empty() {
@@ -217,6 +222,9 @@ enum Tag {
     Table,
     Rows,
     Row,
+    /// `table:table-column-group` / `table:table-header-columns` / `table:table-columns`.
+    Columns,
+    Column,
     Cell,
     Covered,
     /// `table:named-range` / `table:named-expression`.
@@ -245,6 +253,8 @@ fn tag(reader: &mut NsReader<&[u8]>, e: &BytesStart<'_>) -> Tag {
             b"table" => Tag::Table,
             b"table-row-group" | b"table-header-rows" | b"table-rows" => Tag::Rows,
             b"table-row" => Tag::Row,
+            b"table-column-group" | b"table-header-columns" | b"table-columns" => Tag::Columns,
+            b"table-column" => Tag::Column,
             b"table-cell" => Tag::Cell,
             b"covered-table-cell" => Tag::Covered,
             b"named-range" | b"named-expression" => Tag::Name,
@@ -270,12 +280,28 @@ struct SheetDraft {
     row: u32,
     /// The table's `table:style-name` (its table style names the master page).
     style: Option<String>,
+    /// The next `table:table-column` index.
+    col: u32,
+    /// Column runs with a width or hidden, applied when the table ends.
+    col_runs: Vec<LineRun>,
+    /// Empty row runs with a height or hidden, kept until a later row has content.
+    empty_row_runs: Vec<LineRun>,
+    /// The last column holding content or a merge.
+    last_col: Option<u32>,
+}
+/// Consecutive rows or columns sharing one size and visibility.
+struct LineRun {
+    start: u32,
+    count: u32,
+    info: LineInfo,
 }
 struct RowDraft {
     depth: usize,
     repeat: u32,
     col: u32,
     cells: Vec<RepeatedCell>,
+    /// Size and visibility from the row's style and `table:visibility`; `None` when default.
+    info: Option<LineInfo>,
 }
 struct RepeatedCell {
     col: u32,
@@ -321,6 +347,8 @@ struct Import {
     shortened_row_repeat: bool,
     /// Each imported sheet's `table:style-name`, in sheet order.
     table_styles: Vec<Option<String>>,
+    /// Column and row styles from the automatic styles.
+    lines: crate::ods_page::LineStyles,
 }
 
 impl Import {
@@ -344,6 +372,7 @@ impl Import {
             renamed: false,
             shortened_row_repeat: false,
             table_styles: vec![],
+            lines: crate::ods_page::LineStyles::default(),
         }
     }
 
@@ -429,7 +458,16 @@ impl Import {
                     self.report.warn("Some ODS sheet names were shortened or renamed to valid, unique XLSX sheet names.");
                 }
                 let style = attr(reader, e, TABLE, b"style-name")?;
-                self.sheet = Some(SheetDraft { sheet: Sheet::new(name), depth, row: 0, style });
+                self.sheet = Some(SheetDraft {
+                    sheet: Sheet::new(name),
+                    depth,
+                    row: 0,
+                    style,
+                    col: 0,
+                    col_runs: vec![],
+                    empty_row_runs: vec![],
+                    last_col: None,
+                });
             }
             Tag::Name if self.sheet.is_none() && self.stack.starts_with(&[Tag::Document, Tag::Body, Tag::Spreadsheet]) => {
                 let name = attr(reader, e, TABLE, b"name")?.unwrap_or_default();
@@ -445,9 +483,27 @@ impl Import {
                     _ => self.report.warn("Some ODS named ranges couldn't be converted and were left out."),
                 }
             }
+            Tag::Column
+                if self.sheet.as_ref().is_some_and(|s| self.stack.get(s.depth + 1..).is_some_and(|p| p.iter().all(|t| *t == Tag::Columns))) =>
+            {
+                // Lenient: an unusable repeat counts as one column, as column styles are optional.
+                let repeat =
+                    attr(reader, e, TABLE, b"number-columns-repeated")?.and_then(|s| s.trim().parse::<u32>().ok()).filter(|n| *n > 0).unwrap_or(1);
+                let info = self.line_info(reader, e, false)?;
+                if let Some(sheet) = self.sheet.as_mut()
+                    && sheet.col < MAX_COLS
+                {
+                    let count = repeat.min(MAX_COLS - sheet.col);
+                    if let Some(info) = info {
+                        sheet.col_runs.push(LineRun { start: sheet.col, count, info });
+                    }
+                    sheet.col += count;
+                }
+            }
             Tag::Row if self.sheet.as_ref().is_some_and(|s| self.stack.get(s.depth + 1..).is_some_and(|p| p.iter().all(|t| *t == Tag::Rows))) => {
-                self.row =
-                    Some(RowDraft { depth, repeat: positive(attr(reader, e, TABLE, b"number-rows-repeated")?, 1, u32::MAX)?, col: 0, cells: vec![] });
+                let repeat = positive(attr(reader, e, TABLE, b"number-rows-repeated")?, 1, u32::MAX)?;
+                let info = self.line_info(reader, e, true)?;
+                self.row = Some(RowDraft { depth, repeat, col: 0, cells: vec![], info });
             }
             Tag::Cell | Tag::Covered if self.row.as_ref().is_some_and(|r| depth == r.depth + 1) => {
                 let kind = if attr(reader, e, CALC_EXT, b"value-type")?.as_deref() == Some("error") {
@@ -534,6 +590,24 @@ impl Import {
         Ok(())
     }
 
+    /// A column's or row's size (from its `table:style-name`) and `table:visibility`
+    /// (ODF 1.2 Part 1 §19.666); `None` when both are default.
+    fn line_info(&self, reader: &mut NsReader<&[u8]>, e: &BytesStart<'_>, row: bool) -> Result<Option<LineInfo>, IoError> {
+        let mut info = LineInfo::default();
+        if let Some(style) = attr(reader, e, TABLE, b"style-name")? {
+            if row {
+                if let Some((px, fixed)) = self.lines.rows.get(&style) {
+                    info.size = Some(*px);
+                    info.custom = *fixed;
+                }
+            } else if let Some(px) = self.lines.cols.get(&style) {
+                info.size = Some(*px);
+            }
+        }
+        info.hidden = matches!(attr(reader, e, TABLE, b"visibility")?.as_deref(), Some("collapse" | "filter"));
+        Ok((info.size.is_some() || info.hidden).then_some(info))
+    }
+
     fn captures_text(&self) -> bool {
         self.cell
             .as_ref()
@@ -578,8 +652,9 @@ impl Import {
             self.finish_row()?;
         }
         if self.sheet.as_ref().is_some_and(|s| s.depth == depth)
-            && let Some(sheet) = self.sheet.take()
+            && let Some(mut sheet) = self.sheet.take()
         {
+            finish_lines(&mut sheet);
             self.wb.sheets.push(Arc::new(sheet.sheet));
             self.table_styles.push(sheet.style);
         }
@@ -762,6 +837,21 @@ impl Import {
             }
             None => return Err(IoError::TooLarge("ODS exceeds worksheet height".into())),
         };
+        // Row sizes: an empty run waits until a later row has content (a long trailing one is
+        // then dropped by `finish_lines`); a row with content flushes the runs before it.
+        let count = end.saturating_sub(sheet.row);
+        if row.cells.is_empty() {
+            if let Some(info) = row.info.filter(|_| count > 0) {
+                sheet.empty_row_runs.push(LineRun { start: sheet.row, count, info });
+            }
+        } else {
+            for run in std::mem::take(&mut sheet.empty_row_runs) {
+                set_lines(&mut sheet.sheet.rows, run.start, run.count, run.info);
+            }
+            if let Some(info) = row.info {
+                set_lines(&mut sheet.sheet.rows, sheet.row, count, info);
+            }
+        }
         for entry in row.cells {
             let count = u64::from(entry.repeat) * u64::from(row.repeat);
             if !entry.cell.is_blank() {
@@ -786,6 +876,9 @@ impl Import {
             if merged && ((entry.repeat > 1 && entry.width > 1) || (row.repeat > 1 && entry.height > 1)) {
                 return Err(IoError::Format("repeated ODS cells have overlapping merges".into()));
             }
+            if let Some(c) = last_col {
+                sheet.last_col = Some(sheet.last_col.map_or(c, |l| l.max(c)));
+            }
             for r in sheet.row..end {
                 for c in entry.col..entry.col + entry.repeat {
                     let pos = CellRef::new(r, c);
@@ -800,6 +893,40 @@ impl Import {
         }
         sheet.row = end;
         Ok(())
+    }
+}
+
+/// Stores `info` for `count` lines from `start`, clipped to `MAX_ROWS` (row and column indexes
+/// both fit below it).
+fn set_lines(lines: &mut std::collections::BTreeMap<u32, LineInfo>, start: u32, count: u32, info: LineInfo) {
+    let end = start.saturating_add(count).min(MAX_ROWS);
+    for i in start..end {
+        lines.insert(i, info);
+    }
+}
+
+/// Applies a finished table's line runs: short trailing empty row runs, and column runs (those
+/// reaching past the last column with content stop there when long, the rest setting the default width).
+fn finish_lines(draft: &mut SheetDraft) {
+    for run in std::mem::take(&mut draft.empty_row_runs) {
+        if run.count <= MAX_TRAILING_LINES {
+            set_lines(&mut draft.sheet.rows, run.start, run.count, run.info);
+        }
+    }
+    // The first column past the content (0 when the sheet has none).
+    let content_end = draft.last_col.map_or(0, |c| c.saturating_add(1));
+    for run in std::mem::take(&mut draft.col_runs) {
+        let end = run.start.saturating_add(run.count).min(MAX_COLS);
+        let split = content_end.max(run.start).min(end);
+        set_lines(&mut draft.sheet.cols, run.start, split.saturating_sub(run.start), run.info);
+        let beyond = end.saturating_sub(split);
+        if beyond > MAX_TRAILING_LINES {
+            if let Some(px) = run.info.size {
+                draft.sheet.default_col_width = px;
+            }
+        } else {
+            set_lines(&mut draft.sheet.cols, split, beyond, run.info);
+        }
     }
 }
 
