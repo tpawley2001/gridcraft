@@ -182,14 +182,29 @@ impl<'a> RowPitch<'a> {
         self.pair.0 as f32
     }
 
+    /// The baseline of an automatic row on an `.xlsx` sheet whose `defaultRowHeight` is not custom
+    /// (ECMA-376 Part 1, 18.3.1.81): the Normal font's default row, unless the saved default is
+    /// positive and shorter than the Normal font's own size in points, which it then stays.
+    ///
+    /// Excel prints such rows at Normal's height when the saved default is a little or even a
+    /// quarter below it (Calibri 11 saved 14.5 pt prints 15 pt; Yu Gothic 10 saved 12.8 pt prints
+    /// 16.5 pt), but keeps a saved default shorter than the font itself (Arial 10 saved 9.6 pt
+    /// prints at about 9 pt). A row shorter than its font cannot be Normal's fitted height, so it
+    /// reads as chosen. Unverified: the exact cut-off between those observations.
+    fn automatic_default_px(&self) -> f32 {
+        let saved = self.sh.default_row_height;
+        let font_px = self.normal_size * 96.0 / 72.0;
+        if saved.is_finite() && saved > 0.0 && saved < font_px { saved.min(self.default_px()) } else { self.default_px() }
+    }
+
     /// Row `r`'s height in screen pixels for printing. A sheet read from an `.xlsx` file prints
     /// a row whose height is not custom (ECMA-376 Part 1, 18.3.1.73 `row@customHeight`) at the
     /// height that fits its content, not at the stored height: the default row height of the
     /// largest font in it, never below the sheet's default (likewise the rows a `defaultRowHeight`
-    /// without `customHeight` covers, 18.3.1.81). A positive finite saved sheet default below
-    /// Normal remains the baseline; a larger noncustom default normalizes to Normal. A row with
-    /// wrapped text, or with a font bigger than Normal whose default row is not known, keeps its
-    /// stored height. Other sheets print the stored height.
+    /// without `customHeight` covers, 18.3.1.81). A non-custom sheet default counts at
+    /// Normal's default row height, unless it is shorter than the Normal font itself
+    /// ([`Self::automatic_default_px`]). A row with wrapped text, or with a font bigger than Normal
+    /// whose default row is not known, keeps its stored height. Other sheets print the stored height.
     ///
     /// With `fit_print_rows_without_default_floor` (sheets read from `.xls`, whose ROW records
     /// without fUnsynced Excel re-fits on open, [MS-XLS] 2.4.221) a non-custom row prints at the
@@ -210,16 +225,7 @@ impl<'a> RowPitch<'a> {
             }
             return self.fitted_px_no_floor(r).unwrap_or_else(|| sh.row_height(r));
         }
-        let saved_default = sh.default_row_height;
-        // Empty automatic rows retain a smaller saved sheet baseline; a larger noncustom
-        // default still normalizes to Normal. Content fitting below may grow populated rows.
-        let default = if sh.default_row_custom_height == Some(true) {
-            saved_default
-        } else if saved_default.is_finite() && saved_default > 0.0 {
-            saved_default.min(self.default_px())
-        } else {
-            self.default_px()
-        };
+        let default = if sh.default_row_custom_height == Some(true) { sh.default_row_height } else { self.automatic_default_px() };
         let stored = match sh.rows.get(&r) {
             Some(i) if i.custom => return i.size.unwrap_or(default),
             Some(i) => i.size,

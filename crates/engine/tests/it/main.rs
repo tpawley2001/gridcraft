@@ -112,4 +112,5 @@ mod xlsb_list_recalc;
 mod xlsb_names_recalc;
 mod xlsb_pivot_refresh;
 
+mod print_noncustom_sheet_default;
 mod print_small_sheet_default;
