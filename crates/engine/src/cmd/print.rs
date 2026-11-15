@@ -657,6 +657,8 @@ mod normal_font_pairs_tests;
 #[cfg(test)]
 mod overflow_past_last_col_tests;
 #[cfg(test)]
+mod overflow_script_width_tests;
+#[cfg(test)]
 mod page_limit_tests;
 #[cfg(test)]
 mod print_col_scale_arial_subst_tests;
