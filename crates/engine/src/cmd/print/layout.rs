@@ -836,7 +836,33 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
     let mut last: Vec<Option<usize>> = vec![None; col_bands.len()];
     // Marks the rectangle ending in row r1 over columns c0..=c1 (only its lowest row matters). Bands stop at a page cap, so what lies
     // past the last band counts on the last band (everything before it prints).
-    let mut mark = |r1: u32, c0: u32, c1: u32| {
+    // A column cut to the page prints continuation bands for the text running on past the cut:
+    // per column band, its index among the cut column's continuation bands (1, 2, ...; None on
+    // other bands), and per cut column its cut width (sheet pixels).
+    let mut cont: Vec<Option<usize>> = Vec::with_capacity(col_bands.len());
+    let mut cut_cols: Vec<(u32, f32)> = Vec::new();
+    let mut first_cut: Option<(u32, usize)> = None;
+    for (ci, &(c0, c1)) in col_bands.iter().enumerate() {
+        let cut = lay.col_cut(ci);
+        let idx = if cut.width > 0.0 && c0 == c1 {
+            match first_cut {
+                Some((col, first)) if col == c0 && cut.offset > 0.0 => Some(ci.saturating_sub(first)),
+                _ => {
+                    first_cut = Some((c0, ci));
+                    cut_cols.push((c0, cut.width));
+                    None
+                }
+            }
+        } else {
+            first_cut = None;
+            None
+        };
+        cont.push(idx);
+    }
+    // Marks the rectangle ending in row r1 over columns c0..=c1. `limit` (for a cell in a cut
+    // column) is how many of that column's continuation bands its text reaches; the others
+    // stay unmarked by it.
+    let mut mark_in = |r1: u32, c0: u32, c1: u32, limit: Option<(u32, usize)>| {
         let (Some(first), Some(end), Some(col_end)) = (row_bands.first(), row_bands.last(), col_bands.last()) else { return };
         if r1 < first.0 {
             return;
@@ -850,6 +876,12 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
         for (ci, b) in col_bands.iter().enumerate().skip(from) {
             if b.0 > c1 {
                 break;
+            }
+            if let (Some((col, n)), Some(Some(o))) = (limit, cont.get(ci))
+                && b.0 == col
+                && *o > n
+            {
+                continue;
             }
             if let Some(slot) = last.get_mut(ci) {
                 *slot = Some(slot.map_or(rb, |v| v.max(rb)));
@@ -882,11 +914,18 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
             None
         };
         let c1 = end.map_or(c.col, |e| e.max(c.col));
-        mark(c.row, c.col, c1);
+        // In a column cut to the page, the cell reaches a continuation band only when its text
+        // runs on past that band's left edge, counted as the continuation bands are.
+        let limit = cut_cols.iter().find(|t| t.0 == c.col).map(|&(col, width)| {
+            let reached = if drawn { cut_reach_pages(wb, sh, lay, (c, cell), width, &mut fonts) } else { 0 };
+            (col, reached)
+        });
+        mark_in(c.row, c.col, c1, limit);
         if let Some(r) = repeats(c.row, c.row) {
-            mark(r, c.col, c1);
+            mark_in(r, c.col, c1, limit);
         }
     }
+    let mut mark = |r1: u32, c0: u32, c1: u32| mark_in(r1, c0, c1, None);
     implicit_row_fill(wb, sh, &mut mark);
     for t in &sh.tables {
         mark(t.range.end.row, t.range.start.col, t.range.end.col);
@@ -934,6 +973,28 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
         }
     }
     below.map(|_| reach)
+}
+
+/// How many continuation pages of a column cut to `cut` sheet pixels the text of `cell` runs
+/// onto, counted as [`split_bands_pieces`] counts the column's continuation pages: the columns
+/// printed after the cut one carry the text first.
+fn cut_reach_pages(
+    wb: &Workbook,
+    sh: &Sheet,
+    lay: &SheetLayout,
+    cell: (CellRef, &gridcraft_model::Cell),
+    cut: f32,
+    fonts: &mut Option<(gridcraft_model::StyleId, super::Font)>,
+) -> usize {
+    let k = lay.k();
+    let cut_pt = cut * k;
+    if cut_pt.is_nan() || cut_pt <= 0.0 {
+        return 0;
+    }
+    let Some(reach) = super::text::cut_text_reach(wb, sh, cell, &sh.merges, (k, lay.scale), cut_pt, fonts) else { return 0 };
+    let rest: f32 = (cell.0.col.saturating_add(1)..=lay.area.end.col).map(|c| sh.col_width(c) * k).sum();
+    // Saturating float-to-int conversion: a hostile reach only meets the page cap.
+    ((reach - cut_pt - rest) / cut_pt).ceil().max(0.0) as usize
 }
 
 /// [`page_sequence`] cut after the last page that holds anything, as Excel prints a sheet:

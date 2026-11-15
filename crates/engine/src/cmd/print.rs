@@ -629,6 +629,8 @@ mod cut_column_draw_tests;
 #[cfg(test)]
 mod cut_continuation_tests;
 #[cfg(test)]
+mod cut_strip_reach_tests;
+#[cfg(test)]
 mod empty_pages_before_last_tests;
 #[cfg(test)]
 mod empty_pages_more_tests;
