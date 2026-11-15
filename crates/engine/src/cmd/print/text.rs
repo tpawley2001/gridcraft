@@ -135,10 +135,11 @@ fn extend_text_bounds(sh: &Sheet, c: CellRef, merges: &[RangeRef], k: f32, need:
 /// The last column the text of `c` runs into to its right when printed at page scale `scale`
 /// (`k` points per sheet pixel), by the same rule [`draw_text`] clips it with: single-line text
 /// (not a number) wider than its cell spills over the empty cells to its right, up to the first
-/// non-empty one. Wrapped, shrunk-to-fit, filled, right-aligned, upright and merged cells, and
-/// Center Across Selection runs, stay in place (`None`), and so does centred text whose left
-/// neighbour (same row) is not empty: Excel's printed range gains no column for it. The text is
-/// measured only when the right neighbour is empty, so a sheet of short or packed text costs one lookup per cell.
+/// non-empty one. Wrapped, justified, distributed, shrunk-to-fit, filled, right-aligned, upright
+/// and merged cells, and Center Across Selection runs, stay in place (`None`), and so does centred
+/// text whose left neighbour (same row) is not empty: Excel's printed range gains no column for it.
+/// The text is measured only when the right neighbour is empty, so a sheet of short or packed text
+/// costs one lookup per cell.
 /// `fonts` remembers the printed font of the style last measured (cells in a run share styles).
 pub(super) fn right_overflow_end(
     wb: &gridcraft_model::Workbook,
@@ -237,8 +238,9 @@ fn spill_candidate(sh: &Sheet, (c, cell): (CellRef, &gridcraft_model::Cell)) -> 
 }
 
 /// The printed width (points at page scale `k`, padding and indent included) and alignment of
-/// the single-line text of `c`, when that text may spill past its cell: not wrapped, shrunk,
-/// filled, upright, right-aligned or a Center Across Selection run.
+/// the single-line text of `c`, when that text may spill past its cell: not folded (wrapped,
+/// justified or distributed, [`gridcraft_model::Alignment::folds`]), shrunk, filled, upright,
+/// right-aligned or a Center Across Selection run.
 fn spilling_text(
     wb: &gridcraft_model::Workbook,
     sh: &Sheet,
@@ -251,7 +253,7 @@ fn spilling_text(
     let sid = cell.style;
     let st = wb.styles.get(sid);
     let a = &st.align;
-    if a.wrap || a.shrink || a.h == HAlign::Fill || a.rotation.abs() == 90 {
+    if a.folds() || a.shrink || a.h == HAlign::Fill || a.rotation.abs() == 90 {
         return None;
     }
     let h_align = text_align(a.h, value);
@@ -357,7 +359,8 @@ pub(super) fn draw_text(pg: &mut Page, b: &Block, placement: TextPlacement<'_>) 
         color = rgb_of(st.font.color, wb).unwrap_or(color);
     }
     let is_num = matches!(v, Value::Number(_));
-    let wrap = st.align.wrap;
+    // Justified and distributed text folds as wrapped text does.
+    let wrap = st.align.folds();
     let mut text = if sh.show_formulas {
         crate::display::cell_text(wb, sh, c)
     } else if code == "General"

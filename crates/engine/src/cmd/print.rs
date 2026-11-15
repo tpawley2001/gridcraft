@@ -649,6 +649,8 @@ mod format_only_merges_tests;
 #[cfg(test)]
 mod indent_width_tests;
 #[cfg(test)]
+mod justify_wraps_tests;
+#[cfg(test)]
 mod macro_sheet_print_tests;
 #[cfg(test)]
 mod macro_sheet_text_tests;
