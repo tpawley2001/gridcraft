@@ -682,6 +682,8 @@ mod small_spill_band_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod title_rows_reach_tests;
+#[cfg(test)]
 mod wide_column_split_tests;
 #[cfg(test)]
 mod xls_col_style_refit_tests;
