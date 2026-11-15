@@ -120,7 +120,7 @@ impl CellStore {
             .flat_map(|band| band.rows.iter().flat_map(|(row, cols)| cols.iter().map(move |(col, cell)| (CellRef::new(*row, *col), cell))))
     }
     /// Cells of one row in `c0..=c1`.
-    pub fn row(&self, row: u32, c0: u32, c1: u32) -> impl Iterator<Item = (u32, &Cell)> + '_ {
+    pub fn row(&self, row: u32, c0: u32, c1: u32) -> impl DoubleEndedIterator<Item = (u32, &Cell)> + '_ {
         self.bands.get(&(row / BAND)).and_then(|b| b.rows.get(&row)).into_iter().flat_map(move |cols| cols.range(c0..=c1).map(|(c, cell)| (*c, cell)))
     }
     /// Smallest range containing every stored cell, `None` when empty.

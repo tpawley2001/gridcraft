@@ -232,6 +232,9 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
                     let last = csi + 1 == csegs.len();
                     let bx = if last { x - shift } else { x };
                     let mut b = make_block(wb, lay.sheet, sh, *rs, *cs, (bx, y), lay);
+                    b.spill_in = last;
+                    b.title_cols = lay.title_cols;
+                    b.spill_min_col = run_ons.get(*ci).copied().flatten().map_or(0, |(col, _, _)| col.saturating_add(1));
                     if last && split {
                         b.cut_column((cut.offset + cut.width) * k, (cut.offset > 0.0).then_some(cut.width * k));
                     }
@@ -616,6 +619,10 @@ fn page_setup(s: &mut Session, p: &Json) -> Result<Json> {
     Ok(serde_json::to_value(&pr).unwrap_or(Json::Null))
 }
 
+#[cfg(test)]
+mod band_spill_in_draw_tests;
+#[cfg(test)]
+mod band_spill_in_more_tests;
 #[cfg(test)]
 mod centred_blocked_overflow_tests;
 #[cfg(test)]
