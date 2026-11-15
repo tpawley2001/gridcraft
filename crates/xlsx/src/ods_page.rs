@@ -207,6 +207,85 @@ pub(crate) fn content_table_styles(content: &[u8]) -> HashMap<String, String> {
     out
 }
 
+/// Column widths and row heights of the automatic `table-column` / `table-row` styles in
+/// `content.xml` (ODF 1.2 Part 1 §17.16 `style:table-column-properties`, §17.17
+/// `style:table-row-properties`), in whole pixels at 96 dpi.
+#[derive(Debug, Default)]
+pub(crate) struct LineStyles {
+    /// Column style name -> width in px.
+    pub(crate) cols: HashMap<String, f32>,
+    /// Row style name -> (height in px, `true` when the height is fixed rather than optimal).
+    pub(crate) rows: HashMap<String, (f32, bool)>,
+}
+
+/// Most line styles kept from one file.
+const MAX_LINE_STYLES: usize = 100_000;
+
+/// Reads [`LineStyles`] from the automatic styles of `content.xml` (everything before
+/// `office:body`). Unknown units, missing properties and zero or negative lengths are skipped.
+pub(crate) fn content_line_styles(content: &[u8]) -> LineStyles {
+    let mut out = LineStyles::default();
+    let mut reader = NsReader::from_reader(content);
+    // The enclosing `style:style`: (family, name).
+    let mut current: Option<(String, String)> = None;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                let Some(el) = element(&mut reader, &e) else { continue };
+                if el.is(Ns::Office, b"body") {
+                    break;
+                }
+                if el.is(Ns::Style, b"style") {
+                    current = match (el.attr(Ns::Style, b"family"), el.attr(Ns::Style, b"name")) {
+                        (Some(family), Some(name)) => Some((family.to_string(), name.to_string())),
+                        _ => None,
+                    };
+                } else {
+                    line_style(&el, current.as_ref(), &mut out);
+                }
+            }
+            Ok(Event::Empty(e)) => {
+                let Some(el) = element(&mut reader, &e) else { continue };
+                line_style(&el, current.as_ref(), &mut out);
+            }
+            Ok(Event::End(e)) => {
+                let (ns, name) = reader.resolver_mut().resolve_element(e.name());
+                if ns_of(ns) == Ns::Style && name.as_ref() == b"style" {
+                    current = None;
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+    out
+}
+
+fn line_style(el: &El, current: Option<&(String, String)>, out: &mut LineStyles) {
+    let Some((family, name)) = current else { return };
+    if out.cols.len().saturating_add(out.rows.len()) >= MAX_LINE_STYLES {
+        return;
+    }
+    if family == "table-column" && el.is(Ns::Style, b"table-column-properties") {
+        if let Some(px) = el.attr(Ns::Style, b"column-width").and_then(length_px) {
+            out.cols.entry(name.clone()).or_insert(px);
+        }
+    } else if family == "table-row"
+        && el.is(Ns::Style, b"table-row-properties")
+        && let Some(px) = el.attr(Ns::Style, b"row-height").and_then(length_px)
+    {
+        let fixed = el.attr(Ns::Style, b"use-optimal-row-height").map(str::trim) == Some("false");
+        out.rows.entry(name.clone()).or_insert((px, fixed));
+    }
+}
+
+/// An ODF length in whole pixels at 96 dpi, rounded to the nearest pixel as Excel stores
+/// widths and heights; `None` when unparsable or not at least half a pixel.
+pub(crate) fn length_px(v: &str) -> Option<f32> {
+    let px = (length(v)? * 96.0).round();
+    (px >= 1.0).then_some(px as f32)
+}
+
 fn table_style(el: &El, out: &mut HashMap<String, String>) {
     if el.is(Ns::Style, b"style")
         && el.attr(Ns::Style, b"family") == Some("table")
@@ -537,6 +616,9 @@ mod tests {
         assert_eq!(length("NaNin"), None);
         assert_eq!(length("12furlongs"), None);
         assert_eq!(length("96px"), Some(1.0));
+        assert_eq!(length_px("2.868cm"), Some(108.0));
+        assert_eq!(length_px("0.4px"), None);
+        assert_eq!(length_px("-3mm"), None);
         let s = r#"<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:master-styles><style:master-page style:name="Default"><style:header><text:p><text:s text:c="4000000000"/></text:p></style:header></style:master-page></office:master-styles></office:document-styles>"#;
         let root = parse_tree(s.as_bytes()).unwrap();
         let header = root.elements().next().and_then(|m| m.elements().next()).and_then(|m| m.child(Ns::Style, b"header")).unwrap();
