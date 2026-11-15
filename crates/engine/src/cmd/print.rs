@@ -697,6 +697,10 @@ mod smartart_extent_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod title_cols_empty_tests;
+#[cfg(test)]
+mod title_cols_reach_tests;
+#[cfg(test)]
 mod title_rows_reach_tests;
 #[cfg(test)]
 mod wide_column_split_tests;

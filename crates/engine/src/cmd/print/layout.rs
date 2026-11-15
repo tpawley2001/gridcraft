@@ -905,6 +905,11 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
         _ => None,
     };
     let repeats = |r0: u32, r1: u32| repeat.filter(|&(a, b, _)| r0 <= b && a <= r1).map(|t| t.2);
+    // Repeated title columns print at the left of every page; when they put anything on paper,
+    // Excel prints every row band of the printed range in every band of columns (blank pages
+    // included). Title columns holding nothing printable leave the usual trimming in place.
+    let in_titles = |col: u32| lay.title_cols.is_some_and(|(a, b)| a <= col && col <= b);
+    let mut titled = false;
     let mut fonts = None;
     let mut on_paper = OnPaper::new(wb, sh);
     for (c, cell) in sh.cells.iter() {
@@ -924,6 +929,7 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
             let reached = if drawn { cut_reach_pages(wb, sh, lay, (c, cell), width, &mut fonts) } else { 0 };
             (col, reached)
         });
+        titled |= in_titles(c.col);
         mark_in(c.row, c.col, c1, limit);
         if let Some(r) = repeats(c.row, c.row) {
             mark_in(r, c.col, c1, limit);
@@ -979,6 +985,10 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
         if let Some(slot) = reach.get_mut(ci) {
             *slot = below.map_or(0, |v| v + 1);
         }
+    }
+    // The leftmost band reaches the lowest occupied row band of any band.
+    if titled && let Some(&full) = reach.first() {
+        reach.iter_mut().for_each(|r| *r = full);
     }
     below.map(|_| reach)
 }
