@@ -311,11 +311,13 @@ fn relationship_kinds_within(bytes: &[u8], mut budget: u64) -> Result<BTreeMap<S
             {
                 sheet_parts.insert((*part).clone());
             }
-            if !external
-                && let Some(part) = by_key.get(&resolve_target(&src_dir, target).to_ascii_lowercase())
-                && !holds_something(&mut zip, part, kind, &mut verdicts, &mut budget)
-            {
-                continue;
+            if !external {
+                let target_key = resolve_target(&src_dir, target).to_ascii_lowercase();
+                // A dangling relationship cannot lose content; keep unreadable existing parts.
+                let Some(part) = by_key.get(&target_key) else { continue };
+                if !holds_something(&mut zip, part, kind, &mut verdicts, &mut budget) {
+                    continue;
+                }
             }
             if kind.eq_ignore_ascii_case("sharedStrings") {
                 shared_strings.get_or_insert_with(|| kind.to_string());
@@ -383,19 +385,16 @@ fn rels_source_dir(key: &str) -> Option<String> {
 }
 
 /// Whether a part has content: an element under its root, or for comments (whose authors list
-/// comes first) a comment, for VML a shape. Read only as far as needed; an unreadable part counts.
+/// comes first) a comment, for VML a shape, for core properties non-whitespace text below the
+/// root. Missing parts hold nothing; unreadable parts count. Read only as far as needed.
 /// `verdicts` remembers the answer per (part, named content); `budget` is the decompression this
 /// package's remaining checks may cause, and once it is spent the part counts as having content.
 fn holds_something(zip: &mut Zip<'_>, name: &str, kind: &str, verdicts: &mut HashMap<(String, &'static str), bool>, budget: &mut u64) -> bool {
-    let wanted: Option<&'static [u8]> = match kind.to_ascii_lowercase().as_str() {
-        "comments" => Some(b"comment"),
-        "vmldrawing" => Some(b"shape"),
-        _ => None,
-    };
-    let marker = match wanted {
-        Some(b"comment") => "comment",
-        Some(_) => "shape",
-        None => "any",
+    let marker = match kind.to_ascii_lowercase().as_str() {
+        "comments" => "comment",
+        "vmldrawing" => "shape",
+        "core-properties" => "text",
+        _ => "any",
     };
     if let Some(v) = verdicts.get(&(name.to_ascii_lowercase(), marker)) {
         return *v;
@@ -407,10 +406,15 @@ fn holds_something(zip: &mut Zip<'_>, name: &str, kind: &str, verdicts: &mut Has
 
 fn holds_something_uncached(zip: &mut Zip<'_>, name: &str, marker: &'static str, budget: &mut u64) -> bool {
     use quick_xml::events::Event;
-    let Ok(f) = zip.by_name(name) else { return true };
+    let f = match zip.by_name(name) {
+        Ok(f) => f,
+        Err(zip::result::ZipError::FileNotFound) => return false,
+        Err(_) => return true,
+    };
     if *budget == 0 {
         return true;
     }
+    let complete = f.size() <= MAX_XML_PART.min(*budget);
     let take = f.size().min(MAX_XML_PART).min(*budget);
     *budget -= take;
     let mut reader = quick_xml::Reader::from_reader(std::io::BufReader::new(f.take(take)));
@@ -421,19 +425,43 @@ fn holds_something_uncached(zip: &mut Zip<'_>, name: &str, marker: &'static str,
     };
     let mut buf = Vec::new();
     let mut in_root = false;
+    let mut depth = 0usize;
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+            Ok(event @ (Event::Start(_) | Event::Empty(_))) => {
+                let opens = matches!(&event, Event::Start(_));
+                let e = match &event {
+                    Event::Start(e) | Event::Empty(e) => e,
+                    _ => return true,
+                };
                 let found = match wanted {
                     Some(w) => local_name(e.name().as_ref()) == w,
-                    None => in_root,
+                    None => marker != "text" && in_root,
                 };
                 if found {
                     return true;
                 }
                 in_root = true;
+                // Empty elements have no text and do not open a new nesting level.
+                if opens {
+                    depth = depth.saturating_add(1);
+                }
             }
-            Ok(Event::Eof) => return false,
+            Ok(Event::End(_)) => depth = depth.saturating_sub(1),
+            Ok(Event::Text(t)) if marker == "text" && depth > 1 => match t.xml_content(quick_xml::XmlVersion::Explicit1_0) {
+                Ok(text) if text.trim().is_empty() => {}
+                _ => return true,
+            },
+            Ok(Event::CData(t)) if marker == "text" && depth > 1 => match t.decode() {
+                Ok(text) if text.trim().is_empty() => {}
+                _ => return true,
+            },
+            Ok(Event::GeneralRef(r)) if marker == "text" && depth > 1 => match r.resolve_char_ref() {
+                Ok(Some(c)) if c.is_whitespace() => {}
+                _ => return true,
+            },
+            // A truncated or over-budget part cannot be proved empty.
+            Ok(Event::Eof) => return !complete || depth != 0,
             Ok(_) => {}
             Err(_) => return true,
         }
@@ -446,6 +474,32 @@ mod tests {
     use std::io::Write as _;
 
     use super::*;
+
+    #[test]
+    fn core_props_content_uses_text_and_a_separate_cache_marker() {
+        for (xml, content) in [
+            ("<root><item/></root>", false),
+            ("<root><item><![CDATA[ \n]]>&#32;&#x9;</item></root>", false),
+            ("<root><item><![CDATA[revision]]></item></root>", true),
+            ("<root><item>&amp;</item></root>", true),
+            ("<root>root text<item/></root>", false),
+            ("<root><item><nested>value</nested></item></root>", true),
+            ("<root><item>", true),
+        ] {
+            let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+            out.start_file("props.xml", zip::write::SimpleFileOptions::default()).unwrap();
+            out.write_all(xml.as_bytes()).unwrap();
+            let bytes = out.finish().unwrap().into_inner();
+            let mut zip = zip::ZipArchive::new(Cursor::new(&bytes[..])).unwrap();
+            let mut verdicts = HashMap::new();
+            let mut budget = 10_000;
+            // The same part can be empty for core properties but content for another kind.
+            assert_eq!(holds_something(&mut zip, "props.xml", "core-properties", &mut verdicts, &mut budget), content, "{xml}");
+            assert!(holds_something(&mut zip, "props.xml", "madeUp", &mut verdicts, &mut budget), "{xml}");
+            assert!(!holds_something(&mut zip, "missing.xml", "madeUp", &mut verdicts, &mut budget));
+            assert!(holds_something_uncached(&mut zip, "props.xml", "text", &mut 1));
+        }
+    }
 
     /// A package with `count` relationship parts of `size` bytes each, none of them describing an
     /// existing part.

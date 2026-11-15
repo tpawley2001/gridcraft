@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~25 points of "ready for real work" and ~160–240 h away
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-15 · **Change:** minor (G0418: `.xls` import reads notes, hyperlinks and frozen panes. Earlier: G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. Earlier: form check boxes and option buttons; catalog 283 / 298; earlier: form controls: buttons, sliders and spin buttons; earlier: RefEdit reference boxes in dialogs: Goal Seek, Solver and Data Analysis take ranges by selection on the grid)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-15 · **Change:** minor (G0421: XLSX keeps `cp:revision` (1–10 ASCII digits) without incrementing it; `gridcraft-cli check` ignores core properties without non-whitespace text and dangling relationships, while unreadable parts still count as content. Earlier: G0418: `.xls` import reads notes, hyperlinks and frozen panes. Earlier: G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. Earlier: form check boxes and option buttons; catalog 283 / 298; earlier: form controls: buttons, sliders and spin buttons; earlier: RefEdit reference boxes in dialogs: Goal Seek, Solver and Data Analysis take ranges by selection on the grid)
 
 GridCraft aims at full Microsoft Excel parity, and at being better in places: faster, open (XLSX
 is the native format), fully scriptable by agents (MCP, control channel, CLI), and on the web.

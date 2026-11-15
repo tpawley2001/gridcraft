@@ -318,6 +318,9 @@ pub struct DocProps {
     /// `cp:lastModifiedBy`: who saved the file last, as the file says.
     #[serde(default)]
     pub last_modified_by: String,
+    /// `cp:revision`: revision text as read, without incrementing on save.
+    #[serde(default)]
+    pub revision: String,
     /// `dcterms:created` and `dcterms:modified`, W3CDTF text as read (`2026-10-31T09:15:00Z`), kept
     /// so a round trip doesn't erase when the workbook was made. Empty when the file had none.
     #[serde(default)]
