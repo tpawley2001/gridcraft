@@ -186,9 +186,10 @@ impl<'a> RowPitch<'a> {
     /// a row whose height is not custom (ECMA-376 Part 1, 18.3.1.73 `row@customHeight`) at the
     /// height that fits its content, not at the stored height: the default row height of the
     /// largest font in it, never below the sheet's default (likewise the rows a `defaultRowHeight`
-    /// without `customHeight` covers, 18.3.1.81). A row with wrapped text, or with a font bigger
-    /// than the Normal font whose default row is not known, keeps its stored height. Other sheets
-    /// print the stored height.
+    /// without `customHeight` covers, 18.3.1.81). A positive finite saved sheet default below
+    /// Normal remains the baseline; a larger noncustom default normalizes to Normal. A row with
+    /// wrapped text, or with a font bigger than Normal whose default row is not known, keeps its
+    /// stored height. Other sheets print the stored height.
     ///
     /// With `fit_print_rows_without_default_floor` (sheets read from `.xls`, whose ROW records
     /// without fUnsynced Excel re-fits on open, [MS-XLS] 2.4.221) a non-custom row prints at the
@@ -428,6 +429,33 @@ mod tests {
             wb.sheet_mut(0).unwrap().default_row_height = saved;
             assert_eq!(RowPitch::new(&wb, wb.sheet(0).unwrap(), 1.0).row_px(0), expected);
         }
+    }
+
+    #[test]
+    fn smaller_baseline_keeps_stored_fallback_for_wrapped_and_unknown_fonts() {
+        use gridcraft_core::{CellRef, Value};
+        use gridcraft_model::{Cell, LineInfo, Style};
+
+        let mut wb = Workbook::new();
+        let mut wrapped = Style::default();
+        wrapped.align.wrap = true;
+        let wrapped = wb.styles.intern(wrapped);
+        let mut unknown = Style::default();
+        unknown.font.name = "Unmeasured font".into();
+        unknown.font.size = 30.0;
+        let unknown = wb.styles.intern(unknown);
+        let sh = wb.sheet_mut(0).unwrap();
+        sh.fit_auto_row_heights_in_print = true;
+        sh.default_row_custom_height = Some(false);
+        sh.default_row_height = 12.0;
+        for (row, style) in [(0, wrapped), (1, unknown)] {
+            sh.set_cell(CellRef::new(row, 0), Cell { style, value: Value::Number(1.0), ..Cell::default() });
+            sh.rows.insert(row, LineInfo { size: Some(32.0), ..Default::default() });
+        }
+        let pitch = RowPitch::new(&wb, wb.sheet(0).unwrap(), 1.0);
+        assert_eq!(pitch.row_px(0), 32.0);
+        assert_eq!(pitch.row_px(1), 32.0);
+        assert_eq!(pitch.row_px(2), 12.0);
     }
 
     #[test]
