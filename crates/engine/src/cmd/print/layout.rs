@@ -581,14 +581,26 @@ fn title_span(t: Option<(u32, u32)>, max: u32) -> Option<(u32, u32)> {
 
 /// Advance of the digits, in em, of fonts whose digits share one width: Excel sizes columns by it.
 /// Names are matched trimmed and lower-cased with Unicode rules (stored Japanese names use
-/// full-width Latin letters). MS Sans Serif (a bitmap screen font) and the Arial charset names
+/// full-width Latin letters), after stripping one matching pair of single or double quotes.
+/// MS Sans Serif (a bitmap screen font) and the Arial charset names
 /// (Arial Cyr, Tur, CE, Baltic, Greek) map to Arial: Excel prints their text in Arial, and the
 /// printed column widths follow (an MS Sans Serif 10 default column prints at Arial 10's width).
+/// Liberation Sans is metric-compatible with Arial. Sans, Sans-Serif, sans serif, Helvetica
+/// (any name starting with Helvetica), Geneva, Clear Sans and Droid Sans Fallback use Arial's
+/// printed digits too. Cambria uses the same width, measured from Excel's printed page counts.
 /// SimSun, NSimSun, MS Gothic and MS PGothic have half-width digits: half an em.
 fn digit_em(font: &str) -> Option<f32> {
-    let units = match font.trim().to_lowercase().as_str() {
+    let name = font.trim().to_lowercase();
+    let name = name
+        .strip_prefix('\'')
+        .and_then(|s| s.strip_suffix('\''))
+        .or_else(|| name.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
+        .unwrap_or(&name);
+    let units = match name {
         "calibri" => 1038.0,
         "arial" | "ms sans serif" | "arial cyr" | "arial tur" | "arial ce" | "arial baltic" | "arial greek" => 1139.0,
+        "liberation sans" | "sans" | "sans-serif" | "sans serif" | "geneva" | "clear sans" | "droid sans fallback" | "cambria" => 1139.0,
+        n if n.starts_with("helvetica") => 1139.0,
         "times new roman" => 1024.0,
         "courier new" => 1229.0,
         "verdana" => 1302.0,
@@ -605,7 +617,10 @@ fn digit_em(font: &str) -> Option<f32> {
 /// Measured in Excel 365 on fit-to-width scales, assuming a 600 dpi printer: Calibri 11 prints 47
 /// dots (5.64 pt) a character, so a column is 7.4% wider on paper; Arial 10, Times New Roman 12,
 /// Verdana 10 and Calibri 16 match the same rule. MS Sans Serif and the Arial charset names use
-/// Arial's digits (Excel prints them in Arial). Fonts not listed use Calibri's digits.
+/// Arial's digits (Excel prints them in Arial). Liberation Sans, Sans, Sans-Serif, sans serif,
+/// Helvetica (including all names starting with Helvetica), Geneva, Clear Sans and Droid Sans
+/// Fallback also use Arial's digits; Cambria uses the same measured width. Fonts not listed use
+/// Calibri's digits.
 pub(crate) fn print_col_scale(wb: &Workbook) -> f32 {
     const DPI: f32 = 600.0;
     let font = &wb.styles.get(gridcraft_model::StyleId::DEFAULT).font;
