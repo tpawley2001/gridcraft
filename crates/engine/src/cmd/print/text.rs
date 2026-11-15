@@ -136,8 +136,9 @@ fn extend_text_bounds(sh: &Sheet, c: CellRef, merges: &[RangeRef], k: f32, need:
 /// (`k` points per sheet pixel), by the same rule [`draw_text`] clips it with: single-line text
 /// (not a number) wider than its cell spills over the empty cells to its right, up to the first
 /// non-empty one. Wrapped, shrunk-to-fit, filled, right-aligned, upright and merged cells, and
-/// Center Across Selection runs, stay in place (`None`). The text is measured only when the
-/// right neighbour is empty, so a sheet of short or packed text costs one lookup per cell.
+/// Center Across Selection runs, stay in place (`None`), and so does centred text whose left
+/// neighbour (same row) is not empty: Excel's printed range gains no column for it. The text is
+/// measured only when the right neighbour is empty, so a sheet of short or packed text costs one lookup per cell.
 /// `fonts` remembers the printed font of the style last measured (cells in a run share styles).
 pub(super) fn right_overflow_end(
     wb: &gridcraft_model::Workbook,
@@ -149,6 +150,9 @@ pub(super) fn right_overflow_end(
 ) -> Option<u32> {
     let right = spill_candidate(sh, (c, cell))?;
     let (need, h_align) = spilling_text(wb, sh, (c, cell), merges, (k, scale), fonts)?;
+    if h_align == HAlign::Center && c.col > 0 && !empty_for_overflow(sh, CellRef::new(c.row, c.col - 1), merges) {
+        return None;
+    }
     // Columns print wider than they draw on screen (Excel's printed column width, see
     // `layout::print_col_scale`) while text prints at its font size, so the reach is measured
     // against the printed column widths.
