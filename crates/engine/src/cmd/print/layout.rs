@@ -388,6 +388,10 @@ fn used_print_range(wb: &Workbook, sh: &Sheet) -> Option<RangeRef> {
     for o in sh.embedded_objects.iter().filter(|o| o.print) {
         grow(&o.anchor);
     }
+    // SmartArt diagrams aren't drawn either, but they print and take room like any drawing.
+    for o in sh.diagram_frames.iter().filter(|o| !o.hidden && !o.no_print) {
+        grow(&o.anchor);
+    }
     // Without a print area Excel prints from A1: leading empty rows and columns print as blank
     // space, and pages that fall wholly inside them print as blank pages.
     r.map(|r| RangeRef::new(CellRef::new(0, 0), r.end))
@@ -921,6 +925,10 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
     for o in sh.embedded_objects.iter().filter(|o| o.print) {
         object(&o.anchor);
     }
+    // SmartArt diagrams aren't drawn either, but they print and take room like any drawing.
+    for o in sh.diagram_frames.iter().filter(|o| !o.hidden && !o.no_print) {
+        object(&o.anchor);
+    }
     // Sweep from the right: a band prints down to the lowest occupied band at or right of it.
     let mut reach = vec![0usize; last.len()];
     let mut below: Option<usize> = None;
@@ -1183,13 +1191,14 @@ fn fitted_area_prints_nothing(sh: &Sheet, opts: &PrintOptions, ranges: &[RangeRe
 }
 
 /// Whether the sheet holds a drawing object that prints (a visible chart, picture, shape, form
-/// control or embedded object not marked do-not-print).
+/// control, embedded object or diagram frame not marked do-not-print).
 fn has_drawn_objects(sh: &Sheet) -> bool {
     sh.charts.iter().any(|o| !o.hidden && !o.no_print)
         || sh.images.iter().any(|o| !o.hidden && !o.no_print)
         || sh.shapes.iter().any(|o| !o.hidden && !o.no_print)
         || sh.controls.iter().any(|o| o.print)
         || sh.embedded_objects.iter().any(|o| o.print)
+        || sh.diagram_frames.iter().any(|o| !o.hidden && !o.no_print)
 }
 
 /// Segments of a page along one axis: repeated titles (before the band) then the band.

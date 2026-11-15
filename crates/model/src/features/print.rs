@@ -466,6 +466,7 @@ impl MacroSheetPrint {
         sheet.slicers.clear();
         sheet.controls.clear();
         sheet.embedded_objects.clear();
+        sheet.diagram_frames.clear();
         sheet.pivots.clear();
         sheet.cell_pictures.clear();
         Self { name, visibility, before, charts_before, sheet }
