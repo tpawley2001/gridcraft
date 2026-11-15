@@ -27,6 +27,9 @@ fn equation(id: u32, cell: &str, latex: &str, ink: Color) -> Shape {
         line: ink,
         text: latex.into(),
         format: Default::default(),
+        flip_h: false,
+        flip_v: false,
+        rotation: None,
         math: Default::default(),
     }
 }
@@ -176,6 +179,9 @@ fn a_text_box_stays_a_text_box_and_hostile_sources_survive() {
         line: Color::Auto,
         text: "plain".into(),
         format: Default::default(),
+        flip_h: false,
+        flip_v: false,
+        rotation: None,
         math: Default::default(),
     });
     wb.sheets[0] = Arc::new(sh);

@@ -43,6 +43,9 @@ fn freeform() -> Shape {
         line: Color::Rgb(0x000000),
         text: String::new(),
         format: Default::default(),
+        flip_h: false,
+        flip_v: false,
+        rotation: None,
         math: Default::default(),
     }
 }

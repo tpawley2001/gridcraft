@@ -1696,6 +1696,16 @@ pub struct Shape {
     /// Outline visibility and text formatting (DrawingML `a:ln`, `a:bodyPr`, `a:pPr`, `a:rPr`).
     #[serde(default)]
     pub format: ShapeFormat,
+    /// Mirrored left to right (DrawingML `a:xfrm flipH`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip_h: bool,
+    /// Mirrored top to bottom (DrawingML `a:xfrm flipV`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip_v: bool,
+    /// Clockwise rotation about the box centre in 60000ths of a degree (DrawingML `a:xfrm rot`),
+    /// as read; `None` when the shape is not turned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<i32>,
     /// An equation's layout, rebuilt from `text` and never saved.
     #[serde(skip)]
     pub math: EquationCache,
@@ -2341,6 +2351,43 @@ pub struct ShapeFontRef {
 }
 
 impl Shape {
+    /// A line's start and end in a `w` x `h` box (relative to its top-left corner), after the
+    /// flips: none runs top-left to bottom-right, `flip_v` bottom-left to top-right, `flip_h`
+    /// top-right to bottom-left and both bottom-right to top-left. The arrowhead sits at the end.
+    pub fn line_endpoints(&self, w: f32, h: f32) -> ((f32, f32), (f32, f32)) {
+        match (self.flip_h, self.flip_v) {
+            (false, false) => ((0.0, 0.0), (w, h)),
+            (false, true) => ((0.0, h), (w, 0.0)),
+            (true, false) => ((w, 0.0), (0.0, h)),
+            (true, true) => ((w, h), (0.0, 0.0)),
+        }
+    }
+
+    /// The rotation in degrees clockwise (0 when the shape is not turned).
+    pub fn rotation_degrees(&self) -> f64 {
+        self.rotation.map_or(0.0, |r| f64::from(r) / 60000.0)
+    }
+
+    /// Maps a point of the unturned shape whose box centre is (`cx`, `cy`) to where it is drawn:
+    /// mirrored about the centre by the flips, then turned clockwise about the centre by the
+    /// rotation (y grows downward), the order of ECMA-376 Part 1 §20.1.7.6.
+    pub fn transform_point(&self, cx: f64, cy: f64, p: (f64, f64)) -> (f64, f64) {
+        let x = if self.flip_h { 2.0 * cx - p.0 } else { p.0 };
+        let y = if self.flip_v { 2.0 * cy - p.1 } else { p.1 };
+        self.rotate_point(cx, cy, (x, y))
+    }
+
+    /// Turns a point clockwise about (`cx`, `cy`) by the shape's rotation only (no flips).
+    pub fn rotate_point(&self, cx: f64, cy: f64, p: (f64, f64)) -> (f64, f64) {
+        let deg = self.rotation_degrees();
+        if deg == 0.0 || !deg.is_finite() {
+            return p;
+        }
+        let (sin, cos) = deg.to_radians().sin_cos();
+        let (dx, dy) = (p.0 - cx, p.1 - cy);
+        (cx + dx * cos - dy * sin, cy + dx * sin + dy * cos)
+    }
+
     /// The fill drawn: the shape's own fill, else its style's (`Color::Auto`: no fill).
     pub fn drawn_fill(&self) -> Color {
         if self.format.no_fill {
@@ -2959,6 +3006,9 @@ mod shape_style_drawn_tests {
             line: Color::Auto,
             text: String::new(),
             format: ShapeFormat { style, ..ShapeFormat::default() },
+            flip_h: false,
+            flip_v: false,
+            rotation: None,
             math: EquationCache::default(),
         }
     }

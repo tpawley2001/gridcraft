@@ -405,16 +405,22 @@ fn paint_shape_shadow(
             paint_geometry_paths(p, paths, r, sp, f, l, &[]);
         }
         ShapeKind::Line | ShapeKind::Arrow => {
-            p.line_segment([r.left_top(), r.right_bottom()], Stroke::new(2.0, c));
+            let (a, tip) = line_ends(sp, r);
+            p.line_segment([a, tip], Stroke::new(2.0, c));
             if sp.kind == ShapeKind::Arrow {
-                let d = (r.right_bottom() - r.left_top()).normalized();
+                let d = (tip - a).normalized();
                 let n = vec2(-d.y, d.x);
-                let tip = r.right_bottom();
                 p.add(PathShape::convex_polygon(vec![tip, tip - d * 10.0 + n * 5.0, tip - d * 10.0 - n * 5.0], c, Stroke::NONE));
             }
         }
         ShapeKind::Ink | ShapeKind::Icon | ShapeKind::Equation | ShapeKind::WordArt => {}
     }
+}
+
+/// A line shape's start and end in its box `r`, by its flips (the arrowhead sits at the end).
+fn line_ends(sp: &gridcraft_engine::model::Shape, r: Rect) -> (Pos2, Pos2) {
+    let ((sx, sy), (ex, ey)) = sp.line_endpoints(r.width(), r.height());
+    (r.left_top() + vec2(sx, sy), r.left_top() + vec2(ex, ey))
 }
 
 /// A shape outline's preset dash (`a:prstDash`, ECMA-376 Part 1 §20.1.10.48) in screen pixels:
@@ -574,12 +580,12 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Arc<Wor
                 paint_geometry_paths(p, paths, r, sp, fill, full_line, &dash);
             }
             ShapeKind::Line | ShapeKind::Arrow => {
-                p.line_segment([r.left_top(), r.right_bottom()], Stroke::new(2.0, line));
-                dashed(&[r.left_top(), r.right_bottom()], false, 2.0);
+                let (a, tip) = line_ends(sp, r);
+                p.line_segment([a, tip], Stroke::new(2.0, line));
+                dashed(&[a, tip], false, 2.0);
                 if sp.kind == ShapeKind::Arrow {
-                    let d = (r.right_bottom() - r.left_top()).normalized();
+                    let d = (tip - a).normalized();
                     let n = vec2(-d.y, d.x);
-                    let tip = r.right_bottom();
                     p.add(PathShape::convex_polygon(vec![tip, tip - d * 10.0 + n * 5.0, tip - d * 10.0 - n * 5.0], full_line, Stroke::NONE));
                 }
             }

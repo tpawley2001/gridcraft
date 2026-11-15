@@ -320,26 +320,34 @@ fn draw_geometry(
                     [x + w / 2.0 + w / 2.0 * a.cos(), y + h / 2.0 + h / 2.0 * a.sin()]
                 })
                 .collect();
-            outline(pg, &pts, fill, line, dash);
+            outline(pg, &placed(shp, (x, y, w, h), pts), fill, line, dash);
         }
-        ShapeKind::Triangle => outline(pg, &[[x + w / 2.0, y], [x + w, y + h], [x, y + h]], fill, line, dash),
+        ShapeKind::Triangle => outline(pg, &placed(shp, (x, y, w, h), vec![[x + w / 2.0, y], [x + w, y + h], [x, y + h]]), fill, line, dash),
         ShapeKind::Line | ShapeKind::Arrow => {
             let c = line.map(|l| l.0).or(fill).unwrap_or([0, 0, 0]);
             let lw = (1.0 * b.k).max(0.3);
             let d = outline_dash(shp, lw);
-            pg.stroke_line_dashed(gridcraft_pdf::Point::new(x, y), gridcraft_pdf::Point::new(x + w, y + h), lw, c, &d);
+            // The flips pick the diagonal and its direction; the rotation then turns it.
+            let ((sx, sy), (ex, ey)) = shp.line_endpoints(w, h);
+            let (cx, cy) = (f64::from(x) + f64::from(w) / 2.0, f64::from(y) + f64::from(h) / 2.0);
+            let turn = |px: f32, py: f32| {
+                let (tx, ty) = shp.rotate_point(cx, cy, (f64::from(x + px), f64::from(y + py)));
+                (tx as f32, ty as f32)
+            };
+            let ((sx, sy), (ex, ey)) = (turn(sx, sy), turn(ex, ey));
+            pg.stroke_line_dashed(gridcraft_pdf::Point::new(sx, sy), gridcraft_pdf::Point::new(ex, ey), lw, c, &d);
             if shp.kind == ShapeKind::Arrow {
-                let ang = h.atan2(w);
+                let ang = (ey - sy).atan2(ex - sx);
                 let al = 8.0 * b.k;
-                let p = |da: f32| [x + w - al * (ang + da).cos(), y + h - al * (ang + da).sin()];
-                pg.polygon(&[[x + w, y + h], p(0.4), p(-0.4)], Some(c), None);
+                let p = |da: f32| [ex - al * (ang + da).cos(), ey - al * (ang + da).sin()];
+                pg.polygon(&[[ex, ey], p(0.4), p(-0.4)], Some(c), None);
             }
         }
-        ShapeKind::RoundedRectangle => outline(pg, &rounded_rect_points((x, y, w, h)), fill, line, dash),
+        ShapeKind::RoundedRectangle => outline(pg, &placed(shp, (x, y, w, h), rounded_rect_points((x, y, w, h))), fill, line, dash),
         ShapeKind::Freeform if draw_freeform(pg, shp, b, (x, y, w, h), fill, line, dash) => {}
         _ if draw_preset(pg, shp, b, (x, y, w, h), fill, line, dash) => {}
         _ => {
-            outline(pg, &[[x, y], [x + w, y], [x + w, y + h], [x, y + h]], fill, line, dash);
+            outline(pg, &placed(shp, (x, y, w, h), vec![[x, y], [x + w, y], [x + w, y + h], [x, y + h]]), fill, line, dash);
         }
     }
 }
@@ -390,6 +398,20 @@ fn draw_shape_text(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b
         pg.text(lx, yy, size, font, color, l);
         yy += size * 1.2;
     }
+}
+
+/// An outline's points as drawn: mirrored by the shape's flips, then turned by its rotation, both
+/// about the centre of the box `(x, y, w, h)` (ECMA-376 Part 1 §20.1.7.6).
+fn placed(shp: &gridcraft_model::Shape, (x, y, w, h): (f32, f32, f32, f32), mut pts: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
+    if !shp.flip_h && !shp.flip_v && shp.rotation.is_none() {
+        return pts;
+    }
+    let (cx, cy) = (f64::from(x) + f64::from(w) / 2.0, f64::from(y) + f64::from(h) / 2.0);
+    for p in &mut pts {
+        let (px, py) = shp.transform_point(cx, cy, (f64::from(p[0]), f64::from(p[1])));
+        *p = [px as f32, py as f32];
+    }
+    pts
 }
 
 /// The PDF dash array of a shape's outline stroked `width` wide: its preset dash
@@ -447,7 +469,7 @@ fn draw_freeform(
     dash: &[f32],
 ) -> bool {
     let Some(geom) = shp.geometry.as_ref() else { return false };
-    draw_paths(pg, &geom.paths, b, rect, fill, line, dash)
+    draw_paths(pg, shp, &geom.paths, b, rect, fill, line, dash)
 }
 
 /// Draws a preset shape kept in `geometry` (block arrows, chevron, diamond, …) by its own outline
@@ -465,13 +487,15 @@ fn draw_preset(
     let Some(geom) = shp.geometry.as_ref() else { return false };
     let res = |v: f32| (v.abs() * 100.0).round().min(1.0e9) as i64;
     let Some(paths) = gridcraft_model::preset_paths(geom, res(rect.2), res(rect.3)) else { return false };
-    draw_paths(pg, &paths, b, rect, fill, line, dash)
+    draw_paths(pg, shp, &paths, b, rect, fill, line, dash)
 }
 
 /// Draws geometry paths flattened into polygons and polylines on the shape box; false when there
 /// is nothing to draw.
+#[allow(clippy::too_many_arguments)]
 fn draw_paths(
     pg: &mut Page,
+    shp: &gridcraft_model::Shape,
     paths: &[gridcraft_model::GeometryPath],
     b: &Block,
     rect: (f32, f32, f32, f32),
@@ -483,7 +507,10 @@ fn draw_paths(
     let mut drew = false;
     for path in paths {
         let line = line.filter(|_| path.stroke);
-        let subs = flatten_path(path, rect, b.k, &mut budget);
+        let subs: Vec<Subpath> = flatten_path(path, rect, b.k, &mut budget)
+            .into_iter()
+            .map(|sub| Subpath { points: placed(shp, rect, sub.points), closed: sub.closed })
+            .collect();
         // Several closed subpaths of one filled path are filled together, even-odd, so one inside
         // another is a hole (donut, frame). A single subpath prints as before.
         if path.fill && subs.iter().filter(|s| s.closed && s.points.len() >= 2).count() >= 2 {

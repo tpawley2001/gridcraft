@@ -102,6 +102,9 @@ fn insert_equation(s: &mut Session, p: &Json) -> Result<Json> {
         line: color,
         text: latex.to_string(),
         format: Default::default(),
+        flip_h: false,
+        flip_v: false,
+        rotation: None,
         math: Default::default(),
     };
     shape.math.refresh(latex);
