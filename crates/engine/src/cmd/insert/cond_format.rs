@@ -333,6 +333,9 @@ pub(super) fn insert_icon(s: &mut Session, p: &Json) -> Result<Json> {
         line: Color::Auto,
         text: name,
         format: Default::default(),
+        flip_h: false,
+        flip_v: false,
+        rotation: None,
         math: Default::default(),
     };
     let sheet = d.wb.active_sheet();

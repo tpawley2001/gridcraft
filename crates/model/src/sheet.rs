@@ -1211,6 +1211,9 @@ mod tests {
                 line: Color::default(),
                 text: String::new(),
                 format: ShapeFormat::default(),
+                flip_h: false,
+                flip_v: false,
+                rotation: None,
                 math: EquationCache::default(),
             }),
             ObjKind::Slicer => {

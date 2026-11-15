@@ -201,6 +201,9 @@ fn insert_word_art(s: &mut Session, p: &Json) -> Result<Json> {
         line: Color::Auto,
         text: text.clone(),
         format: ShapeFormat { no_line: true, align: Some(ShapeTextAlign::Center), anchor: Some(ShapeTextAnchor::Middle), ..Default::default() },
+        flip_h: false,
+        flip_v: false,
+        rotation: None,
         math: Default::default(),
     };
     apply("insert.wordArt", &mut shape, Some(style), p)?;

@@ -26,6 +26,9 @@ fn shape(kind: ShapeKind, text: &str, alt: &str) -> Shape {
         line: Color::Auto,
         text: text.into(),
         format: Default::default(),
+        flip_h: false,
+        flip_v: false,
+        rotation: None,
         math: Default::default(),
     }
 }

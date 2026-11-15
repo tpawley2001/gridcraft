@@ -505,6 +505,11 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                 }
                 "sp" | "cxnSp" => {
                     if let Some(mut s) = read_shape(obj, anchor, &cx.theme_colors, &cx.format_scheme) {
+                        let tf = obj.path(&["spPr", "xfrm"]);
+                        let on = |k: &str| tf.and_then(|x| x.attr(k)).is_some_and(|v| v == "1" || v == "true");
+                        s.flip_h = on("flipH");
+                        s.flip_v = on("flipV");
+                        s.rotation = tf.and_then(|x| x.attr("rot")).and_then(|v| v.trim().parse::<i32>().ok()).filter(|r| *r != 0);
                         s.hidden =
                             obj.path(&["nvSpPr", "cNvPr"]).or_else(|| obj.path(&["nvCxnSpPr", "cNvPr"])).is_some_and(|p| p.flag("hidden", false));
                         s.no_print = no_print;
@@ -789,6 +794,9 @@ fn read_shape(obj: &El, anchor: Anchor, theme: &[u32; 12], scheme: &shape_style:
             line: ink,
             text,
             format: Default::default(),
+            flip_h: false,
+            flip_v: false,
+            rotation: None,
             math: Default::default(),
         });
     }
@@ -824,6 +832,9 @@ fn read_shape(obj: &El, anchor: Anchor, theme: &[u32; 12], scheme: &shape_style:
         line,
         text,
         format,
+        flip_h: false,
+        flip_v: false,
+        rotation: None,
         math: Default::default(),
     })
 }
@@ -1132,6 +1143,25 @@ fn anchor_open(sheet: &Sheet, a: &Anchor) -> (String, &'static str) {
     (open, "</xdr:twoCellAnchor>")
 }
 
+/// A shape's `<a:xfrm>`, with its rotation and flips (ECMA-376 Part 1 §20.1.7.6) when it has them.
+fn shape_xfrm(sh: &Shape) -> String {
+    let plain = xfrm(&sh.anchor, "a:xfrm");
+    let mut attrs = String::new();
+    if let Some(r) = sh.rotation {
+        let _ = write!(attrs, " rot=\"{r}\"");
+    }
+    if sh.flip_h {
+        attrs.push_str(" flipH=\"1\"");
+    }
+    if sh.flip_v {
+        attrs.push_str(" flipV=\"1\"");
+    }
+    match plain.strip_prefix("<a:xfrm") {
+        Some(rest) if !attrs.is_empty() => format!("<a:xfrm{attrs}{rest}"),
+        _ => plain,
+    }
+}
+
 fn xfrm(a: &Anchor, tag: &str) -> String {
     let e = |v: f32| ((v.max(0.0) as f64) * EMU_PER_PX).round() as i64;
     format!("<{tag}><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{}\" cy=\"{}\"/></{tag}>", e(a.width), e(a.height))
@@ -1363,7 +1393,7 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>], kept: &[(us
                     s,
                     "<xdr:sp macro=\"\" textlink=\"\"><xdr:nvSpPr><xdr:cNvPr id=\"{id}\" name=\"{name}\"{descr}{hidden}>{link}</xdr:cNvPr><xdr:cNvSpPr{}/></xdr:nvSpPr><xdr:spPr>{}",
                     if tx { " txBox=\"1\"" } else { "" },
-                    xfrm(&sh.anchor, "a:xfrm")
+                    shape_xfrm(sh)
                 );
                 write_geometry(&mut s, prst, sh);
                 if sh.format.no_fill {

@@ -1044,6 +1044,9 @@ impl Embedded {
                 line: drawing::art_color(props.line_color, &table),
                 text: text.text,
                 format,
+                flip_h: false,
+                flip_v: false,
+                rotation: None,
                 math: Default::default(),
             });
         }
@@ -1082,6 +1085,9 @@ impl Embedded {
                 line,
                 text: text.map_or(String::new(), |t| t.text),
                 format,
+                flip_h: false,
+                flip_v: false,
+                rotation: None,
                 math: Default::default(),
             });
         }
@@ -1311,6 +1317,9 @@ fn biff5_polygon(data: &[u8], table: &[u32; 64]) -> Option<PendingPolygon> {
         line,
         text: String::new(),
         format: ShapeFormat { no_fill: *fls == 0, no_line: *lns == 5, ..ShapeFormat::default() },
+        flip_h: false,
+        flip_v: false,
+        rotation: None,
         math: Default::default(),
     };
     Some(PendingPolygon { anchor, shape, closed: flags & POLY_CLOSED != 0, cpt })

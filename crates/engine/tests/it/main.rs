@@ -83,6 +83,7 @@ mod recently_used;
 mod regression_one_cell_y_excel;
 mod regression_plots;
 mod row_autofit;
+mod shape_flip_rotation_print;
 mod shape_gallery;
 mod shape_gallery_excel_entries;
 mod shape_outline_print;
