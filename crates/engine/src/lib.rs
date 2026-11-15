@@ -408,6 +408,18 @@ impl DocState {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| self.title.clone())
     }
+
+    /// The file name the `&F` header/footer field prints: the save path's name, else the file
+    /// the workbook was opened from (an import keeps its own name, `budget.xls`, although its
+    /// title is `budget (imported).xlsx`), else the title (`Book1`).
+    pub fn print_file_name(&self) -> String {
+        let name_of = |p: &std::path::Path| p.file_name().map(|n| n.to_string_lossy().to_string());
+        self.path
+            .as_deref()
+            .and_then(|p| name_of(std::path::Path::new(p)))
+            .or_else(|| self.wb.source_path.as_deref().and_then(name_of))
+            .unwrap_or_else(|| self.title.clone())
+    }
 }
 
 /// Engine-side preferences.

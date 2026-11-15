@@ -334,7 +334,7 @@ fn build_pdf(s: &Session, p: &Json, cmd: &str) -> Result<(Vec<u8>, usize)> {
     let d = s.doc()?;
     let lays = layouts(&d.wb, &opts);
     let path = d.path.clone().unwrap_or_default();
-    Ok(render_pdf(&d.wb, &lays, &d.display_title(), &path))
+    Ok(render_pdf(&d.wb, &lays, &d.print_file_name(), &path))
 }
 
 pub(crate) fn export_pdf(s: &mut Session, p: &Json) -> Result<Json> {
