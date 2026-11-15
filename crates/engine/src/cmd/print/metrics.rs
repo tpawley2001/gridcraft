@@ -209,7 +209,16 @@ impl<'a> RowPitch<'a> {
             }
             return self.fitted_px_no_floor(r).unwrap_or_else(|| sh.row_height(r));
         }
-        let default = if sh.default_row_custom_height == Some(true) { sh.default_row_height } else { self.default_px() };
+        let saved_default = sh.default_row_height;
+        // Empty automatic rows retain a smaller saved sheet baseline; a larger noncustom
+        // default still normalizes to Normal. Content fitting below may grow populated rows.
+        let default = if sh.default_row_custom_height == Some(true) {
+            saved_default
+        } else if saved_default.is_finite() && saved_default > 0.0 {
+            saved_default.min(self.default_px())
+        } else {
+            self.default_px()
+        };
         let stored = match sh.rows.get(&r) {
             Some(i) if i.custom => return i.size.unwrap_or(default),
             Some(i) => i.size,
@@ -375,6 +384,65 @@ impl<'a> RowPitch<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn smaller_default_layout_matches_custom_control_without_changing_imported_metrics() {
+        use gridcraft_core::{CellRef, RangeRef, Value};
+        use gridcraft_model::{Cell, Style, StyleTable};
+
+        let mut source = Workbook::new();
+        let mut normal = Style::default();
+        normal.font.name = "Arial".into();
+        normal.font.size = 10.0;
+        source.styles = StyleTable::with_default(normal);
+        let sh = source.sheet_mut(0).unwrap();
+        sh.default_row_height = 12.0;
+        sh.default_row_custom_height = Some(false);
+        sh.print.set_print_areas(vec![RangeRef::new(CellRef::new(0, 0), CellRef::new(149, 0))]);
+        for r in [0, 149] {
+            sh.set_cell(CellRef::new(r, 0), Cell { value: Value::Number(1.0), ..Cell::default() });
+        }
+        let read = |wb: &Workbook| gridcraft_xlsx::read_xlsx(&gridcraft_xlsx::write_xlsx(wb).unwrap()).unwrap().0;
+        let automatic = read(&source);
+        source.sheet_mut(0).unwrap().default_row_custom_height = Some(true);
+        let control = read(&source);
+        let before = serde_json::to_value(&automatic).unwrap();
+        let options = super::super::PrintOptions::default();
+        let actual = super::super::layout_sheet(&automatic, 0, &options, None).unwrap();
+        let expected = super::super::layout_sheet(&control, 0, &options, None).unwrap();
+        assert_eq!(actual.row_bands, expected.row_bands);
+        assert_eq!(actual.pages, expected.pages);
+        assert_eq!(actual.scale, expected.scale);
+        assert_eq!(automatic.sheet(0).unwrap().default_row_height, 12.0);
+        assert_eq!(automatic.sheet(0).unwrap().default_row_custom_height, Some(false));
+        assert_eq!(serde_json::to_value(&automatic).unwrap(), before);
+    }
+
+    #[test]
+    fn automatic_sheet_baseline_is_positive_finite_and_at_most_normal() {
+        let mut wb = Workbook::new();
+        let sh = wb.sheet_mut(0).unwrap();
+        sh.fit_auto_row_heights_in_print = true;
+        sh.default_row_custom_height = Some(false);
+        for (saved, expected) in [(12.0, 12.0), (13.5, 13.5), (40.0, 20.0), (0.0, 20.0), (-1.0, 20.0), (f32::NAN, 20.0), (f32::INFINITY, 20.0)] {
+            wb.sheet_mut(0).unwrap().default_row_height = saved;
+            assert_eq!(RowPitch::new(&wb, wb.sheet(0).unwrap(), 1.0).row_px(0), expected);
+        }
+    }
+
+    #[test]
+    fn xls_empty_row_retains_stored_height_without_a_normal_floor() {
+        let mut wb = Workbook::new();
+        let sh = wb.sheet_mut(0).unwrap();
+        sh.fit_auto_row_heights_in_print = true;
+        sh.fit_print_rows_without_default_floor = true;
+        sh.default_row_custom_height = Some(false);
+        sh.default_row_height = 40.0;
+        sh.rows.insert(1, gridcraft_model::LineInfo { size: Some(12.0), ..Default::default() });
+        let pitch = RowPitch::new(&wb, wb.sheet(0).unwrap(), 1.0);
+        assert_eq!(pitch.row_px(0), 40.0);
+        assert_eq!(pitch.row_px(1), 12.0);
+    }
 
     #[test]
     fn a_scaled_row_rounds_half_up() {
