@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-14 · **Change:** minor (G0394: inherited row fills count within the stored-cell footprint for automatic print range and trailing page bands; earlier: G0385: Excel 4.0 macro sheets read from `.xlsx`/`.xlsm`/`.xlsb`/`.xls` print in their tab place when printing the entire workbook; earlier: G0376: `.xls` picture objects whose image is not imported keep their place for printing; earlier: G0372: printing and PDF export print every page of a long workbook, up to a 200,000-page guard, instead of stopping at 2,000)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-14 · **Change:** minor (G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. Earlier: G0385: Excel 4.0 macro sheets read from `.xlsx`/`.xlsm`/`.xlsb`/`.xls` print in their tab place when printing the entire workbook; earlier: G0376: `.xls` picture objects whose image is not imported keep their place for printing; earlier: G0372: printing and PDF export print every page of a long workbook, up to a 200,000-page guard, instead of stopping at 2,000)
 
 
 Legacy VML captions accept HTML-style `br` line breaks, preserving buttons, macro assignments and shown notes through open + save (`vml_html_br_tests.rs`).
@@ -228,10 +228,13 @@ Truncated packages. When an `.xlsx`, `.xlsm` or `.xlsb` file has lost its ZIP ce
 
 Wrong checksums. In an intact `.xlsx`, `.xlsm`, `.xlsb` or `.ods` package, a part whose data inflates completely to its stated size but whose CRC-32 doesn't match opens with that content, as Excel does, with one warning naming the part. A part whose compressed data is broken still fails with its own error (a required part refuses the file); content that is garbage still fails to parse as before (`zip_bad_checksum_tests.rs`).
 
+Visible Excel 5 dialog sheets in XLSX have detached print views for whole-workbook preview and PDF output: sheet page setup and grid metrics position VML frame captions and supported form controls. Hidden or empty forms add no pages. Original dialog, VML and relationship parts remain owned by pass-through; controls and callbacks are never activated (`print_dialog_sheets.rs`, `dialog_print_view.rs`).
+
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-14 | minor | G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. |
 | 2026-11-14 | minor | G0394: missing cells inherit visible row fills for the automatic print range and trailing pages in every applicable column band, within the stored-cell footprint; hidden lines and explicit cell overrides are excluded. Synthetic XLSX round-trip controls verify equivalence to explicit fills; frozen-set validation on a base containing G0393 remains required. |
 | 2026-11-14 | minor | G0385: Excel 4.0 macro sheets (`.xlsx`/`.xlsm` `xlMacrosheet`/`xlIntlMacrosheet` parts, `.xlsb`, `.xls` BoundSheet8 `dt = 1`) keep a print-only copy of their cells, layout, page setup and show-formulas flag (`Workbook::macro_sheets`), so printing the entire workbook prints each visible one in its tab place, with its formula text; the kept parts are saved unchanged |
 | 2026-11-14 | minor | G0384: BIFF5/BIFF8 `.xls` worksheets without DefaultRowHeight use the measured Normal-font default height; unknown fonts and explicit records keep their existing behavior. |

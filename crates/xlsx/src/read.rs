@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use gridcraft_core::{DateSystem, RangeRef};
 use gridcraft_model::{
-    CalcMode, Chart, ChartSheetPrint, DefinedName, MacroSheetPrint, PhoneticString, PrintSettings, Sheet, ShowObjects, Style, StyleId, StyleTable,
-    UpdateLinks, Visibility, WindowRect, Workbook, WorkbookOptions, WorkbookView,
+    CalcMode, Chart, ChartSheetPrint, DefinedName, DialogSheetPrint, MacroSheetPrint, PhoneticString, PrintSettings, Sheet, ShowObjects, Style,
+    StyleId, StyleTable, UpdateLinks, Visibility, WindowRect, Workbook, WorkbookOptions, WorkbookView,
 };
 
 use crate::package::{Package, Rel};
@@ -422,6 +422,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
     let mut file_to_model: Vec<Option<usize>> = vec![];
     let mut chart_sheets: Vec<ChartSheetPrint> = vec![];
     let mut macro_sheets: Vec<MacroSheetPrint> = vec![];
+    let mut dialog_sheets = vec![];
     // Legacy formula cells per model sheet, rewritten once names and tables are known.
     let mut legacy_formulas: Vec<(usize, Vec<gridcraft_core::CellRef>)> = vec![];
     let mut pivot_caches = crate::pivot::CachesIn::new(&wb_xml, &wb_rels);
@@ -437,14 +438,14 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
         };
         if crate::passthrough::KEPT_SHEET_KINDS.iter().any(|k| k.eq_ignore_ascii_case(&rel.kind)) {
             // Chart, dialog and macro sheets are kept as they are and written back in place (see
-            // `passthrough`); nothing to model. Chart sheets also keep a copy of their chart and
-            // page setup for printing.
+            // `passthrough`); detached views also retain their printable content and page setup.
+            dialog_sheets.extend(read_dialog_sheet(&mut cx, &rel, &name, visibility(se), (wb.sheets.len(), chart_sheets.len(), macro_sheets.len())));
             if rel.kind.eq_ignore_ascii_case("chartsheet")
                 && let Some((chart, print)) = read_chart_sheet(&mut cx, &rel.target)?
             {
                 chart_sheets.push(ChartSheetPrint { name, visibility: visibility(se), before: wb.sheets.len(), chart, print });
             } else if crate::passthrough::MACRO_SHEET_KINDS.iter().any(|k| k.eq_ignore_ascii_case(&rel.kind))
-                && let Some(sheet) = read_macro_sheet(&mut cx, &rel.target, &name)
+                && let Some(sheet) = read_print_sheet(&mut cx, &rel.target, &name)
             {
                 macro_sheets.push(MacroSheetPrint::new(name, visibility(se), wb.sheets.len(), chart_sheets.len(), sheet));
             }
@@ -552,6 +553,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
     }
     wb.chart_sheets = Arc::new(chart_sheets);
     wb.macro_sheets = Arc::new(macro_sheets);
+    wb.dialog_sheets = Arc::new(dialog_sheets);
 
     read_doc_props(&mut cx.pkg, &root_rels, &mut wb.props);
 
@@ -636,11 +638,11 @@ fn visibility(se: &El) -> Visibility {
     }
 }
 
-/// An Excel 4.0 macro sheet's cells, layout and page setup, for printing: `CT_Macrosheet` has
-/// `CT_Worksheet`'s children ([MS-XLSX] 2.1.11), so the worksheet reader reads it. Its formulas
-/// are kept as text, never evaluated. A part that can't be read is `None` and prints nothing; the
+/// A detached macro or dialog sheet's layout and page setup for printing. The worksheet reader
+/// handles their shared children (CT_Macrosheet: [MS-XLSX] 2.1.11; CT_Dialogsheet: ECMA-376
+/// §18.3.1.34). Macro formulas are never evaluated. An unreadable part prints nothing; the
 /// read adds no warnings (the kept part already has its own) and leaves object ids as they were.
-fn read_macro_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Option<Sheet> {
+fn read_print_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Option<Sheet> {
     let warnings = cx.report.warnings.len();
     let next_id = cx.next_id;
     let read = crate::sheet_read::read_sheet(cx, part, name);
@@ -648,6 +650,25 @@ fn read_macro_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Option<Sheet> {
     cx.next_id = next_id;
     cx.legacy_formulas.clear();
     read.ok().map(|(sheet, _)| sheet)
+}
+
+/// Keep only inert controls in the dialog's print view. Index-dependent features belong to
+/// editable worksheets and must not resolve against the worksheet at this tab position.
+fn read_dialog_sheet(cx: &mut Ctx<'_>, rel: &Rel, name: &str, visibility: Visibility, order: (usize, usize, usize)) -> Option<DialogSheetPrint> {
+    if !rel.kind.eq_ignore_ascii_case("dialogsheet") {
+        return None;
+    }
+    let mut sheet = read_print_sheet(cx, &rel.target, name)?;
+    crate::controls::read_dialog_frame(cx, &rel.target, &mut sheet);
+    let mut controls = std::mem::take(&mut sheet.controls);
+    for control in &mut controls {
+        control.action = None;
+        control.link = None;
+        control.input_range = None;
+    }
+    let mut sheet = MacroSheetPrint::new(name.into(), visibility, 0, 0, sheet).sheet;
+    sheet.controls = controls;
+    Some(DialogSheetPrint { name: name.into(), visibility, before: order.0, charts_before: order.1, macros_before: order.2, sheet })
 }
 
 /// The chart and page setup of a chart sheet part (ECMA-376 Part 1 §18.3.1.12), for printing:

@@ -113,5 +113,6 @@ mod xlsb_list_recalc;
 mod xlsb_names_recalc;
 mod xlsb_pivot_refresh;
 
+mod print_dialog_sheets;
 mod print_inherited_row_fill;
 mod print_inherited_row_fill_guards;

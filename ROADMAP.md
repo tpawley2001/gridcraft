@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~25 points of "ready for real work" and ~160–240 h away
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-14 · **Change:** minor (G0393: whole-workbook print and PDF omit sheets containing only nonvisual cell formatting; fills, borders, merges and explicit print ranges retain their reach. Earlier: form check boxes and option buttons; catalog 283 / 298; earlier: form controls: buttons, sliders and spin buttons; earlier: RefEdit reference boxes in dialogs: Goal Seek, Solver and Data Analysis take ranges by selection on the grid)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-14 · **Change:** minor (G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. Earlier: form check boxes and option buttons; catalog 283 / 298; earlier: form controls: buttons, sliders and spin buttons; earlier: RefEdit reference boxes in dialogs: Goal Seek, Solver and Data Analysis take ranges by selection on the grid)
 
 GridCraft aims at full Microsoft Excel parity, and at being better in places: faster, open (XLSX
 is the native format), fully scriptable by agents (MCP, control channel, CLI), and on the web.
@@ -271,6 +271,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-14 | minor | G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. |
 | 2026-11-14 | minor | G0393: whole-workbook print and PDF omit sheets containing only nonvisual cell formatting; fills, borders, merges and explicit print ranges retain their reach. |
 | 2026-11-07 | minor | Form check boxes and option buttons; catalog 281 / 296 → 283 / 298 (Developer › Controls) |
 | 2026-11-06 | trivial | Progress log: scroll positions follow their sheet through sheet inserts, deletes and moves (#3485) |

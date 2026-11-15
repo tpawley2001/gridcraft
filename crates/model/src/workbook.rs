@@ -478,6 +478,9 @@ pub struct Workbook {
     /// are not in `sheets`; their parts are in `preserved`). Shared between snapshots. Not in JSON.
     #[serde(skip)]
     pub macro_sheets: Arc<Vec<crate::MacroSheetPrint>>,
+    /// Detached dialog sheets for printing only; original parts stay in `preserved`.
+    #[serde(skip)]
+    pub dialog_sheets: Arc<Vec<crate::DialogSheetPrint>>,
     /// The folder the workbook was read from, which relative paths to linked workbooks in
     /// `preserved` are relative to. Saving into another folder rewrites them from there. Not in JSON.
     #[serde(skip)]
@@ -593,6 +596,7 @@ impl Workbook {
             mdx_metadata: None,
             chart_sheets: Arc::default(),
             macro_sheets: Arc::default(),
+            dialog_sheets: Arc::default(),
             source_dir: None,
             region: gridcraft_core::region::default_region(),
             source_path: None,
