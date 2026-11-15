@@ -4,12 +4,13 @@
 //! Format reference: ODF 1.3, part 3, sections 6.1 and 9.1:
 //! <https://docs.oasis-open.org/office/OpenDocument/v1.3/os/part3-schema/OpenDocument-v1.3-os-part3-schema.html>.
 
+use std::collections::HashSet;
 use std::io::{Cursor, Read};
 use std::sync::Arc;
 
 use gridcraft_core::date::{days_in_month, serial_from_ymd};
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{Cell, DefinedName, LineInfo, NumFmt, Sheet, StyleId, Workbook};
+use gridcraft_model::{Cell, DefinedName, LineInfo, NumFmt, Sheet, StyleId, Visibility, Workbook};
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
@@ -127,6 +128,7 @@ pub fn read_ods_with(bytes: &[u8], known_function: &dyn Fn(&str) -> bool) -> Res
     if import.wb.sheets.is_empty() {
         return Err(IoError::Format("ODS contains no worksheets".into()));
     }
+    hide_sheets(&crate::ods_page::content_hidden_table_styles(&content), &import.table_styles, &mut import.wb);
     // Page setup is optional: a missing styles.xml changes nothing, an unreadable one warns.
     match package.read_optional_limited("styles.xml", crate::ods_page::MAX_STYLES_PART) {
         Ok(Some(styles)) => {
@@ -140,6 +142,30 @@ pub fn read_ods_with(bytes: &[u8], known_function: &dyn Fn(&str) -> bool) -> Res
         import.report.warn(crate::package::checksum_warning(part));
     }
     Ok((import.wb, import.report))
+}
+
+/// Hides each sheet whose table style is in `hidden` (ODF has no "very hidden" state). One sheet
+/// stays visible (the first, when every sheet is hidden), and the active sheet is a visible one.
+fn hide_sheets(hidden: &HashSet<String>, table_styles: &[Option<String>], wb: &mut Workbook) {
+    if hidden.is_empty() {
+        return;
+    }
+    for (sheet, style) in wb.sheets.iter_mut().zip(table_styles) {
+        if style.as_ref().is_some_and(|s| hidden.contains(s)) {
+            Arc::make_mut(sheet).visibility = Visibility::Hidden;
+        }
+    }
+    let first_visible = match wb.sheets.iter().position(|s| s.visibility == Visibility::Visible) {
+        Some(i) => i,
+        None => {
+            let Some(first) = wb.sheets.first_mut() else { return };
+            Arc::make_mut(first).visibility = Visibility::Visible;
+            0
+        }
+    };
+    if wb.sheets.get(wb.active_sheet()).is_none_or(|s| s.visibility != Visibility::Visible) {
+        wb.set_active_sheet(first_visible);
+    }
 }
 
 fn is_ns(ns: ResolveResult<'_>, expected: &[u8]) -> bool {
