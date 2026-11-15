@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~25 points of "ready for real work" and ~160–240 h away
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-14 · **Change:** minor (G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. Earlier: form check boxes and option buttons; catalog 283 / 298; earlier: form controls: buttons, sliders and spin buttons; earlier: RefEdit reference boxes in dialogs: Goal Seek, Solver and Data Analysis take ranges by selection on the grid)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-15 · **Change:** minor (G0418: `.xls` import reads notes, hyperlinks and frozen panes. Earlier: G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. Earlier: form check boxes and option buttons; catalog 283 / 298; earlier: form controls: buttons, sliders and spin buttons; earlier: RefEdit reference boxes in dialogs: Goal Seek, Solver and Data Analysis take ranges by selection on the grid)
 
 GridCraft aims at full Microsoft Excel parity, and at being better in places: faster, open (XLSX
 is the native format), fully scriptable by agents (MCP, control channel, CLI), and on the web.
@@ -134,6 +134,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-11-15 | `.xls` import reads cell notes (author, multi-line text, shown or hidden), hyperlinks (web, mailto, absolute and relative files, places in the workbook, tooltips) and frozen panes (#121, from #2496) |
 | 2026-11-14 | Whole-workbook print and PDF omit font-only and number-format-only sheets, retaining their formatting on save/reopen (G0393) |
 | 2026-11-06 | A sheet keeps its own scroll position when sheets are inserted, deleted or moved before it: a new PivotTable or inserted sheet opens at the top instead of where its neighbour was scrolled; a closed window's positions are let go (#3485) |
 | 2026-11-02 | Form controls: Insert › Controls places buttons, sliders (scroll bars) and spin buttons on the sheet. A slider or spin button holds a whole number from 0 to 30000 in a linked cell (a drag or a held arrow is one undo step, and editing the cell moves the control); a button runs a macro or one command through the macro policy, asking first in a workbook opened from a file; Assign Action and Format Control edit them, and XLSX files read and write them (control properties, `<controls>` and VML), alongside the form controls GridCraft keeps unchanged |
@@ -272,6 +273,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | Progress log: G0418 `.xls` import of notes, hyperlinks and frozen panes (#121, from #2496) |
 | 2026-11-14 | minor | G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. |
 | 2026-11-14 | minor | G0393: whole-workbook print and PDF omit sheets containing only nonvisual cell formatting; fills, borders, merges and explicit print ranges retain their reach. |
 | 2026-11-07 | minor | Form check boxes and option buttons; catalog 281 / 296 → 283 / 298 (Developer › Controls) |
