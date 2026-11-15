@@ -658,6 +658,8 @@ mod format_only_cells_tests;
 #[cfg(test)]
 mod format_only_merges_tests;
 #[cfg(test)]
+mod hash_fit_tests;
+#[cfg(test)]
 mod indent_width_tests;
 #[cfg(test)]
 mod justify_wraps_tests;
