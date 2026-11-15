@@ -62,9 +62,119 @@ pub(super) fn wrap_lines(text: &str, font: Font, size: f32, width: f32) -> Vec<S
     out
 }
 
+/// Advance widths (1/2048 em) of Calibri regular's printable ASCII characters (U+0020..=U+007E):
+/// published font metrics, measured facts with no font file involved. Excel wraps Calibri text at
+/// these widths, which are narrower than the printed stand-in's, capitals and digits most of all.
+const CALIBRI_ASCII: [u16; 95] = [
+    463, 548, 821, 1038, 1038, 1464, 1397, 452, 621, 621, 1038, 1038, 511, 627, 517, 792, // ' '../
+    1038, 1038, 1038, 1038, 1038, 1038, 1038, 1038, 1038, 1038, 548, 548, 1038, 1038, 1038, 949, // 0..?
+    1757, 1185, 1114, 1092, 1260, 1000, 941, 1292, 1276, 516, 653, 1064, 861, 1751, 1322, 1356, // @..O
+    1058, 1378, 1112, 941, 998, 1314, 1162, 1822, 1063, 998, 959, 627, 792, 627, 1038, 1038, // P.._
+    585, 981, 1076, 866, 1076, 1019, 625, 964, 1076, 470, 490, 931, 470, 1636, 1076, 1080, // `..o
+    1076, 1076, 714, 801, 686, 1076, 925, 1464, 887, 927, 809, 638, 948, 638, 1038, // p..~
+];
+
+/// Pixels (at 100 %) of a cell's width that wrapped text with a measured width table does not use:
+/// fitted to Excel's wrapped line counts of Calibri 11 text in columns of 49 to 208 px.
+const MEASURED_WRAP_MARGIN_PX: f32 = 7.25;
+
+/// How a cell's folded text is measured for wrapping: the printed stand-in's advance widths, or a
+/// measured table of the cell font's own widths at the whole-pixel size a 96 dpi screen renders it.
+#[derive(Clone, Copy)]
+pub(super) struct CellWrap {
+    font: Font,
+    /// Printed size in points.
+    size: f32,
+    /// The cell font's own ASCII advances (1/2048 em) and its em in printed points.
+    table: Option<(&'static [u16; 95], f32)>,
+}
+
+impl CellWrap {
+    /// The measure for text in style `st` printed at `scale`.
+    pub(super) fn new(st: &Style, scale: f32) -> Self {
+        let size = st.font.size.clamp(1.0, 409.0);
+        let regular_calibri = st.font.name.trim().eq_ignore_ascii_case("calibri") && !st.font.bold && !st.font.italic;
+        let table = regular_calibri.then(|| (&CALIBRI_ASCII, (size * 4.0 / 3.0).round().max(1.0) * 0.75 * scale));
+        Self { font: font_for(st), size: size * scale, table }
+    }
+
+    /// Width of `c` in printed points.
+    fn width(&self, c: char) -> f32 {
+        if let Some((table, em)) = self.table {
+            let i = (c as usize).wrapping_sub(0x20);
+            if let Some(&u) = table.get(i) {
+                return f32::from(u) * em / 2048.0;
+            }
+            return f32::from(self.font.char_width(c)) * em / 1000.0;
+        }
+        f32::from(self.font.char_width(c)) * self.size / 1000.0
+    }
+
+    /// Unscaled pixels of the cell width the text does not wrap into, both sides together.
+    pub(super) fn margin_px(&self) -> f32 {
+        if self.table.is_some() { MEASURED_WRAP_MARGIN_PX } else { 2.0 * PAD_PX }
+    }
+}
+
+/// Wraps a cell's folded text to `width` points the way Excel breaks cell text: a line breaks
+/// after a run of spaces (which hang past the edge and are not printed at its end) or after a
+/// hyphen; a word longer than the line breaks between characters (each piece at least one
+/// character); a line feed always breaks. Each character is measured once.
+pub(super) fn wrap_cell_lines(text: &str, m: &CellWrap, width: f32) -> Vec<String> {
+    let width = f64::from(width);
+    let mut out = Vec::new();
+    for para in text.split('\n') {
+        let chars: Vec<char> = para.chars().collect();
+        // prefix[i] = width of chars[..i].
+        let mut prefix = Vec::with_capacity(chars.len() + 1);
+        let mut sum = 0.0f64;
+        prefix.push(sum);
+        for &c in &chars {
+            sum += f64::from(m.width(c));
+            prefix.push(sum);
+        }
+        let span = |a: usize, b: usize| prefix.get(b).copied().unwrap_or(sum) - prefix.get(a).copied().unwrap_or(sum);
+        let piece = |a: usize, b: usize, trim: bool| -> String {
+            let s: String = chars.get(a..b).unwrap_or_default().iter().collect();
+            if trim { s.trim_end_matches(' ').to_string() } else { s }
+        };
+        let mut start = 0usize;
+        // The last break opportunity on the line: the next line starts after it.
+        let mut brk: Option<usize> = None;
+        for (i, &c) in chars.iter().enumerate() {
+            if c == ' ' {
+                brk = Some(i + 1);
+                continue;
+            }
+            if i > start && span(start, i + 1) > width {
+                if let Some(b) = brk.filter(|&b| b > start) {
+                    out.push(piece(start, b, true));
+                    start = b;
+                }
+                if i > start && span(start, i + 1) > width {
+                    out.push(piece(start, i, true));
+                    start = i;
+                }
+                brk = None;
+                if out.len() > MAX_WRAP_LINES {
+                    return out;
+                }
+            }
+            if c == '-' {
+                brk = Some(i + 1);
+            }
+        }
+        out.push(piece(start, chars.len(), false));
+        if out.len() > MAX_WRAP_LINES {
+            return out;
+        }
+    }
+    out
+}
+
 /// Lines the folded (wrapped, justified or distributed) text of cell `c` with style `st` takes
-/// when printed at 100 % in its own column: its displayed text wrapped by [`wrap_lines`] to the
-/// width [`draw_text`] gives it (explicit line breaks always break). `Some(0)` when the cell
+/// when printed at 100 % in its own column: its displayed text wrapped by [`wrap_cell_lines`] to
+/// the width [`draw_text`] gives it (explicit line breaks always break). `Some(0)` when the cell
 /// prints no value; `None` for rotated or stacked text, whose height the row fit does not model.
 pub(super) fn folded_line_count(wb: &gridcraft_model::Workbook, sh: &Sheet, c: CellRef, st: &Style) -> Option<usize> {
     let v = crate::display::displayed_value(sh.value(c));
@@ -84,10 +194,11 @@ pub(super) fn folded_line_count(wb: &gridcraft_model::Workbook, sh: &Sheet, c: C
         return Some(0);
     }
     let k = super::PX_TO_PT;
+    let m = CellWrap::new(st, 1.0);
     let size = st.font.size.clamp(1.0, 409.0);
     let indent = f32::from(st.align.indent) * indent_level_pt(wb);
-    let avail = (sh.col_width(c.col) * k - 2.0 * PAD_PX * k - indent).max(0.0);
-    Some(wrap_lines(&text, font_for(st), size, avail.max(size)).len())
+    let avail = (sh.col_width(c.col) * k - m.margin_px() * k - indent).max(0.0);
+    Some(wrap_cell_lines(&text, &m, avail.max(size)).len())
 }
 
 fn font_for(style: &Style) -> Font {
@@ -441,8 +552,12 @@ pub(super) fn draw_text(pg: &mut Page, b: &Block, placement: TextPlacement<'_>) 
     let rotated = rot != 0 && rot != 255;
     // Rotated text wraps along its own direction: upright (±90°) text to the row height.
     let lines: Vec<String> = match (wrap, rotated) {
-        (true, false) => wrap_lines(&text, font, size, avail.max(size)),
-        (true, true) if rot.abs() == 90 => wrap_lines(&text, font, size, (h - 2.0 * pad).max(size)),
+        (true, false) => {
+            let m = CellWrap::new(st, b.scale);
+            let wrap_avail = (w - m.margin_px() * b.k - indent).max(0.0);
+            wrap_cell_lines(&text, &m, wrap_avail.max(size))
+        }
+        (true, true) if rot.abs() == 90 => wrap_cell_lines(&text, &CellWrap::new(st, b.scale), (h - 2.0 * pad).max(size)),
         (true, true) => vec![text.lines().next().unwrap_or_default().to_string()],
         (false, _) => vec![text],
     };
