@@ -140,6 +140,11 @@ fn extend_text_bounds(sh: &Sheet, c: CellRef, merges: &[RangeRef], k: f32, need:
 /// text whose left neighbour (same row) is not empty: Excel's printed range gains no column for it.
 /// The text is measured only when the right neighbour is empty, so a sheet of short or packed text
 /// costs one lookup per cell.
+/// non-empty one. Wrapped, shrunk-to-fit, filled, right-aligned, upright and merged cells, and
+/// Center Across Selection runs, stay in place (`None`), and so does centred text whose left
+/// neighbour (same row) is not empty: Excel's printed range gains no column for it. The text is
+/// measured only when the right neighbour is empty, so a sheet of short or packed text costs one lookup per cell.
+/// Greek and Cyrillic use the Latin-width approximation in [`spilling_text`] for pagination.
 /// `fonts` remembers the printed font of the style last measured (cells in a run share styles).
 pub(super) fn right_overflow_end(
     wb: &gridcraft_model::Workbook,
@@ -241,6 +246,11 @@ fn spill_candidate(sh: &Sheet, (c, cell): (CellRef, &gridcraft_model::Cell)) -> 
 /// the single-line text of `c`, when that text may spill past its cell: not folded (wrapped,
 /// justified or distributed, [`gridcraft_model::Alignment::folds`]), shrunk, filled, upright,
 /// right-aligned or a Center Across Selection run.
+/// the single-line text of `c`, when that text may spill past its cell: not wrapped, shrunk,
+/// filled, upright, right-aligned or a Center Across Selection run.
+/// For pagination, Greek (U+0370–U+03FF) and Cyrillic (U+0400–U+052F) use the stand-in's
+/// lowercase `o` advance, scaled like ASCII by [`latin_width_ratio`]. Other characters keep
+/// their existing advances, including full-width CJK; drawing metrics are unchanged.
 fn spilling_text(
     wb: &gridcraft_model::Workbook,
     sh: &Sheet,
@@ -290,8 +300,16 @@ fn spilling_text(
     };
     // Line breaks print as spaces (as in `draw_text`).
     let width_of = |ch: char| u64::from(font.char_width(if ch == '\n' || ch == '\r' { ' ' } else { ch }));
-    let (ascii, other) = text.chars().fold((0u64, 0u64), |(a, o), ch| if ch.is_ascii() { (a + width_of(ch), o) } else { (a, o + width_of(ch)) });
-    let tw = (ascii as f32 * latin_width_ratio(&st.font.name, font) + other as f32) * size / 1000.0;
+    let (latin, other) = text.chars().fold((0u64, 0u64), |(latin, other), ch| {
+        if matches!(ch, '\u{0370}'..='\u{03ff}' | '\u{0400}'..='\u{052f}') {
+            (latin + u64::from(font.char_width('o')), other)
+        } else if ch.is_ascii() {
+            (latin + width_of(ch), other)
+        } else {
+            (latin, other + width_of(ch))
+        }
+    });
+    let tw = (latin as f32 * latin_width_ratio(&st.font.name, font) + other as f32) * size / 1000.0;
     let indent = if a.indent == 0 { 0.0 } else { f32::from(a.indent) * indent_level_pt(wb) };
     Some((tw + 2.0 * PAD_PX * k + indent, h_align))
 }
