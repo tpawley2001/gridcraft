@@ -711,4 +711,6 @@ pub(crate) fn specs() -> Vec<FnSpec> {
 }
 
 #[cfg(test)]
+mod one_obs_shape_tests;
+#[cfg(test)]
 mod tests;
