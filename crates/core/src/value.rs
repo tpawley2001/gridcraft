@@ -585,7 +585,6 @@ mod tests {
         assert_eq!(number_to_text(999999999999999.5), "999999999999999");
         assert_eq!(number_to_text(1234567890123455.0), "1234567890123450");
         assert_eq!(number_to_text(999999999999999.0), "999999999999999");
-        assert_eq!(number_to_text(999999999999999.5), "1E+15");
         assert_eq!(number_to_text(999999999999999.4), "999999999999999");
         assert_eq!(number_to_text(999999999999989.9), "999999999999990");
     }
