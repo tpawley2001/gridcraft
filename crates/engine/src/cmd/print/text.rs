@@ -159,6 +159,11 @@ pub(super) fn right_overflow_end(
         return None;
     }
     let mut remaining = if h_align == HAlign::Center { over / 2.0 } else { over };
+    // Text running past the cell edge by only a few points does not widen the printed range.
+    const MIN_PRINTED_SPILL_PT: f32 = 6.0;
+    if remaining < MIN_PRINTED_SPILL_PT {
+        return None;
+    }
     let (mut col, mut ext, mut last) = (c.col + 1, 0.0f32, None);
     while remaining > 0.0 && col < MAX_COLS && ext <= 20_000.0 {
         let nc = CellRef::new(c.row, col);
