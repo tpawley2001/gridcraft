@@ -234,8 +234,9 @@ impl<'a> RowPitch<'a> {
         self.fitted_px(r, default).unwrap_or_else(|| stored.unwrap_or(default))
     }
 
-    /// The height row `r` fits its fonts to, at least `default`: `None` when the row wraps text or
-    /// holds a font bigger than the Normal font whose default row height is not known.
+    /// The height row `r` fits its fonts to, at least `default`: `None` when the row folds text
+    /// (wrapped, justified or distributed) or holds a font bigger than the Normal font whose
+    /// default row height is not known.
     ///
     /// A counted cell whose font is superscript or subscript needs its font's default row plus
     /// [`script_extra_px`]; a superscript or subscript run of its string needs the run font's default
@@ -253,7 +254,7 @@ impl<'a> RowPitch<'a> {
         let mut thick_top = false;
         for (c, cell) in sh.cells.row(r, 0, gridcraft_core::MAX_COLS - 1) {
             let st = self.wb.styles.get(cell.style);
-            if st.align.wrap {
+            if st.align.folds() {
                 return None;
             }
             let font_script = st.font.vert != gridcraft_model::VertAlign::Baseline;
@@ -318,8 +319,8 @@ impl<'a> RowPitch<'a> {
     }
 
     /// The largest default row height among row `r`'s cell fonts, with no lower bound: `None` when
-    /// no cell counts, or when a counted cell wraps text or has a font whose default row height is
-    /// not known (the row then keeps its stored height).
+    /// no cell counts, or when a counted cell folds text (wrapped, justified or distributed) or has
+    /// a font whose default row height is not known (the row then keeps its stored height).
     ///
     /// When a cell in the row counts, the empty cells of the row count too, through the format they
     /// show: the row's own format when it has one (ROW fGhostDirty + ixfe, [MS-XLS] 2.4.221), else the
@@ -335,7 +336,7 @@ impl<'a> RowPitch<'a> {
                 continue;
             }
             let st = self.wb.styles.get(cell.style);
-            if st.align.wrap {
+            if st.align.folds() {
                 return None;
             }
             let px = cell_font_px(&st.font.name, st.font.size)? as f32;
