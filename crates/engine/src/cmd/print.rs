@@ -653,6 +653,8 @@ mod normal_font_pairs_tests;
 #[cfg(test)]
 mod page_limit_tests;
 #[cfg(test)]
+mod print_col_scale_arial_subst_tests;
+#[cfg(test)]
 mod print_col_scale_font_tests;
 #[cfg(test)]
 mod row_font_fit_tests;
