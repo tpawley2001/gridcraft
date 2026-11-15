@@ -115,7 +115,8 @@ fn a_visible_macro_sheet_prints_in_its_tab_place() {
     let mut s = open(&[tab("Sheet A", false, DATA_A), tab("Macro1", true, MACRO), tab("Sheet B", false, DATA_B)]);
     let p = pages(&mut s, json!({"sheets": "all"}));
     assert_eq!(names(&p), ["Sheet A", "Macro1", "Sheet B"]);
-    assert_eq!(p[1].1, "A1:A2");
+    // `=ECHO(FALSE)` is drawn wider than column A and runs on over B1, which therefore prints.
+    assert_eq!(p[1].1, "A1:B2");
 }
 
 #[test]

@@ -46,15 +46,24 @@ fn without_overflowing_text_the_later_band_prints_one_page() {
     assert_eq!(rows_of_p_band(&pages), ["1:47"], "{pages:?}");
 }
 
-/// A long text in A150 runs over the empty cells to its right, into the later bands of columns:
-/// their pages down to rows 142:188 hold that text and are printed.
+/// A long text in A150 runs over the empty cells to its right, into the later bands of columns
+/// (past P, which widens the printed range to where the text ends): the last band's pages down
+/// to rows 142:188 hold that text and are printed, and every band before it prints whole.
 #[test]
 fn text_overflowing_into_a_later_band_prints_that_bands_page() {
     let mut s = sheet();
     s.execute("cell.set", json!({"cell": "A150", "input": "overflowing words ".repeat(24)})).unwrap();
     let pages = page_list(&mut s);
     assert_eq!(first_band_rows(&pages), FIVE, "{pages:?}");
-    assert_eq!(rows_of_p_band(&pages), ["1:47", "48:94", "95:141", "142:188"], "{pages:?}");
+    let mut later: Vec<&str> = pages.iter().map(|p| p.0.as_str()).filter(|c| *c != pages[0].0).collect();
+    later.dedup();
+    assert!(later.len() >= 2, "the text reaches past P's band: {pages:?}");
+    let last = later.len() - 1;
+    for (i, band) in later.into_iter().enumerate() {
+        let rows: Vec<&str> = pages.iter().filter(|p| p.0 == band).map(|p| p.1.as_str()).collect();
+        let expected = if i == last { &FIVE[..4] } else { &FIVE[..] };
+        assert_eq!(rows, expected, "{band}: {pages:?}");
+    }
 }
 
 /// A value in B150 cuts the text off inside the first band: nothing reaches the later band.
