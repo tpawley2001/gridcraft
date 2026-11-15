@@ -580,13 +580,19 @@ fn title_span(t: Option<(u32, u32)>, max: u32) -> Option<(u32, u32)> {
 }
 
 /// Advance of the digits, in em, of fonts whose digits share one width: Excel sizes columns by it.
+/// Names are matched trimmed and lower-cased with Unicode rules (stored Japanese names use
+/// full-width Latin letters). MS Sans Serif (a bitmap screen font) and the Arial charset names
+/// (Arial Cyr, Tur, CE, Baltic, Greek) map to Arial: Excel prints their text in Arial, and the
+/// printed column widths follow (an MS Sans Serif 10 default column prints at Arial 10's width).
+/// SimSun, NSimSun, MS Gothic and MS PGothic have half-width digits: half an em.
 fn digit_em(font: &str) -> Option<f32> {
-    let units = match font.to_ascii_lowercase().as_str() {
+    let units = match font.trim().to_lowercase().as_str() {
         "calibri" => 1038.0,
-        "arial" => 1139.0,
+        "arial" | "ms sans serif" | "arial cyr" | "arial tur" | "arial ce" | "arial baltic" | "arial greek" => 1139.0,
         "times new roman" => 1024.0,
         "courier new" => 1229.0,
         "verdana" => 1302.0,
+        "simsun" | "宋体" | "nsimsun" | "新宋体" | "ms gothic" | "ｍｓ ゴシック" | "ms pgothic" | "ｍｓ ｐゴシック" => 1024.0,
         _ => return None,
     };
     Some(units / 2048.0)
@@ -598,7 +604,8 @@ fn digit_em(font: &str) -> Option<f32> {
 /// it at the printer's resolution instead, as whole printer dots, with the same character count.
 /// Measured in Excel 365 on fit-to-width scales, assuming a 600 dpi printer: Calibri 11 prints 47
 /// dots (5.64 pt) a character, so a column is 7.4% wider on paper; Arial 10, Times New Roman 12,
-/// Verdana 10 and Calibri 16 match the same rule. Fonts not listed use Calibri's digits.
+/// Verdana 10 and Calibri 16 match the same rule. MS Sans Serif and the Arial charset names use
+/// Arial's digits (Excel prints them in Arial). Fonts not listed use Calibri's digits.
 pub(crate) fn print_col_scale(wb: &Workbook) -> f32 {
     const DPI: f32 = 600.0;
     let font = &wb.styles.get(gridcraft_model::StyleId::DEFAULT).font;
