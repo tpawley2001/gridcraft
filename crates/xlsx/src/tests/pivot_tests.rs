@@ -832,3 +832,47 @@ fn two_value_fields_without_columns_hide_the_values_row() {
     assert!(t.contains("firstHeaderRow=\"1\""), "{t}");
     assert!(!t.contains("hideValuesRow"), "{t}");
 }
+
+#[test]
+fn pivot_writer_keeps_first_axis_placement_and_data_fields() {
+    let parts = small_pivot(&[("K", vec![Value::text("x")]), ("V", vec![Value::number(1.0)])], |p| {
+        p.rows = vec![field("K"), field("k")];
+        p.columns = vec![field("K"), field("V"), field("v")];
+        p.filters = vec![PivotFilter { source_col: "K".into(), selected: None }];
+        p.values = vec![PivotValue { source_col: "K".into(), ..PivotValue::default() }];
+    });
+    let table = &parts["xl/pivotTables/pivotTable1.xml"];
+    assert_eq!(axis_xs(table, "rowFields"), [0]);
+    assert_eq!(axis_xs(table, "colFields"), [1]);
+    let root = xml::parse(table.as_bytes()).unwrap();
+    assert!(root.child("pageFields").is_none());
+    for (area, axis) in [("rowFields", "axisRow"), ("colFields", "axisCol")] {
+        let list = root.child(area).unwrap();
+        assert_eq!(list.attr_u32("count"), Some(list.children.len() as u32));
+        for entry in &list.children {
+            let i = entry.attr_u32("x").unwrap() as usize;
+            assert_eq!(root.child("pivotFields").unwrap().children[i].attr("axis"), Some(axis));
+        }
+    }
+    assert_eq!(root.child("dataFields").unwrap().children[0].attr_u32("fld"), Some(0));
+}
+
+#[test]
+fn pivot_real_field_wins_over_earlier_unsupported_group_on_another_axis() {
+    for grouping in ["<discretePr/>", "<rangePr startNum=\"0\" endNum=\"10\" groupInterval=\"5\"/>"] {
+        let cache = format!(
+            r#"<pivotCacheDefinition><cacheSource type="worksheet"><worksheetSource ref="A1:B3"/></cacheSource><cacheFields><cacheField name="K"/><cacheField name="Group" databaseField="0"><fieldGroup base="0">{grouping}</fieldGroup></cacheField></cacheFields></pivotCacheDefinition>"#
+        );
+        for later in [r#"<colFields><field x="0"/></colFields>"#, r#"<pageFields><pageField fld="0"/></pageFields>"#] {
+            let table = format!(
+                r#"<pivotTableDefinition name="PT"><location ref="D3:F9"/><pivotFields><pivotField/><pivotField/></pivotFields><rowFields><field x="1"/></rowFields>{later}</pivotTableDefinition>"#
+            );
+            let (wb, report) = read_xlsx(&with_pivot(&table, Some(&cache))).unwrap();
+            let pt = &wb.sheet(0).unwrap().pivots[0];
+            assert!(pt.rows.is_empty());
+            assert_eq!(pt.columns.len() + pt.filters.len(), 1);
+            assert_eq!(report.warnings.iter().filter(|w| w.contains("duplicates")).count(), 1);
+            assert!(report.warnings.iter().any(|w| w.contains("not supported; the field is ungrouped")));
+        }
+    }
+}
