@@ -182,13 +182,29 @@ impl<'a> RowPitch<'a> {
         self.pair.0 as f32
     }
 
+    /// The baseline of an automatic row on an `.xlsx` sheet whose `defaultRowHeight` is not custom
+    /// (ECMA-376 Part 1, 18.3.1.81): the Normal font's default row, unless the saved default is
+    /// positive and shorter than the Normal font's own size in points, which it then stays.
+    ///
+    /// Excel prints such rows at Normal's height when the saved default is a little or even a
+    /// quarter below it (Calibri 11 saved 14.5 pt prints 15 pt; Yu Gothic 10 saved 12.8 pt prints
+    /// 16.5 pt), but keeps a saved default shorter than the font itself (Arial 10 saved 9.6 pt
+    /// prints at about 9 pt). A row shorter than its font cannot be Normal's fitted height, so it
+    /// reads as chosen. Unverified: the exact cut-off between those observations.
+    fn automatic_default_px(&self) -> f32 {
+        let saved = self.sh.default_row_height;
+        let font_px = self.normal_size * 96.0 / 72.0;
+        if saved.is_finite() && saved > 0.0 && saved < font_px { saved.min(self.default_px()) } else { self.default_px() }
+    }
+
     /// Row `r`'s height in screen pixels for printing. A sheet read from an `.xlsx` file prints
     /// a row whose height is not custom (ECMA-376 Part 1, 18.3.1.73 `row@customHeight`) at the
     /// height that fits its content, not at the stored height: the default row height of the
     /// largest font in it, never below the sheet's default (likewise the rows a `defaultRowHeight`
-    /// without `customHeight` covers, 18.3.1.81). A row with wrapped text, or with a font bigger
-    /// than the Normal font whose default row is not known, keeps its stored height. Other sheets
-    /// print the stored height.
+    /// without `customHeight` covers, 18.3.1.81). A non-custom sheet default counts at
+    /// Normal's default row height, unless it is shorter than the Normal font itself
+    /// ([`Self::automatic_default_px`]). A row with wrapped text, or with a font bigger than Normal
+    /// whose default row is not known, keeps its stored height. Other sheets print the stored height.
     ///
     /// With `fit_print_rows_without_default_floor` (sheets read from `.xls`, whose ROW records
     /// without fUnsynced Excel re-fits on open, [MS-XLS] 2.4.221) a non-custom row prints at the
@@ -209,7 +225,7 @@ impl<'a> RowPitch<'a> {
             }
             return self.fitted_px_no_floor(r).unwrap_or_else(|| sh.row_height(r));
         }
-        let default = if sh.default_row_custom_height == Some(true) { sh.default_row_height } else { self.default_px() };
+        let default = if sh.default_row_custom_height == Some(true) { sh.default_row_height } else { self.automatic_default_px() };
         let stored = match sh.rows.get(&r) {
             Some(i) if i.custom => return i.size.unwrap_or(default),
             Some(i) => i.size,
@@ -375,6 +391,92 @@ impl<'a> RowPitch<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn smaller_default_layout_matches_custom_control_without_changing_imported_metrics() {
+        use gridcraft_core::{CellRef, RangeRef, Value};
+        use gridcraft_model::{Cell, Style, StyleTable};
+
+        let mut source = Workbook::new();
+        let mut normal = Style::default();
+        normal.font.name = "Arial".into();
+        normal.font.size = 10.0;
+        source.styles = StyleTable::with_default(normal);
+        let sh = source.sheet_mut(0).unwrap();
+        sh.default_row_height = 12.0;
+        sh.default_row_custom_height = Some(false);
+        sh.print.set_print_areas(vec![RangeRef::new(CellRef::new(0, 0), CellRef::new(149, 0))]);
+        for r in [0, 149] {
+            sh.set_cell(CellRef::new(r, 0), Cell { value: Value::Number(1.0), ..Cell::default() });
+        }
+        let read = |wb: &Workbook| gridcraft_xlsx::read_xlsx(&gridcraft_xlsx::write_xlsx(wb).unwrap()).unwrap().0;
+        let automatic = read(&source);
+        source.sheet_mut(0).unwrap().default_row_custom_height = Some(true);
+        let control = read(&source);
+        let before = serde_json::to_value(&automatic).unwrap();
+        let options = super::super::PrintOptions::default();
+        let actual = super::super::layout_sheet(&automatic, 0, &options, None).unwrap();
+        let expected = super::super::layout_sheet(&control, 0, &options, None).unwrap();
+        assert_eq!(actual.row_bands, expected.row_bands);
+        assert_eq!(actual.pages, expected.pages);
+        assert_eq!(actual.scale, expected.scale);
+        assert_eq!(automatic.sheet(0).unwrap().default_row_height, 12.0);
+        assert_eq!(automatic.sheet(0).unwrap().default_row_custom_height, Some(false));
+        assert_eq!(serde_json::to_value(&automatic).unwrap(), before);
+    }
+
+    #[test]
+    fn automatic_sheet_baseline_is_positive_finite_and_at_most_normal() {
+        let mut wb = Workbook::new();
+        let sh = wb.sheet_mut(0).unwrap();
+        sh.fit_auto_row_heights_in_print = true;
+        sh.default_row_custom_height = Some(false);
+        for (saved, expected) in [(12.0, 12.0), (13.5, 13.5), (40.0, 20.0), (0.0, 20.0), (-1.0, 20.0), (f32::NAN, 20.0), (f32::INFINITY, 20.0)] {
+            wb.sheet_mut(0).unwrap().default_row_height = saved;
+            assert_eq!(RowPitch::new(&wb, wb.sheet(0).unwrap(), 1.0).row_px(0), expected);
+        }
+    }
+
+    #[test]
+    fn smaller_baseline_keeps_stored_fallback_for_wrapped_and_unknown_fonts() {
+        use gridcraft_core::{CellRef, Value};
+        use gridcraft_model::{Cell, LineInfo, Style};
+
+        let mut wb = Workbook::new();
+        let mut wrapped = Style::default();
+        wrapped.align.wrap = true;
+        let wrapped = wb.styles.intern(wrapped);
+        let mut unknown = Style::default();
+        unknown.font.name = "Unmeasured font".into();
+        unknown.font.size = 30.0;
+        let unknown = wb.styles.intern(unknown);
+        let sh = wb.sheet_mut(0).unwrap();
+        sh.fit_auto_row_heights_in_print = true;
+        sh.default_row_custom_height = Some(false);
+        sh.default_row_height = 12.0;
+        for (row, style) in [(0, wrapped), (1, unknown)] {
+            sh.set_cell(CellRef::new(row, 0), Cell { style, value: Value::Number(1.0), ..Cell::default() });
+            sh.rows.insert(row, LineInfo { size: Some(32.0), ..Default::default() });
+        }
+        let pitch = RowPitch::new(&wb, wb.sheet(0).unwrap(), 1.0);
+        assert_eq!(pitch.row_px(0), 32.0);
+        assert_eq!(pitch.row_px(1), 32.0);
+        assert_eq!(pitch.row_px(2), 12.0);
+    }
+
+    #[test]
+    fn xls_empty_row_retains_stored_height_without_a_normal_floor() {
+        let mut wb = Workbook::new();
+        let sh = wb.sheet_mut(0).unwrap();
+        sh.fit_auto_row_heights_in_print = true;
+        sh.fit_print_rows_without_default_floor = true;
+        sh.default_row_custom_height = Some(false);
+        sh.default_row_height = 40.0;
+        sh.rows.insert(1, gridcraft_model::LineInfo { size: Some(12.0), ..Default::default() });
+        let pitch = RowPitch::new(&wb, wb.sheet(0).unwrap(), 1.0);
+        assert_eq!(pitch.row_px(0), 40.0);
+        assert_eq!(pitch.row_px(1), 12.0);
+    }
 
     #[test]
     fn a_scaled_row_rounds_half_up() {

@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-11-14 · **Change:** minor (G0393: whole-workbook print and PDF omit sheets containing only nonvisual cell formatting; fills, borders, merges and explicit print ranges retain their reach. Earlier: G0341: Page Setup Fit To starts from the sheet's stored page counts and keeps them when switched off; earlier: G0300: imported snip-and-round rectangle, left-right ribbon and multidocument flowchart outlines; earlier: Go To Special Same selects a rule's ranges as areas, whole columns too, and works for conditional formats)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-11-14 · **Change:** minor (G0397: printing an `.xlsx` sheet whose `defaultRowHeight` is not custom keeps a saved default shorter than the Normal font itself (Arial 10 saved 9.6 pt) for its automatic rows, as Excel does; other saved defaults still print at the Normal font's row (Calibri 11 saved 14.5 pt: 15 pt). Import, saving and `.xls` printing are unchanged. Earlier: G0341: Page Setup Fit To starts from the sheet's stored page counts and keeps them when switched off; earlier: G0300: imported snip-and-round rectangle, left-right ribbon and multidocument flowchart outlines; earlier: Go To Special Same selects a rule's ranges as areas, whole columns too, and works for conditional formats)
 
 Interaction, controls and feel, against Excel. Part of [target-app-parity.md](target-app-parity.md).
 **UI/UX fidelity: ~55% ready, 50–80 h** (estimated). Ribbon command coverage is measured
@@ -286,6 +286,7 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-14 | minor | G0397: printing an `.xlsx` sheet whose `defaultRowHeight` is not custom keeps a saved default shorter than the Normal font itself (Arial 10 saved 9.6 pt) for its automatic rows, as Excel does; other saved defaults still print at the Normal font's row (Calibri 11 saved 14.5 pt: 15 pt). Import, saving and `.xls` printing are unchanged. |
 | 2026-11-14 | minor | G0393: whole-workbook print and PDF omit sheets containing only nonvisual cell formatting; fills, borders, merges and explicit print ranges retain their reach. |
 | 2026-11-12 | minor | G0341: `pageLayout.pageSetup` `fitToPage` starts from the page counts the sheet keeps while Fit To is off (such as 2 wide by 3 tall), a single `fitWidth`/`fitHeight` takes the other count from them, and switching to a scale or `fitToPage: false` keeps the counts, as Excel does; `pageLayout.scaleToFit` keeps them too. |
 | 2026-11-12 | minor | G0337: a typed entry (`cell.set`, the cell editor, Ctrl+Enter fill) starting with `'` stores the text after it and sets the cell format's quote prefix (saved as `xf quotePrefix`); an entry without one clears it. The editor and formula bar show `'` for any text cell with the mark. |

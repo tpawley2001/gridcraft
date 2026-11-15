@@ -117,4 +117,6 @@ mod print_dialog_sheets;
 mod print_empty_workbook_area;
 mod print_inherited_row_fill;
 mod print_inherited_row_fill_guards;
+mod print_noncustom_sheet_default;
+mod print_small_sheet_default;
 mod print_unfitted_empty_area;
