@@ -314,6 +314,15 @@ fn spilling_text(
     Some((tw + 2.0 * PAD_PX * k + indent, h_align))
 }
 
+/// Width of `text` at `size` with its ASCII characters scaled by `ratio` ([`latin_width_ratio`]).
+fn scaled_width(font: Font, size: f32, text: &str, ratio: f32) -> f32 {
+    let (latin, other) = text.chars().fold((0u64, 0u64), |(latin, other), ch| {
+        let cw = u64::from(font.char_width(ch));
+        if ch.is_ascii() { (latin + cw, other) } else { (latin, other + cw) }
+    });
+    (latin as f32 * ratio + other as f32) * size / 1000.0
+}
+
 /// How much wider (or narrower) the named font's Latin text prints than its stand-in's metrics
 /// give: the ratio of their digit advances. Excel prints Calibri text at Calibri's own widths,
 /// about 9% narrower than the sans-serif stand-in's, and the cells it runs over are sized by
@@ -377,6 +386,10 @@ pub(super) fn draw_text(pg: &mut Page, b: &Block, placement: TextPlacement<'_>) 
         color = rgb_of(st.font.color, wb).unwrap_or(color);
     }
     let is_num = matches!(v, Value::Number(_));
+    // Numbers are measured at the cell font's own Latin widths, as the print extent is, and may
+    // use half the cell padding: Excel prints a number in full whenever its digits fit the column.
+    let ratio = latin_width_ratio(&st.font.name, font);
+    let num_room = (w - indent - pad).max(0.0);
     // Justified and distributed text folds as wrapped text does.
     let wrap = st.align.folds();
     let mut text = if sh.show_formulas {
@@ -384,8 +397,9 @@ pub(super) fn draw_text(pg: &mut Page, b: &Block, placement: TextPlacement<'_>) 
     } else if code == "General"
         && let Value::Number(n) = v
     {
-        let digit = gridcraft_pdf::text_width(font, size, "0").max(0.1);
-        let max_chars = (avail / digit).floor().max(1.0) as usize;
+        // Digits counted at the cell font's own width, within the room a number may use.
+        let digit = (gridcraft_pdf::text_width(font, size, "0") * ratio).max(0.1);
+        let max_chars = (num_room / digit).floor().max(1.0) as usize;
         gridcraft_numfmt::format_general_fit(n, max_chars.min(11)).unwrap_or_else(|| "#".repeat(max_chars.min(255)))
     } else {
         // The look's code, which a conditional format can override (#1163).
@@ -403,10 +417,22 @@ pub(super) fn draw_text(pg: &mut Page, b: &Block, placement: TextPlacement<'_>) 
         size = (size * avail / tw).max(1.0);
         tw = gridcraft_pdf::text_width(font, size, &text);
     }
-    if is_num && !wrap && tw > avail + 0.01 && !sh.show_formulas {
+    if is_num && !wrap && tw > avail + 0.01 && !sh.show_formulas && scaled_width(font, size, &text, ratio) > num_room + 0.01 {
         let hash = gridcraft_pdf::text_width(font, size, "#").max(0.1);
         text = "#".repeat(((avail / hash).floor().max(1.0) as usize).min(255));
         tw = gridcraft_pdf::text_width(font, size, &text);
+    }
+    // A number that fits at its font's widths but whose stand-in glyphs are wider than the
+    // padded room stays inside its cell: centred over the padding, else drawn smaller.
+    let mut fit_x = None;
+    if is_num && !wrap && tw > avail + 0.01 && tw > 0.0 {
+        let room = (w - indent).max(0.0);
+        if tw > room {
+            size = (size * room / tw).max(0.1);
+            fit_x = Some(x + indent);
+        } else {
+            fit_x = Some(x + indent + (room - tw) / 2.0);
+        }
     }
     let h_align = text_align(st.align.h, &v);
     let rot = st.align.rotation;
@@ -475,10 +501,11 @@ pub(super) fn draw_text(pg: &mut Page, b: &Block, placement: TextPlacement<'_>) 
     }
     for (i, line) in lines.iter().enumerate() {
         let lw = gridcraft_pdf::text_width(font, size, line);
-        let lx = match h_align {
-            HAlign::Right => x + w - pad - lw - indent,
-            HAlign::Center => x + (w + across - lw) / 2.0,
-            _ => x + pad + indent,
+        let lx = match (fit_x, h_align) {
+            (Some(fx), _) => fx,
+            (None, HAlign::Right) => x + w - pad - lw - indent,
+            (None, HAlign::Center) => x + (w + across - lw) / 2.0,
+            (None, _) => x + pad + indent,
         };
         let ly = first_baseline + i as f32 * line_h;
         if ly - size > y + h || ly < y - line_h {
