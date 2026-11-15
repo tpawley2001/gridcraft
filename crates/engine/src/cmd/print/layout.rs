@@ -1002,7 +1002,17 @@ fn workbook_prints_nothing(wb: &Workbook) -> bool {
             .sheets
             .iter()
             .filter(|s| s.visibility == Visibility::Visible)
-            .all(|sh| sh.cells.is_empty() && sh.merges.is_empty() && sh.spill_ranges.is_empty() && sh.tables.is_empty() && !has_printing_objects(sh))
+            .all(|sh| sh.cells.is_empty() && sh.merges.is_empty() && sh.spill_ranges.is_empty() && sh.tables.is_empty() && !has_drawn_objects(sh))
+}
+
+/// Whether the sheet holds a drawing object that prints (a visible chart, picture, shape, form
+/// control or embedded object not marked do-not-print).
+fn has_drawn_objects(sh: &Sheet) -> bool {
+    sh.charts.iter().any(|o| !o.hidden && !o.no_print)
+        || sh.images.iter().any(|o| !o.hidden && !o.no_print)
+        || sh.shapes.iter().any(|o| !o.hidden && !o.no_print)
+        || sh.controls.iter().any(|o| o.print)
+        || sh.embedded_objects.iter().any(|o| o.print)
 }
 
 /// Segments of a page along one axis: repeated titles (before the band) then the band.
