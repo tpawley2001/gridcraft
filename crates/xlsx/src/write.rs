@@ -609,6 +609,7 @@ pub fn write_xlsx_named_with(wb: &Workbook, kind: XlsxKind, book_name: Option<&s
         ("cp:keywords", &p.keywords),
         ("dc:description", &p.description),
         ("cp:lastModifiedBy", &p.last_modified_by),
+        ("cp:revision", &p.revision),
         ("cp:category", &p.category),
         ("dc:language", &p.language),
     ] {

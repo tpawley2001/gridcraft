@@ -621,6 +621,8 @@ pub(crate) fn read_doc_props(pkg: &mut Package<'_>, root_rels: &[Rel], props: &m
         props.language =
             Some(get("language")).filter(|l| l.len() <= 35 && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).unwrap_or_default();
         props.last_modified_by = get("lastModifiedBy");
+        // Bound revision text and retain only ASCII digits, without changing leading zeroes.
+        props.revision = Some(get("revision")).filter(|r| (1..=10).contains(&r.len()) && r.bytes().all(|b| b.is_ascii_digit())).unwrap_or_default();
         // Dates are kept only when they look like W3CDTF, so a hostile file can't smuggle markup
         // or an unbounded string into what is written back.
         let date = |n: &str| Some(get(n)).filter(|d| is_w3cdtf(d)).unwrap_or_default();
