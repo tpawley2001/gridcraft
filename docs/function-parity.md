@@ -1,6 +1,6 @@
 # Function parity: worksheet functions and formulas
 
-> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-12 · **Change:** minor (TREND, GROWTH, LINEST and LOGEST read a one-cell known_y's as one observation of many x variables; earlier: RTD, DATESTRING and NUMBERSTRING answer `#N/A` instead of `#NAME?`; earlier: MID, REPLACE, FIND and SEARCH count UTF-16 positions; earlier: TEXT rejects two elapsed-time codes in one section; earlier: G0306: PRICE, YIELD, DURATION, MDURATION and COUPDAYSNC count days to the next coupon like Excel)
+> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-12 · **Change:** minor (TREND, GROWTH, LINEST and LOGEST read a one-cell known_y's as one observation of many x variables; earlier: GCD and LCM reject negative fractional arguments before truncation; earlier: RTD, DATESTRING and NUMBERSTRING answer `#N/A` instead of `#NAME?`; earlier: MID, REPLACE, FIND and SEARCH count UTF-16 positions; earlier: TEXT rejects two elapsed-time codes in one section; earlier: G0306: PRICE, YIELD, DURATION, MDURATION and COUPDAYSNC count days to the next coupon like Excel) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's worksheet functions, category by category, against GridCraft's function library. Part of
 [target-app-parity.md](target-app-parity.md); gaps feed [gaps.md](gaps.md).
@@ -151,6 +151,11 @@ Work to close (16–26 h in total): the in-scope missing functions (10–16 h wi
 an oracle corpus of Excel-computed results per function (owner runs Excel on generated
 workbooks; results checked in as data, not Excel files) and fixing what it finds (6–10 h).
 
+GCD and LCM validate the sign of the original argument before truncating it. Negative
+fractions such as `-0.5` return `#NUM!`, including inside ranges and beside a zero argument.
+Positive fractional inputs still truncate, and signed zero remains valid. Covered by
+`gcd_and_lcm_reject_negative_fractions_before_truncation`; function counts and estimates are unchanged.
+
 ## Revision history
 
 | Date | Change | Summary |
@@ -182,6 +187,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 | 2026-11-06 | minor | INDIRECT resolves unquoted existing sheet names starting with a digit, including A1 and converted R1C1 text. |
 | 2026-11-05 | minor | INDIRECT resolves unquoted existing sheet names starting with a digit, including A1 and converted R1C1 text. |
 | 2026-11-05 | minor | IF returns an empty value for an omitted value_if_true / value_if_false, so CONCATENATE joins it as ""; a cell showing the IF result still shows 0 |
+| 2026-11-04 | minor | GCD and LCM reject negative fractional arguments before truncation; scalar and range regressions in the extracted math tests preserve positive truncation and signed-zero behavior; estimates unchanged |
 | 2026-11-04 | minor | SUBTOTAL 3 and 103 (COUNTA) count a cell holding an error instead of returning it, as in Excel; SUBTOTAL's other function numbers and AGGREGATE are unchanged |
 | 2026-11-04 | minor | G0099: GROUPBY and PIVOTBY omit a detected header row from both data and output when `field_headers` is omitted, matching Excel mode 1; explicit modes and detection rules are unchanged. |
 | 2026-11-03 | minor | INDIRECT of an array of texts gives an array of references to SUMIF, COUNTIF, AVERAGEIF and the *IFS functions, which return one result per reference; `ROW(1:3)` lists all three rows on a sheet whose used range is smaller |
