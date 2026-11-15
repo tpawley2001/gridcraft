@@ -169,7 +169,7 @@ impl<'a> Package<'a> {
                 let data = parts.get(idx).ok_or_else(|| IoError::Zip(format!("{part}: missing")))?;
                 let size = data.len() as u64;
                 if size > maximum {
-                    return Err(IoError::TooLarge(format!("{part} expands to {size} bytes")));
+                    return Err(IoError::TooLarge(format!("{part} expands to more than {maximum} bytes")));
                 }
                 if size > MAX_TOTAL.saturating_sub(self.total) {
                     self.total = MAX_TOTAL;
@@ -187,7 +187,7 @@ impl<'a> Package<'a> {
         }
         let mut f = zip.by_index(idx).map_err(|e| IoError::Zip(format!("{part}: {e}")))?;
         if f.size() > maximum {
-            return Err(IoError::TooLarge(format!("{part} expands to {} bytes", f.size())));
+            return Err(IoError::TooLarge(format!("{part} expands to more than {maximum} bytes")));
         }
         let remaining = MAX_TOTAL.saturating_sub(self.total);
         let limit = maximum.min(remaining);
