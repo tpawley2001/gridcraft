@@ -279,9 +279,22 @@ fn spilling_text(
     };
     // Line breaks print as spaces (as in `draw_text`).
     let width_of = |ch: char| u64::from(font.char_width(if ch == '\n' || ch == '\r' { ' ' } else { ch }));
-    let tw = text.chars().map(width_of).sum::<u64>() as f32 * size / 1000.0;
+    let (ascii, other) = text.chars().fold((0u64, 0u64), |(a, o), ch| if ch.is_ascii() { (a + width_of(ch), o) } else { (a, o + width_of(ch)) });
+    let tw = (ascii as f32 * latin_width_ratio(&st.font.name, font) + other as f32) * size / 1000.0;
     let indent = if a.indent == 0 { 0.0 } else { f32::from(a.indent) * indent_level_pt(wb) };
     Some((tw + 2.0 * PAD_PX * k + indent, h_align))
+}
+
+/// How much wider (or narrower) the named font's Latin text prints than its stand-in's metrics
+/// give: the ratio of their digit advances. Excel prints Calibri text at Calibri's own widths,
+/// about 9% narrower than the sans-serif stand-in's, and the cells it runs over are sized by
+/// those widths too. 1 for a font whose digit advance is not known.
+fn latin_width_ratio(name: &str, font: Font) -> f32 {
+    let stand_in = f32::from(font.char_width('0')) / 1000.0;
+    match super::layout::digit_em(name) {
+        Some(em) if stand_in > 0.0 => (em / stand_in).clamp(0.5, 2.0),
+        _ => 1.0,
+    }
 }
 
 /// Unscaled width of the empty Center Across Selection cells right of `c`, which its text is centred over too.

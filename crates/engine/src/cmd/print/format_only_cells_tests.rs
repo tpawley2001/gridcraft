@@ -128,8 +128,8 @@ fn a_formula_showing_nothing_still_counts() {
     assert_eq!(pages(&mut s), 3, "{:?}", page_list(&mut s));
 }
 
-/// Overflow text over formatting-only cells prints as far as its drawn text reaches: a long text
-/// in A1 over bold empty cells B1:Z1 prints its later bands up to AT, where the text ends.
+/// Overflow text keeps printing as far as it did before this rule, never past the last stored
+/// column: a long text in A1 over bold empty cells B1:Z1 prints its later band(s) up to Z.
 #[test]
 fn text_overflowing_over_font_only_cells_keeps_its_pages() {
     let mut s = Session::new();
@@ -138,5 +138,5 @@ fn text_overflowing_over_font_only_cells_keeps_its_pages() {
     s.execute("home.bold", json!({"range": "B1:Z1", "on": true})).unwrap();
     let p = page_list(&mut s);
     assert!(p.len() >= 2, "{p:?}");
-    assert!(p.last().unwrap().0.ends_with(":AT"), "{p:?}");
+    assert!(p.last().unwrap().0.ends_with(":Z"), "{p:?}");
 }

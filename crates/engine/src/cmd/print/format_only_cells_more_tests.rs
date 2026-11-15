@@ -73,8 +73,7 @@ fn font_only_cells_below_a_later_bands_value_add_no_pages() {
     assert!(p[5].0.ends_with(":P") && p[5].1.starts_with("1:"), "{p:?}");
 }
 
-/// A long text over font-only cells, with nothing else: every band it reaches prints one page,
-/// past the formatted cells to where the text ends.
+/// A long text over font-only cells, with nothing else: every band it reaches prints one page.
 #[test]
 fn every_band_an_overflowing_text_reaches_prints_one_page() {
     let mut s = Session::new();
@@ -84,8 +83,7 @@ fn every_band_an_overflowing_text_reaches_prints_one_page() {
     let p = page_list(&mut s);
     assert!(p.len() >= 2, "{p:?}");
     assert!(p.iter().all(|q| q.1 == "1:1"), "{p:?}");
-    // 400 x's (about 2,100 pt) end in column AT.
-    assert!(p.last().unwrap().0.ends_with(":AT"), "{p:?}");
+    assert!(p.last().unwrap().0.ends_with(":P"), "{p:?}");
 }
 
 /// A print area prints whole, formatting-only cells or not.

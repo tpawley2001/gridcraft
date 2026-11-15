@@ -355,10 +355,13 @@ fn used_print_range(wb: &Workbook, sh: &Sheet) -> Option<RangeRef> {
     for m in sh.merges.iter().map(merge_extent) {
         grow_to(&mut end, m.end.row, m.end.col);
     }
-    // Text spilling over the empty cells to its right prints where its drawn text reaches,
-    // measured as the drawing measures it.
+    // Text spilling over the empty cells to its right prints where its drawn text reaches. When
+    // formatting-only cells are stored past the counted range, the text keeps printing over them
+    // up to the last stored column and no further (as Excel prints those sheets).
     if let Some(e) = end {
-        grow_to(&mut end, e.row, overflow_reach(wb, sh, &spill_from, e.col));
+        let stored = sh.cells.used_range().map_or(0, |u| u.end.col);
+        let reach = overflow_reach(wb, sh, &spill_from, e.col);
+        grow_to(&mut end, e.row, if stored > e.col { reach.min(stored) } else { reach });
     }
     let mut r = end.map(|e| RangeRef::new(CellRef::new(0, 0), e));
     let mut grow = |a: &Anchor| {
@@ -597,7 +600,7 @@ fn title_span(t: Option<(u32, u32)>, max: u32) -> Option<(u32, u32)> {
 /// (any name starting with Helvetica), Geneva, Clear Sans and Droid Sans Fallback use Arial's
 /// printed digits too. Cambria uses the same width, measured from Excel's printed page counts.
 /// SimSun, NSimSun, MS Gothic and MS PGothic have half-width digits: half an em.
-fn digit_em(font: &str) -> Option<f32> {
+pub(super) fn digit_em(font: &str) -> Option<f32> {
     let name = font.trim().to_lowercase();
     let name = name
         .strip_prefix('\'')
