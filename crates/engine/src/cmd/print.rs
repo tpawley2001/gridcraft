@@ -686,6 +686,8 @@ mod shape_shadow_tests;
 #[cfg(test)]
 mod small_spill_band_tests;
 #[cfg(test)]
+mod smartart_extent_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod title_rows_reach_tests;

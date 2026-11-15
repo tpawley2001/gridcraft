@@ -12,9 +12,9 @@ use std::sync::Arc;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS};
 use gridcraft_model::{
-    Anchor, AnchorMode, CameraTool, Color, DrawingHyperlink, GeometryPath, Image, KeptDmlColor, LineDash, PathCommand, PathShade, PictureBorder,
-    PictureLocks, Shape, ShapeFormat, ShapeGeometry, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextAutofit, ShapeTextHorzOverflow,
-    ShapeTextVert, ShapeTextVertOverflow, ShapeTextWrap, Sheet, Theme,
+    Anchor, AnchorMode, CameraTool, Color, DiagramFrame, DrawingHyperlink, GeometryPath, Image, KeptDmlColor, LineDash, PathCommand, PathShade,
+    PictureBorder, PictureLocks, Shape, ShapeFormat, ShapeGeometry, ShapeKind, ShapeTextAlign, ShapeTextAnchor, ShapeTextAutofit,
+    ShapeTextHorzOverflow, ShapeTextVert, ShapeTextVertOverflow, ShapeTextWrap, Sheet, Theme,
 };
 
 use crate::IoError;
@@ -491,6 +491,12 @@ pub fn read_drawing(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) -> Result<(
                         || uri == "http://purl.oclc.org/ooxml/drawingml/diagram"
                     {
                         // SmartArt: kept as it is by the pass-through reader, which reports it.
+                        // Not drawn here, but its place counts toward the printed range.
+                        sheet.diagram_frames.push(DiagramFrame {
+                            anchor,
+                            hidden: obj.path(&["nvGraphicFramePr", "cNvPr"]).is_some_and(|p| p.flag("hidden", false)),
+                            no_print,
+                        });
                     } else if uri.contains("chartex") || uri.contains("chartEx") {
                         cx.warn(format!("a histogram, waterfall, treemap… chart without its chart part was skipped ({part}, object {n})"));
                     } else {

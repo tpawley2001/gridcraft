@@ -574,6 +574,19 @@ pub struct Anchor {
     pub mode: AnchorMode,
 }
 
+/// A drawing frame whose content GridCraft keeps as the file has it without modelling it (a
+/// SmartArt diagram): not drawn here, but its place on the sheet counts toward the printed range
+/// like any other drawing object. The file's own XML is what gets saved.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiagramFrame {
+    pub anchor: Anchor,
+    /// Hidden in the file (`cNvPr hidden="1"`).
+    pub hidden: bool,
+    /// "Print object" turned off (`clientData fPrintsWithSheet="0"`).
+    pub no_print: bool,
+}
+
 /// What an [`EmbeddedObject`] is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EmbeddedObjectKind {
