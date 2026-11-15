@@ -872,10 +872,11 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
             if b.0 > c1 {
                 break;
             }
-            if let (Some((col, n)), Some(Some(o))) = (limit, cont.get(ci)) {
-                if b.0 == col && *o > n {
-                    continue;
-                }
+            if let (Some((col, n)), Some(Some(o))) = (limit, cont.get(ci))
+                && b.0 == col
+                && *o > n
+            {
+                continue;
             }
             if let Some(slot) = last.get_mut(ci) {
                 *slot = Some(slot.map_or(rb, |v| v.max(rb)));
