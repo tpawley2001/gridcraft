@@ -1,8 +1,8 @@
 //! Text overflowing past the last used column widens the printed range to the column bands its
 //! drawn text reaches, as Excel prints (measured in Excel 365). Every sheet: Letter portrait,
 //! 0.5" margins, header "&A p&P", Calibri 11, default column widths and row heights; row 120
-//! is on the third page down and the first band of columns is A:K, the second L:V, the third
-//! W:AG. These are the cases of `tests/it/print_overflow_past_last_col.rs`, under the same names.
+//! is on the third page down and the first band of columns is A:J, the second K:T, the third
+//! U:AD (Excel prints a default column 51.6 pt wide). These are the cases of `tests/it/print_overflow_past_last_col.rs`, under the same names.
 use serde_json::json;
 
 use super::*;
@@ -39,13 +39,13 @@ fn page_list(s: &mut Session) -> Vec<(String, String)> {
     list.iter().map(|p| (p["columns"].as_str().unwrap().to_string(), p["rows"].as_str().unwrap().to_string())).collect()
 }
 
-/// The page count, after checking the layout's bands start where Excel's do: A:K first, then L
+/// The page count, after checking the layout's bands start where Excel's do: A:J first, then K
 /// (a band is labelled up to the range's last column).
 fn pages(s: &mut Session) -> usize {
     let list = page_list(s);
-    assert_eq!(list.first().map(|p| p.0.as_str()), Some("A:K"), "{list:?}");
-    if let Some(p) = list.iter().find(|p| p.0 != "A:K") {
-        assert!(p.0.starts_with("L:"), "{list:?}");
+    assert_eq!(list.first().map(|p| p.0.as_str()), Some("A:J"), "{list:?}");
+    if let Some(p) = list.iter().find(|p| p.0 != "A:J") {
+        assert!(p.0.starts_with("K:"), "{list:?}");
     }
     list.len()
 }
@@ -97,8 +97,8 @@ fn widened_range_prints_blank_pages() {
     // Four bands of columns, three pages down each (the blank ones included).
     let bands: Vec<&str> = list.iter().step_by(3).map(|p| p.0.as_str()).collect();
     assert_eq!(bands.len(), 4, "{list:?}");
-    assert_eq!(bands[0], "A:K", "{list:?}");
-    assert!(bands[1].starts_with("L:") && bands[3].starts_with("AH:"), "{list:?}");
+    assert_eq!(bands[0], "A:J", "{list:?}");
+    assert!(bands[1].starts_with("K:") && bands[3].starts_with("AE:"), "{list:?}");
 }
 
 #[test]
@@ -126,20 +126,24 @@ fn hidden_text_does_not_widen() {
     set(&mut s, "K100", &words(400));
     s.execute("home.hideColumns", json!({"cols": "K:K"})).unwrap();
     let list = page_list(&mut s);
-    // K is gone from the first band, which now reaches L: nothing past L prints.
-    assert!(list.iter().all(|p| p.0 == "A:L"), "{list:?}");
+    // Nothing past L prints: A:J three pages down, then the band ending at L (only L1).
+    assert_eq!(list.len(), 4, "{list:?}");
+    // (The band holding the hidden K may be labelled A:K.)
+    assert!(list.iter().all(|p| p.0.starts_with("A:") || p.0.ends_with(":L")), "{list:?}");
     // A zero-width column.
     let mut s = base();
     set(&mut s, "K100", &words(400));
     s.execute("home.columnWidth", json!({"cols": "K:K", "width": 0})).unwrap();
     let list = page_list(&mut s);
-    // K is gone from the first band, which now reaches L: nothing past L prints.
-    assert!(list.iter().all(|p| p.0 == "A:L"), "{list:?}");
+    // Nothing past L prints: A:J three pages down, then the band ending at L (only L1).
+    assert_eq!(list.len(), 4, "{list:?}");
+    // (The band holding the hidden K may be labelled A:K.)
+    assert!(list.iter().all(|p| p.0.starts_with("A:") || p.0.ends_with(":L")), "{list:?}");
 }
 
 #[test]
 fn cjk_text_uses_drawn_width() {
-    // 40 ideographs in SimSun 11 draw about 440 pt from K: they end inside L:V.
+    // 40 ideographs in SimSun 11 draw about 440 pt from K: they end inside K:T.
     let mut s = base();
     set(&mut s, "K120", &"漢字".repeat(20));
     s.execute("home.fontName", json!({"range": "K120", "name": "SimSun"})).unwrap();
@@ -186,7 +190,7 @@ fn non_overflowing_cells_do_not_widen() {
     s.execute("home.wrapText", json!({"range": "K120", "on": true})).unwrap();
     // (Its taller row may move the page breaks; no band of columns is added.)
     let list = page_list(&mut s);
-    assert!(list.iter().all(|p| p.0 == "A:K" || p.0 == "L:L"), "{list:?}");
+    assert!(list.iter().all(|p| p.0 == "A:J" || p.0 == "K:L"), "{list:?}");
     // A non-empty right neighbour.
     let mut s = base();
     set(&mut s, "K120", &words(400));

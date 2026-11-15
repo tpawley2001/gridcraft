@@ -149,7 +149,11 @@ pub(super) fn right_overflow_end(
 ) -> Option<u32> {
     let right = spill_candidate(sh, (c, cell))?;
     let (need, h_align) = spilling_text(wb, sh, (c, cell), merges, (k, scale), fonts)?;
-    let w = sh.col_width(c.col) * k;
+    // Columns print wider than they draw on screen (Excel's printed column width, see
+    // `layout::print_col_scale`) while text prints at its font size, so the reach is measured
+    // against the printed column widths.
+    let cs = super::layout::print_col_scale(wb);
+    let w = sh.col_width(c.col) * k * cs;
     let over = need - w;
     if over <= 0.0 || merges.iter().any(|m| m.contains(c) || m.contains(right)) {
         return None;
@@ -161,7 +165,7 @@ pub(super) fn right_overflow_end(
         if !empty_for_overflow(sh, nc, merges) {
             break;
         }
-        let width = sh.col_width(col) * k;
+        let width = sh.col_width(col) * k * cs;
         ext += width;
         remaining -= width;
         last = Some(col);
