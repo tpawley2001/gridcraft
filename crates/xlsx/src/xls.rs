@@ -20,7 +20,8 @@
 //! series refer to the cells (see `chart`), PNG and JPEG pictures (see `drawing`), and PivotTables on worksheet-range or defined-name
 //! sources (cache streams in `_SX_DB_CUR` and the SxView views, in `xls/pivot.rs`), and query tables with
 //! their data connections (kept for .xlsx, in `xls/connections.rs`), and links to other workbooks
-//! (kept for .xlsx, in `xls/external_links.rs`). Everything else (other shapes, comments, macros) is
+//! (kept for .xlsx, in `xls/external_links.rs`), and notes, hyperlinks, frozen panes and the sheet
+//! display options (see `objects`). Everything else (other shapes, Excel 5.0/95 notes, macros) is
 //! skipped with a warning.
 //! Workbooks encrypted with Excel's default password (`VelvetSweatshop`) are decrypted first
 //! (see `xls_crypto`), as Excel opens them without a prompt; others open with their password
@@ -40,6 +41,7 @@ mod external_links;
 pub(crate) mod formula;
 mod ftab;
 pub(crate) mod macro_sheet;
+mod objects;
 mod page_setup;
 mod pivot;
 mod png;
@@ -516,7 +518,7 @@ fn read_xls_inner(bytes: &[u8], mut budget: Budget, lock: Lock<'_>, functions: F
         if g.biff5.is_some() {
             "Imported from an Excel 5.0/95 (.xls) workbook: values, formulas, cell formatting, column widths, row heights, defined names, charts, pictures, text boxes and drawn shapes were read. Comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         } else {
-            "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights, defined names, charts, pictures and data validation were read. Comments and other features are not imported yet. Save as .xlsx; saving .xls is not supported."
+            "Imported from an Excel 97-2003 (.xls) workbook: values, formulas, cell formatting, merged cells, column widths, row heights, defined names, charts, pictures, notes, hyperlinks, frozen panes and data validation were read. Other features are not imported yet. Save as .xlsx; saving .xls is not supported."
         }
         .into(),
     );
@@ -1117,6 +1119,8 @@ struct SheetState<'g> {
     queries: connections::Blocks,
     /// The SELECTION records read so far: pane and active cell.
     selections: Vec<(u8, CellRef)>,
+    /// Notes, hyperlinks and the pane records read so far, applied when the substream ends.
+    objects: objects::Objects,
     /// A SELECTION record was cut short.
     bad_selection: bool,
     /// The result ranges of the What-If data tables read so far (a repeated one is skipped).
@@ -1387,6 +1391,7 @@ fn worksheet<'g>(
         pivots: pivot::Views::default(),
         queries: connections::Blocks::default(),
         selections: vec![],
+        objects: objects::Objects::default(),
         bad_selection: false,
         data_table_ranges: HashSet::new(),
         data_table_cell: false,
@@ -1494,11 +1499,17 @@ fn finish_sheet(
     std::mem::take(&mut st.tables).finish(&mut st.sheet, budget, report)?;
     st.page.finish(&mut st.sheet.print);
     st.cond.finish(report);
-    // The top-left pane's selection (the only one without frozen panes), else the last one.
-    let chosen = st.selections.iter().find(|(pnn, _)| *pnn == 3).or(st.selections.last());
+    // The active pane's selection (PANE pnnAct), else the top-left pane's (the only one without
+    // panes), else the last one.
+    let active = st.objects.pane.as_ref().and_then(|p| p.active);
+    let chosen = active
+        .and_then(|a| st.selections.iter().find(|(pnn, _)| *pnn == a))
+        .or_else(|| st.selections.iter().find(|(pnn, _)| *pnn == 3))
+        .or(st.selections.last());
     if let Some((_, at)) = chosen {
         st.sheet.view_active = *at;
     }
+    std::mem::take(&mut st.objects).finish(&mut st.sheet, report);
     if st.bad_selection {
         report.warn("Malformed .xls selection records were skipped.");
     }
@@ -1848,6 +1859,7 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
             let flags = if c.remaining() >= WINDOW2_MIN_LEN { c.u16().ok() } else { None };
             let Some(flags) = flags else { return Ok(()) };
             let on = |bit: u16| flags & bit != 0;
+            st.objects.window2(flags);
             st.sheet.show_formulas = on(0x0001);
             st.sheet.show_gridlines = on(0x0002);
             st.sheet.show_headings = on(0x0004);
@@ -1886,10 +1898,23 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
                 Err(_) => st.bad_selection = true,
             }
         }
-        0x001C => report.warn("Cell comments in .xls files are not imported yet."),
+        // Excel 5.0/95 notes keep their text in the Note record itself, which isn't read.
+        0x001C if st.g.biff5.is_some() => report.warn("Cell comments in .xls files are not imported yet."),
+        0x001C => st.objects.note(rec, budget)?,
+        0x0041 => st.objects.pane(rec),
         0x00EC => st.charts.drawing(rec),
-        0x005D => st.charts.obj(rec, st.g.biff5.as_ref(), &st.g.links, report),
-        0x01B6 => st.charts.txo(rec, report),
+        0x005D => {
+            if st.g.biff5.is_none() {
+                st.objects.obj(rec);
+            }
+            st.charts.obj(rec, st.g.biff5.as_ref(), &st.g.links, report);
+        }
+        // A note's TxO is taken by the note; the drawing reader still reads any drawing data
+        // after its text, and has nothing pending to give the text to.
+        0x01B6 => {
+            st.objects.txo(rec, budget)?;
+            st.charts.txo(rec, report);
+        }
         // IMDATA: a BIFF5 picture's image (BIFF8 pictures are in the drawing's blip store).
         0x007F => st.charts.imdata(rec, st.g.biff5.is_some()),
         // Only a BIFF5 polygon waits for its points.
@@ -1900,7 +1925,8 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         0x01B1 => st.cond.cf(&c.rest(), &st.g.links, &mut st.sheet),
         0x087A => st.cond.cf12(&c.rest(), &st.g.links, &mut st.sheet),
         0x087B => st.cond.cf_ex(&c.rest(), &mut st.sheet),
-        0x01B8 => report.warn("Hyperlinks in .xls files are not imported yet."),
+        0x01B8 => st.objects.hlink(rec, budget)?,
+        0x0800 => st.objects.tooltip(rec, budget)?,
         0x009D => autofilter::State::info(&mut c, st, report),
         0x009E => autofilter::State::criterion(&mut c, st, report),
         0x087E => autofilter::State::filter12(&mut c, st, report),

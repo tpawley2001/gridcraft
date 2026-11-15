@@ -766,8 +766,11 @@ impl Embedded {
                     report.warn("Form controls in .xls files are not imported yet.");
                 }
             }
+            // A note's text is read with the note (`objects`): a text box still waiting for its
+            // TxO must not take it.
+            Some(OT_NOTE) => self.pending_text = None,
             // A group's shapes are read from their own Obj records.
-            Some(OT_NOTE | OT_GROUP) => {}
+            Some(OT_GROUP) => {}
             Some(ot) if OT_FORM_CONTROLS.contains(&ot) => report.warn("Form controls in .xls files are not imported yet."),
             Some(ot) => {
                 // A shape without its drawing shape has no anchor to place it with.
