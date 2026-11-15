@@ -468,11 +468,16 @@ fn props_from_ctrl_prop(e: &El) -> Props {
 fn props_from_vml(shape: &El) -> Option<Props> {
     let data = shape.child("ClientData")?;
     let kind = data.attr("ObjectType").and_then(kind_of)?;
-    let text_of = |n: &str| data.child(n).map(|c| c.text.trim().to_string());
+    Some(props_from_vml_kind(shape, kind))
+}
+
+fn props_from_vml_kind(shape: &El, kind: ControlKind) -> Props {
+    let data = shape.child("ClientData");
+    let text_of = |n: &str| data.and_then(|d| d.child(n)).map(|c| c.text.trim().to_string());
     let int = |n: &str| text_of(n).and_then(|t| t.parse::<f64>().ok()).filter(|v| v.is_finite()).map(|v| v.round() as i64);
     let truth = |n: &str| text_of(n).map(|t| !t.eq_ignore_ascii_case("false"));
     let text = shape.child("textbox").map(|t| all_text(t, 0)).unwrap_or_default().trim().to_string();
-    Some(Props {
+    Props {
         kind: Some(kind),
         link: text_of("FmlaLink").filter(|t| !t.is_empty()),
         min: int("Min"),
@@ -480,18 +485,18 @@ fn props_from_vml(shape: &El) -> Option<Props> {
         inc: int("Inc"),
         page: int("Page"),
         val: int("Val"),
-        horiz: data.child("Horiz").map(|_| true),
+        horiz: data.and_then(|d| d.child("Horiz")).map(|_| true),
         macro_: text_of("FmlaMacro"),
         text,
         print: truth("PrintObject"),
         locked: truth("Locked"),
         checked: Some(int("Checked").filter(|v| (1..=2).contains(v)).unwrap_or(0)),
-        three_d: Some(data.child("NoThreeD").is_none()),
+        three_d: Some(data.and_then(|d| d.child("NoThreeD")).is_none()),
         range: text_of("FmlaRange").filter(|t| !t.is_empty()),
         sel: int("Sel"),
         sel_type: text_of("SelType").as_deref().and_then(sel_type_of),
         drop_lines: int("DropLines"),
-    })
+    }
 }
 
 /// The text inside `e` and its descendants (a VML text box holds `<div>` and `<font>`), up to a
@@ -836,6 +841,34 @@ fn anchor_from_markers(a: &El, sheet: &Sheet) -> Option<Anchor> {
         _ => AnchorMode::Absolute,
     };
     Some(Anchor { cell, dx, dy, width: (x2 - x1).clamp(1.0, 10_000.0) as f32, height: (y2 - y1).clamp(1.0, 10_000.0) as f32, mode })
+}
+
+/// Adds dialog frames only to a detached print view. Worksheet controls and the kept VML
+/// remain unchanged: a group-box outline supplies the frame and caption for printing.
+pub(crate) fn read_dialog_frame(cx: &mut Ctx<'_>, part: &str, sheet: &mut Sheet) {
+    let Ok(Some(xml)) = cx.optional_xml(part) else { return };
+    let Ok(rels) = cx.pkg.rels(part) else { return };
+    let Some(rel) = xml
+        .child("legacyDrawing")
+        .and_then(|e| e.attr("id"))
+        .and_then(|id| rels.iter().find(|r| r.id == id && r.kind == "vmlDrawing" && !r.external))
+    else {
+        return;
+    };
+    let Ok(Some(vml)) = cx.pkg.read_vml(&rel.target) else { return };
+    let mut frames = Vec::new();
+    for shape in vml.kids("shape").take(MAX_CONTROLS.saturating_sub(sheet.controls.len())) {
+        if !object_type_of(shape).is_some_and(|t| t.eq_ignore_ascii_case("dialog")) {
+            continue;
+        }
+        let Some(anchor) = vml_anchor(shape, sheet) else { continue };
+        // Interpret Dialog locally rather than making it an editable worksheet control kind.
+        let props = props_from_vml_kind(shape, ControlKind::GroupBox);
+        frames.push(build(props, ControlKind::GroupBox, anchor, None, 0));
+    }
+    // Frame first, so the buttons remain visible on top of it.
+    frames.append(&mut sheet.controls);
+    sheet.controls = frames;
 }
 
 /// A VML `x:Anchor` (`LeftColumn, LeftOffset, TopRow, TopOffset, RightColumn, RightOffset,

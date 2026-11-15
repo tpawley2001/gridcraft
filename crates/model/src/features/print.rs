@@ -417,6 +417,19 @@ pub struct ChartSheetPrint {
     pub print: PrintSettings,
 }
 
+/// A detached Excel 5 dialog sheet print view. Original sheet and VML parts remain owned by
+/// pass-through; this copy is never editable and its controls never execute actions.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DialogSheetPrint {
+    pub name: String,
+    pub visibility: crate::Visibility,
+    /// Numbers of worksheet, chart and macro tabs preceding this dialog in the file.
+    pub before: usize,
+    pub charts_before: usize,
+    pub macros_before: usize,
+    pub sheet: crate::Sheet,
+}
+
 /// What printing needs of an Excel 4.0 macro sheet ([MS-XLSX] 2.1.11 `xl/macrosheets/sheetN.xml`,
 /// [MS-XLS] BoundSheet8 `dt = 1`) read from a file. Macro sheets aren't modelled as sheets: their
 /// parts are kept and written back unchanged, and this read-only copy lets Print Entire Workbook

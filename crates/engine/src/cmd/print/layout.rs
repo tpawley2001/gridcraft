@@ -100,12 +100,16 @@ pub struct SheetLayout {
     /// worksheet's. `sheet` is then the worksheet before it; read the printed sheet through
     /// [`SheetLayout::sheet_in`].
     pub macro_sheet: Option<usize>,
+    /// Index of a detached dialog print view, when present.
+    pub dialog_sheet: Option<usize>,
 }
 
 impl SheetLayout {
-    /// The sheet whose cells these pages print: the macro sheet's detached sheet for a macro
-    /// sheet's layout, otherwise the workbook's sheet `sheet`.
+    /// The printed sheet: a detached macro/dialog view, otherwise worksheet `sheet`.
     pub(crate) fn sheet_in<'a>(&self, wb: &'a Workbook) -> Option<&'a Sheet> {
+        if let Some(di) = self.dialog_sheet {
+            return wb.dialog_sheets.get(di).map(|d| &d.sheet);
+        }
         match self.macro_sheet {
             Some(mi) => wb.macro_sheets.get(mi).map(|m| &m.sheet),
             None => wb.sheet(self.sheet),
@@ -588,6 +592,7 @@ fn layout_chart_sheet(wb: &Workbook, ci: usize) -> Option<SheetLayout> {
         manual_col_breaks: false,
         chart_sheet: Some(ci),
         macro_sheet: None,
+        dialog_sheet: None,
     })
 }
 
@@ -649,6 +654,7 @@ fn layout_of(wb: &Workbook, sh: &Sheet, at: (usize, Option<usize>), opts: &Print
         manual_col_breaks: fit.is_none_or(|(w, _)| w == 0),
         chart_sheet: None,
         macro_sheet,
+        dialog_sheet: None,
     };
     // Without a print area the pages below and to the right of everything on the sheet are left
     // out (Excel prints each band of columns down to its last cell); a print area prints its grid.
@@ -880,36 +886,44 @@ pub(crate) fn split_bands(wb: &Workbook, sh: &Sheet, lay: &SheetLayout, cap: usi
 enum Tab {
     /// A macro sheet (an index into [`Workbook::macro_sheets`]).
     Macro(usize),
+    /// A dialog sheet (an index into `Workbook::dialog_sheets`).
+    Dialog(usize),
     /// A chart sheet (an index into [`Workbook::chart_sheets`]).
     Chart(usize),
     /// A worksheet (an index into [`Workbook::sheets`]).
     Sheet(usize),
 }
 
-/// The visible chart and macro sheets in tab order, each with the number of worksheets before it
+/// The visible chart, macro and dialog sheets in tab order, each with the number of worksheets before it
 /// (at most `n`, the worksheet count: past the end means last).
 fn other_tabs(wb: &Workbook, n: usize) -> Vec<(usize, Tab)> {
-    // Sort key: (worksheets before, chart sheets before, macro before chart, index). A macro sheet
-    // with `k` chart sheets before it sits just before chart sheet `k`.
+    // Dialogs sit before the next macro or chart counted when reading the file. Hidden tabs
+    // still count in these ordinals, so filtering visibility cannot change the order.
     let charts = wb
         .chart_sheets
         .iter()
         .enumerate()
         .filter(|(_, c)| c.visibility == Visibility::Visible)
-        .map(|(ci, c)| ((c.before.min(n), ci, 1), Tab::Chart(ci)));
+        .map(|(ci, c)| ((c.before.min(n), ci, usize::MAX, 2), Tab::Chart(ci)));
     let macros = wb
         .macro_sheets
         .iter()
         .enumerate()
         .filter(|(_, m)| m.visibility == Visibility::Visible)
-        .map(|(mi, m)| ((m.before.min(n), m.charts_before, 0), Tab::Macro(mi)));
-    let mut all: Vec<((usize, usize, u8), Tab)> = charts.chain(macros).collect();
+        .map(|(mi, m)| ((m.before.min(n), m.charts_before, mi, 1), Tab::Macro(mi)));
+    let dialogs = wb
+        .dialog_sheets
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| d.visibility == Visibility::Visible)
+        .map(|(di, d)| ((d.before.min(n), d.charts_before, d.macros_before, 0), Tab::Dialog(di)));
+    let mut all: Vec<_> = charts.chain(macros).chain(dialogs).collect();
     all.sort();
     all.into_iter().map(|((before, ..), tab)| (before, tab)).collect()
 }
 
 /// Lays out every sheet a print command covers. Printing the whole workbook also prints each
-/// visible chart sheet as one page and each visible macro sheet like a worksheet, in tab order.
+/// visible chart sheet as one page and visible macro and dialog sheets in tab order.
 pub fn layouts(wb: &Workbook, opts: &PrintOptions) -> Vec<SheetLayout> {
     let mut out = Vec::new();
     let mut pages = 0usize;
@@ -918,7 +932,7 @@ pub fn layouts(wb: &Workbook, opts: &PrintOptions) -> Vec<SheetLayout> {
         let n = wb.sheets.len();
         let others = other_tabs(wb, n);
         for i in 0..=n {
-            // A chart or macro sheet sits before the worksheet `before` counts up to.
+            // A kept sheet sits before the worksheet `before` counts up to.
             tabs.extend(others.iter().filter(|(before, _)| *before == i).map(|(_, tab)| *tab));
             if wb.sheet(i).is_some_and(|s| s.visibility == Visibility::Visible) {
                 tabs.push(Tab::Sheet(i));
@@ -943,6 +957,20 @@ pub fn layouts(wb: &Workbook, opts: &PrintOptions) -> Vec<SheetLayout> {
                     }
                     sheet_layouts(wb, si, opts, &ranges)
                 }
+            }
+            Tab::Dialog(di) => {
+                let Some(d) = wb.dialog_sheets.get(di) else { continue };
+                if !d.sheet.controls.iter().any(|c| c.print) {
+                    continue;
+                }
+                let si = d.before.min(wb.sheets.len().saturating_sub(1));
+                layout_of(wb, &d.sheet, (si, None), opts, None)
+                    .map(|mut l| {
+                        l.dialog_sheet = Some(di);
+                        l
+                    })
+                    .into_iter()
+                    .collect()
             }
             Tab::Chart(ci) => layout_chart_sheet(wb, ci).into_iter().collect(),
             // A macro sheet without cells prints nothing, like an empty worksheet.
@@ -994,6 +1022,57 @@ pub(super) fn seg_size(sh: &Sheet, seg: (u32, u32), rows: bool) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dialogs_keep_their_order_among_macro_chart_and_worksheet_tabs() {
+        use gridcraft_model::{ChartSheetPrint, DialogSheetPrint, FormControl, MacroSheetPrint};
+        use std::sync::Arc;
+        let mut session = crate::Session::new();
+        session.new_workbook();
+        session.execute("cell.set", serde_json::json!({"cell":"A1", "input":"1"})).unwrap();
+        session.execute("insert.chart", serde_json::json!({"range":"A1:A1", "type":"column"})).unwrap();
+        let mut wb = (*session.doc().unwrap().wb).clone();
+        let chart = wb.sheet(0).unwrap().charts[0].clone();
+        wb.chart_sheets = Arc::new(vec![ChartSheetPrint {
+            name: "Chart".into(),
+            visibility: Visibility::Visible,
+            before: 0,
+            chart,
+            print: PrintSettings::default(),
+        }]);
+        wb.macro_sheets = Arc::new(vec![
+            MacroSheetPrint::new("Macro A".into(), Visibility::Visible, 0, 0, wb.sheet(0).unwrap().clone()),
+            MacroSheetPrint::new("Macro B".into(), Visibility::Visible, 0, 1, wb.sheet(0).unwrap().clone()),
+        ]);
+        let dialog = |name: &str, before, charts_before, macros_before| {
+            let mut sheet = Sheet::new(name);
+            sheet.controls.push(FormControl { text: name.into(), ..Default::default() });
+            DialogSheetPrint { name: name.into(), visibility: Visibility::Visible, before, charts_before, macros_before, sheet }
+        };
+        wb.dialog_sheets = Arc::new(vec![
+            dialog("Form A", 0, 0, 0),
+            dialog("Form B", 0, 0, 1),
+            dialog("Form C", 0, 0, 1),
+            dialog("Form D", 0, 1, 1),
+            dialog("Form E", 0, 1, 2),
+            dialog("Form F", 1, 1, 2),
+        ]);
+        let opts = PrintOptions { all_sheets: true, ..Default::default() };
+        let names = |wb: &Workbook| {
+            layouts(wb, &opts)
+                .iter()
+                .map(|l| l.chart_sheet.map(|ci| wb.chart_sheets[ci].name.clone()).unwrap_or_else(|| l.sheet_in(wb).unwrap().name.clone()))
+                .collect::<Vec<_>>()
+        };
+        let worksheet = wb.sheet(0).unwrap().name.clone();
+        assert_eq!(names(&wb), ["Form A", "Macro A", "Form B", "Form C", "Chart", "Form D", "Macro B", "Form E", &worksheet, "Form F"]);
+        Arc::make_mut(&mut wb.chart_sheets)[0].visibility = Visibility::VeryHidden;
+        Arc::make_mut(&mut wb.macro_sheets)[0].visibility = Visibility::Hidden;
+        assert_eq!(names(&wb), ["Form A", "Form B", "Form C", "Form D", "Macro B", "Form E", &worksheet, "Form F"]);
+        Arc::make_mut(&mut wb.dialog_sheets)[0].sheet.controls.clear();
+        Arc::make_mut(&mut wb.dialog_sheets)[1].sheet.controls[0].print = false;
+        assert_eq!(names(&wb), ["Form C", "Form D", "Macro B", "Form E", &worksheet, "Form F"]);
+    }
 
     #[test]
     fn a_print_area_past_the_grid_is_held_to_the_grid() {

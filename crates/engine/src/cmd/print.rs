@@ -170,7 +170,7 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
     let mut pics = PicCache::default();
     // The worksheet the previous layout printed: a print area's later ranges continue its sheet,
     // so they don't get the first-page header and footer again.
-    let mut prev_sheet: Option<(usize, Option<usize>)> = None;
+    let mut prev_sheet: Option<(usize, Option<usize>, Option<usize>)> = None;
     for lay in layouts {
         if let Some(cs) = lay.chart_sheet.and_then(|ci| wb.chart_sheets.get(ci)) {
             prev_sheet = None;
@@ -190,13 +190,13 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
             continue;
         }
         let Some(sh) = lay.sheet_in(wb) else { continue };
-        // A macro sheet's cells only: what is looked up by sheet index (conditional formats,
-        // links, drawn objects) belongs to the workbook's sheets.
-        let worksheet = lay.macro_sheet.is_none();
+        // Detached tabs have no worksheet index. Conditional formats and links must not
+        // read the worksheet at their insertion position; dialogs draw only their own controls.
+        let worksheet = lay.macro_sheet.is_none() && lay.dialog_sheet.is_none();
         let mut cf = if sh.cond_formats.is_empty() || !worksheet { None } else { Some(crate::cf::CfCache::new()) };
         let k = lay.k();
         let (aw, ah) = lay.avail();
-        let tab = (lay.sheet, lay.macro_sheet);
+        let tab = (lay.sheet, lay.macro_sheet, lay.dialog_sheet);
         let continues = prev_sheet == Some(tab);
         prev_sheet = Some(tab);
         let run_ons = lay.cut_run_ons();
@@ -276,7 +276,7 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
                 y += pitch.span_pt(*rs);
             }
             // Continuation pages carry only the text running on past the cut.
-            if let Some(b) = body.as_ref().filter(|_| cut.offset <= 0.0 && worksheet) {
+            if let Some(b) = body.as_ref().filter(|_| cut.offset <= 0.0 && (worksheet || lay.dialog_sheet.is_some())) {
                 if let Some((cx, cy, cw, ch)) = clip {
                     pg.save();
                     pg.clip_rect(cx, cy, cw, ch);

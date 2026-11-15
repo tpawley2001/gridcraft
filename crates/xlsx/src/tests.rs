@@ -39,6 +39,7 @@ mod custom_views_tests;
 mod data_consolidate_kept_tests;
 mod data_table_formula_tests;
 mod data_table_text_results_tests;
+mod dialog_print_view;
 mod dif_tests;
 mod drawing_alt_text;
 mod drawing_hyperlinks;
