@@ -974,15 +974,15 @@ fn printed_page_sequence(reach: &[usize], order: PageOrder, cap: usize) -> Vec<(
 pub(crate) type Bands = Vec<(u32, u32)>;
 
 /// Room a column band leaves free at its right edge, in the sheet pixels the column bands are
-/// measured in: two screen pixels at the printed column scale (2 x 0.75 pt x `col_scale` at
-/// 100%). Excel starts a new band with a column that would end closer than this to the right
-/// margin (measured on Excel's PDFs; the best fit over a corpus, not a documented rule).
+/// measured in: 1.5 sheet pixels x `col_scale` (about 1.1 pt at 100%). Excel starts a new band
+/// with a column that would end closer than this to the right margin (the best fit over Excel's
+/// PDFs of a corpus, not a documented rule).
 /// None when the sheet is fitted to a page count wide (`manual_col_breaks` off): that scale is
 /// picked so the columns fill the width exactly, and they print on the pages asked for.
 /// Only which columns share a band changes: a column wider than the page is still cut to the
 /// full printable width.
 pub(super) fn col_band_reserve(lay: &SheetLayout) -> f32 {
-    if lay.manual_col_breaks { 2.0 * lay.col_scale } else { 0.0 }
+    if lay.manual_col_breaks { 1.5 * lay.col_scale } else { 0.0 }
 }
 
 /// Splits a layout's area into row and column bands that fit its pages (at most `cap` of each),
