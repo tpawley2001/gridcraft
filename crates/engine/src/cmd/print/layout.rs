@@ -460,7 +460,11 @@ pub(super) fn bands(start: u32, end: u32, size: impl Fn(u32) -> f32, avail: impl
 /// [`bands`] for columns, except that a line wider than an empty page's room (`avail` at that
 /// line, when positive) is cut to that room and printed alone on its page, as Excel prints such
 /// a column; `more(line, room)` continuation pages follow it, for text running on past the cut.
-/// The line after it starts a new page. Returns the bands and, per band, its [`ColCut`].
+/// The line after it starts a new page. Bands are filled to `avail` less `reserve`
+/// ([`col_band_reserve`]); the wide test and the cut use the whole of `avail`. Returns the bands
+/// and, per band, its [`ColCut`].
+// One pagination pass's inputs; bundling them would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn bands_cut_wide(
     start: u32,
     end: u32,
@@ -469,12 +473,13 @@ pub(super) fn bands_cut_wide(
     breaks: &[u32],
     cap: usize,
     more: impl Fn(u32, f32) -> usize,
+    reserve: f32,
 ) -> (Vec<(u32, u32)>, Vec<ColCut>) {
     let mut out = Vec::new();
     let mut cuts = Vec::new();
     let mut cur = start;
     let mut used = 0.0f32;
-    let mut room = avail(start).max(1.0);
+    let mut room = (avail(start) - reserve).max(1.0);
     let mut line = start;
     loop {
         let sz = size(line);
@@ -489,7 +494,7 @@ pub(super) fn bands_cut_wide(
             }
             cur = line;
             used = 0.0;
-            room = avail(line).max(1.0);
+            room = (avail(line) - reserve).max(1.0);
         }
         if wide {
             // The cut line's page, then one page per further printable width its text reaches.
@@ -506,7 +511,7 @@ pub(super) fn bands_cut_wide(
             line += 1;
             cur = line;
             used = 0.0;
-            room = avail(line).max(1.0);
+            room = (avail(line) - reserve).max(1.0);
             continue;
         }
         used += sz;
@@ -576,7 +581,7 @@ pub(crate) fn split_bands_pieces(wb: &Workbook, sh: &Sheet, lay: &SheetLayout, c
         // negative count is 0.
         ((reach - cut_pt - rest) / cut_pt).ceil().max(0.0) as usize
     };
-    let (cols, cuts) = bands_cut_wide(area.start.col, area.end.col, |c| sh.col_width(c) * lay.col_scale, room, &cb, cap, more);
+    let (cols, cuts) = bands_cut_wide(area.start.col, area.end.col, |c| sh.col_width(c) * lay.col_scale, room, &cb, cap, more, col_band_reserve(lay));
     (rows, cols, cuts)
 }
 
@@ -968,6 +973,18 @@ fn printed_page_sequence(reach: &[usize], order: PageOrder, cap: usize) -> Vec<(
 /// Inclusive-start/end index spans of the pages along one axis.
 pub(crate) type Bands = Vec<(u32, u32)>;
 
+/// Room a column band leaves free at its right edge, in the sheet pixels the column bands are
+/// measured in: two screen pixels at the printed column scale (2 x 0.75 pt x `col_scale` at
+/// 100%). Excel starts a new band with a column that would end closer than this to the right
+/// margin (measured on Excel's PDFs; the best fit over a corpus, not a documented rule).
+/// None when the sheet is fitted to a page count wide (`manual_col_breaks` off): that scale is
+/// picked so the columns fill the width exactly, and they print on the pages asked for.
+/// Only which columns share a band changes: a column wider than the page is still cut to the
+/// full printable width.
+pub(super) fn col_band_reserve(lay: &SheetLayout) -> f32 {
+    if lay.manual_col_breaks { 2.0 * lay.col_scale } else { 0.0 }
+}
+
 /// Splits a layout's area into row and column bands that fit its pages (at most `cap` of each),
 /// honouring manual breaks (per axis, `lay.manual_row_breaks` / `lay.manual_col_breaks`), print headings and repeated titles. The
 /// one pagination rule shared by printing, PDF export, Page Break Preview and Page Layout view.
@@ -1000,8 +1017,14 @@ pub(crate) fn split_bands(wb: &Workbook, sh: &Sheet, lay: &SheetLayout, cap: usi
     };
     let area = lay.area;
     let rows = bands(area.start.row, area.end.row, |r| pitch.dots(r) as f32, |start| (page - head - title_h(start)).max(1.0), &rb, cap);
-    let cols =
-        bands(area.start.col, area.end.col, |c| sh.col_width(c) * lay.col_scale, |start| (aw - lay.heading_w - title_w(start)).max(1.0), &cb, cap);
+    let cols = bands(
+        area.start.col,
+        area.end.col,
+        |c| sh.col_width(c) * lay.col_scale,
+        |start| (aw - lay.heading_w - title_w(start) - col_band_reserve(lay)).max(1.0),
+        &cb,
+        cap,
+    );
     (rows, cols)
 }
 
@@ -1258,21 +1281,21 @@ mod tests {
         let w = [250.0f32, 40.0, 40.0];
         let size = |c: u32| w.get(c as usize).copied().unwrap_or(0.0);
         let cut = |offset: f32| ColCut { offset, width: 100.0 };
-        let (b, o) = bands_cut_wide(0, 2, size, |_| 100.0, &[], 100, |_, _| 2);
+        let (b, o) = bands_cut_wide(0, 2, size, |_| 100.0, &[], 100, |_, _| 2, 0.0);
         assert_eq!(b, [(0, 0), (0, 0), (0, 0), (1, 2)]);
         assert_eq!(o, [cut(0.0), cut(100.0), cut(200.0), ColCut::default()]);
         // Without long text the cut line takes one band; a manual break still applies.
-        let (b, o) = bands_cut_wide(0, 2, size, |_| 100.0, &[2], 100, |_, _| 0);
+        let (b, o) = bands_cut_wide(0, 2, size, |_| 100.0, &[2], 100, |_, _| 0, 0.0);
         assert_eq!(b, [(0, 0), (1, 1), (2, 2)]);
         assert_eq!(o, [cut(0.0), ColCut::default(), ColCut::default()]);
         // A wide line after a narrow one moves to a band of its own.
-        let (b, _) = bands_cut_wide(0, 2, |c| [40.0f32, 250.0, 40.0].get(c as usize).copied().unwrap_or(0.0), |_| 100.0, &[], 100, |_, _| 0);
+        let (b, _) = bands_cut_wide(0, 2, |c| [40.0f32, 250.0, 40.0].get(c as usize).copied().unwrap_or(0.0), |_| 100.0, &[], 100, |_, _| 0, 0.0);
         assert_eq!(b, [(0, 0), (1, 1), (2, 2)]);
         // No room means no cut; the page cap holds for continuation pages too.
-        let (b, o) = bands_cut_wide(0, 2, size, |_| 0.0, &[], 100, |_, _| 0);
+        let (b, o) = bands_cut_wide(0, 2, size, |_| 0.0, &[], 100, |_, _| 0, 0.0);
         assert_eq!(b, bands(0, 2, size, |_| 1.0, &[], 100));
         assert!(o.iter().all(|x| *x == ColCut::default()));
-        let (b, _) = bands_cut_wide(0, 2, size, |_| 100.0, &[], 3, |_, _| usize::MAX);
+        let (b, _) = bands_cut_wide(0, 2, size, |_| 100.0, &[], 3, |_, _| usize::MAX, 0.0);
         assert_eq!(b.len(), 3);
     }
 }
