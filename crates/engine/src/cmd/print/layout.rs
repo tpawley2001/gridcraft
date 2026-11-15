@@ -212,20 +212,13 @@ struct OnPaper<'a> {
     /// Per style id: not yet looked at, or whether it shows on paper.
     styles: Vec<Option<bool>>,
     hidden_row: Option<(u32, bool)>,
-    /// Every stored cell counts: nothing on the sheet puts anything on paper by the rule above
-    /// (no value or formula, no fill or border, no merge, spill range, table or printing drawing
-    /// object). Such a sheet prints its block of stored cells, as Excel does (a sheet of empty
-    /// cells formatted only with number formats and fonts prints all of them).
-    all: bool,
 }
 
 impl<'a> OnPaper<'a> {
     fn new(wb: &'a Workbook, sh: &'a Sheet) -> Self {
-        let mut p = OnPaper { wb, sh, styles: vec![None; wb.styles.len()], hidden_row: None, all: false };
-        let other = !sh.merges.is_empty() || !sh.spill_ranges.is_empty() || !sh.tables.is_empty() || has_printing_objects(sh);
-        // Stops at the first cell that counts, so a sheet with data pays almost nothing here.
-        p.all = !other && !sh.cells.iter().any(|(_, cell)| cell.has_content() || p.style_shows(cell));
-        p
+        // Nonvisual formatting alone must leave no automatic range, so whole-workbook
+        // printing can omit this sheet. The empty-workbook preview fallback lives in layouts.
+        OnPaper { wb, sh, styles: vec![None; wb.styles.len()], hidden_row: None }
     }
 
     /// Whether the style of an empty cell shows on paper, looked up once per style id.
@@ -245,9 +238,6 @@ impl<'a> OnPaper<'a> {
 
     /// Whether the stored cell `c` counts as something on a page.
     fn counts(&mut self, c: CellRef, cell: &gridcraft_model::Cell) -> bool {
-        if self.all {
-            return true;
-        }
         let hidden = match self.hidden_row {
             Some((r, h)) if r == c.row => h,
             _ => {
@@ -261,15 +251,6 @@ impl<'a> OnPaper<'a> {
         }
         cell.has_content() || self.style_shows(cell)
     }
-}
-
-/// Whether the sheet holds a drawing object that prints.
-fn has_printing_objects(sh: &Sheet) -> bool {
-    sh.charts.iter().any(|o| !o.hidden && !o.no_print)
-        || sh.images.iter().any(|o| !o.hidden && !o.no_print)
-        || sh.shapes.iter().any(|o| !o.hidden && !o.no_print)
-        || sh.controls.iter().any(|o| o.print)
-        || sh.embedded_objects.iter().any(|o| o.print)
 }
 
 /// The part of a merged range that counts toward the printed range: a merge over whole columns
