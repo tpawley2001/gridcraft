@@ -855,6 +855,15 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
     // already keeps), and only matters when a later band of columns exists.
     let last_band_start = col_bands.last().map_or(0, |b| b.0);
     let page_scale = (lay.k(), lay.scale);
+    // Repeated title rows print at the top of every later page, so what they put on paper keeps
+    // every row band of its column bands (Excel prints those pages even when nothing else is on
+    // them). Only the title rows above the last row band repeat on it; with a single row band
+    // there is nothing to extend. `repeat` maps rows r0..=r1 to the row marking the last band.
+    let repeat = match (lay.title_rows, row_bands.last()) {
+        (Some((a, b)), Some(lastb)) if row_bands.len() > 1 && a < lastb.0 => Some((a, b.min(lastb.0 - 1), lastb.1)),
+        _ => None,
+    };
+    let repeats = |r0: u32, r1: u32| repeat.filter(|&(a, b, _)| r0 <= b && a <= r1).map(|t| t.2);
     let mut fonts = None;
     let mut on_paper = OnPaper::new(wb, sh);
     for (c, cell) in sh.cells.iter() {
@@ -867,7 +876,11 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
         } else {
             None
         };
-        mark(c.row, c.col, end.map_or(c.col, |e| e.max(c.col)));
+        let c1 = end.map_or(c.col, |e| e.max(c.col));
+        mark(c.row, c.col, c1);
+        if let Some(r) = repeats(c.row, c.row) {
+            mark(r, c.col, c1);
+        }
     }
     implicit_row_fill(wb, sh, &mut mark);
     for t in &sh.tables {
@@ -878,6 +891,9 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
     }
     for m in sh.merges.iter().map(merge_extent) {
         mark(m.end.row, m.start.col, m.end.col);
+        if let Some(r) = repeats(m.start.row, m.end.row) {
+            mark(r, m.start.col, m.end.col);
+        }
     }
     let mut object = |a: &Anchor| {
         let x = sh.col_left(a.cell.col) + a.dx as f64;
