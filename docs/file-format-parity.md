@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-14 · **Change:** minor (G0385: Excel 4.0 macro sheets read from `.xlsx`/`.xlsm`/`.xlsb`/`.xls` print in their tab place when printing the entire workbook; earlier: G0376: `.xls` picture objects whose image is not imported keep their place for printing; earlier: G0372: printing and PDF export print every page of a long workbook, up to a 200,000-page guard, instead of stopping at 2,000)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-14 · **Change:** minor (G0394: inherited row fills count within the stored-cell footprint for automatic print range and trailing page bands; earlier: G0385: Excel 4.0 macro sheets read from `.xlsx`/`.xlsm`/`.xlsb`/`.xls` print in their tab place when printing the entire workbook; earlier: G0376: `.xls` picture objects whose image is not imported keep their place for printing; earlier: G0372: printing and PDF export print every page of a long workbook, up to a 200,000-page guard, instead of stopping at 2,000)
 
 
 Legacy VML captions accept HTML-style `br` line breaks, preserving buttons, macro assignments and shown notes through open + save (`vml_html_br_tests.rs`).
@@ -176,6 +176,8 @@ The `.xls` Normal font comes from FONT record 0, even when the Normal style XF n
 
 ## Export and print
 
+Visible inherited row fills count within the stored-cell footprint for automatic print ranges and trailing pages in every applicable column band; explicit cells and hidden lines take precedence.
+
 XLSX `pageSetup scale="0"` uses the default 100% and is omitted on save, matching Excel. Nonzero scales retain the 10–400 clamp; `paperSize="0"` keeps the default paper. Every other paper size id (`.xlsx` `paperSize`, `.xls`/`.xlsb` page setup) is kept and written back, including printer-specific ids, and the ECMA-376 §18.3.1.63 sizes (A4 small, 11x17, Folio, Quarto, A2, C/D/E sheets, C4–C6 envelopes…) print at their real size. Worksheet `pageSetup` output options (`blackAndWhite`, `draft`, `cellComments`, `errors`, `firstPageNumber`, `useFirstPageNumber`, `horizontalDpi`, `verticalDpi`, `copies`, `usePrinterDefaults`) survive open + save as stated, including `0`/false and `4294967295`; invalid or out-of-range values are dropped and no default resolution is added. They are kept only: printing and PDF export don't apply them yet.
 
 | Format | Excel | GridCraft | Notes |
@@ -230,6 +232,7 @@ Wrong checksums. In an intact `.xlsx`, `.xlsm`, `.xlsb` or `.ods` package, a par
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-14 | minor | G0394: missing cells inherit visible row fills for the automatic print range and trailing pages in every applicable column band, within the stored-cell footprint; hidden lines and explicit cell overrides are excluded. Synthetic XLSX round-trip controls verify equivalence to explicit fills; frozen-set validation on a base containing G0393 remains required. |
 | 2026-11-14 | minor | G0385: Excel 4.0 macro sheets (`.xlsx`/`.xlsm` `xlMacrosheet`/`xlIntlMacrosheet` parts, `.xlsb`, `.xls` BoundSheet8 `dt = 1`) keep a print-only copy of their cells, layout, page setup and show-formulas flag (`Workbook::macro_sheets`), so printing the entire workbook prints each visible one in its tab place, with its formula text; the kept parts are saved unchanged |
 | 2026-11-14 | minor | G0384: BIFF5/BIFF8 `.xls` worksheets without DefaultRowHeight use the measured Normal-font default height; unknown fonts and explicit records keep their existing behavior. |
 | 2026-11-14 | minor | G0383: `.xls` Normal uses FONT record 0 even when its style XF names another font; cell XFs keep their own fonts. The shared BIFF5/BIFF8 path applies the same rule (BIFF5 behaviour unverified in Excel). |

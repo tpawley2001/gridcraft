@@ -292,6 +292,57 @@ fn style_shows_on_paper(st: &gridcraft_model::Style) -> bool {
     st.fill.pattern != gridcraft_model::PatternType::None || [b.left, b.right, b.top, b.bottom, b.diag_down, b.diag_up].iter().any(|l| !l.is_none())
 }
 
+/// Visit missing-cell intervals that inherit row fill ink. Row metadata cannot create a
+/// footprint: only the stored cells bound both axes. Subtract explicit cells (including
+/// unfilled overrides) and hidden columns without walking the row/column Cartesian product.
+fn implicit_row_fill(wb: &Workbook, sh: &Sheet, mut visit: impl FnMut(u32, u32, u32)) {
+    let Some(footprint) = sh.cells.used_range() else { return };
+    let (r0, r1) = (footprint.start.row, footprint.end.row.min(MAX_ROWS - 1));
+    let (c0, c1) = (footprint.start.col, footprint.end.col.min(MAX_COLS - 1));
+    if r0 > r1 || c0 > c1 {
+        return;
+    }
+    // At most MAX_COLS columns are examined once, regardless of the number of row styles.
+    let mut visible = Vec::new();
+    let mut start = c0;
+    for col in c0..=c1 {
+        if sh.is_col_hidden(col) {
+            if start < col {
+                visible.push((start, col - 1));
+            }
+            start = col + 1;
+        }
+    }
+    if start <= c1 {
+        visible.push((start, c1));
+    }
+    for (&row, info) in sh.rows.range(r0..=r1) {
+        let Some(style) = info.style else { continue };
+        let st = wb.styles.get(style);
+        if sh.is_row_hidden(row) || st.fill.pattern == gridcraft_model::PatternType::None || !style_shows_on_paper(st) {
+            continue;
+        }
+        let mut gap = |from: u32, to: u32| {
+            let first = visible.partition_point(|&(_, end)| end < from);
+            for &(a, b) in visible.iter().skip(first).take_while(|&&(a, _)| a <= to) {
+                visit(row, from.max(a), to.min(b));
+            }
+        };
+        // Sheet::style_id gives an explicit cell priority over the row, and the row
+        // priority over a column style. Only missing cells therefore inherit this fill.
+        let mut from = c0;
+        for (col, _) in sh.cells.row(row, c0, c1) {
+            if from < col {
+                gap(from, col - 1);
+            }
+            from = col + 1;
+        }
+        if from <= c1 {
+            gap(from, c1);
+        }
+    }
+}
+
 /// A1 to the end of the cells that put something on paper, merged ranges, spill ranges and
 /// visible drawing objects; text overflowing past that reaches the columns it spills over, but
 /// no further than the last stored column.
@@ -313,6 +364,7 @@ fn used_print_range(wb: &Workbook, sh: &Sheet) -> Option<RangeRef> {
             }
         }
     }
+    implicit_row_fill(wb, sh, |row, _, end_col| grow_to(&mut end, row, end_col));
     for r in sh.spill_ranges.values() {
         grow_to(&mut end, r.end.row, r.end.col);
     }
@@ -757,6 +809,7 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
         let end = if c.col < last_band_start { super::text::right_overflow_end(wb, sh, (c, cell), &sh.merges, page_scale, &mut fonts) } else { None };
         mark(c.row, c.col, end.map_or(c.col, |e| e.max(c.col)));
     }
+    implicit_row_fill(wb, sh, &mut mark);
     for t in &sh.tables {
         mark(t.range.end.row, t.range.start.col, t.range.end.col);
     }
