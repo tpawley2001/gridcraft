@@ -114,5 +114,7 @@ mod xlsb_names_recalc;
 mod xlsb_pivot_refresh;
 
 mod print_dialog_sheets;
+mod print_empty_workbook_area;
 mod print_inherited_row_fill;
 mod print_inherited_row_fill_guards;
+mod print_unfitted_empty_area;
