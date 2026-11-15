@@ -619,6 +619,8 @@ fn page_setup(s: &mut Session, p: &Json) -> Result<Json> {
 #[cfg(test)]
 mod centred_blocked_overflow_tests;
 #[cfg(test)]
+mod centred_left_neighbour_band_tests;
+#[cfg(test)]
 mod col_scale_tests;
 #[cfg(test)]
 mod cut_column_draw_tests;
