@@ -113,3 +113,4 @@ mod xlsb_names_recalc;
 mod xlsb_pivot_refresh;
 
 mod print_empty_workbook_area;
+mod print_unfitted_empty_area;

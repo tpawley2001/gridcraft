@@ -969,14 +969,9 @@ pub fn layouts(wb: &Workbook, opts: &PrintOptions) -> Vec<SheetLayout> {
 /// One layout per range of a sheet's print area, in order (a print area of several ranges
 /// prints each range starting on a new page); the sheet's default layout when `ranges` is empty.
 fn sheet_layouts(wb: &Workbook, si: usize, opts: &PrintOptions, ranges: &[RangeRef]) -> Vec<SheetLayout> {
-    // Printing a whole workbook in which nothing prints gives one blank page, as Excel does, even
-    // when a sheet keeps a print area that would span several pages. That page goes to the first
-    // visible sheet with a print area, over its own page setup; the area itself is left as saved.
-    if opts.all_sheets && !ranges.is_empty() && workbook_prints_nothing(wb) {
-        let first = wb.sheets.iter().position(|s| s.visibility == Visibility::Visible && !s.print.print_areas().is_empty());
-        if first != Some(si) {
-            return vec![];
-        }
+    // Excel prints a Fit To print area with nothing on paper as one blank page (the area's first)
+    // rather than the fitted page count. Without Fit To every page of every range still prints.
+    if opts.all_sheets && wb.sheet(si).is_some_and(|sh| fitted_area_prints_nothing(sh, opts, ranges)) {
         let corner = ranges.first().map_or(CellRef::new(0, 0), |r| r.start);
         return layout_sheet(wb, si, opts, Some(RangeRef::cell(corner)))
             .map(|mut l| {
@@ -992,17 +987,24 @@ fn sheet_layouts(wb: &Workbook, si: usize, opts: &PrintOptions, ranges: &[RangeR
     }
 }
 
-/// Whether printing the whole workbook puts nothing on paper: no visible chart or macro sheet, and
-/// no visible worksheet with a stored cell (of any kind), a merge, a spill range, a table or a
-/// printing drawing object. A saved print area alone does not count.
-fn workbook_prints_nothing(wb: &Workbook) -> bool {
-    !wb.chart_sheets.iter().any(|c| c.visibility == Visibility::Visible)
-        && !wb.macro_sheets.iter().any(|m| m.visibility == Visibility::Visible)
-        && wb
-            .sheets
-            .iter()
-            .filter(|s| s.visibility == Visibility::Visible)
-            .all(|sh| sh.cells.is_empty() && sh.merges.is_empty() && sh.spill_ranges.is_empty() && sh.tables.is_empty() && !has_drawn_objects(sh))
+/// Whether `sh` prints its print area `ranges` with Fit To and nothing in them reaches paper: no
+/// stored cell (of any kind), merge, spill range or table in the area, no printing drawing object on
+/// the sheet, and no gridlines or headings.
+fn fitted_area_prints_nothing(sh: &Sheet, opts: &PrintOptions, ranges: &[RangeRef]) -> bool {
+    let fitted = match opts.fit_to_page {
+        Some(f) => f,
+        None => sh.print.fit_to.is_some_and(|(w, h)| w > 0 || h > 0),
+    };
+    let touches = |r: &RangeRef| ranges.iter().any(|a| a.intersects(r));
+    fitted
+        && !ranges.is_empty()
+        && !sh.print.gridlines
+        && !sh.print.headings
+        && ranges.iter().all(|r| sh.cells.iter_range(*r).next().is_none())
+        && !sh.merges.iter().any(touches)
+        && !sh.spill_ranges.values().any(touches)
+        && !sh.tables.iter().any(|t| touches(&t.range))
+        && !has_drawn_objects(sh)
 }
 
 /// Whether the sheet holds a drawing object that prints (a visible chart, picture, shape, form
