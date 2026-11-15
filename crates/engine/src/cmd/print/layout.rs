@@ -102,6 +102,9 @@ pub struct SheetLayout {
     pub macro_sheet: Option<usize>,
     /// Index of a detached dialog print view, when present.
     pub dialog_sheet: Option<usize>,
+    /// How much wider a column is on paper than on screen, for paginating (see
+    /// [`print_col_scale`]).
+    pub col_scale: f32,
 }
 
 impl SheetLayout {
@@ -525,14 +528,14 @@ pub(crate) fn split_bands_pieces(wb: &Workbook, sh: &Sheet, lay: &SheetLayout, c
     let aw = lay.avail().0 / k;
     let title_w = |start: u32| -> f32 {
         match lay.title_cols {
-            Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|c| sh.col_width(c)).sum(),
+            Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|c| sh.col_width(c) * lay.col_scale).sum(),
             _ => 0.0,
         }
     };
     let room = |start: u32| aw - lay.heading_w - title_w(start);
     // Fit To a page count wide picks the scale so the columns fit: no cut (as before).
     // `manual_col_breaks` is off exactly when the sheet is fitted to a page count wide.
-    let wide = |&(a, b): &(u32, u32)| (a..=b).any(|c| room(c) > 0.0 && sh.col_width(c) > room(c) + 0.01);
+    let wide = |&(a, b): &(u32, u32)| (a..=b).any(|c| room(c) > 0.0 && sh.col_width(c) * lay.col_scale > room(c) + 0.01);
     if !lay.manual_col_breaks || !cols.iter().any(wide) {
         let cuts = vec![ColCut::default(); cols.len()];
         return (rows, cols, cuts);
@@ -562,7 +565,7 @@ pub(crate) fn split_bands_pieces(wb: &Workbook, sh: &Sheet, lay: &SheetLayout, c
         // negative count is 0.
         ((reach - cut_pt - rest) / cut_pt).ceil().max(0.0) as usize
     };
-    let (cols, cuts) = bands_cut_wide(area.start.col, area.end.col, |c| sh.col_width(c), room, &cb, cap, more);
+    let (cols, cuts) = bands_cut_wide(area.start.col, area.end.col, |c| sh.col_width(c) * lay.col_scale, room, &cb, cap, more);
     (rows, cols, cuts)
 }
 
@@ -574,6 +577,36 @@ fn title_span(t: Option<(u32, u32)>, max: u32) -> Option<(u32, u32)> {
     }
     // Repeated titles are capped (Excel needs them to fit on a page anyway).
     Some((a, b.min(max - 1).min(a.saturating_add(499))))
+}
+
+/// Advance of the digits, in em, of fonts whose digits share one width: Excel sizes columns by it.
+fn digit_em(font: &str) -> Option<f32> {
+    let units = match font.to_ascii_lowercase().as_str() {
+        "calibri" => 1038.0,
+        "arial" => 1139.0,
+        "times new roman" => 1024.0,
+        "courier new" => 1229.0,
+        "verdana" => 1302.0,
+        _ => return None,
+    };
+    Some(units / 2048.0)
+}
+
+/// How much wider a column prints than its on-screen width, for paginating. A column's width is
+/// a number of characters of the workbook's default font (screen pixels / 7). On screen a
+/// character is that font's digit width in whole pixels at 96 dpi, 7 for Calibri 11. Excel prints
+/// it at the printer's resolution instead, as whole printer dots, with the same character count.
+/// Measured in Excel 365 on fit-to-width scales, assuming a 600 dpi printer: Calibri 11 prints 47
+/// dots (5.64 pt) a character, so a column is 7.4% wider on paper; Arial 10, Times New Roman 12,
+/// Verdana 10 and Calibri 16 match the same rule. Fonts not listed use Calibri's digits.
+pub(crate) fn print_col_scale(wb: &Workbook) -> f32 {
+    const DPI: f32 = 600.0;
+    let font = &wb.styles.get(gridcraft_model::StyleId::DEFAULT).font;
+    let size = if font.size.is_finite() && font.size > 0.0 { font.size.clamp(1.0, 409.0) } else { 11.0 };
+    let em = digit_em(&font.name).unwrap_or(1038.0 / 2048.0);
+    let dots = ((size * DPI / 72.0).round() * em).round().max(1.0);
+    // Printed points per character, over the 7 screen pixels (5.25 pt) a character is stored as.
+    (dots * 72.0 / DPI) / (7.0 * PX_TO_PT)
 }
 
 /// Page width and height and the margins (left, right, top, bottom, header, footer), in points,
@@ -624,6 +657,7 @@ fn layout_chart_sheet(wb: &Workbook, ci: usize) -> Option<SheetLayout> {
         chart_sheet: Some(ci),
         macro_sheet: None,
         dialog_sheet: None,
+        col_scale: 1.0,
     })
 }
 
@@ -686,6 +720,7 @@ fn layout_of(wb: &Workbook, sh: &Sheet, at: (usize, Option<usize>), opts: &Print
         chart_sheet: None,
         macro_sheet,
         dialog_sheet: None,
+        col_scale: print_col_scale(wb),
     };
     // Without a print area the pages below and to the right of everything on the sheet are left
     // out (Excel prints each band of columns down to its last cell); a print area prints its grid.
@@ -695,7 +730,7 @@ fn layout_of(wb: &Workbook, sh: &Sheet, at: (usize, Option<usize>), opts: &Print
     };
     match fit {
         Some((fw, fh)) => {
-            let total_w: f32 = (area.start.col..=area.end.col).map(|c| sh.col_width(c)).sum::<f32>() + heading_w;
+            let total_w: f32 = (area.start.col..=area.end.col).map(|c| sh.col_width(c)).sum::<f32>() * lay.col_scale + heading_w;
             // The sheet's printed height at 100 %, in points: rows at their printed pitch.
             let total_h_pt: f32 = if area.height() > 200_000 {
                 f32::INFINITY
@@ -707,7 +742,9 @@ fn layout_of(wb: &Workbook, sh: &Sheet, at: (usize, Option<usize>), opts: &Print
             let (aw, ah) = lay.avail();
             let sw = if fw > 0 { aw * fw as f32 / (total_w * PX_TO_PT).max(1.0) } else { f32::INFINITY };
             let sh_ = if fh > 0 { ah * fh as f32 / total_h_pt.max(1.0) } else { f32::INFINITY };
-            lay.scale = sw.min(sh_).min(1.0).clamp(0.1, 1.0);
+            // Excel fits in whole percents, rounding down.
+            let pct = (sw.min(sh_).min(1.0) * 100.0).floor().clamp(10.0, 100.0);
+            lay.scale = pct / 100.0;
             for _ in 0..40 {
                 paginate(&mut lay);
                 let ok_w = fw == 0 || lay.col_bands.len() <= fw as usize;
@@ -715,7 +752,7 @@ fn layout_of(wb: &Workbook, sh: &Sheet, at: (usize, Option<usize>), opts: &Print
                 if (ok_w && ok_h) || lay.scale <= 0.1 {
                     break;
                 }
-                lay.scale = (lay.scale * 0.97).max(0.1);
+                lay.scale = (((lay.scale * 100.0).round() * 0.97).floor().max(10.0)) / 100.0;
             }
         }
         None => paginate(&mut lay),
@@ -903,13 +940,14 @@ pub(crate) fn split_bands(wb: &Workbook, sh: &Sheet, lay: &SheetLayout, cap: usi
     };
     let title_w = |start: u32| -> f32 {
         match title_cols {
-            Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|c| sh.col_width(c)).sum(),
+            Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|c| sh.col_width(c) * lay.col_scale).sum(),
             _ => 0.0,
         }
     };
     let area = lay.area;
     let rows = bands(area.start.row, area.end.row, |r| pitch.dots(r) as f32, |start| (page - head - title_h(start)).max(1.0), &rb, cap);
-    let cols = bands(area.start.col, area.end.col, |c| sh.col_width(c), |start| (aw - lay.heading_w - title_w(start)).max(1.0), &cb, cap);
+    let cols =
+        bands(area.start.col, area.end.col, |c| sh.col_width(c) * lay.col_scale, |start| (aw - lay.heading_w - title_w(start)).max(1.0), &cb, cap);
     (rows, cols)
 }
 

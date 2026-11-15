@@ -161,11 +161,12 @@ fn wide_sheet_goes_down_then_over() {
     let rows: Vec<Vec<Json>> = (0..60).map(|r| (0..15).map(|c| json!(r * 100 + c)).collect()).collect();
     s.execute("range.setValues", json!({"range": "A1", "values": rows})).unwrap();
     let pv = s.execute("file.printPreview", json!({})).unwrap();
-    // 511.2pt / 48pt = 10 columns per page; 47 rows per page.
+    // A default column (8.43 characters) prints 9.14 × 5.64pt = 51.6pt wide, as Excel prints
+    // Calibri 11, so 511.2pt holds 9 columns; 47 rows per page.
     assert_eq!(pv["pages"], 4);
-    assert_eq!(pv["pageList"][0]["range"], "A1:J47");
-    assert_eq!(pv["pageList"][1]["range"], "A48:J60");
-    assert_eq!(pv["pageList"][2]["range"], "K1:O47");
+    assert_eq!(pv["pageList"][0]["range"], "A1:I47");
+    assert_eq!(pv["pageList"][1]["range"], "A48:I60");
+    assert_eq!(pv["pageList"][2]["range"], "J1:O47");
 }
 
 /// The ranges of the printed pages, in print order.
@@ -286,7 +287,7 @@ fn page_order_without_breaks_and_with_print_titles() {
         s.execute("pageLayout.pageSetup", json!({"pageOrder": "downThenOver"})).unwrap();
         let down = page_ranges(&mut s);
         if !titles {
-            assert_eq!(down, ["A1:J47", "A48:J60", "K1:O47", "K48:O60"]);
+            assert_eq!(down, ["A1:I47", "A48:I60", "J1:O47", "J48:O60"]);
         }
         s.execute("pageLayout.pageSetup", json!({"pageOrder": "overThenDown"})).unwrap();
         let over = page_ranges(&mut s);

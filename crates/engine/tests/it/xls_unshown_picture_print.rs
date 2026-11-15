@@ -74,14 +74,18 @@ fn pages(bytes: &[u8]) -> Vec<String> {
 #[test]
 fn xls_png_picture_reaching_column_p_prints_on_two_pages() {
     // The guard: a picture that is imported already counts.
+    // The file has no FONT records, so the default font is Calibri 11: a default column prints
+    // 48pt × 1.0743 = 51.57pt (47 dots = 5.64pt a character, not 5.25pt), and the 511.2pt Letter
+    // width holds 511.2 / 51.57 = 9.9, so 9 columns a page (A:I, then J:P), not 10.
     let p = pages(&workbook(1, true));
-    assert_eq!(p, ["A1:J20", "K1:P20"]);
+    assert_eq!(p, ["A1:I20", "J1:P20"]);
 }
 
 #[test]
 fn xls_unshown_picture_prints_the_pages_an_imported_picture_does() {
+    // 9 printed default columns a Letter page, as above.
     let p = pages(&workbook(2, true));
-    assert_eq!(p, ["A1:J20", "K1:P20"]);
+    assert_eq!(p, ["A1:I20", "J1:P20"]);
 }
 
 #[test]
