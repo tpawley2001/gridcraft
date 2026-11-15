@@ -3,7 +3,7 @@
 //! `style:header-footer-properties`) become the sheet's print settings, header and footer.
 //! Everything here is optional: a missing or unreadable `styles.xml` leaves the defaults.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gridcraft_model::{Orientation, PageOrder, PrintSettings, Workbook};
@@ -294,6 +294,68 @@ fn table_style(el: &El, out: &mut HashMap<String, String>) {
     {
         out.entry(name.to_string()).or_insert_with(|| master.to_string());
     }
+}
+
+const TABLE: &[u8] = b"urn:oasis:names:tc:opendocument:xmlns:table:1.0";
+
+/// Names of the `style:style style:family="table"` automatic styles in `content.xml` whose
+/// `style:table-properties` child says `table:display="false"` (ODF 1.2 Part 1 §19.627: the
+/// table is not shown). Reads everything before `office:body`; at most 100,000 names.
+pub(crate) fn content_hidden_table_styles(content: &[u8]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let mut reader = NsReader::from_reader(content);
+    let mut depth = 0usize;
+    // The table style being read and the depth of its `style:style` element.
+    let mut current: Option<(String, usize)> = None;
+    loop {
+        match reader.read_event() {
+            Ok(ev @ (Event::Start(_) | Event::Empty(_))) => {
+                let (Event::Start(e) | Event::Empty(e)) = &ev else { break };
+                let Some(el) = element(&mut reader, e) else {
+                    if matches!(ev, Event::Start(_)) {
+                        depth = depth.saturating_add(1);
+                    }
+                    continue;
+                };
+                if el.is(Ns::Office, b"body") {
+                    break;
+                }
+                if el.is(Ns::Style, b"style") {
+                    let is_table = el.attr(Ns::Style, b"family") == Some("table") && matches!(ev, Event::Start(_));
+                    current = el.attr(Ns::Style, b"name").filter(|_| is_table).map(|n| (n.to_string(), depth));
+                } else if el.is(Ns::Style, b"table-properties")
+                    && let Some((name, at)) = &current
+                    && depth == at.saturating_add(1)
+                    && display_false(&mut reader, e)
+                    && out.len() < 100_000
+                {
+                    out.insert(name.clone());
+                }
+                if matches!(ev, Event::Start(_)) {
+                    depth = depth.saturating_add(1);
+                }
+            }
+            Ok(Event::End(_)) => {
+                depth = depth.saturating_sub(1);
+                if current.as_ref().is_some_and(|(_, at)| *at == depth) {
+                    current = None;
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Whether the element carries `table:display` with exactly the value "false".
+fn display_false(reader: &mut NsReader<&[u8]>, e: &BytesStart<'_>) -> bool {
+    e.attributes().flatten().any(|a| {
+        let (ns, local) = reader.resolver_mut().resolve_attribute(a.key);
+        matches!(ns, ResolveResult::Bound(n) if n.as_ref() == TABLE)
+            && local.as_ref() == b"display"
+            && a.normalized_value(XmlVersion::Explicit1_0).is_ok_and(|v| v == "false")
+    })
 }
 
 /// Applies each sheet's master page from `styles.xml`. `table_styles[i]` is sheet `i`'s
