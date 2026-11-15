@@ -302,16 +302,14 @@ fn implicit_row_fill(wb: &Workbook, sh: &Sheet, mut visit: impl FnMut(u32, u32, 
     if r0 > r1 || c0 > c1 {
         return;
     }
-    // At most MAX_COLS columns are examined once, regardless of the number of row styles.
+    // Hidden column metadata splits the footprint into visible intervals once.
     let mut visible = Vec::new();
     let mut start = c0;
-    for col in c0..=c1 {
-        if sh.is_col_hidden(col) {
-            if start < col {
-                visible.push((start, col - 1));
-            }
-            start = col + 1;
+    for (&col, _) in sh.cols.range(c0..=c1).filter(|(_, info)| info.hidden) {
+        if start < col {
+            visible.push((start, col - 1));
         }
+        start = col + 1;
     }
     if start <= c1 {
         visible.push((start, c1));
