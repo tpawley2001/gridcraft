@@ -90,18 +90,27 @@ fn script_extra_px(font_size: f32, subscript: bool) -> f32 {
     if subscript || font_size >= 12.0 - 0.01 { 4.0 } else { 2.0 }
 }
 
-/// Pixels a thick bottom border (`row@thickBot`) adds to a fitted `.xlsx` row that carries a
-/// stored height (`row@ht`). Measured for Arial 10 in Excel's own saves (17 -> 18 px, 12.75 ->
-/// 13.5 pt). On a row with no `ht` Excel's print adds nothing (Arial 10: 55 rows a page, like a plain
-/// row); Excel's files write `ht` and `thickBot` together, so which of the two it keys on is not
-/// known. Thin, medium and double borders add nothing.
+/// Pixels a medium or thick bottom border (`row@thickBot`, "medium or thick bottom border" in
+/// ECMA-376 Part 1, 18.3.1.73) adds to a fitted `.xlsx` row that carries a stored height (`row@ht`).
+/// Measured for thick with Arial 10 in Excel's own saves (17 -> 18 px, 12.75 -> 13.5 pt) and for
+/// medium with Calibri 11 (20 -> 21 px, 15.75 pt kept). On a row with no `ht` Excel's print adds
+/// nothing for either (Arial 10: 55 rows a page, like a plain row); Excel's files write `ht` and
+/// `thickBot` together, so which of the two it keys on is not known. Thin, hair, dotted, dashed,
+/// double and the medium dashed/dash-dot styles add nothing.
 const THICK_BOTTOM_EXTRA_PX: f32 = 1.0;
 
-/// Pixels a thick top border (`row@thickTop`) adds to a fitted `.xlsx` row that carries a stored
-/// height. Measured for Trebuchet MS 11 (22 -> 23 px, 16.5 -> 17.25 pt); with a thick bottom border
-/// too the row is 24 px (18 pt): the two add up. Like a thick bottom border, nothing on a row with
-/// no `ht`.
+/// Pixels a medium or thick top border (`row@thickTop`, ECMA-376 Part 1, 18.3.1.73) adds to a
+/// fitted `.xlsx` row that carries a stored height. Measured for thick with Trebuchet MS 11 (22 -> 23
+/// px, 16.5 -> 17.25 pt); with a thick bottom border too the row is 24 px (18 pt): the two add up.
+/// Medium is taken to count like thick, as the specification groups them. Like a bottom border,
+/// nothing on a row with no `ht`.
 const THICK_TOP_EXTRA_PX: f32 = 1.0;
+
+/// Whether a border style is "medium or thick" in the sense of `row@thickBot` / `row@thickTop`
+/// (ECMA-376 Part 1, 18.3.1.73): plain medium or thick, not the medium dashed or dash-dot styles.
+fn heavy_border(style: gridcraft_model::BorderStyle) -> bool {
+    matches!(style, gridcraft_model::BorderStyle::Medium | gridcraft_model::BorderStyle::Thick)
+}
 
 /// The default row height in screen pixels of a cell font (P), from [`FONTS`] or [`ROW_PX`];
 /// `None` when neither lists it.
@@ -242,9 +251,11 @@ impl<'a> RowPitch<'a> {
     /// [`script_extra_px`]; a superscript or subscript run of its string needs the run font's default
     /// row plus the extra for the run's size (a run with no `rFont` or `sz` takes the cell font's; a
     /// run font whose row is not known counts as the cell font). On a row that carries a stored
-    /// height, a counted cell with a thick bottom border adds [`THICK_BOTTOM_EXTRA_PX`] once to the
-    /// row's plain font need, and one with a thick top border adds [`THICK_TOP_EXTRA_PX`] once (the
-    /// two add up). The larger need wins.
+    /// height, a counted cell with a medium or thick bottom border adds [`THICK_BOTTOM_EXTRA_PX`]
+    /// once to the row's plain font need, and one with a medium or thick top border adds
+    /// [`THICK_TOP_EXTRA_PX`] once (the two add up; ECMA-376 Part 1, 18.3.1.73 defines `thickBot` and
+    /// `thickTop` as medium or thick). On a row without a stored height neither adds anything. The
+    /// larger need wins.
     fn fitted_px(&self, r: u32, default: f32) -> Option<f32> {
         let sh = self.sh;
         let has_ht = sh.rows.get(&r).is_some_and(|i| i.size.is_some());
@@ -260,8 +271,8 @@ impl<'a> RowPitch<'a> {
             let font_script = st.font.vert != gridcraft_model::VertAlign::Baseline;
             let pos = gridcraft_core::CellRef::new(r, c);
             let run_script = !sh.script_run_cells.is_empty() && sh.script_run_cells.contains(&pos);
-            let thick_bot_cell = has_ht && st.borders.bottom.style == gridcraft_model::BorderStyle::Thick;
-            let thick_top_cell = has_ht && st.borders.top.style == gridcraft_model::BorderStyle::Thick;
+            let thick_bot_cell = has_ht && heavy_border(st.borders.bottom.style);
+            let thick_top_cell = has_ht && heavy_border(st.borders.top.style);
             let thick = thick_bot_cell || thick_top_cell;
             let px = cell_font_px(&st.font.name, st.font.size);
             let matters = match px {

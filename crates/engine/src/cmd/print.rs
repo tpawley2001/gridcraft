@@ -655,6 +655,8 @@ mod macro_sheet_print_tests;
 #[cfg(test)]
 mod macro_sheet_text_tests;
 #[cfg(test)]
+mod medium_border_fit_tests;
+#[cfg(test)]
 mod normal_font_pairs_tests;
 #[cfg(test)]
 mod overflow_past_last_col_tests;
