@@ -223,3 +223,43 @@ fn grouped_shapes_survive_save_as_xlsx() {
         assert!((got.0 - r.0).abs() < 0.5 && (got.1 - r.1).abs() < 0.5 && (got.2 - r.2).abs() < 0.5 && (got.3 - r.3).abs() < 0.5, "{got:?} vs {r:?}");
     }
 }
+
+/// Change one synthetic FSP without changing its container lengths or anchors.
+fn with_fsp_flags(mut records: Vec<u8>, spt: u16, old: u32, new: u32) -> Vec<u8> {
+    let before = fsp(spt, old);
+    let after = fsp(spt, new);
+    let at = records.windows(before.len()).position(|w| w == before).unwrap();
+    records[at..at + before.len()].copy_from_slice(&after);
+    records
+}
+
+#[test]
+fn text_box_flips_survive_save_and_do_not_leak_to_the_next_shape() {
+    let flags = F_HAVE_ANCHOR | F_HAVE_SPT;
+    let flipped = with_fsp_flags(top_level(SPT_TEXT_BOX, OT_TEXT_BOX, (1, 2, 4, 6), Some("Note")), SPT_TEXT_BOX, flags, flags | 0xC0);
+    let plain = top_level(SPT_RECTANGLE, OT_RECTANGLE, (6, 1, 8, 3), None);
+    let (wb, _) = read_xls(&xls(&cat(&[&flipped, &plain]))).unwrap();
+    for book in [wb.clone(), read_xlsx(&write_xlsx(&wb).unwrap()).unwrap().0] {
+        let shapes = &book.sheet(0).unwrap().shapes;
+        let text = shapes.iter().find(|s| s.kind == ShapeKind::TextBox).unwrap();
+        assert_eq!((text.flip_h, text.flip_v), (true, true));
+        assert_eq!(text.text, "Note");
+        let rectangle = shapes.iter().find(|s| s.kind == ShapeKind::Rectangle).unwrap();
+        assert_eq!((rectangle.flip_h, rectangle.flip_v), (false, false));
+    }
+}
+
+#[test]
+fn group_children_use_their_own_flips_without_the_groups_flags() {
+    let flags = F_CHILD | F_HAVE_ANCHOR | F_HAVE_SPT;
+    let mut flipped = child(SPT_RECTANGLE, OT_OFFICE_ART, [0, 0, 50, 50], None);
+    flipped.1 = with_fsp_flags(flipped.1, SPT_RECTANGLE, flags, flags | 0x80);
+    let plain = child(SPT_RECTANGLE, OT_OFFICE_ART, [50, 50, 100, 100], None);
+    let g = group([0, 0, 100, 100], &client_anchor(1, 2, 5, 12), false, &[flipped, plain]);
+    let records = with_fsp_flags(g.1, 0, F_GROUP | F_HAVE_ANCHOR, F_GROUP | F_HAVE_ANCHOR | 0x40);
+    let (wb, _) = read_xls(&xls(&records)).unwrap();
+    let shapes = &wb.sheet(0).unwrap().shapes;
+    assert_eq!(shapes.len(), 2);
+    assert_eq!((shapes[0].flip_h, shapes[0].flip_v), (false, true));
+    assert_eq!((shapes[1].flip_h, shapes[1].flip_v), (false, false));
+}
