@@ -151,8 +151,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 ### 8. PivotTables: no slicers, calculated items, PivotCharts; unverified in Excel (F)
 - **Evidence:** `parity-checklist.md` missing `insert.slicer`, `insert.timeline`,
-  `insert.pivotChart`, `table.insertSlicer`; calculated items and GETPIVOTDATA missing (calculated fields
-  and values on rows done). Show Details (double-click a value, subtotal or grand total cell) lists
+  `insert.pivotChart`, `table.insertSlicer`; calculated items and Generate GetPivotData missing (calculated fields,
+  values on rows and GETPIVOTDATA done). Show Details (double-click a value, subtotal or grand total cell) lists
   its source records on a new sheet. The "Enable show details" option (`pivot.options`
   `enableShowDetails`, saved as `enableDrill`) turns it off; it has no PivotTable Options dialog
   yet (command only).
@@ -228,8 +228,7 @@ Whole-workbook output includes visible Excel 5 dialog sheets in tab order, drawi
   Margins are dragged on the rulers (#792). Different First Page and Odd & Even Pages headers/footers print, show in Page Layout view and round-trip through `.xlsx`, `.xls` and `.xlsb`. Remaining: pictures in headers/footers. Desktop now submits directly through craft-print with printer choice, copies, duplex and grayscale; browser printing stays available. Print ranges and driver tray/options UI remain. **Estimate:** 5–10 h.
 
 ### 15. Remaining functions and an oracle suite (F)
-- **Progress (2026-11-05):** INDIRECT accepts unquoted existing sheet names starting with a digit (for example `1月!A:A`), including monthly-sheet SUMIF totals.
-- 10 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 16–26 h.
+- 9 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 15–25 h.
   [function-parity.md](function-parity.md)
 
 ### 16. Collaboration and review (F)
@@ -504,6 +503,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 | 2026-10-15 | minor | §13: Solver prepares reports before committing the solution, model and report sheets together; report refusal preserves the workbook and Undo/Redo (#1050) |
 | 2026-10-13 | trivial | §4: multi-level category axes landed |
 | 2026-10-12 | minor | §9: next/previous sheet commands retain the current visible sheet and selection when there is no visible destination |
+| 2026-10-12 | minor | §8, §15: GETPIVOTDATA added (9 functions missing) |
 | 2026-10-12 | minor | rows auto-fit oversized fonts on open and whole-row/column formatting (#833) |
 | 2026-10-12 | minor | Page Layout view: dragging margins on the rulers (#792) removed from the §14 remainder |
 | 2026-10-12 | minor | §13: Forecast Sheet Forecast Start (hindcast) landed (#785) |

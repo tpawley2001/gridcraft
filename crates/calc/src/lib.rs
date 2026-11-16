@@ -5,6 +5,7 @@
 
 pub mod eval;
 mod legacy;
+mod pivotdata;
 mod precision;
 pub mod recalc;
 mod spill_index;

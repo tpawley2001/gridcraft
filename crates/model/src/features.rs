@@ -12,8 +12,9 @@ mod print;
 mod table_sort;
 
 pub use pivot::{
-    PivotArea, PivotAreaField, PivotAreaItem, PivotAreaReference, PivotCalcField, PivotConditionalFormat, PivotDateGroup, PivotField, PivotFilter,
-    PivotFormat, PivotFunc, PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue,
+    PIVOT_INDEXER, PivotArea, PivotAreaField, PivotAreaItem, PivotAreaReference, PivotCalcField, PivotConditionalFormat, PivotDataCell,
+    PivotDateGroup, PivotField, PivotFilter, PivotFormat, PivotFunc, PivotIndexer, PivotItemRef, PivotLayout, PivotLookup, PivotShowAs, PivotSort,
+    PivotTable, PivotValue, pivot_key,
 };
 pub use preset_geometry::preset_paths;
 pub use print::{
