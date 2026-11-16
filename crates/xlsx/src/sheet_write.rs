@@ -905,8 +905,7 @@ fn write_sheet_data(s: &mut String, data: SheetCellData<'_>, sid: &dyn Fn(gridcr
     let SheetCellData { workbook, index, sheet, overrides, extra, dynamic } = data;
     let xls_row_floor = sheet.fit_print_rows_without_default_floor.then(|| {
         let normal = &workbook.styles.get(gridcraft_model::StyleId::DEFAULT).font;
-        crate::xls::normal_font_row_twips(&normal.name, normal.size)
-            .map_or(gridcraft_model::DEFAULT_ROW_HEIGHT, |twips| f32::from(twips) / 15.0)
+        crate::xls::normal_font_row_twips(&normal.name, normal.size).map_or(gridcraft_model::DEFAULT_ROW_HEIGHT, |twips| f32::from(twips) / 15.0)
     });
     // A What-If data table's formula goes on its top-left result cell. A table whose cell the
     // sheet does not store still gets its cell, so the file keeps the table.

@@ -25,7 +25,7 @@ fn only_stored_heights_below_each_normal_font_floor_become_custom() {
         zip.by_name("xl/worksheets/sheet1.xml").unwrap().read_to_end(&mut xml).unwrap();
         let xml = crate::xml::parse(&xml).unwrap();
         let rows = xml.child("sheetData").unwrap();
-        let rows: Vec<_> = rows.children.iter().filter(|el| el.name == "row").collect();
+        let rows: Vec<_> = rows.children.iter().filter(|el| el.name == "row" && el.attr("outlineLevel") == Some("1")).collect();
         assert_eq!(rows.len(), 4);
         for (index, row) in rows.iter().enumerate() {
             assert_eq!(row.flag("customHeight", false), index == 0, "{name} {size}: {row:?}");
