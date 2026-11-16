@@ -1,4 +1,4 @@
-//! Cell notes, hyperlinks and frozen panes of a BIFF8 worksheet substream, from the public
+//! Cell notes, hyperlinks and frozen or split panes of a BIFF8 worksheet substream, from the public
 //! [MS-XLS] and [MS-OSHARED] specifications:
 //!
 //! - notes: Obj ([MS-XLS] 2.4.181, its FtCmo names the note's object id), TxO (2.4.329, the text,
@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 
 use gridcraft_core::{CellRef, MAX_ROWS, RangeRef};
-use gridcraft_model::{Comment, Hyperlink, Sheet};
+use gridcraft_model::{Comment, Hyperlink, Sheet, SheetSplit};
 
 use super::records::{Cursor, Record};
 use super::{Budget, XLS_MAX_COLS};
@@ -363,7 +363,22 @@ impl Objects {
                 }
             }
             (Some(p), Some(false)) if p.x > 0 || p.y > 0 => {
-                report.warn("Split (not frozen) window panes in .xls files are not supported and were removed.")
+                // Unfrozen: x and y are the split bars' positions in twips, as `.xlsx` xSplit/ySplit.
+                let top = u32::from(p.top).min(MAX_ROWS.saturating_sub(1));
+                let left = u32::from(p.left).min(XLS_MAX_COLS - 1);
+                let active_pane = match p.active {
+                    Some(0) => Some("bottomRight"),
+                    Some(1) => Some("topRight"),
+                    Some(2) => Some("bottomLeft"),
+                    Some(3) => Some("topLeft"),
+                    _ => None,
+                };
+                sheet.split = Some(SheetSplit {
+                    x: f64::from(p.x),
+                    y: f64::from(p.y),
+                    top_left: Some(CellRef::new(top, left)),
+                    active_pane: active_pane.map(str::to_string),
+                });
             }
             _ => {}
         }
