@@ -292,7 +292,8 @@ impl ArtWalk {
             if ty == drawing::FSP {
                 // The instance is the shape type ([MS-ODRAW] 2.2.40); the properties that follow it
                 // are its shape's.
-                props = ShapeProps { shape_type: ver >> 4, ..ShapeProps::default() };
+                let flags = u32_at(atom, 4).unwrap_or(0);
+                props = ShapeProps { shape_type: ver >> 4, flip_h: flags & 0x40 != 0, flip_v: flags & 0x80 != 0, ..ShapeProps::default() };
             } else if ty == drawing::FOPT || ty == drawing::TERTIARY_FOPT {
                 drawing::fopt(ver >> 4, atom, &mut props);
             } else if ty == FSPGR {
@@ -805,7 +806,7 @@ impl Embedded {
                     return;
                 };
                 // icv, lns, lnw, fAuto, the arrow word and iqu follow the header.
-                let Some([icv, lns, _lnw, f_auto, arrow_lo, arrow_hi, _iqu, _]) = data.get(34..42).and_then(|f| <[u8; 8]>::try_from(f).ok()) else {
+                let Some([icv, lns, _lnw, f_auto, arrow_lo, arrow_hi, iqu, _]) = data.get(34..42).and_then(|f| <[u8; 8]>::try_from(f).ok()) else {
                     report.warn("Shapes in .xls files are not imported yet.");
                     return;
                 };
@@ -817,7 +818,9 @@ impl Embedded {
                 props.no_line = lns == 5;
                 let arrow_word = u16::from_le_bytes([arrow_lo, arrow_hi]);
                 let kind = if arrow_word & 0x000F != 0 { ShapeKind::Arrow } else { ShapeKind::Line };
-                // iqu (the direction quadrant) maps to the shape's flips once the model has them.
+                // BIFF5 line start quadrant: clockwise from top-left; unknown values keep defaults.
+                props.flip_h = matches!(iqu, 1 | 2);
+                props.flip_v = matches!(iqu, 2 | 3);
                 self.shapes.push((Place::Cells(anchor), props, kind, None));
             }
             OT_TEXT_BOX => {
@@ -1056,8 +1059,8 @@ impl Embedded {
                 line: drawing::art_color(props.line_color, &table),
                 text: text.text,
                 format,
-                flip_h: false,
-                flip_v: false,
+                flip_h: props.flip_h,
+                flip_v: props.flip_v,
                 rotation: None,
                 math: Default::default(),
             });
@@ -1097,8 +1100,8 @@ impl Embedded {
                 line,
                 text: text.map_or(String::new(), |t| t.text),
                 format,
-                flip_h: false,
-                flip_v: false,
+                flip_h: props.flip_h,
+                flip_v: props.flip_v,
                 rotation: None,
                 math: Default::default(),
             });

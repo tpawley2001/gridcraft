@@ -259,6 +259,9 @@ pub(super) struct ShapeProps {
     pub hidden: bool,
     /// The OfficeArtFSP instance: the shape type ([MS-ODRAW] 2.2.40, msospt*).
     pub shape_type: u16,
+    /// Horizontal and vertical flips from OfficeArtFSP ([MS-ODRAW] 2.2.40).
+    pub flip_h: bool,
+    pub flip_v: bool,
     /// fillColor and lineColor as OfficeArtCOLORREFs, whatever their flags say.
     pub fill_color: Option<u32>,
     pub line_color: Option<u32>,
