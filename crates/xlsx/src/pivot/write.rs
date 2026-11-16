@@ -1161,6 +1161,9 @@ fn pivot_area_xml(a: &PivotArea, c: &Cache, value_count: usize) -> Option<String
                     *i as usize
                 }
                 PivotAreaItem::Label(l) => {
+                    // A shared item index. Without cacheIndex `v` is a position in the
+                    // pivotField's items; that is the same number here, because written item i
+                    // is shared item i (`<item x="i"/>`, subtotal items last).
                     let labels = labels.as_ref()?;
                     labels.iter().position(|x| x == l).or_else(|| labels.iter().position(|x| same(x, l)))?
                 }

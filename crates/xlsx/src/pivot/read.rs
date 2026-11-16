@@ -641,7 +641,7 @@ pub(super) const SUBTOTAL_FLAGS: [&str; 13] = [
 
 /// A pivot area, its fields and items named rather than indexed. `None` when a field index or
 /// shared item index is out of range.
-fn read_area(a: &El, cache: &CacheIn) -> Option<PivotArea> {
+fn read_area(a: &El, cache: &CacheIn, pfs: &[&El]) -> Option<PivotArea> {
     let mut area = PivotArea {
         field: match a.attr("field") {
             Some(v) => Some(area_field(cache, v)?),
@@ -674,7 +674,18 @@ fn read_area(a: &El, cache: &CacheIn) -> Option<PivotArea> {
         for x in r.kids("x").take(MAX_AREA_ITEMS) {
             let v = x.attr_u32("v").unwrap_or(0);
             let item = match (&field, by_position) {
-                (Some(PivotAreaField::Name(_)), false) => PivotAreaItem::Label(labels?.get(v as usize)?.clone()),
+                (Some(PivotAreaField::Name(_)), false) => {
+                    // Without cacheIndex, `v` is a position in the pivotField's whole `items` list
+                    // (view order, subtotal items included); with it, a shared item index.
+                    let shared = if area.cache_index {
+                        v as usize
+                    } else {
+                        let fi = r.attr("field").and_then(|f| f.trim().parse::<usize>().ok())?;
+                        let it = pfs.get(fi)?.child("items")?.kids("item").nth(v as usize)?;
+                        it.attr_u32("x")? as usize
+                    };
+                    PivotAreaItem::Label(labels.as_ref()?.get(shared)?.clone())
+                }
                 _ => PivotAreaItem::Index(v),
             };
             items.push(item);
@@ -694,10 +705,11 @@ fn read_area(a: &El, cache: &CacheIn) -> Option<PivotArea> {
 /// The PivotTable's own formatting (`formats`, §18.10.1.40/41). A format whose area can't be
 /// mapped to the cache is skipped, with one warning per PivotTable.
 fn read_formats(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, name: &str) -> Vec<PivotFormat> {
+    let pfs: Vec<&El> = x.child("pivotFields").map(|p| p.kids("pivotField").collect()).unwrap_or_default();
     let mut out = Vec::new();
     let mut skipped = false;
     for f in x.child("formats").into_iter().flat_map(|f| f.kids("format")).take(MAX_FORMATS) {
-        let Some(area) = f.child("pivotArea").and_then(|a| read_area(a, cache)) else {
+        let Some(area) = f.child("pivotArea").and_then(|a| read_area(a, cache, &pfs)) else {
             skipped = true;
             continue;
         };
