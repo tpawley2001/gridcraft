@@ -551,8 +551,9 @@ fn bof(rec: &Record<'_>) -> Result<(u16, u16), IoError> {
     Ok((c.u16()?, c.u16()?))
 }
 
-/// Excel's built-in password for workbooks that are encrypted but open without a prompt.
-const DEFAULT_PASSWORD: &str = "VelvetSweatshop";
+/// Excel's built-in password for workbooks that are encrypted but open without a prompt (legacy
+/// `.xls` and encrypted `.xlsx` packages alike).
+pub const DEFAULT_PASSWORD: &str = "VelvetSweatshop";
 
 /// Decrypts a stream whose globals begin with a FilePass ([MS-XLS] 2.4.117). Excel's default
 /// password is tried first, as Excel opens those workbooks without asking; then `password`, or

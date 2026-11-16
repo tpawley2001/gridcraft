@@ -115,6 +115,7 @@ mod xlsb_arrays_recalc;
 mod xlsb_list_recalc;
 mod xlsb_names_recalc;
 mod xlsb_pivot_refresh;
+mod xlsx_default_password_open;
 
 mod print_dialog_sheets;
 mod print_empty_workbook_area;

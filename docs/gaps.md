@@ -132,7 +132,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   places in the workbook, tooltips) and frozen panes. `.xls` is never
   written. Excel 5.0/95 (BIFF5) files open through the same reader (values, number formats, cell
   formatting, names and formulas; 8-bit code-page text); BIFF2-4 files are refused. Password-encrypted
-  `.xlsx` workbooks (Agile and Standard encryption) open with their password since #11, but are
+  `.xlsx` workbooks (Agile and Standard encryption) open with their password since #11, and
+  without a prompt when encrypted with Excel's default password, as `.xls` already did, but are
   saved without it: GridCraft can't write an encrypted file yet. Encrypted `.xls` (FILEPASS: XOR,
   RC4, RC4 CryptoAPI) open too: Excel's default password without a prompt, any other password
   when the user gives it; RC4-encrypted `.xlsx` files are still refused
@@ -291,6 +292,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | G0431: §7: `.xlsx` workbooks encrypted with Excel's default password open without a prompt, as `.xls` already did. |
 | 2026-11-15 | minor | G0430: XLSX PivotTables on a connection, the Data Model or another workbook survive save (from #2499). |
 | 2026-11-15 | minor | G0426: elbow connectors (`bentConnector2/3/4`) draw and print as open strokes, including elbows outside the shape box. |
 | 2026-11-15 | minor | G0425: XLSX PivotTable axes drop duplicate fields after unsupported grouping is removed, preferring real database fields; saving also guards against duplicate cache indices across rows, columns and pages. Data fields remain unchanged. |
