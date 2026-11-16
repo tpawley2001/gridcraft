@@ -617,7 +617,7 @@ fn embedded_object(pr: Option<&El>, shape: Option<&El>, sheet: &Sheet, kind: Emb
     let vml_print =
         shape.and_then(|s| s.child("ClientData")).and_then(|d| d.child("PrintObject")).map(|p| !p.text.trim().eq_ignore_ascii_case("false"));
     let print = pr.and_then(|pr| pr.attr_bool("print")).or(vml_print).unwrap_or(true);
-    Some(EmbeddedObject { anchor, print, kind, prog_id: prog_id.to_string() })
+    Some(EmbeddedObject { anchor, print, kind, prog_id: prog_id.to_string(), preview: None })
 }
 
 /// The `<controls>` element of a worksheet child (`controls`, or one inside AlternateContent).

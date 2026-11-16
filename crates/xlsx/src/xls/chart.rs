@@ -988,7 +988,7 @@ impl Embedded {
                 if !props.hidden && sheet.embedded_objects.len() < MAX_EMBEDDED {
                     let kind = if props.shape_type == SPT_HOST_CONTROL { EmbeddedObjectKind::ActiveX } else { EmbeddedObjectKind::Ole };
                     let anchor = place_at(sheet, &a);
-                    sheet.embedded_objects.push(EmbeddedObject { anchor, print: !props.no_print, kind, prog_id: String::new() });
+                    sheet.embedded_objects.push(EmbeddedObject { anchor, print: !props.no_print, kind, prog_id: String::new(), preview: None });
                 }
                 continue;
             };
@@ -1035,7 +1035,7 @@ impl Embedded {
                 break;
             }
             let anchor = place(sheet, &a);
-            sheet.embedded_objects.push(EmbeddedObject { anchor, print: true, kind: EmbeddedObjectKind::Ole, prog_id: String::new() });
+            sheet.embedded_objects.push(EmbeddedObject { anchor, print: true, kind: EmbeddedObjectKind::Ole, prog_id: String::new(), preview: None });
         }
         if (skipped && !store.damaged) || biff5_skipped {
             report.warn("Some pictures in .xls files use a format that isn't imported (only PNG, JPEG, EMF and WMF are).");

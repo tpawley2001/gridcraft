@@ -120,6 +120,7 @@ mod xlsx_default_password_open;
 mod xlsx_linked_book_values;
 mod xlsx_orphan_pivot_cache;
 mod xlsx_this_book_names;
+mod embedded_object_preview;
 
 mod print_dialog_sheets;
 mod print_empty_workbook_area;
