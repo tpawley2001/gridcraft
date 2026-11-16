@@ -106,6 +106,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 ### 7. Legacy `.xls` only partly read; encrypted workbooks can't be saved with a password (FF)
 - BIFF8 shapes retain their own horizontal/vertical flips, including grouped children; BIFF5 lines retain their start quadrant (`xls_shape_flips_tests.rs`).
+- BIFF8 `.xls` PtgNameX through the self SupBook with no ExternName records resolves the workbook's defined names like PtgName; formulas survive Save As `.xlsx` (`xls_internal_namex_tests.rs`).
 - `.xls` EMF and WMF pictures (stored or zlib-compressed) open as pictures and save as `.xlsx` `image/x-emf`/`image/x-wmf` parts; PICT and DIB pictures and embedded-object/ActiveX previews still keep a placeholder with one warning (`xls_metafile_picture_tests.rs`).
 - `.xls` property sets whose declared size overruns the stream keep properties within the available bytes, including custom properties on Save As `.xlsx`. Orphaned XFExt records are ignored silently; malformed records still warn (`xls_props_xfext_tests.rs`).
 - `.xls` shapes whose drawing spans CONTINUE records after a text box’s TxO import through the same OfficeArt path as MsoDrawing (`xls_drawing_in_continue_tests.rs`).
@@ -295,6 +296,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | G0439: BIFF8 `.xls` PtgNameX through a self SupBook without ExternName records resolves workbook and sheet-level defined names, keeping formulas through Save As `.xlsx`. |
 | 2026-11-15 | minor | G0437: `.xls` property sets with oversized declared sizes retain readable properties; orphaned XFExt records are ignored silently, while malformed records still warn. |
 | 2026-11-15 | minor | G0435: `.xls` imports BIFF8 shape flips and BIFF5 line start quadrants, preserving line and arrow direction on Save As `.xlsx`. |
 | 2026-11-15 | minor | G0433: gap 7, `.xls` split (unfrozen) panes are kept (Pane in twips, top-left cell and active pane) and saved to `.xlsx`; no warning. |

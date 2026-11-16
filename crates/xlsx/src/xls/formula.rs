@@ -353,6 +353,16 @@ fn area(r0: u32, r1: u32, c0: u16, c1: u16, base: CellRef, relative: bool, grid:
 }
 
 impl Links {
+    fn defined_name(&self, i: usize, mode: Mode, missing: &'static str) -> Result<String, Unsupported> {
+        let name = self.names.get(i).filter(|n| !n.is_empty()).ok_or(Unsupported(missing))?;
+        // A cell using a name the import drops would calculate to #NAME?: keep its
+        // saved result instead, as for references to other workbooks.
+        if !mode.is_name() && self.skipped.get(i) == Some(&true) {
+            return Err(Unsupported("defined names that were skipped"));
+        }
+        Ok(name.clone())
+    }
+
     /// The sheets XTI `ixti` names; with `external`, a read external workbook's sheets as
     /// `[n]Sheet` (a span as `[n]First` to `Last`), as the `.xlsx` formula text holds them.
     fn sheet_sel(&self, ixti: u16, external: bool) -> Result<Option<SheetSel>, Unsupported> {
@@ -376,10 +386,15 @@ impl Links {
         })
     }
 
-    fn extern_name(&self, ixti: u16, index: u32) -> Result<String, Unsupported> {
+    fn extern_name(&self, ixti: u16, index: u32, mode: Mode) -> Result<String, Unsupported> {
         let x = self.xti.get(usize::from(ixti)).ok_or(Unsupported("reference to a missing name link"))?;
         let book = usize::try_from(x.book).ok().and_then(|b| self.books.get(b)).ok_or(Unsupported("reference to a missing workbook link"))?;
         let i = usize::try_from(index).ok().and_then(|i| i.checked_sub(1)).ok_or(Unsupported("invalid name index"))?;
+        // Without ExternName records, the self SupBook's PtgNameX index names a Lbl,
+        // just like PtgName; populated ExternName tables retain their own indexing.
+        if book.internal && book.names.is_empty() {
+            return self.defined_name(i, mode, "reference to a missing name");
+        }
         if let Some(ext) = &book.external {
             // A name of a linked workbook: `[1]!Rate`, or `[1]Totals!Limit` when sheet-level.
             let n = ext.names.get(i).and_then(Option::as_ref).ok_or(Unsupported("a name in another workbook that can't be read"))?;
@@ -774,14 +789,8 @@ fn decode_in(
                 } else {
                     t.u32()?
                 };
-                let i = usize::try_from(index).ok().and_then(|i| i.checked_sub(1));
-                let name = i.and_then(|i| links.names.get(i)).filter(|n| !n.is_empty()).ok_or(Unsupported("reference to a missing defined name"))?;
-                // A cell using a name the import drops would calculate to #NAME?: keep its
-                // saved result instead, as for references to other workbooks.
-                if !mode.is_name() && i.and_then(|i| links.skipped.get(i)) == Some(&true) {
-                    return Err(Unsupported("defined names that were skipped"));
-                }
-                push(&mut stack, kids, Expr::Name(name.clone()))?;
+                let i = usize::try_from(index).ok().and_then(|i| i.checked_sub(1)).ok_or(Unsupported("reference to a missing defined name"))?;
+                push(&mut stack, kids, Expr::Name(links.defined_name(i, mode, "reference to a missing defined name")?))?;
             }
             0x24 | 0x2C => {
                 let (r, c) = grid.loc(&mut t)?;
@@ -846,7 +855,7 @@ fn decode_in(
             0x39 => {
                 let ixti = t.u16()?;
                 let i = t.u32()?;
-                push(&mut stack, kids, Expr::Name(links.extern_name(ixti, i)?))?;
+                push(&mut stack, kids, Expr::Name(links.extern_name(ixti, i, mode)?))?;
             }
             0x3A => {
                 let ixti = t.u16()?;
@@ -1076,6 +1085,34 @@ mod tests {
 
     fn xlsb_linked(rgce: &[u8], mode: Mode) -> Result<String, Unsupported> {
         decode_xlsb(rgce, &[], CellRef::new(0, 0), mode, &links()).map(|e| gridcraft_formula::print(&e))
+    }
+
+    #[test]
+    fn internal_name_x_uses_defined_name_mapping_and_skip_rules() {
+        let mut l = links();
+        l.names[0] = "_On2".into();
+        let name = [0x43, 1, 0, 0, 0];
+        let name_x = [0x59, 0, 0, 1, 0, 0, 0];
+        for skipped in [false, true] {
+            l.skipped[0] = skipped;
+            for mode in [Mode::Cell, Mode::Shared, Mode::Name, Mode::XlsName] {
+                let decode_text = |tokens: &[u8]| decode(tokens, &[], CellRef::new(0, 0), mode, &l).map(|e| gridcraft_formula::print(&e));
+                let expected = if skipped && !mode.is_name() { Err(Unsupported("defined names that were skipped")) } else { Ok("_On2".into()) };
+                assert_eq!(decode_text(&name), expected);
+                assert_eq!(decode_text(&name_x), expected);
+            }
+        }
+        l.skipped[0] = false;
+        l.names[0].clear();
+        assert_eq!(decode(&name_x, &[], CellRef::new(0, 0), Mode::Cell, &l), Err(Unsupported("reference to a missing name")));
+        // An internal book with ExternName records must use those, even for an index
+        // beyond their end that would otherwise be a valid Lbl index.
+        l.names = vec!["First".into(), "Second".into()];
+        l.books[0].names = vec!["ExternName".into()];
+        assert_eq!(l.extern_name(0, 1, Mode::Cell), Ok("ExternName".into()));
+        assert_eq!(l.extern_name(0, 2, Mode::Cell), Err(Unsupported("reference to a missing name")));
+        l.books[0].names.clear();
+        assert!(decode_xlsb(&name_x, &[], CellRef::new(0, 0), Mode::Cell, &l).is_err());
     }
 
     #[test]
