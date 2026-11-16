@@ -22,7 +22,7 @@ use std::fmt::Write as _;
 use gridcraft_core::CellRef;
 use gridcraft_model::{
     Anchor, AnchorMode, CONTROL_MAX, ControlAction, ControlKind, DEFAULT_DROP_LINES, EmbeddedObject, EmbeddedObjectKind, FormControl, ListSelection,
-    MacroInput, Sheet,
+    MacroInput, ObjectPreview, Sheet,
 };
 
 use crate::package::Rel;
@@ -617,7 +617,56 @@ fn embedded_object(pr: Option<&El>, shape: Option<&El>, sheet: &Sheet, kind: Emb
     let vml_print =
         shape.and_then(|s| s.child("ClientData")).and_then(|d| d.child("PrintObject")).map(|p| !p.text.trim().eq_ignore_ascii_case("false"));
     let print = pr.and_then(|pr| pr.attr_bool("print")).or(vml_print).unwrap_or(true);
-    Some(EmbeddedObject { anchor, print, kind, prog_id: prog_id.to_string() })
+    Some(EmbeddedObject { anchor, print, kind, prog_id: prog_id.to_string(), preview: None })
+}
+
+/// The largest preview picture read for an embedded object or ActiveX control.
+const MAX_PREVIEW_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The preview pictures of a sheet's embedded objects and ActiveX controls, each part read once
+/// however many objects name it (`None` remembered for a part that is missing, unreadable or not
+/// an image).
+#[derive(Default)]
+struct Previews {
+    by_part: HashMap<String, Option<ObjectPreview>>,
+}
+
+impl Previews {
+    /// The preview of an object: the image its properties element (`objectPr` / `controlPr`
+    /// `r:id`, ECMA-376 Part 1, 18.3.1.56) names among the sheet's relationships, else the image
+    /// its legacy VML shape names (`v:imagedata o:relid`) among the VML drawing's relationships.
+    fn find(&mut self, cx: &mut Ctx<'_>, pr: Option<&El>, shape: Option<&El>, rels: &[Rel], vml_rels: &[Rel]) -> Option<ObjectPreview> {
+        let from_pr = pr.and_then(|p| p.attr("id")).and_then(|id| image_rel(rels, id)).and_then(|t| self.read(cx, t));
+        from_pr.or_else(|| {
+            let id = shape.and_then(|s| s.child("imagedata")).and_then(|d| d.attr("relid").or_else(|| d.attr("id")))?;
+            let target = image_rel(vml_rels, id)?;
+            self.read(cx, target)
+        })
+    }
+
+    fn read(&mut self, cx: &mut Ctx<'_>, part: &str) -> Option<ObjectPreview> {
+        if let Some(p) = self.by_part.get(part) {
+            return p.clone();
+        }
+        let mime = crate::drawing::mime_for(part);
+        let preview = if mime.starts_with("image/") {
+            cx.pkg
+                .read_optional_limited(part, MAX_PREVIEW_BYTES)
+                .ok()
+                .flatten()
+                .filter(|d| !d.is_empty())
+                .map(|d| ObjectPreview { data: std::sync::Arc::new(d), mime: mime.to_string() })
+        } else {
+            None
+        };
+        self.by_part.insert(part.to_string(), preview.clone());
+        preview
+    }
+}
+
+/// The internal image part a relationship id names.
+fn image_rel<'r>(rels: &'r [Rel], id: &str) -> Option<&'r str> {
+    rels.iter().find(|r| r.id == id && r.kind == "image" && !r.external).map(|r| r.target.as_str())
 }
 
 /// The `<controls>` element of a worksheet child (`controls`, or one inside AlternateContent).
@@ -694,10 +743,18 @@ pub fn read(
     sheet: &mut Sheet,
 ) -> ReadControls {
     let mut read = HashSet::new();
-    let vml = match vml_rid.and_then(|id| rels.iter().find(|r| r.id == id && r.kind == "vmlDrawing")) {
+    let vml_rel = vml_rid.and_then(|id| rels.iter().find(|r| r.id == id && r.kind == "vmlDrawing"));
+    let vml = match vml_rel {
         Some(r) => cx.pkg.read_vml(&r.target).ok().flatten(),
         None => None,
     };
+    // The VML drawing's own relationships, for the pictures (`v:imagedata o:relid`) of embedded
+    // objects that have no `objectPr` naming their preview.
+    let vml_rels = match (vml_rel, &vml) {
+        (Some(r), Some(_)) => cx.pkg.rels(&r.target).unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    let mut previews = Previews::default();
     let shapes: Vec<&El> = vml.as_ref().map(|v| v.kids("shape").collect()).unwrap_or_default();
     // Looked up once per listed control: indexes keep a sheet of many controls linear.
     let mut by_number: HashMap<u64, &El> = HashMap::with_capacity(shapes.len());
@@ -810,7 +867,9 @@ pub fn read(
         if prop_kind == Some("ctrlProp") || sheet.embedded_objects.len() >= MAX_EMBEDDED {
             continue;
         }
-        if let Some(o) = embedded_object(ctl.child("controlPr"), shape, sheet, EmbeddedObjectKind::ActiveX, "") {
+        let pr = ctl.child("controlPr");
+        if let Some(mut o) = embedded_object(pr, shape, sheet, EmbeddedObjectKind::ActiveX, "") {
+            o.preview = previews.find(cx, pr, shape, rels, &vml_rels);
             sheet.embedded_objects.push(o);
         }
     }
@@ -821,7 +880,9 @@ pub fn read(
         }
         let shape = ole.attr("shapeId").and_then(shape_number).and_then(shape_of);
         let prog_id = ole.attr("progId").unwrap_or_default();
-        if let Some(o) = embedded_object(ole.child("objectPr"), shape, sheet, EmbeddedObjectKind::Ole, prog_id) {
+        let pr = ole.child("objectPr");
+        if let Some(mut o) = embedded_object(pr, shape, sheet, EmbeddedObjectKind::Ole, prog_id) {
+            o.preview = previews.find(cx, pr, shape, rels, &vml_rels);
             sheet.embedded_objects.push(o);
         }
     }

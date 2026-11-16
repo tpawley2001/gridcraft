@@ -38,6 +38,7 @@ mod disc_family_basis1_excel;
 mod drawing_alt_text;
 mod drawing_print_object;
 mod dynamicmetadata;
+mod embedded_object_preview;
 mod error_precedence;
 mod extreme_selection_moves;
 mod fill_multi_area;

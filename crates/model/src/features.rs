@@ -628,6 +628,19 @@ pub struct EmbeddedObject {
     /// The object's program id (`Word.Document.12`); empty for ActiveX controls and when the file
     /// gives none.
     pub prog_id: String,
+    /// The preview picture saved with the object (what Excel draws when the source program
+    /// isn't running); `None` when the file has none that can be read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<ObjectPreview>,
+}
+
+/// An embedded object's or ActiveX control's saved preview picture.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ObjectPreview {
+    pub data: std::sync::Arc<Vec<u8>>,
+    /// `image/png`, `image/jpeg`, `image/x-emf`, `image/x-wmf`, ... as for [`Image::mime`].
+    pub mime: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]

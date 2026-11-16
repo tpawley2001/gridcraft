@@ -115,6 +115,25 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
             pg.rect_stroke(x, y, w, h, width, c);
         }
     }
+    // Embedded objects and ActiveX controls print their saved preview picture, stretched to their
+    // place like a picture. One without a preview (or whose preview can't be decoded) draws nothing.
+    for (oi, o) in sh.embedded_objects.iter().enumerate().filter(|(_, o)| o.print) {
+        let Some(preview) = o.preview.as_ref().filter(|p| !p.data.is_empty()) else { continue };
+        let r = anchor_rect(sh, &o.anchor);
+        if !visible(r) {
+            continue;
+        }
+        let (x, y, w, h) = place(&o.anchor, r);
+        let (mw, mh) = (((w / 72.0) * 150.0).ceil().clamp(1.0, 4000.0) as u32, ((h / 72.0) * 150.0).ceil().clamp(1.0, 4000.0) as u32);
+        let decoded = pics.previews.entry((si, oi)).or_insert_with(|| decode_image(&preview.data, mw, mh));
+        if let Some((px, pw, ph)) = decoded.as_ref() {
+            let bytes = px.len();
+            if pics.image_bytes.saturating_add(bytes) <= super::MAX_EMBEDDED_IMAGE_BYTES {
+                pics.image_bytes += bytes;
+                pg.image_rgba(Rect::new(x, y, w, h), px, [*pw, *ph]);
+            }
+        }
+    }
     for shp in sh.shapes.iter().filter(|o| !o.hidden && !o.no_print) {
         let r = anchor_rect(sh, &shp.anchor);
         if !visible(r) {

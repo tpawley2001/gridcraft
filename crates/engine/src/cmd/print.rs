@@ -42,6 +42,8 @@ type DecodedPicture = (Vec<u8>, u32, u32);
 struct PicCache {
     /// Decoded pictures (bytes, width, height) keyed by (sheet, picture); `None` = undecodable.
     decoded: std::collections::HashMap<(usize, usize), Option<DecodedPicture>>,
+    /// Decoded preview pictures of embedded objects, keyed by (sheet, object), as for `decoded`.
+    previews: std::collections::HashMap<(usize, usize), Option<DecodedPicture>>,
     /// Laid-out charts (with their [`chart_cost`]) keyed by (sheet, chart), rendered once however
     /// many pages they touch. Only charts that can still be drawn are kept.
     charts: std::collections::HashMap<(usize, usize), (Vec<gridcraft_chart::Prim>, usize)>,
@@ -664,6 +666,8 @@ mod cut_column_draw_tests;
 mod cut_continuation_tests;
 #[cfg(test)]
 mod cut_strip_reach_tests;
+#[cfg(test)]
+mod embedded_object_preview_tests;
 #[cfg(test)]
 mod empty_pages_before_last_tests;
 #[cfg(test)]

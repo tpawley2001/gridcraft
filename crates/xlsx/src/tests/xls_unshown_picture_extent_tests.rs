@@ -124,6 +124,13 @@ fn xls_host_control_shape_is_an_activex_object() {
 }
 
 #[test]
+fn xls_unreadable_blip_leaves_no_preview_and_keeps_the_warning() {
+    let (wb, warnings) = open(&object(HOST_CONTROL, &[(0x4104, 2)], F_PRINT));
+    assert_eq!(wb.sheets[0].embedded_objects[0].preview, None);
+    assert_eq!(warnings.iter().filter(|w| *w == FORMAT_WARNING).count(), 1, "{warnings:?}");
+}
+
+#[test]
 fn xls_hidden_unshown_picture_is_not_printed() {
     // Group booleans: fUsefHidden + fHidden.
     let (wb, _) = open(&object(PICTURE_FRAME, &[(0x4104, 2), (0x03BF, 0x0002_0002)], F_PRINT));
