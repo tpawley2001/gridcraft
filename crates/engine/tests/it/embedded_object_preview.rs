@@ -14,7 +14,9 @@ const PNG: &[u8] = b"\x89PNG\r\n\x1a\nfake-preview-1";
 const PNG2: &[u8] = b"\x89PNG\r\n\x1a\nfake-preview-2";
 
 fn rels(items: &[(&str, &str, &str)]) -> String {
-    let mut s = String::from(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#);
+    let mut s = String::from(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
+    );
     for (id, kind, target) in items {
         s.push_str(&format!(r#"<Relationship Id="{id}" Type="{R}/{kind}" Target="{target}"/>"#));
     }
@@ -39,15 +41,22 @@ fn xlsx() -> Vec<u8> {
     );
     let vml = |relid: &str| {
         format!(
-            r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shapetype id="_x0000_t75" coordsize="21600,21600" o:spt="75" o:preferrelative="t" path="m@4@5l@4@11@9@11@9@5xe" filled="f" stroked="f"/><v:shape id="_x0000_s1025" type="#_x0000_t75" style="position:absolute;margin-left:48pt;margin-top:15pt;width:144pt;height:105pt;z-index:1"><v:imagedata o:relid="{relid}" o:title=""/><x:ClientData ObjectType="Pict"><x:SizeWithCells/><x:Anchor>1, 0, 1, 0, 4, 0, 8, 0</x:Anchor><x:CF>Pict</x:CF></x:ClientData></v:shape></xml>"#
+            r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shapetype id="_x0000_t75" coordsize="21600,21600" o:spt="75" o:preferrelative="t" path="m@4@5l@4@11@9@11@9@5xe" filled="f" stroked="f"/><v:shape id="_x0000_s1025" type="#_x0000_t75" style="position:absolute;margin-left:48pt;margin-top:15pt;width:144pt;height:105pt;z-index:1"><v:imagedata o:relid="{relid}" o:title=""/><x:ClientData ObjectType="Pict"><x:SizeWithCells/><x:Anchor>1, 0, 1, 0, 4, 0, 8, 0</x:Anchor><x:CF>Pict</x:CF></x:ClientData></v:shape></xml>"##
         )
     };
     let workbook = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="{MAIN}" xmlns:r="{R}"><sheets><sheet name="Pr" sheetId="1" r:id="rId1"/><sheet name="Vml" sheetId="2" r:id="rId2"/><sheet name="Missing" sheetId="3" r:id="rId3"/></sheets></workbook>"#
     );
-    let wb_rels = rels(&[("rId1", "worksheet", "worksheets/sheet1.xml"), ("rId2", "worksheet", "worksheets/sheet2.xml"), ("rId3", "worksheet", "worksheets/sheet3.xml")]);
+    let wb_rels = rels(&[
+        ("rId1", "worksheet", "worksheets/sheet1.xml"),
+        ("rId2", "worksheet", "worksheets/sheet2.xml"),
+        ("rId3", "worksheet", "worksheets/sheet3.xml"),
+    ]);
     let sheet_rels = |n: u32, img: Option<&str>| {
-        let mut v = vec![("rId1", "vmlDrawing".to_string(), format!("../drawings/vmlDrawing{n}.vml")), ("rId2", "oleObject".to_string(), format!("../embeddings/oleObject{n}.bin"))];
+        let mut v = vec![
+            ("rId1", "vmlDrawing".to_string(), format!("../drawings/vmlDrawing{n}.vml")),
+            ("rId2", "oleObject".to_string(), format!("../embeddings/oleObject{n}.bin")),
+        ];
         if let Some(i) = img {
             v.push(("rId3", "image".to_string(), format!("../media/{i}")));
         }
