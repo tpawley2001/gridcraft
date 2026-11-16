@@ -180,3 +180,47 @@ fn acl(bytes: &[u8]) -> Option<String> {
     }
     Some(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn audit_descriptor() -> Vec<u8> {
+        let mut bytes = vec![1, 0];
+        bytes.extend(0xaa10u16.to_le_bytes()); // Self-relative SACL: protected, inherited, requested.
+        for offset in [0u32, 0, 20, 0] {
+            bytes.extend(offset.to_le_bytes());
+        }
+        bytes.extend([4, 0, 28, 0, 1, 0, 0, 0]);
+        bytes.extend([2, 0xdf, 20, 0]);
+        bytes.extend(0xf00f01ffu32.to_le_bytes());
+        bytes.extend([1, 1, 0, 0, 0, 0, 0, 5]);
+        bytes.extend(18u32.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn audit_flags_and_all_abbreviated_rights() {
+        assert_eq!(
+            security_descriptor_to_sddl(&audit_descriptor()).as_deref(),
+            Some("S:PAIAR(AU;OICINPIOIDSAFA;GAGRGWGXRCSDWDWOCCDCLCSWRPWPDTLOCR;;;SY)")
+        );
+        assert_eq!(rights(0), "0x0");
+        assert_eq!(rights(0x100001), "0x100001");
+        assert_eq!(sid(&[1, 0, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa]).as_deref(), Some("S-1-0xFFEEDDCCBBAA"));
+    }
+
+    #[test]
+    fn truncated_components_are_rejected() {
+        let bytes = audit_descriptor();
+        for end in 0..bytes.len() {
+            assert_eq!(security_descriptor_to_sddl(&bytes[..end]), None, "prefix length {end}");
+        }
+        let mut bad = bytes.clone();
+        bad[22..24].copy_from_slice(&8u16.to_le_bytes());
+        assert_eq!(security_descriptor_to_sddl(&bad), None);
+        let mut bad = bytes;
+        bad[30..32].copy_from_slice(&3u16.to_le_bytes());
+        assert_eq!(security_descriptor_to_sddl(&bad), None);
+    }
+}
