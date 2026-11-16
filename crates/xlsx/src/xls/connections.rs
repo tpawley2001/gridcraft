@@ -484,13 +484,16 @@ fn text_query(r: &mut Reader<'_>) -> Res<TextPr> {
         r.next(EXT_STRING)?;
     }
     let fbit = |n: u16| flags & (1 << n) != 0;
-    // fFile must be set; a code page given by number (fUseNewiCpid) has no documented mapping.
-    let code_page = (flags >> 2) & 0x03;
-    let new_code_page = (flags >> 5) & 0x3FF;
-    if !fbit(0) || (fbit(15) && new_code_page > 2) {
+    // fFile must be set.
+    if !fbit(0) {
         return Err(Skip);
     }
+    // With fUseNewiCpid set and iCpidNew > 2, iCpid is unused and iCpidNew is only an optional
+    // optimisation hint ([MS-XLS] 2.4.330): no code page is written, so textPr's defaults apply.
+    let code_page = (flags >> 2) & 0x03;
+    let new_code_page = (flags >> 5) & 0x3FF;
     let file_type = match code_page {
+        _ if fbit(15) && new_code_page > 2 => None,
         0 => Some("mac"),
         1 => None,
         2 => Some("dos"),
