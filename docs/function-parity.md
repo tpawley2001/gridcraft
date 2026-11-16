@@ -1,6 +1,6 @@
 # Function parity: worksheet functions and formulas
 
-> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-15 · **Change:** minor (G0422: one-cell known_y's with two-dimensional known_x's returns `#REF!` in TREND, GROWTH, LINEST and LOGEST; earlier: COUNTIF, SUMIF and the other criteria functions return a `#REF!` range argument as the result; odd roots of negative numbers; earlier: TREND, GROWTH, LINEST and LOGEST read a one-cell known_y's as one observation of many x variables; earlier: GCD and LCM reject negative fractional arguments before truncation; earlier: RTD, DATESTRING and NUMBERSTRING answer `#N/A` instead of `#NAME?`; earlier: MID, REPLACE, FIND and SEARCH count UTF-16 positions; earlier: TEXT rejects two elapsed-time codes in one section; earlier: G0306: PRICE, YIELD, DURATION, MDURATION and COUPDAYSNC count days to the next coupon like Excel) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-15 · **Change:** minor (G0428: NOW, TODAY, the `&D`/`&T` print fields, Ctrl+; and date-typed years use the local clock, not UTC; earlier: G0422: one-cell known_y's with two-dimensional known_x's returns `#REF!` in TREND, GROWTH, LINEST and LOGEST; earlier: COUNTIF, SUMIF and the other criteria functions return a `#REF!` range argument as the result; odd roots of negative numbers; earlier: TREND, GROWTH, LINEST and LOGEST read a one-cell known_y's as one observation of many x variables; earlier: GCD and LCM reject negative fractional arguments before truncation; earlier: RTD, DATESTRING and NUMBERSTRING answer `#N/A` instead of `#NAME?`; earlier: MID, REPLACE, FIND and SEARCH count UTF-16 positions; earlier: TEXT rejects two elapsed-time codes in one section; earlier: G0306: PRICE, YIELD, DURATION, MDURATION and COUPDAYSNC count days to the next coupon like Excel) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's worksheet functions, category by category, against GridCraft's function library. Part of
 [target-app-parity.md](target-app-parity.md); gaps feed [gaps.md](gaps.md).
@@ -39,7 +39,7 @@ Excel's worksheet functions, category by category, against GridCraft's function 
 | Text | 50 | 48 | 48 | 96% | DETECTLANGUAGE, TRANSLATE |
 | Lookup and reference | 40 | 38 | 37 | 93% | GETPIVOTDATA, IMAGE (RTD is a `#N/A` stub) |
 | Compatibility | 40 | 40 | 40 | 100% | — |
-| Date and time | 25 | 25 | 25 | 100% | — |
+| Date and time | 25 | 25 | 25 | 100% | — (NOW and TODAY read the computer's local clock, daylight saving included, not UTC) |
 | Information | 22 | 21 | 21 | 95% | STOCKHISTORY |
 | Logical | 19 | 19 | 19 | 100% | — |
 | Database | 12 | 12 | 12 | 100% | — |
@@ -160,6 +160,7 @@ Positive fractional inputs still truncate, and signed zero remains valid. Covere
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | G0428: NOW() and TODAY() (and the `&D`/`&T` header fields, "Today" conditional formats, Ctrl+; and the year for dates typed without one) read the computer's local wall clock with daylight saving, as Excel does, instead of UTC (`crates/calc/tests/local_clock.rs`). |
 | 2026-11-15 | minor | G0422: TREND, GROWTH, LINEST and LOGEST reject known_x's with more than one row and more than one column for a one-cell known_y's with `#REF!`, before checking size or x values; single-row and single-column x are unchanged. |
 | 2026-11-15 | minor | COUNTIF(S), SUMIF(S), AVERAGEIF(S), MAXIFS and MINIFS return an error written as a range argument (`=SUMIF(#REF!,">0")` is `#REF!`, not 0), as Excel does; error cells inside a real range are unchanged. `^` and POWER take the real root of a negative base when 1/y, at 15 significant digits, is an odd whole number (`(-8)^(1/3)` = -2); other fractional powers of a negative base stay `#NUM!` (`criteria_ref_error_tests.rs`) |
 | 2026-11-12 | minor | TREND, GROWTH, LINEST and LOGEST with a one-cell known_y's read it as one observation: every known_x's cell in a single row or column is an x variable, new_x's needs the same cell count (else `#REF!`) and the result is one value; with a constant every slope is 0 and the intercept is y, without one the fit goes to the x with the largest absolute value, as Excel does, instead of `#REF!` (`regression_one_cell_y_excel.rs`) |

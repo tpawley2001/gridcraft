@@ -654,11 +654,11 @@ fn fill_spill(sheet: &mut gridcraft_model::Sheet, anchor: CellRef, range: RangeR
     sheet.spill_ranges.insert(anchor, range);
 }
 
-/// Current date-time as a serial (1900 system), from the system clock (browser clock on wasm).
-/// UTC; the local offset isn't available without platform calls. Falls back to a fixed date only
-/// when no clock is available.
+/// Current date-time as a serial (1900 system): the computer's local wall-clock time (daylight
+/// saving included), as Excel's NOW() reads it, from the system clock (browser clock on wasm).
+/// Falls back to a fixed date only when no clock is available.
 pub fn now_serial() -> f64 {
-    gridcraft_core::date::unix_now_ms().map_or(46302.5, gridcraft_core::date::serial_from_unix_ms)
+    gridcraft_core::date::local_now_serial().unwrap_or(46302.5)
 }
 
 /// Evaluates a formula in the context of a cell without storing it (conditional formats, data
