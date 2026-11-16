@@ -649,6 +649,8 @@ fn page_setup(s: &mut Session, p: &Json) -> Result<Json> {
 }
 
 #[cfg(test)]
+mod arial_subst_row_pitch_tests;
+#[cfg(test)]
 mod band_spill_in_draw_tests;
 #[cfg(test)]
 mod band_spill_in_more_tests;
