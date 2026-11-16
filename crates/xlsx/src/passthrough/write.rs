@@ -65,6 +65,7 @@ impl KeptOut {
     fn claim_with(&mut self, original: &str, third_party: bool) -> String {
         let lower = original.to_ascii_lowercase();
         let own = OWN_DIRS.iter().any(|d| lower.starts_with(d)) || (third_party && free_for_third_party(original));
+        let pivot_cache = lower.starts_with("xl/pivotcache/pivotcachedefinition");
         if own && self.used.insert(lower) {
             return original.to_string();
         }
@@ -75,7 +76,7 @@ impl KeptOut {
         };
         let stem = if own {
             format!("{stem}_")
-        } else if lower.starts_with("xl/pivotcache/pivotcachedefinition") {
+        } else if pivot_cache {
             // A distinct suffix leaves the native writer's numbered cache names available.
             "pivotCacheDefinition_kept".to_string()
         } else {
