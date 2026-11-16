@@ -244,6 +244,7 @@ Visible Excel 5 dialog sheets in XLSX have detached print views for whole-workbo
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | G0441: Save As `.xlsx` marks visible, non-custom `.xls` rows with stored heights below the Normal font's default as `customHeight="1"`, preserving their short printed heights; other rows and sheet formats keep their existing behavior (`xls_row_ht_save_tests.rs`). |
 | 2026-11-15 | minor | G0434: `.xls` freeforms (Office Art shape type 0), BIFF8 polygons and WordArt (types 136–175) open as freeform and WordArt shapes instead of being skipped, and survive Save As `.xlsx`. |
 | 2026-11-15 | minor | G0435: `.xls` imports BIFF8 shape flips and BIFF5 line start quadrants, preserving line and arrow direction on Save As `.xlsx`. |
 | 2026-11-15 | minor | G0433: `.xls` import keeps split (unfrozen) panes ([MS-XLS] 2.4.189 Pane with Window2 fFrozenRt = 0): bar positions in twips, rwTop/colLeft as the bottom-right pane's first cell, pnnAcct as the active pane; they save to `.xlsx` and no longer warn (#121). |

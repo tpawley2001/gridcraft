@@ -195,6 +195,7 @@ mod xls_protection_tests;
 mod xls_radar_area_tests;
 mod xls_relative_name_tests;
 mod xls_row_height_oor;
+mod xls_row_ht_save_boundaries;
 mod xls_row_ht_save_tests;
 mod xls_row_refit_tests;
 mod xls_selection_refu_tests;
