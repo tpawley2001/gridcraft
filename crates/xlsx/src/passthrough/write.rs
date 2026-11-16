@@ -73,7 +73,14 @@ impl KeptOut {
             Some((s, e)) => (s, format!(".{e}")),
             None => (file, String::new()),
         };
-        let stem = if own { format!("{stem}_") } else { "kept".to_string() };
+        let stem = if own {
+            format!("{stem}_")
+        } else if lower.starts_with("xl/pivotcache/pivotcachedefinition") {
+            // A distinct suffix leaves the native writer's numbered cache names available.
+            "pivotCacheDefinition_kept".to_string()
+        } else {
+            "kept".to_string()
+        };
         loop {
             self.n = self.n.saturating_add(1);
             let file = format!("{stem}{}{ext}", self.n);
