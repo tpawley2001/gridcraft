@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use gridcraft_model::Color;
+use gridcraft_model::{Color, GeometryPath, PathCommand};
 
 use super::{Budget, MAX_PICTURE_BYTES, inflate};
 use crate::ReadReport;
@@ -37,6 +37,18 @@ const PROP_LINE_COLOR: u16 = 0x01C0;
 const PROP_LINE_START_ARROWHEAD: u16 = 0x01D0;
 const PROP_LINE_END_ARROWHEAD: u16 = 0x01D1;
 const PROP_LINE_BOOLEANS: u16 = 0x01FF;
+/// Geometry properties ([MS-ODRAW] 2.3.6): the coordinate box (geoLeft, geoTop, geoRight and
+/// geoBottom, consecutive ids), the vertices and the segments.
+const PROP_GEO_LEFT: u16 = 0x0140;
+const PROP_GEO_BOTTOM: u16 = 0x0143;
+const PROP_VERTICES: u16 = 0x0145;
+const PROP_SEGMENT_INFO: u16 = 0x0146;
+/// Geometry text properties ([MS-ODRAW] 2.3.22): WordArt's text, size and font.
+const PROP_GTEXT_UNICODE: u16 = 0x00C0;
+const PROP_GTEXT_SIZE: u16 = 0x00C3;
+const PROP_GTEXT_FONT: u16 = 0x00C5;
+/// The default geometry box's right and bottom ([MS-ODRAW] 2.3.6.3, 2.3.6.4).
+const GEO_EXTENT: i32 = 21_600;
 /// GroupShapeBooleanProperties: `fHidden` and `fUsefHidden`.
 const HIDDEN: u32 = 0x0000_0002;
 const USE_HIDDEN: u32 = 0x0002_0000;
@@ -276,6 +288,99 @@ pub(super) struct ShapeProps {
     /// The Obj record holds an FtPictFmla: the picture is the preview of an embedded or linked
     /// OLE object.
     pub ole: bool,
+    /// The geometry and WordArt properties (boxed: most shapes have none).
+    pub art: Box<ArtProps>,
+}
+
+/// A shape's geometry and geometry-text properties ([MS-ODRAW] 2.3.6, 2.3.22).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct ArtProps {
+    /// geoLeft, geoTop, geoRight and geoBottom, when given.
+    pub geo: [Option<i32>; 4],
+    /// pVertices: the geometry's points, as written (relative to nothing yet).
+    pub vertices: Option<Vec<(i64, i64)>>,
+    /// pSegmentInfo: the MSOPATHINFO entries (2-byte form).
+    pub segments: Option<Vec<u16>>,
+    /// gtextUNICODE, gtextSize (points) and gtextFont: a WordArt's text and its font.
+    pub gtext: Option<String>,
+    pub gtext_size: Option<f32>,
+    pub gtext_font: Option<String>,
+}
+
+impl ArtProps {
+    /// A freeform's outline from its geometry properties: one path per moveTo, in the box
+    /// geoLeft..geoRight x geoTop..geoBottom. `None` without vertices, or when the segments ask
+    /// for more points than there are.
+    pub(super) fn freeform_paths(&self) -> Option<Vec<GeometryPath>> {
+        let points = self.vertices.as_deref().filter(|p| !p.is_empty())?;
+        let [left, top, right, bottom] = self.geo;
+        let (left, top) = (i64::from(left.unwrap_or(0)), i64::from(top.unwrap_or(0)));
+        let (w, h) = (i64::from(right.unwrap_or(GEO_EXTENT)) - left, i64::from(bottom.unwrap_or(GEO_EXTENT)) - top);
+        let mut next = points.iter().map(|&(x, y)| (x - left, y - top));
+        let new_path = |at: (i64, i64)| GeometryPath {
+            w,
+            h,
+            fill: true,
+            stroke: true,
+            shade: Default::default(),
+            commands: vec![PathCommand::MoveTo(at.0, at.1)],
+        };
+        let Some(segments) = self.segments.as_deref() else {
+            // No segments: one open polyline through every point.
+            let mut path = new_path(next.next()?);
+            path.commands.extend(next.map(|(x, y)| PathCommand::LineTo(x, y)));
+            return Some(vec![path]);
+        };
+        let mut paths: Vec<GeometryPath> = Vec::new();
+        for &seg in segments {
+            let count = seg & 0x1FFF;
+            match seg >> 13 {
+                // lineTo `count` times; a line before any moveTo starts a path where it ends.
+                0 => {
+                    for _ in 0..count {
+                        let (x, y) = next.next()?;
+                        match paths.last_mut() {
+                            Some(p) => p.commands.push(PathCommand::LineTo(x, y)),
+                            None => paths.push(new_path((x, y))),
+                        }
+                    }
+                }
+                // curveTo: `count` cubic Béziers of three points each.
+                1 => {
+                    for _ in 0..count {
+                        let c = [next.next()?, next.next()?, next.next()?];
+                        match paths.last_mut() {
+                            Some(p) => p.commands.push(PathCommand::CubicBezTo(c)),
+                            None => paths.push(new_path(c[2])),
+                        }
+                    }
+                }
+                2 => paths.push(new_path(next.next()?)),
+                3 => {
+                    if let Some(p) = paths.last_mut() {
+                        p.commands.push(PathCommand::Close);
+                    }
+                }
+                4 => break,
+                // An escape (editing hints, noFill, noLine) or a client escape: its points are
+                // skipped, nothing is drawn.
+                kind @ (5 | 6) => {
+                    for _ in 0..(seg & 0xFF) {
+                        next.next()?;
+                    }
+                    if let (5, Some(p)) = (kind, paths.last_mut()) {
+                        match (seg >> 8) & 0x1F {
+                            0x0A => p.fill = false,
+                            0x0B => p.stroke = false,
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        (!paths.is_empty()).then_some(paths)
+    }
 }
 
 /// An OfficeArtCOLORREF as a model colour: bytes red, green, blue, flags. With `fSchemeIndex` the
@@ -303,13 +408,21 @@ pub(super) fn art_color(op: Option<u32>, table: &[u32; 64]) -> Color {
 pub(super) fn fopt(count: u16, body: &[u8], props: &mut ShapeProps) {
     let table = usize::from(count).saturating_mul(6);
     let mut complex = table;
+    // Cleared once a complex property's size can't be trusted: the data after it isn't read.
+    let mut complex_ok = true;
     for i in 0..usize::from(count) {
         let at = i * 6;
         let (Some(opid), Some(op)) = (u16_at(body, at), u32_at(body, at.saturating_add(2))) else { break };
         let id = opid & 0x3FFF;
         let is_complex = opid & 0x8000 != 0;
-        let extra = if is_complex { usize::try_from(op).unwrap_or(usize::MAX) } else { 0 };
-        let data = body.get(complex..complex.saturating_add(extra)).unwrap_or_default();
+        let mut extra = if is_complex { usize::try_from(op).unwrap_or(usize::MAX) } else { 0 };
+        if is_complex && matches!(id, PROP_VERTICES | PROP_SEGMENT_INFO) {
+            match complex_ok.then(|| array_len(body.get(complex..).unwrap_or_default(), op)).flatten() {
+                Some(len) => extra = len,
+                None => complex_ok = false,
+            }
+        }
+        let data = if complex_ok { body.get(complex..complex.saturating_add(extra)).unwrap_or_default() } else { &[] };
         match id {
             PROP_PIB if !is_complex => props.pib = Some(op),
             PROP_NAME if is_complex => props.name = utf16(data),
@@ -320,10 +433,75 @@ pub(super) fn fopt(count: u16, body: &[u8], props: &mut ShapeProps) {
             PROP_FILL_BOOLEANS if !is_complex => props.no_fill = op & USE_FILLED != 0 && op & FILLED == 0,
             PROP_LINE_BOOLEANS if !is_complex => props.no_line = op & USE_LINE != 0 && op & LINE == 0,
             PROP_LINE_START_ARROWHEAD | PROP_LINE_END_ARROWHEAD if !is_complex => props.arrow |= op != 0,
+            PROP_GEO_LEFT..=PROP_GEO_BOTTOM if !is_complex => {
+                if let Some(slot) = props.art.geo.get_mut(usize::from(id - PROP_GEO_LEFT)) {
+                    *slot = Some(i32::from_le_bytes(op.to_le_bytes()));
+                }
+            }
+            PROP_VERTICES if is_complex && complex_ok => props.art.vertices = vertices(data),
+            PROP_SEGMENT_INFO if is_complex && complex_ok => props.art.segments = segments(data),
+            PROP_GTEXT_UNICODE if is_complex && complex_ok => props.art.gtext = utf16(data).map(|t| t.replace("\r\n", "\n").replace('\r', "\n")),
+            PROP_GTEXT_SIZE if !is_complex => props.art.gtext_size = Some(op as f32 / 65_536.0).filter(|s| *s > 0.0),
+            PROP_GTEXT_FONT if is_complex && complex_ok => props.art.gtext_font = utf16(data),
             _ => {}
         }
         complex = complex.saturating_add(extra);
     }
+}
+
+/// The size of an IMsoArray property's data ([MS-ODRAW] 2.2.51): its 6-byte header (`nElems`,
+/// `nElemsAlloc`, `cbElem`) and `nElems` elements. Files written by Excel leave the header out of
+/// the property's `op`, so `op` is taken with or without it; any other `op`, or an array running
+/// past `data`, is `None`.
+fn array_len(data: &[u8], op: u32) -> Option<usize> {
+    let n = usize::from(u16_at(data, 0)?);
+    let elems = n.checked_mul(elem_size(u16_at(data, 4)?))?;
+    let op = usize::try_from(op).ok()?;
+    let len = if op == elems.checked_add(6)? {
+        op
+    } else if op == elems {
+        op.checked_add(6)?
+    } else {
+        return None;
+    };
+    (len <= data.len()).then_some(len)
+}
+
+/// An IMsoArray's element size: `cbElem`, where 0xFFF0 is 4 bytes.
+fn elem_size(cb_elem: u16) -> usize {
+    if cb_elem == 0xFFF0 { 4 } else { usize::from(cb_elem) }
+}
+
+/// The elements of an IMsoArray (`data` begins with its header and holds all of it).
+fn elements(data: &[u8]) -> Option<(usize, impl Iterator<Item = &[u8]>)> {
+    let n = usize::from(u16_at(data, 0)?);
+    let size = elem_size(u16_at(data, 4)?);
+    if size == 0 {
+        return None;
+    }
+    let body = data.get(6..6usize.checked_add(n.checked_mul(size)?)?)?;
+    Some((size, body.chunks_exact(size)))
+}
+
+/// pVertices: points of two signed 16-bit (4-byte elements) or 32-bit (8-byte) coordinates.
+fn vertices(data: &[u8]) -> Option<Vec<(i64, i64)>> {
+    let (size, elems) = elements(data)?;
+    elems
+        .map(|e| match size {
+            4 => Some((i64::from(u16_at(e, 0)? as i16), i64::from(u16_at(e, 2)? as i16))),
+            8 => Some((i64::from(u32_at(e, 0)? as i32), i64::from(u32_at(e, 4)? as i32))),
+            _ => None,
+        })
+        .collect()
+}
+
+/// pSegmentInfo: MSOPATHINFO entries of 2 bytes, or 4 bytes whose low 16 bits are read the same.
+fn segments(data: &[u8]) -> Option<Vec<u16>> {
+    let (size, elems) = elements(data)?;
+    if size != 2 && size != 4 {
+        return None;
+    }
+    elems.map(|e| u16_at(e, 0)).collect()
 }
 
 /// A null-terminated (or not) UTF-16LE string; `None` when empty.
