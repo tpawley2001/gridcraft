@@ -106,6 +106,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 ### 7. Legacy `.xls` only partly read; encrypted workbooks can't be saved with a password (FF)
 - BIFF8 shapes retain their own horizontal/vertical flips, including grouped children; BIFF5 lines retain their start quadrant (`xls_shape_flips_tests.rs`).
+- BIFF8 `.xls` PtgNameX through the self SupBook with no ExternName records resolves the workbook's defined names like PtgName; formulas survive Save As `.xlsx` (`xls_internal_namex_tests.rs`).
 - `.xls` EMF and WMF pictures (stored or zlib-compressed) open as pictures and save as `.xlsx` `image/x-emf`/`image/x-wmf` parts; PICT and DIB pictures and embedded-object/ActiveX previews still keep a placeholder with one warning (`xls_metafile_picture_tests.rs`).
 - `.xls` shapes whose drawing spans CONTINUE records after a text box’s TxO import through the same OfficeArt path as MsoDrawing (`xls_drawing_in_continue_tests.rs`).
 - Rows fitted to their content (on open and after an edit) take each line's height from the font's measured default row height, n lines of a listed font being n of its rows (Arial 10 = 12.75 pt a line, as Excel stores them); fonts outside the measured table keep the size-scaled estimate (`row_fit_font_tests.rs`).
@@ -294,6 +295,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | G0439: BIFF8 `.xls` PtgNameX through a self SupBook without ExternName records resolves workbook and sheet-level defined names, keeping formulas through Save As `.xlsx`. |
 | 2026-11-15 | minor | G0435: `.xls` imports BIFF8 shape flips and BIFF5 line start quadrants, preserving line and arrow direction on Save As `.xlsx`. |
 | 2026-11-15 | minor | G0433: gap 7, `.xls` split (unfrozen) panes are kept (Pane in twips, top-left cell and active pane) and saved to `.xlsx`; no warning. |
 | 2026-11-15 | minor | G0432: gap 7: `.xls` EMF and WMF pictures open as pictures and save to `.xlsx`. |
