@@ -1,6 +1,6 @@
 //! Save-height thresholds follow Normal, independently of the stored sheet default.
 
-use super::xls_tests::{one_sheet_with, rec, u16s};
+use super::xls_tests::{cat, one_sheet_with, rec, u16s};
 use crate::{read_xls, write_xlsx};
 use gridcraft_model::{LineInfo, Style, StyleTable};
 use std::io::Read;
@@ -8,8 +8,11 @@ use std::io::Read;
 #[test]
 fn only_stored_heights_below_each_normal_font_floor_become_custom() {
     for (name, size, floor) in [("Arial", 8.0, 15.0), ("Arial", 10.0, 17.0), ("Yu Gothic", 11.0, 25.0), ("Unknown font", 11.0, 20.0)] {
-        // Read a real XLS sheet to establish the format-specific flag, then vary Normal.
-        let (mut wb, _) = read_xls(&one_sheet_with(&rec(0x0225, &u16s(&[0, 255])))).unwrap();
+        // Read a real XLS sheet with a ROW record (row 21, which the loop below leaves alone) to
+        // establish the format-specific flag, then vary Normal.
+        let records = cat(&[&rec(0x0225, &u16s(&[0, 255])), &rec(0x0208, &cat(&[&u16s(&[20, 0, 1, 255, 0, 0]), &0x100u32.to_le_bytes()]))]);
+        let (mut wb, _) = read_xls(&one_sheet_with(&records)).unwrap();
+        assert!(wb.sheets[0].fit_print_rows_without_default_floor, "precondition: an .xls sheet with ROW records");
         let mut normal = Style::default();
         normal.font.name = name.into();
         normal.font.size = size;
