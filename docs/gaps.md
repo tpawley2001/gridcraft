@@ -78,17 +78,17 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - **Estimate:** 25–35 h for beta (40–60 h full). [chart-parity.md](chart-parity.md)
 
 ### 5. Text in non-Latin scripts doesn't render or export (L)
-- **Missing:** cross-platform script coverage, Devanagari/Thai shaping verification, non-Latin PDF and Arabic UI layout.
+- **Missing:** cross-platform script coverage, Devanagari/Thai shaping verification, non-Latin PDF outside Arabic and Arabic UI layout.
 - **Evidence:** system-font fallback for CJK, Thai and Hebrew landed in #38 (closed #32); #142
   (Chinese text) awaits confirmation; #54 (symbols as boxes on Fedora). Arabic shared shaping/bidi,
   editing and cell Context/LTR/RTL now have focused regressions and full gates. Arabic font
   delivery and PDF output are separate PRs; other script shaping still needs verification.
-- **Missing:** CJK font fallback, complex shaping (Arabic, Devanagari, Thai), bidi, non-Latin PDF.
+- **Missing:** CJK font fallback, complex shaping (Arabic, Devanagari, Thai), bidi, non-Latin PDF outside Arabic.
 - **Evidence:** system-font fallback for CJK, Thai and Hebrew landed in #38 (closed #32), and for
   Arabic (system, fontconfig and craft-fonts faces); a UI font with Arabic of its own (DejaVu Sans
   in the Flatpak) still draws interface Arabic ahead of fontconfig's choice (#229); #142
   (Chinese text) awaits confirmation; #54 (symbols as boxes on Fedora); no shaping for Arabic or
-  Devanagari; PDF writer uses 14 standard fonts only.
+  Devanagari in the UI. PDF now shapes Arabic with licensed glyph outlines, preserves cell reading direction, and mirrors RTL sheets.
 - **Impact:** blocks most of the world's users even with an English UI.
 - **Estimate:** 12–20 h. [localization-parity.md](localization-parity.md)
 
@@ -446,6 +446,7 @@ XLSX shapes, text boxes and pictures now retain click hyperlinks and tooltips on
 | 2026-11-01 | minor | §4: chart data tables implemented for column, bar, line, area and compatible combo charts, with legend keys and border settings, live source values, XLSX round-trip and print/PDF; other chart gaps remain. |
 | 2026-10-31 | minor | §13: Solver Options (Max Evaluations, Integer Optimality and the Evolutionary options), saved with the model |
 | 2026-10-31 | minor | §13: Solver Load/Save Model (`data.solverSaveModel`, `data.solverLoadModel`) and Reset All (`data.solverReset`), with buttons in the Solver Parameters dialog |
+| 2026-10-26 | minor | §5: Arabic PDF output preserves cell direction, joined glyphs and RTL sheet geometry. Other script and UI gaps remain. |
 | 2026-11-01 | minor | §19: XLSB array constants and PtgMemArea caches now stay live in cell, shared, array and defined-name formulas; malformed payloads keep saved results. |
 | 2026-11-01 | minor | §3: Office add-in content survives XLSX saves: a content add-in's `mc:AlternateContent` drawing anchor, its `webextension` part (with its own rels) and its fallback snapshot picture, and the workbook's `webextensiontaskpanes` part; add-ins are not shown, and an add-in whose part is missing is left out so nothing dangles |
 | 2026-11-01 | minor | §3, §17: XLSX keeps grouped pictures, text boxes and shapes (`grpSp`) and their images on save; not shown yet |

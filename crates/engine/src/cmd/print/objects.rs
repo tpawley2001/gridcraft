@@ -1,6 +1,6 @@
 use super::draw::{Block, PdfMeasure, Xf, draw_prims, rgb_of};
 use super::text::wrap_lines;
-use super::{Anchor, Font, Page, RangeRef, Rect, ShapeKind, Sheet, Value, Workbook};
+use super::{Anchor, Font, Page, Point, RangeRef, Rect, ShapeKind, Sheet, TextDirection, Value, Workbook};
 
 /// Cell pictures fit the current cell (or merged-cell) rectangle without changing aspect ratio.
 pub(super) fn draw_cell_picture(pg: &mut Page, data: &[u8], rect: (f32, f32, f32, f32), k: f32) {
@@ -87,10 +87,11 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
     let visible = |r: (f64, f64, f64, f64)| r.2 > 0.0 && r.3 > 0.0 && r.0 < sx1 && r.0 + r.2 > sx0 && r.1 < sy1 && r.1 + r.3 > sy0;
     // An object moves with the row it is anchored to (rows print at their printed pitch); its
     // own size scales like every printed length.
-    let place =
-        |a: &Anchor, r: (f64, f64, f64, f64)| (bx + ((r.0 - sx0) as f32) * b.k, b.y(a.cell.row) + a.dy * b.k, r.2 as f32 * b.k, r.3 as f32 * b.k);
+    let place = |a: &Anchor, r: (f64, f64, f64, f64)| {
+        (b.text_x(bx + ((r.0 - sx0) as f32) * b.k, r.2 as f32 * b.k), b.y(a.cell.row) + a.dy * b.k, r.2 as f32 * b.k, r.3 as f32 * b.k)
+    };
     pg.save();
-    pg.clip_rect(bx, by, bw, bh);
+    pg.clip_rect(b.text_x(bx, bw), by, bw, bh);
     draw_sparklines(pg, wb, si, sh, b, block);
     // A linked picture without a cached copy has no bytes to draw.
     for (imi, im) in sh.images.iter().enumerate().filter(|(_, o)| !o.hidden && !o.no_print && !o.data.is_empty()) {
@@ -262,9 +263,19 @@ fn draw_sparklines(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, b: &Bloc
         }
         let vals = values_of(sp);
         let style = gridcraft_chart::sparkline_style(sp, &wb.theme, [0x15, 0x60, 0x82], &vals, &groups);
-        let (x, y, w, h) = b.rect(RangeRef::cell(sp.cell));
+        let (x, y, w, h) = b.drawn_rect(RangeRef::cell(sp.cell));
         let (wpx, hpx) = (w / b.k, h / b.k);
-        let prims = gridcraft_chart::render_sparkline_styled(sp.kind, &vals, &style, wpx, hpx);
+        let mut prims = gridcraft_chart::render_sparkline_styled(sp.kind, &vals, &style, wpx, hpx);
+        if sh.right_to_left {
+            for prim in &mut prims {
+                match prim {
+                    gridcraft_chart::Prim::Rect { x, w, .. } => *x = wpx - *x - *w,
+                    gridcraft_chart::Prim::Line { pts, .. } => pts.iter_mut().for_each(|p| p[0] = wpx - p[0]),
+                    gridcraft_chart::Prim::Circle { cx, .. } => *cx = wpx - *cx,
+                    _ => {}
+                }
+            }
+        }
         draw_prims(pg, &prims, Xf { ox: x, oy: y, k: b.k });
     }
 }
@@ -366,7 +377,7 @@ fn draw_shape_text(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b
     // bottom), in points at the page's scale.
     let inset = |v: Option<i32>, default: i32| (v.unwrap_or(default) as f32 / 12700.0 * b.scale).clamp(-1.0e4, 1.0e4);
     let (il, it, ir, ib) = (inset(fm.inset_left, 91440), inset(fm.inset_top, 45720), inset(fm.inset_right, 91440), inset(fm.inset_bottom, 45720));
-    let lines = wrap_lines(&shp.text, font, size, (w - il - ir).max(size));
+    let lines = wrap_lines(&shp.text, font, size, (w - il - ir).max(size), TextDirection::Auto);
     let block_h = lines.len().min(500) as f32 * size * 1.2;
     let mut yy = match anchor {
         ShapeTextAnchor::Top => y + it,
@@ -374,7 +385,7 @@ fn draw_shape_text(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b
         ShapeTextAnchor::Bottom => y + h - ib - block_h,
     } + size * 0.8;
     for l in lines.iter().take(500) {
-        let lw = gridcraft_pdf::text_width(font, size, l);
+        let lw = gridcraft_pdf::text_width_with_direction(font, size, &l.text, l.direction);
         let lx = match align {
             ShapeTextAlign::Left => x + il,
             ShapeTextAlign::Center => x + il + (w - il - ir - lw) / 2.0,
@@ -383,7 +394,7 @@ fn draw_shape_text(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b
         // WordArt's drop shadow: the line again, offset, in the shadow colour (under the text).
         if let Some(sc) = fm.text_shadow.and_then(|c| rgb_of(c, wb)) {
             let off = (size * 0.06).max(0.5);
-            pg.text(lx + off, yy + off, size, font, sc, l);
+            pg.text_with_direction(Point::new(lx + off, yy + off), size, font, sc, &l.text, l.direction);
         }
         // WordArt's text outline, as on screen: the line in the outline colour, offset in eight
         // directions by half the outline width, under the filled text.
@@ -392,10 +403,10 @@ fn draw_shape_text(pg: &mut Page, wb: &Workbook, shp: &gridcraft_model::Shape, b
         {
             let d = (ow * b.scale / 2.0).clamp(0.25, 20.0);
             for (dx, dy) in [(-1.0, -1.0), (0.0, -1.0), (1.0, -1.0), (-1.0, 0.0), (1.0, 0.0), (-1.0, 1.0), (0.0, 1.0), (1.0, 1.0)] {
-                pg.text(lx + dx * d, yy + dy * d, size, font, oc, l);
+                pg.text_with_direction(Point::new(lx + dx * d, yy + dy * d), size, font, oc, &l.text, l.direction);
             }
         }
-        pg.text(lx, yy, size, font, color, l);
+        pg.text_with_direction(Point::new(lx, yy), size, font, color, &l.text, l.direction);
         yy += size * 1.2;
     }
 }

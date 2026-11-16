@@ -22,7 +22,8 @@ fn book(show_formulas: bool) -> Workbook {
 
 fn pdf(wb: &Workbook) -> (Vec<u8>, usize) {
     let opts = PrintOptions { all_sheets: true, ..PrintOptions::default() };
-    render_pdf(wb, &layouts(wb, &opts), "book.xlsm", "")
+    let pdf = render_pdf(wb, &layouts(wb, &opts), "book.xlsm", "").unwrap();
+    (pdf.bytes, pdf.pages)
 }
 
 fn contains(hay: &[u8], needle: &str) -> bool {

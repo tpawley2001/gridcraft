@@ -3,6 +3,11 @@ use super::{
     block, bool_param, edit, json, rewrite, shift_cell_features, str_param, target_range, target_sheet, with,
 };
 
+#[cfg(test)]
+pub(super) fn compiled() -> bool {
+    true
+}
+
 // ---------------------------------------------------------------- tables
 
 pub(super) fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
@@ -51,7 +56,7 @@ pub(super) fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
             let sh = cx.sheet_mut(sheet)?;
             // The header row pushes the data down one row: never off the end of the sheet.
             let last = RangeRef::new(CellRef::new(MAX_ROWS - 1, r.start.col), CellRef::new(MAX_ROWS - 1, r.end.col));
-            if sh.cells.iter_range(last).any(|(_, x)| x.formula.is_some() || !x.value.is_empty()) {
+            if sh.cells.iter_range(last).any(|(_, x)| x.has_content()) {
                 return Err(EngineError::Other("To prevent possible loss of data, cells can't be pushed off the end of the worksheet.".into()));
             }
             sh.cells.shift_rows_in_cols(r.start.col, r.end.col, r.start.row, 1);
@@ -93,6 +98,7 @@ pub(super) fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
             names.push(n);
         }
         sh.tables.push(Table {
+            query_table: None,
             id,
             name: name.clone(),
             range: r,
@@ -100,7 +106,21 @@ pub(super) fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
             totals_row: false,
             columns: names
                 .into_iter()
-                .map(|n| TableColumn { name: n, totals: TotalsFn::None, totals_label: None, formula: None, unique_name: None, query_field_id: None, xml: None, header_row_dxf: None, data_dxf: None, totals_row_dxf: None, header_row_cell_style: None, data_cell_style: None, totals_row_cell_style: None })
+                .map(|n| TableColumn {
+                    query_field_id: None,
+                    name: n,
+                    totals: TotalsFn::None,
+                    totals_label: None,
+                    formula: None,
+                    unique_name: None,
+                    xml: None,
+                    header_row_dxf: None,
+                    data_dxf: None,
+                    totals_row_dxf: None,
+                    header_row_cell_style: None,
+                    data_cell_style: None,
+                    totals_row_cell_style: None,
+                })
                 .collect(),
             style,
             banded_rows: true,
@@ -111,7 +131,20 @@ pub(super) fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
             filter: vec![],
             table_type: None,
             connection_id: None,
-            query_table: None,
+            header_row_dxf: None,
+            data_dxf: None,
+            totals_row_dxf: None,
+            header_row_cell_style: None,
+            data_cell_style: None,
+            totals_row_cell_style: None,
+            header_row_border_dxf: None,
+            table_border_dxf: None,
+            totals_row_border_dxf: None,
+            sort: None,
+            comment: None,
+            insert_row: None,
+            insert_row_shift: None,
+            published: None,
         });
         cx.structural = true;
         Ok(json!({"table": name, "range": r.a1()}))
@@ -212,7 +245,10 @@ fn write_totals(sh: &mut Sheet, ti: usize) {
         let c = CellRef::new(row, t.range.start.col + i as u32);
         if let Some(code) = col.totals.subtotal_code() {
             let f = format!("=SUBTOTAL({code},{}[{}])", t.name, col.name);
-            sh.set_cell(c, Cell { formula: Some(std::sync::Arc::new(Formula::new(&f))), value: gridcraft_core::Value::Empty, style: sh.style_id(c) });
+            sh.set_cell(
+                c,
+                Cell { formula: Some(std::sync::Arc::new(Formula::new(&f))), value: gridcraft_core::Value::Empty, style: sh.style_id(c), py: None },
+            );
         } else if let Some(l) = &col.totals_label {
             sh.set_value(c, gridcraft_core::Value::text(l.as_str()));
         } else {
