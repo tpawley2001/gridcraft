@@ -209,6 +209,7 @@ fn calculated_table_column_keeps_formula_and_cell_value() {
     sh.cells.set(at("A2"), Cell::value(Value::Number(3.0)));
     sh.cells.set(at("B2"), formula("A2*2", 6.0));
     sh.tables.push(Table {
+        query_table: None,
         id: 1,
         name: "Data".into(),
         range: range("A1:B2"),
@@ -216,6 +217,7 @@ fn calculated_table_column_keeps_formula_and_cell_value() {
         totals_row: false,
         columns: vec![
             TableColumn {
+                query_field_id: None,
                 name: "Input".into(),
                 totals: TotalsFn::None,
                 totals_label: None,
@@ -230,6 +232,7 @@ fn calculated_table_column_keeps_formula_and_cell_value() {
                 totals_row_cell_style: None,
             },
             TableColumn {
+                query_field_id: None,
                 name: "Output".into(),
                 totals: TotalsFn::None,
                 totals_label: None,
@@ -290,6 +293,7 @@ fn this_row_references_are_written_in_long_form() {
     sh.cells.set(at("A2"), Cell::value(Value::Number(3.0)));
     sh.cells.set(at("B2"), formula("Data[@Input]*2", 6.0));
     sh.tables.push(Table {
+        query_table: None,
         id: 1,
         name: "Data".into(),
         range: range("A1:B2"),
@@ -297,6 +301,7 @@ fn this_row_references_are_written_in_long_form() {
         totals_row: false,
         columns: vec![
             TableColumn {
+                query_field_id: None,
                 name: "Input".into(),
                 totals: TotalsFn::None,
                 totals_label: None,
@@ -311,6 +316,7 @@ fn this_row_references_are_written_in_long_form() {
                 totals_row_cell_style: None,
             },
             TableColumn {
+                query_field_id: None,
                 name: "Output".into(),
                 totals: TotalsFn::None,
                 totals_label: None,
@@ -494,6 +500,7 @@ fn implicit_intersection_metadata_distinguishes_table_rows_and_columns() {
     let mut wb = Workbook::new();
     let sh = wb.sheet_mut(0).unwrap();
     sh.tables.push(Table {
+        query_table: None,
         id: 1,
         name: "Data".into(),
         range: range("A1:B3"),
@@ -501,6 +508,7 @@ fn implicit_intersection_metadata_distinguishes_table_rows_and_columns() {
         totals_row: false,
         columns: vec![
             TableColumn {
+                query_field_id: None,
                 name: "Input".into(),
                 totals: TotalsFn::None,
                 totals_label: None,
@@ -515,6 +523,7 @@ fn implicit_intersection_metadata_distinguishes_table_rows_and_columns() {
                 totals_row_cell_style: None,
             },
             TableColumn {
+                query_field_id: None,
                 name: "Output".into(),
                 totals: TotalsFn::None,
                 totals_label: None,

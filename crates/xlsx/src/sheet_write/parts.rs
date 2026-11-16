@@ -577,6 +577,7 @@ mod tests {
     #[test]
     fn repeated_headers_are_renamed_without_retrying_suffixes() {
         let col = |n: &str| TableColumn {
+            query_field_id: None,
             name: n.into(),
             totals: TotalsFn::None,
             totals_label: None,
@@ -593,6 +594,7 @@ mod tests {
         let mut columns: Vec<TableColumn> = (0..10_000).map(|_| col("Total")).collect();
         columns[1] = col("total3");
         let t = Table {
+            query_table: None,
             id: 1,
             name: "T".into(),
             range: RangeRef::parse("A1:NTP2").unwrap(),

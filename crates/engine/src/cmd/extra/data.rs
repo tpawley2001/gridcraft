@@ -27,6 +27,7 @@ pub(super) fn table_resize(s: &mut Session, p: &Json) -> Result<Json> {
             let name = if h.is_empty() { format!("Column{}", i + 1) } else { h.clone() };
             let existing = t.columns.iter().find(|c| c.name.eq_ignore_ascii_case(&name)).cloned();
             cols.push(existing.unwrap_or(TableColumn {
+                query_field_id: None,
                 name,
                 totals: TotalsFn::None,
                 totals_label: None,

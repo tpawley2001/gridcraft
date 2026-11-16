@@ -298,6 +298,7 @@ fn list_col(payload: &[u8]) -> Result<TableColumn, IoError> {
     let caption = b.string(255, true)?;
     let total = b.string(8189, true)?;
     Ok(TableColumn {
+        query_field_id: None,
         name: caption.or_else(|| unique_name.clone()).unwrap_or_default(),
         totals,
         totals_label: total.filter(|_| totals != TotalsFn::Custom),
@@ -353,6 +354,7 @@ fn table(bytes: &[u8], ctx: Context<'_>, dxfs: &[Style], report: &mut ReadReport
     let display = b.string(255, true)?;
     let xml_table = list_type == 2;
     let mut t = Table {
+        query_table: None,
         id: 0,
         name: display.or(name).unwrap_or_default(),
         range,

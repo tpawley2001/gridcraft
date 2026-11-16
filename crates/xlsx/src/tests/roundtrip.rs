@@ -345,6 +345,7 @@ fn sample() -> Workbook {
         group: Default::default(),
     });
     s.tables.push(Table {
+        query_table: None,
         id: 1,
         name: "Sales Table".into(),
         range: rr("P1:R5"),
@@ -352,6 +353,7 @@ fn sample() -> Workbook {
         totals_row: true,
         columns: vec![
             TableColumn {
+                query_field_id: None,
                 name: "Region".into(),
                 totals: TotalsFn::None,
                 totals_label: Some("Total".into()),
@@ -366,6 +368,7 @@ fn sample() -> Workbook {
                 totals_row_cell_style: None,
             },
             TableColumn {
+                query_field_id: None,
                 name: "Amount".into(),
                 totals: TotalsFn::Sum,
                 totals_label: None,
@@ -380,6 +383,7 @@ fn sample() -> Workbook {
                 totals_row_cell_style: None,
             },
             TableColumn {
+                query_field_id: None,
                 name: "Tax".into(),
                 totals: TotalsFn::Custom,
                 totals_label: Some("SUM(R2:R4)".into()),
@@ -993,6 +997,7 @@ fn writing_repairs_invalid_models() {
     // A table whose header cells disagree with its columns, with duplicate column names.
     s.set_value(at("A1"), Value::Number(1.0));
     s.tables.push(Table {
+        query_table: None,
         id: 1,
         name: "1bad name".into(),
         range: rr("A1:C3"),
@@ -1000,6 +1005,7 @@ fn writing_repairs_invalid_models() {
         totals_row: false,
         columns: vec![
             TableColumn {
+                query_field_id: None,
                 name: "X".into(),
                 totals: TotalsFn::None,
                 totals_label: None,
@@ -1014,6 +1020,7 @@ fn writing_repairs_invalid_models() {
                 totals_row_cell_style: None,
             },
             TableColumn {
+                query_field_id: None,
                 name: "x".into(),
                 totals: TotalsFn::None,
                 totals_label: None,
@@ -1593,6 +1600,7 @@ fn table_newline_column_and_backslash_name_survive() {
     s.set_value(at("B1"), Value::text("Name"));
     s.set_value(at("B2"), Value::text("x"));
     let col = |n: &str| TableColumn {
+        query_field_id: None,
         name: n.into(),
         totals: TotalsFn::None,
         totals_label: None,
@@ -1607,6 +1615,7 @@ fn table_newline_column_and_backslash_name_survive() {
         totals_row_cell_style: None,
     };
     s.tables.push(Table {
+        query_table: None,
         id: 1,
         name: "\\_Prime.1".into(),
         range: rr("A1:B2"),
@@ -1654,6 +1663,7 @@ fn header_and_totals_table_without_data_row_survives() {
     let mut wb = Workbook::new();
     let s = wb.sheet_mut(0).unwrap();
     s.tables.push(Table {
+        query_table: None,
         id: 1,
         name: "Table1".into(),
         range: rr("A1:B2"),
@@ -1661,6 +1671,7 @@ fn header_and_totals_table_without_data_row_survives() {
         totals_row: true,
         columns: vec![
             TableColumn {
+                query_field_id: None,
                 name: "Name".into(),
                 totals: TotalsFn::None,
                 totals_label: Some("Total".into()),
@@ -1675,6 +1686,7 @@ fn header_and_totals_table_without_data_row_survives() {
                 totals_row_cell_style: None,
             },
             TableColumn {
+                query_field_id: None,
                 name: "Amount".into(),
                 totals: TotalsFn::Sum,
                 totals_label: None,
@@ -1974,12 +1986,14 @@ fn a_table_filter_criteria_survive_a_round_trip() {
         s.set_value(at(&format!("A{}", r + 1)), Value::text(v));
     }
     s.tables.push(Table {
+        query_table: None,
         id: 1,
         name: "Sales".into(),
         range: rr("A1:A4"),
         header_row: true,
         totals_row: false,
         columns: vec![TableColumn {
+            query_field_id: None,
             name: "Region".into(),
             totals: TotalsFn::None,
             totals_label: None,
@@ -2044,6 +2058,7 @@ fn a_partial_sheet_filter_is_not_folded_into_a_table() {
         s.set_value(at(a), Value::text(v));
     }
     let column = |name: &str| TableColumn {
+        query_field_id: None,
         name: name.into(),
         totals: TotalsFn::None,
         totals_label: None,
@@ -2058,6 +2073,7 @@ fn a_partial_sheet_filter_is_not_folded_into_a_table() {
         totals_row_cell_style: None,
     };
     s.tables.push(Table {
+        query_table: None,
         id: 1,
         name: "Sales".into(),
         range: rr("A1:B3"),

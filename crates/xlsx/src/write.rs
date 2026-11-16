@@ -840,6 +840,7 @@ mod table_id_tests {
 
     fn table(id: u32, range: &str) -> Table {
         Table {
+            query_table: None,
             id,
             name: String::new(),
             range: RangeRef::parse(range).unwrap(),
