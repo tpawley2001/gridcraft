@@ -30,6 +30,10 @@ pub enum Item {
     Path { subpaths: Vec<Vec<[f32; 2]>>, closed: bool, fill: Option<[u8; 3]>, stroke: Option<([u8; 3], f32)>, even_odd: bool },
     /// A bitmap stretched into `rect` = [x, y, w, h]; RGBA8, rows top-down.
     Image { rect: [f32; 4], rgba: Vec<u8>, size: [u32; 2] },
+    /// A run of text. `origin` = the baseline-left point in picture-relative coordinates (0..1 across
+    /// the frame, like paths); `size` = the em height as a fraction of the frame height; `angle` in
+    /// degrees counter-clockwise (from the font's escapement); colour 0xRRGGBB as [r, g, b].
+    Text { origin: [f32; 2], size: f32, angle: f32, text: String, face: String, bold: bool, italic: bool, color: [u8; 3] },
 }
 
 /// Most records interpreted; the rest of a longer picture is not drawn.

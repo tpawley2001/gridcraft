@@ -52,7 +52,7 @@ fn paths(d: &[Item]) -> Vec<PathView> {
     d.iter()
         .filter_map(|i| match i {
             Item::Path { subpaths, fill, stroke, .. } => Some((subpaths.clone(), *fill, *stroke)),
-            Item::Image { .. } => None,
+            _ => None,
         })
         .collect()
 }
@@ -139,7 +139,7 @@ fn stretchdibits_24bpp_bitmap_becomes_an_rgba_image_over_its_destination() {
         .iter()
         .filter_map(|i| match i {
             Item::Image { rect, rgba, size } => Some((*rect, rgba.clone(), *size)),
-            Item::Path { .. } => None,
+            _ => None,
         })
         .collect();
     assert_eq!(imgs.len(), 1, "one bitmap");

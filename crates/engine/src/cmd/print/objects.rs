@@ -107,6 +107,7 @@ pub(super) fn draw_metafile(pg: &mut Page, d: &crate::metafile::Drawing, frame: 
                     pg.image_rgba(Rect::new(x + rect[0] * w, y + rect[1] * h, rect[2] * w, rect[3] * h), rgba, *size);
                 }
             }
+            Item::Text { .. } => {}
         }
     }
 }

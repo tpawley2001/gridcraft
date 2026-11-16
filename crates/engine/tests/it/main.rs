@@ -123,6 +123,7 @@ mod xlsx_orphan_pivot_cache;
 mod xlsx_this_book_names;
 
 mod emf_render;
+mod emf_text;
 mod print_dialog_sheets;
 mod print_empty_workbook_area;
 mod print_inherited_row_fill;
