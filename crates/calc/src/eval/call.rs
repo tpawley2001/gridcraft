@@ -1,7 +1,7 @@
 use super::array::{Acc, Agg, broadcast_dim, broadcast_len, zip2, zip3};
 use super::format::same_kind;
 use super::reference_fns::RefArg;
-use super::special::{ev_shape, resized_sum_range, resizes_sum_range};
+use super::special::{ev_shape, linked_parts, resized_sum_range, resizes_sum_range, takes_reference};
 use super::{Area, Arg, Array, CellError, Ev, Evaluator, Expr, FnCtx, Lambda, Pipe, Value, compare, err};
 use std::sync::Arc;
 
@@ -307,7 +307,12 @@ impl<'h> Evaluator<'h> {
             return Ev::V(Value::number(count as f64));
         }
         match self.eval(&args[0]) {
-            Ev::R(areas) if is_sheet => areas.first().map_or(err(CellError::Ref), |area| Ev::V(Value::number(area.sheet as f64 + 1.0))),
+            Ev::R(areas) if is_sheet => match areas.first() {
+                // A sheet of a linked workbook has no number in this one.
+                Some(area) if linked_parts(area.sheet).is_some() => err(CellError::NA),
+                Some(area) => Ev::V(Value::number(area.sheet as f64 + 1.0)),
+                None => err(CellError::Ref),
+            },
             Ev::R(areas) => {
                 let mut sheets: Vec<usize> = areas.iter().map(|area| area.sheet).collect();
                 sheets.dedup();
@@ -342,6 +347,9 @@ impl<'h> Evaluator<'h> {
         let mut evaluated = Vec::with_capacity(args.len());
         for (i, a) in args.iter().enumerate() {
             let ev = self.eval(a);
+            if let Some(refused) = self.refused_reference(spec.name, i, &ev, a) {
+                return refused;
+            }
             let arg = self.builtin_arg(spec, args.len(), i, ev, matches!(a, Expr::Missing), &mut state);
             evaluated.push(arg);
         }
@@ -360,6 +368,21 @@ impl<'h> Evaluator<'h> {
         let arg = self.builtin_arg(spec, args.len(), 0, ev, missing, &mut state);
         let (criteria, lambda) = (state.criteria, state.lambda);
         Ev::V(self.call_builtin(spec, &[arg], criteria, lambda))
+    }
+
+    /// Range parameters of the *IF(S) family take only references, and not references into a
+    /// linked workbook: Excel answers `#VALUE!` (or the cell's error) while the source workbook is
+    /// closed. A written error (`#REF!` left by a deleted range, here or in a linked workbook:
+    /// `[1]Data!#REF!`) is that error. `None`: the argument is taken.
+    fn refused_reference(&mut self, name: &str, i: usize, ev: &Ev, a: &Expr) -> Option<Ev> {
+        let linked = matches!(ev, Ev::R(areas) if areas.iter().any(|x| linked_parts(x.sheet).is_some()));
+        if !(takes_reference(name, i) && (linked || matches!(a, Expr::Error(_) | Expr::LinkedRefError(_)))) {
+            return None;
+        }
+        Some(err(match self.deref(ev.clone()) {
+            Value::Error(e) => e,
+            _ => CellError::Value,
+        }))
     }
 
     /// One evaluated argument of a worksheet function, read into the value the function gets.
@@ -452,6 +475,11 @@ impl<'h> Evaluator<'h> {
             let mut evaluated = Vec::with_capacity(evs.len());
             for (i, arg) in evs.into_iter().enumerate() {
                 let RefArg::One(ev) = arg else { return err(CellError::Value) };
+                if let Some(a) = args.get(i)
+                    && let Some(refused) = self.refused_reference(spec.name, i, &ev, a)
+                {
+                    return refused;
+                }
                 let missing = args.get(i).is_some_and(|a| matches!(a, Expr::Missing));
                 let arg = self.builtin_arg(spec, args.len(), i, ev, missing, &mut state);
                 evaluated.push(arg);
@@ -517,7 +545,7 @@ impl<'h> Evaluator<'h> {
 
     /// Adds one area to `acc`; `Err` is the result the function ends with.
     fn aggregate_area(&mut self, kind: Agg, a: &Area, acc: &mut Acc) -> Result<(), Ev> {
-        if !a.range.is_single() {
+        if !a.range.is_single() && linked_parts(a.sheet).is_none() {
             // Adding the block's remembered sum to anything but +0.0 would add in another order.
             // COUNT never reads the sum, so it may reuse every block.
             if (kind == Agg::Count || acc.sum.to_bits() == 0)

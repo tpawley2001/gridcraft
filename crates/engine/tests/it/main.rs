@@ -116,6 +116,7 @@ mod xlsb_list_recalc;
 mod xlsb_names_recalc;
 mod xlsb_pivot_refresh;
 mod xlsx_default_password_open;
+mod xlsx_linked_book_values;
 mod xlsx_orphan_pivot_cache;
 mod xlsx_this_book_names;
 

@@ -37,9 +37,9 @@ pub use style::{
     Underline, VAlign, VertAlign,
 };
 pub use workbook::{
-    CalcMode, CalcSettings, CellStyleId, CustomTableStyle, DefinedName, DocProps, EQUATION_BUDGET_MESSAGE, MAX_EQUATION_LAYOUT_BYTES, PhoneticProps,
-    PhoneticRun, PhoneticString, ShowObjects, TableStyleElement, TableStyles, UpdateLinks, WindowRect, Workbook, WorkbookLocks, WorkbookOptions,
-    WorkbookView,
+    CalcMode, CalcSettings, CellStyleId, CustomTableStyle, DefinedName, DocProps, EQUATION_BUDGET_MESSAGE, ExternalBook, ExternalName, ExternalSheet,
+    MAX_EQUATION_LAYOUT_BYTES, PhoneticProps, PhoneticRun, PhoneticString, ShowObjects, TableStyleElement, TableStyles, UpdateLinks, WindowRect,
+    Workbook, WorkbookLocks, WorkbookOptions, WorkbookView,
 };
 
 /// Font used for new workbooks. Only a name: renderers substitute an available open font
