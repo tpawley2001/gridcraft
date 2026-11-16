@@ -168,6 +168,7 @@ mod xls_default_password_tests;
 mod xls_doc_props_codepage_tests;
 mod xls_drawing_in_continue_tests;
 mod xls_dv_tests;
+mod xls_edit_range_sddl_tests;
 mod xls_edit_ranges_tests;
 mod xls_extern_name_tests;
 mod xls_external_link_tests;
