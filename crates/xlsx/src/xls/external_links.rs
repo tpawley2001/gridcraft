@@ -52,6 +52,9 @@ pub(super) struct Reader {
     table: Option<Table>,
     /// Whether the last SupBook read is one of [`Reader::books`].
     latest: bool,
+    /// Whether the last SupBook read is an unused supporting link (path `" "`): its XCT and CRN
+    /// records are placeholders with no cells to keep.
+    unused: bool,
     cache_warned: bool,
     dde_warned: bool,
 }
@@ -62,6 +65,7 @@ impl Reader {
     pub(super) fn supbook(&mut self, c: &mut Cursor<'_, '_>, book: usize, ctab: u16, cch: u16, report: &mut ReadReport) {
         self.table = None;
         self.latest = false;
+        self.unused = false;
         let read = |c: &mut Cursor<'_, '_>| -> Result<(String, Vec<String>), IoError> {
             let high = c.u8()? & 1 != 0;
             let path = c.chars(usize::from(cch), high)?;
@@ -75,8 +79,13 @@ impl Reader {
             Ok((path, sheets))
         };
         let (target, sheets) = match read(c) {
+            // An unused supporting link: no reference may use it.
+            Ok((path, _)) if path == " " => {
+                self.unused = true;
+                return;
+            }
             // This workbook named by a path: not a link.
-            Ok((path, _)) if path == " " || path.starts_with('\u{2}') => return,
+            Ok((path, _)) if path.starts_with('\u{2}') => return,
             Ok((path, _)) if ctab == 0 && path.contains('\u{3}') => {
                 if !std::mem::replace(&mut self.dde_warned, true) {
                     report.warn("links to other programs (DDE or OLE) were not read; formulas using them keep their saved values");
@@ -116,11 +125,15 @@ impl Reader {
     pub(super) fn other_supbook(&mut self) {
         self.table = None;
         self.latest = false;
+        self.unused = false;
     }
 
     /// XCT: `ccrn` CRN records of sheet `itab` of the latest linked workbook follow.
     pub(super) fn xct(&mut self, c: &mut Cursor<'_, '_>, report: &mut ReadReport) {
         self.table = None;
+        if self.unused {
+            return;
+        }
         let header = (|| Ok::<_, IoError>((c.u16()? as i16, c.u16()?)))();
         let Ok((ccrn, itab)) = header else {
             self.bad_cache(report);
@@ -136,6 +149,9 @@ impl Reader {
 
     /// CRN: one row of cached cells of the current XCT.
     pub(super) fn crn(&mut self, c: &mut Cursor<'_, '_>, report: &mut ReadReport) {
+        if self.unused {
+            return;
+        }
         let Some(t) = self.table.as_mut().filter(|t| t.left > 0) else {
             self.table = None;
             self.bad_cache(report);

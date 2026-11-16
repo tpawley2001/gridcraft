@@ -745,6 +745,8 @@ fn arrays_do_not_spill_in_tables() {
     // Excel: spilled array formulas aren't supported in tables.
     let mut t = T::new();
     t.wb.sheet_mut(0).unwrap().tables.push(gridcraft_model::Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: 1,
         name: "Table1".into(),
@@ -1437,6 +1439,8 @@ fn subtotal_skips_filtered_rows() {
     let crit = || vec![(0, FilterCriterion::Custom { a: (">".into(), "1".into()), b: None, and: false })];
     let sh = t.wb.sheet_mut(0).unwrap();
     sh.tables.push(gridcraft_model::Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: 1,
         name: "Sales".into(),

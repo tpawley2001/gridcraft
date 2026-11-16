@@ -379,14 +379,34 @@ pub(super) fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, cell_st
     let style = if t.style.is_empty() { "TableStyleMedium2" } else { &t.style };
     let _ = write!(
         s,
-        "<tableStyleInfo name=\"{}\" showFirstColumn=\"{}\" showLastColumn=\"{}\" showRowStripes=\"{}\" showColumnStripes=\"{}\"/></table>",
+        "<tableStyleInfo name=\"{}\" showFirstColumn=\"{}\" showLastColumn=\"{}\" showRowStripes=\"{}\" showColumnStripes=\"{}\"/>",
         esc_attr(style),
         t.first_col as u8,
         t.last_col as u8,
         t.banded_rows as u8,
         t.banded_cols as u8
     );
+    write_table_alt_text(&mut s, t);
+    s.push_str("</table>");
     s
+}
+
+/// Appends the accessibility extension as the table's last child.
+fn write_table_alt_text(s: &mut String, t: &Table) {
+    if t.alt_text.is_some() || t.alt_text_summary.is_some() {
+        s.push_str(concat!(
+            "<extLst><ext uri=\"{504A1905-F514-4f6f-8877-14C23A59335A}\" ",
+            "xmlns:x14=\"http://schemas.microsoft.com/office/spreadsheetml/2009/9/main\"><x14:table"
+        ));
+        // CT_Table limits are in characters; cutting bytes could split a UTF-8 character.
+        for (attr, value, limit) in [("altText", &t.alt_text, 25_000), ("altTextSummary", &t.alt_text_summary, 50_000)] {
+            if let Some(value) = value {
+                let text: String = value.chars().take(limit).collect();
+                let _ = write!(s, " {attr}=\"{}\"", esc_attr(&text));
+            }
+        }
+        s.push_str("/></ext></extLst>");
+    }
 }
 
 /// Ids of the threaded comments of sheet `si`: the thread's id, then one per reply. GUID-shaped
@@ -683,6 +703,8 @@ mod tests {
         let mut columns: Vec<TableColumn> = (0..10_000).map(|_| col("Total")).collect();
         columns[1] = col("total3");
         let t = Table {
+            alt_text: None,
+            alt_text_summary: None,
             query_table: None,
             id: 1,
             name: "T".into(),

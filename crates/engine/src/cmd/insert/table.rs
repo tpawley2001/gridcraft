@@ -145,6 +145,8 @@ pub(super) fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
             insert_row: None,
             insert_row_shift: None,
             published: None,
+            alt_text: None,
+            alt_text_summary: None,
         });
         cx.structural = true;
         Ok(json!({"table": name, "range": r.a1()}))

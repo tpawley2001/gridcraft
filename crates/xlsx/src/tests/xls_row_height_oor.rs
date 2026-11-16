@@ -64,3 +64,19 @@ fn saved_as_xlsx_the_rows_keep_the_default_height() {
     }
     assert_eq!(back.sheets[0].value(CellRef::new(3, 0)), Value::Number(4.0));
 }
+
+#[test]
+fn ex_asc_and_ex_des_bits_read_as_thick_top_and_bottom_and_save_to_xlsx() {
+    // [MS-XLS] 2.4.221: fExAsc is bit 28 and fExDes bit 29 of the flags dword (ixfe in 16..=27).
+    // 315 twips = 15.75 pt, a stored height different from the 12.75 pt default.
+    let (wb, _) = read_xls(&book(&[row(0, 315, 0x1000_0100), row(1, 315, 0x2000_0100), row(2, 315, 0x3000_0100), row(3, 315, 0x0FFF_0100)])).unwrap();
+    let flags = |wb: &gridcraft_model::Workbook, r: u32| wb.sheets[0].rows.get(&r).map(|i| (i.thick_top, i.thick_bottom));
+    let expected = [Some((true, false)), Some((false, true)), Some((true, true)), Some((false, false))];
+    for (r, want) in expected.iter().enumerate() {
+        assert_eq!(flags(&wb, r as u32), *want, "row {r}");
+    }
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    for (r, want) in expected.iter().take(3).enumerate() {
+        assert_eq!(flags(&back, r as u32), *want, "row {r} after .xlsx round trip");
+    }
+}
