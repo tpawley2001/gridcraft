@@ -31,6 +31,16 @@ fn sqref(ranges: &[RangeRef]) -> String {
     ranges.iter().map(|r| r.a1()).collect::<Vec<_>>().join(" ")
 }
 
+/// Writes a table's kept query table part, related from table part number `n`.
+fn write_query_table(t: &Table, n: u32, out: &mut Out) {
+    let Some(query) = &t.query_table else { return };
+    let path = out.kept.claim(&format!("xl/queryTables/queryTable{n}.xml"));
+    out.part(&path, Some(CT_QUERY_TABLE), remap_query_fields(query, t).into_bytes());
+    let mut table_rels = Rels::default();
+    table_rels.add("queryTable", &format!("/{path}"));
+    out.part(&format!("xl/tables/_rels/table{n}.xml.rels"), None, table_rels.xml().into_bytes());
+}
+
 pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (String, Rels) {
     let mut rels = Rels::default();
     let Some(sheet) = wb.sheet(si) else { return (String::new(), rels) };
@@ -228,13 +238,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
             let name = table_name(&t.name, &mut used_names, n);
             let xml = table_xml(t, cols, &name, id, &wb.cell_styles, out);
             out.part(&format!("xl/tables/table{n}.xml"), Some(CT_TABLE), xml.into_bytes());
-            if let Some(query) = &t.query_table {
-                let path = out.kept.claim(&format!("xl/queryTables/queryTable{n}.xml"));
-                out.part(&path, Some(CT_QUERY_TABLE), remap_query_fields(query, t).into_bytes());
-                let mut table_rels = Rels::default();
-                table_rels.add("queryTable", &format!("/{path}"));
-                out.part(&format!("xl/tables/_rels/table{n}.xml.rels"), None, table_rels.xml().into_bytes());
-            }
+            write_query_table(t, n, out);
             let rid = rels.add("table", &format!("../tables/table{n}.xml"));
             let _ = write!(parts, "<tablePart r:id=\"{rid}\"/>");
         }
