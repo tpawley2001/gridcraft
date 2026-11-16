@@ -102,7 +102,8 @@ fn xls_missing_properties() {
 }
 #[test]
 fn xls_damaged_properties_are_optional() {
-    let good = stream(SUMMARY, &[(2, text(0x1e, b"Title\0"))]);
+    // No trailing alignment padding: every truncated prefix cuts the header, table or value.
+    let good = stream(SUMMARY, &[(2, text(0x1e, b"Example\0"))]);
     let mut bad_offset = good.clone();
     bad_offset[60..64].copy_from_slice(&u32::MAX.to_le_bytes());
     let mut huge_count = good.clone();
@@ -116,6 +117,15 @@ fn xls_damaged_properties_are_optional() {
     }
     for end in 0..good.len() {
         assert_eq!(read_xls(&xls(Some(&good[..end]), None)).unwrap().0.props, DocProps::default());
+    }
+}
+#[test]
+fn xls_property_set_trailing_padding_is_optional() {
+    let good = stream(SUMMARY, &[(2, text(0x1e, b"Title\0"))]);
+    // The value is complete before the two alignment bytes at the stream's end.
+    for end in good.len() - 2..=good.len() {
+        let props = read_xls(&xls(Some(&good[..end]), None)).unwrap().0.props;
+        assert_eq!(props, DocProps { title: "Title".into(), ..DocProps::default() });
     }
 }
 #[test]

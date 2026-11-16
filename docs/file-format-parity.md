@@ -2,6 +2,8 @@
 
 > **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-15 · **Change:** minor (G0438: `.xls` text-file query tables with fUseNewiCpid set keep their connection, without a code page. Earlier: G0432: `.xls` EMF and WMF pictures open as pictures and save to `.xlsx`. Earlier: G0425: XLSX PivotTable axes drop duplicate fields after ungrouping, preferring the real database field. Earlier: G0418: `.xls` notes, hyperlinks and frozen panes are read (from #2496). Earlier: G0409: `.xls` sheets read their default column width from DefColWidth and DxGCol. Earlier: G0400: ODS sheets hidden with `table:display="false"` open hidden. Earlier: G0401: ODS import keeps column widths, row heights and hidden rows/columns, rounded to whole pixels as Excel does. Earlier: G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. Earlier: G0385: Excel 4.0 macro sheets read from `.xlsx`/`.xlsm`/`.xlsb`/`.xls` print in their tab place when printing the entire workbook; earlier: G0376: `.xls` picture objects whose image is not imported keep their place for printing; earlier: G0372: printing and PDF export print every page of a long workbook, up to a 200,000-page guard, instead of stopping at 2,000)
 
+`.xls` property sets whose declared size overruns the stream are clamped to the available bytes; complete properties, including custom properties saved as `.xlsx`, are retained. Incomplete set headers and property tables remain rejected. XFExt records naming absent XFs are ignored silently; malformed records still warn (`xls_props_xfext_tests.rs`).
+
 
 XLSX tables on a query (`tableType="queryTable"`) keep their query table part on save; field links follow moved or renamed columns and fields whose column is gone are dropped (`passthrough_tests.rs`).
 
@@ -244,6 +246,7 @@ Visible Excel 5 dialog sheets in XLSX have detached print views for whole-workbo
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | G0437: `.xls` property sets with oversized declared sizes retain readable properties; orphaned XFExt records are ignored silently, while malformed records still warn. |
 | 2026-11-15 | minor | G0438: `.xls` text-file query tables whose TxtQry sets fUseNewiCpid with iCpidNew > 2 ([MS-XLS] 2.4.330) are kept on Save As `.xlsx` instead of being dropped; iCpidNew is ignored and `textPr` gets no `fileType` or `codePage`, so the ECMA-376 defaults apply (`xls_connections_tests.rs`). |
 | 2026-11-15 | minor | G0434: `.xls` freeforms (Office Art shape type 0), BIFF8 polygons and WordArt (types 136–175) open as freeform and WordArt shapes instead of being skipped, and survive Save As `.xlsx`. |
 | 2026-11-15 | minor | G0435: `.xls` imports BIFF8 shape flips and BIFF5 line start quadrants, preserving line and arrow direction on Save As `.xlsx`. |
