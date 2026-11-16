@@ -1,6 +1,6 @@
 # Target-app parity: GridCraft vs Microsoft Excel
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-15 · **Change:** minor (G0410: printed `.xlsx` rows without customHeight that hold wrapped text with a value fit its wrapped lines; no score change; earlier: G0408: repeated title rows that reach a later band of columns print every page of that band, as Excel prints; no score change; earlier: G0403: Liberation Sans, generic Sans names, Helvetica variants, Geneva, Clear Sans and Droid Sans Fallback use Arial's printed digit width; Cambria uses the same measured width. Earlier: G0402: MS Sans Serif and the Arial charset names print columns at Arial's digit width, SimSun and MS (P)Gothic at half an em)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-15 · **Change:** minor (G0423: the `&F` header/footer field prints an imported workbook's own file name (`budget.xls`), not its `(imported).xlsx` title, as Excel prints; no score change; earlier: G0416: text overflowing from a cell left of a column band is drawn on that band's pages too, clipped to the band, as Excel prints; no score change; earlier: G0411: a column band leaves about 1.1 printed points free at its right edge, so a column ending closer than that to the right margin starts the next page, as Excel prints; no score change)
 
 This is the authoritative parity assessment. [`ROADMAP.md`](../ROADMAP.md) summarizes it,
 [`gaps.md`](gaps.md) lists every shortfall, and the area checklists hold the detail:
@@ -334,6 +334,7 @@ The inventory carried over from the 2026-10-07 ROADMAP.md, updated for what land
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | G0423: page layout, print, PDF: `&F` in a header or footer prints the file a workbook was opened from (`budget.xls`, `report.slk`) until it is saved, not its `budget (imported).xlsx` window title, as Excel prints; after Save As it prints the new name. No readiness score change. |
 | 2026-11-15 | minor | G0419: page layout, print, PDF: repeated title columns (Columns to repeat at left) that put something on paper make every band of columns print every row band of the printed range, as Excel prints; no readiness score change. |
 | 2026-11-15 | minor | G0416: page layout, print, PDF: single-line text overflowing from a cell left of a column band over empty cells into it is drawn on that band's pages, placed as if the earlier columns lay left of the page and clipped to the band, as Excel prints; no readiness score change. |
 | 2026-11-15 | minor | G0411: page layout, print, PDF: a column band leaves 1.5 sheet pixels x the printed column scale (about 1.1 pt) free at its right edge, so a column ending closer than that to the right margin moves to the next band, as Excel prints (not when fitted to a page count wide); no readiness score change. |
