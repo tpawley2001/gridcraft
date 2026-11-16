@@ -986,8 +986,12 @@ fn printed_reach(wb: &Workbook, sh: &Sheet, lay: &SheetLayout) -> Option<Vec<usi
             *slot = below.map_or(0, |v| v + 1);
         }
     }
-    // The leftmost band reaches the lowest occupied row band of any band.
-    if titled && let Some(&full) = reach.first() {
+    // Print title rows (whatever they hold, even nothing) make Excel print every row band of the
+    // printed range in every band of columns, as title columns that print something do. Every
+    // band then reaches the lowest occupied row band of any band.
+    if (titled || lay.title_rows.is_some())
+        && let Some(&full) = reach.iter().max()
+    {
         reach.iter_mut().for_each(|r| *r = full);
     }
     below.map(|_| reach)
