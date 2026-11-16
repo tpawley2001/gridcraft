@@ -65,6 +65,7 @@ impl KeptOut {
     fn claim_with(&mut self, original: &str, third_party: bool) -> String {
         let lower = original.to_ascii_lowercase();
         let own = OWN_DIRS.iter().any(|d| lower.starts_with(d)) || (third_party && free_for_third_party(original));
+        let pivot_cache = lower.starts_with("xl/pivotcache/pivotcachedefinition");
         if own && self.used.insert(lower) {
             return original.to_string();
         }
@@ -73,7 +74,14 @@ impl KeptOut {
             Some((s, e)) => (s, format!(".{e}")),
             None => (file, String::new()),
         };
-        let stem = if own { format!("{stem}_") } else { "kept".to_string() };
+        let stem = if own {
+            format!("{stem}_")
+        } else if pivot_cache {
+            // A distinct suffix leaves the native writer's numbered cache names available.
+            "pivotCacheDefinition_kept".to_string()
+        } else {
+            "kept".to_string()
+        };
         loop {
             self.n = self.n.saturating_add(1);
             let file = format!("{stem}{}{ext}", self.n);
@@ -511,7 +519,7 @@ pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out, macros: 
     let cache_of_id: HashMap<u32, String> = p
         .elements
         .iter()
-        .filter(|e| e.slot == "pivotCache")
+        .filter(|e| matches!(e.slot.as_str(), "pivotCache" | "unusedPivotCache"))
         .filter_map(|e| {
             let x = xml::parse(e.xml.as_bytes()).ok()?;
             let rel = p.rels.iter().find(|r| Some(r.id.as_str()) == x.attr("id"))?;
@@ -524,6 +532,11 @@ pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out, macros: 
             .filter_map(|part| xml::parse(&part.data).ok()?.attr_u32("cacheId"))
             .filter_map(|id| cache_of_id.get(&id).cloned()),
     );
+    // Caches already unused on import belong to the workbook, so deleting sheets keeps them.
+    used_caches.extend(p.elements.iter().filter(|e| e.slot == "unusedPivotCache").filter_map(|e| {
+        let x = xml::parse(e.xml.as_bytes()).ok()?;
+        cache_of_id.get(&x.attr_u32("cacheId")?).cloned()
+    }));
     let unused_caches: Vec<&PreservedRel> =
         p.rels.iter().filter(|r| !r.external && is_kind(r, &["pivotCacheDefinition"]) && !used_caches.contains(&normalize(&r.target))).collect();
     let dropped_roots: Vec<&PreservedRel> = dropped.iter().filter_map(|s| root_of(s)).chain(stale).chain(unused_caches.iter().copied()).collect();
@@ -549,7 +562,7 @@ pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out, macros: 
     let pivot_caches: Vec<(u32, String)> = p
         .elements
         .iter()
-        .filter(|e| e.slot == "pivotCache")
+        .filter(|e| matches!(e.slot.as_str(), "pivotCache" | "unusedPivotCache"))
         .filter_map(|e| {
             let x = xml::parse(e.xml.as_bytes()).ok()?;
             Some((x.attr_u32("cacheId")?, ids.get(x.attr("id")?)?.clone()))

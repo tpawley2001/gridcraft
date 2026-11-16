@@ -587,7 +587,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
             Err(e) => cx.warn(format!("macros (VBA project) could not be read and were dropped: {e}")),
         }
     }
-    wb.preserved = kept.workbook(&mut cx, &wb_part, &wb_xml, &file_to_model);
+    wb.preserved = kept.workbook(&mut cx, &wb_part, &wb_xml, &file_to_model, &pivot_caches);
     if let Some(sig) = vba_signature {
         let mut p = wb.preserved.as_deref().cloned().unwrap_or_default();
         p.vba_signature = Some(sig);
