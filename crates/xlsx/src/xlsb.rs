@@ -2558,11 +2558,12 @@ fn range_protection(id: u16, payload: &[u8], sheet: &mut Sheet, report: &mut Rea
             return Err(invalid("empty edit range title"));
         }
         let size = b.u32()? as usize;
-        b.take(size)?;
+        let security_descriptor = crate::sddl::security_descriptor_to_sddl(b.take(size)?);
+        let permissions = size != 0 && security_descriptor.is_none();
         let password =
             if let Some(spin) = spin { Some(iso_password(&mut b, spin)?.ok_or_else(|| invalid("empty edit range ISO password"))?) } else { legacy };
         b.finish()?;
-        Ok((EditRange { title, ranges, password, security_descriptor: None }, size != 0))
+        Ok((EditRange { title, ranges, password, security_descriptor }, permissions))
     };
     match parse() {
         Ok((edit, permissions)) => {
