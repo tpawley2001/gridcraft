@@ -19,7 +19,7 @@ use gridcraft_model::{PreservedPart, PreservedRel, Workbook};
 use super::formula::{ExternalBook, Links, decode_name, error_code};
 use super::records::Cursor;
 use super::{BUILTIN_NAMES, MAX_NAMES, valid_name};
-use crate::external_link::{CT_XML, Cached, Kept, LinkName, MAX_CACHED_CELLS, keep, link_xml, push_cell};
+use crate::external_link::{CT_XML, Cached, Kept, LinkName, MAX_CACHED_CELLS, keep, link_xml, push_cell, sheet_stand_ins};
 use crate::{IoError, ReadReport};
 
 const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
@@ -230,7 +230,8 @@ impl Reader {
                 }
                 tables.push_str("</sheetData>");
             }
-            let xml = link_xml("rId1", &b.sheets, Some(&b.names), &tables);
+            let sheets = sheet_stand_ins(&b.sheets);
+            let xml = link_xml("rId1", &sheets, Some(&b.names), &tables);
             let name = format!("xl/externalLinks/externalLink{n}.xml");
             let path = PreservedRel { id: "rId1".into(), rel_type: format!("{REL}externalLinkPath"), target, external: true };
             let part = PreservedPart {
@@ -241,7 +242,7 @@ impl Reader {
                 ..Default::default()
             };
             let rel = PreservedRel { id: format!("rIdExternalLink{n}"), rel_type: format!("{REL}externalLink"), target: name, external: false };
-            kept.push(Kept { book: b.book, sheets: b.sheets, names: b.names, part, rel });
+            kept.push(Kept { book: b.book, sheets, names: b.names, part, rel });
         }
         keep(kept, links, wb, report);
     }

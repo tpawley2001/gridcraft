@@ -68,6 +68,40 @@ pub(crate) struct LinkName {
     pub refers_to: Option<String>,
 }
 
+/// Valid Excel sheet names standing in for a linked workbook's sheet names, index-aligned.
+///
+/// A legacy link can list names Excel rejects in an `.xlsx` (empty, over 31 characters, holding
+/// `[ ] : * ? / \`, or repeated); Excel repairs a file whose `sheetName` (ECMA-376 Part 1
+/// §18.14.7) holds one. Each name drops those characters, control characters and leading or
+/// trailing apostrophes, keeps its first 31 characters, becomes `Sheet{n}` when nothing is left,
+/// and gets ` (k)` when it repeats an earlier stand-in (ignoring case). Valid names are unchanged.
+pub(crate) fn sheet_stand_ins(sheets: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::with_capacity(sheets.len());
+    let mut out = Vec::with_capacity(sheets.len());
+    for (i, name) in sheets.iter().enumerate() {
+        let cleaned: String =
+            name.chars().filter(|c| !matches!(c, '[' | ']' | ':' | '*' | '?' | '/' | '\\') && !('\u{0}'..='\u{1f}').contains(c)).collect();
+        let mut s: String = cleaned.trim_matches('\'').chars().take(31).collect();
+        if s.is_empty() {
+            s = format!("Sheet{}", i.saturating_add(1));
+        }
+        if seen.contains(&s.to_lowercase()) {
+            let base: String = s.chars().take(27).collect();
+            // At most `sheets.len()` earlier stand-ins, so one of the first `len + 1` suffixes is free.
+            for k in 2..=sheets.len().saturating_add(2) {
+                let candidate = format!("{base} ({k})");
+                if !seen.contains(&candidate.to_lowercase()) {
+                    s = candidate;
+                    break;
+                }
+            }
+        }
+        seen.insert(s.to_lowercase());
+        out.push(s);
+    }
+    out
+}
+
 /// The `externalLink` part: the linked file is relationship `rel_id`, then its sheet names, its
 /// defined `names` (`None` entries are skipped) and `tables` (the `<sheetData>` elements of its
 /// cached cells).
@@ -144,4 +178,40 @@ pub(crate) fn keep(kept: Vec<Kept>, links: &mut Links, wb: &mut Workbook, report
     merge_preserved(&mut wb.preserved, Some(Arc::new(p)));
     wb.external_books = Arc::new(books);
     report.warn("links to external workbooks were kept; they are not followed or refreshed");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sheet_stand_ins;
+
+    fn v(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn valid_unique_names_are_unchanged() {
+        let names = v(&["Data", "Sales 2024", "Ünïcødé", "a'b", "Thirty-one characters exactly!!"]);
+        assert_eq!(sheet_stand_ins(&names), names);
+    }
+
+    #[test]
+    fn invalid_names_become_valid_unique_stand_ins() {
+        let long = "A linked sheet name well over thirty-one characters";
+        let got = sheet_stand_ins(&v(&["Data", "", "Q1:2024/Plan", long, "DATA", "'quoted'", "[]", "\u{1}x\t"]));
+        assert_eq!(got, v(&["Data", "Sheet2", "Q12024Plan", "A linked sheet name well over t", "DATA (2)", "quoted", "Sheet7", "x"]));
+    }
+
+    #[test]
+    fn repeated_long_names_are_cut_before_the_suffix() {
+        let long = "x".repeat(40);
+        let got = sheet_stand_ins(&v(&[&long, &long, &long]));
+        let base = "x".repeat(27);
+        assert_eq!(got, vec!["x".repeat(31), format!("{base} (2)"), format!("{base} (3)")]);
+    }
+
+    #[test]
+    fn a_suffix_skips_names_already_taken() {
+        let got = sheet_stand_ins(&v(&["A (2)", "A", "a"]));
+        assert_eq!(got, v(&["A (2)", "A", "a (3)"]));
+    }
 }
