@@ -1660,6 +1660,10 @@ fn read_row(c: &mut Cursor<'_, '_>, st: &mut SheetState<'_>) -> Result<(), IoErr
     }
     info.outline = (flags & 7) as u8;
     info.collapsed = flags & 0x10 != 0;
+    // fExAsc (bit 28) and fExDes (bit 29): a medium or thick border on the row's top or bottom
+    // edge, the same flags as `<row thickTop/thickBot>` in .xlsx.
+    info.thick_top = flags & 0x1000_0000 != 0;
+    info.thick_bottom = flags & 0x2000_0000 != 0;
     if flags & 0x80 != 0 {
         let style = st.style(((flags >> 16) & 0x0FFF) as u16);
         if style != StyleId::DEFAULT {

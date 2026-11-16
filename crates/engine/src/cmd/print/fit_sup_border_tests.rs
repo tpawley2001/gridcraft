@@ -72,6 +72,8 @@ fn page_rows(n: u32, look: Look, custom_pt: Option<f32>) -> Vec<String> {
             let info = sh.rows.entry(r).or_default();
             info.size = Some(px(custom_pt.unwrap_or(12.75)));
             info.custom = custom_pt.is_some();
+            // The row flag Excel's own save writes next to `ht` for a thick bottom border.
+            info.thick_bottom = matches!(look, Look::ThickBottom | Look::SuperscriptAndThickBottomBeside);
         }
         // The .xlsx reader's flags: non-custom rows are fitted, with the sheet default as the floor.
         sh.fit_auto_row_heights_in_print = custom_pt.is_none();
