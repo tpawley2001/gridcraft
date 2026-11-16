@@ -130,6 +130,10 @@ const F_LOCKED: u16 = 0x0001;
 const OT_GROUP: u16 = 0x0000;
 /// The Office Art shape type of a text box (msosptTextBox, [MS-ODRAW] 2.4.24).
 const SPT_TEXT_BOX: u16 = 202;
+/// msosptNotPrimitive ([MS-ODRAW] 2.4.24): a shape with its own geometry (a freeform).
+const SPT_NOT_PRIMITIVE: u16 = 0;
+/// msosptTextPlainText through msosptTextCanDown ([MS-ODRAW] 2.4.24): WordArt.
+const SPT_WORD_ART: std::ops::RangeInclusive<u16> = 136..=175;
 /// msosptHostControl ([MS-ODRAW] 2.4.24): an ActiveX control's shape.
 const SPT_HOST_CONTROL: u16 = 201;
 /// OfficeArtClientAnchorSheet record type ([MS-XLS] 2.5.193).
@@ -569,6 +573,10 @@ fn shape_kind(ot: u16, props: &ShapeProps) -> Option<ShapeKind> {
             _ => ShapeKind::Rectangle,
         }),
         OT_OVAL => Some(ShapeKind::Ellipse),
+        // A BIFF8 polygon (or a freeform) carries its outline in the FOPT geometry.
+        OT_POLYGON | OT_OFFICE_ART if props.shape_type == SPT_NOT_PRIMITIVE => props.art.freeform_paths().map(|_| ShapeKind::Freeform),
+        // WordArt (msosptTextPlainText and the warped text types): its text, the warp is dropped.
+        OT_OFFICE_ART if SPT_WORD_ART.contains(&props.shape_type) => props.art.gtext.as_ref().map(|_| ShapeKind::WordArt),
         OT_OFFICE_ART => match props.shape_type {
             1 => Some(ShapeKind::Rectangle),
             2 => Some(ShapeKind::RoundedRectangle),
@@ -1079,6 +1087,23 @@ impl Embedded {
             if text.as_ref().is_some_and(|t| t.rotation != 0) {
                 rotated = true;
             }
+            let mut text = text.map_or(String::new(), |t| t.text);
+            if kind == ShapeKind::WordArt {
+                // WordArt's own text, size and font (a TxO, if any, says less).
+                if let Some(t) = &props.art.gtext {
+                    text.clone_from(t);
+                }
+                format.font_size = props.art.gtext_size.or(format.font_size);
+                if props.art.gtext_font.is_some() {
+                    format.font.clone_from(&props.art.gtext_font);
+                }
+            }
+            let geometry = match kind {
+                // An Office Art shape type with a DrawingML preset of its own is kept as that preset.
+                ShapeKind::Rectangle => msospt_preset(props.shape_type).map(|p| ShapeGeometry { preset: p.to_string(), ..ShapeGeometry::default() }),
+                ShapeKind::Freeform => props.art.freeform_paths().map(|paths| ShapeGeometry { paths, ..ShapeGeometry::default() }),
+                _ => None,
+            };
             sheet.shapes.push(Shape {
                 alt: String::new(),
                 hidden: props.hidden,
@@ -1089,16 +1114,11 @@ impl Embedded {
                 name: props.name,
                 id: 0,
                 kind,
-                // An Office Art shape type with a DrawingML preset of its own is kept as that preset.
-                geometry: if kind == ShapeKind::Rectangle {
-                    msospt_preset(props.shape_type).map(|p| ShapeGeometry { preset: p.to_string(), ..ShapeGeometry::default() })
-                } else {
-                    None
-                },
+                geometry,
                 anchor: place_at(sheet, &a),
                 fill,
                 line,
-                text: text.map_or(String::new(), |t| t.text),
+                text,
                 format,
                 flip_h: props.flip_h,
                 flip_v: props.flip_v,
