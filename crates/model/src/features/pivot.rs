@@ -140,6 +140,30 @@ pub struct PivotTable {
     pub values_position: Option<usize>,
     /// The PivotTable's own formatting (`formats`, ECMA-376 Part 1 §18.10.1.40/41), in file order.
     pub formats: Vec<PivotFormat>,
+    /// Conditional formats tied to the PivotTable (`conditionalFormats`, ECMA-376 Part 1
+    /// §18.10.1.18/19), in file order. Each links to the sheet's `pivot` conditional-formatting
+    /// rule of the same `priority`.
+    pub conditional_formats: Vec<PivotConditionalFormat>,
+}
+
+/// A PivotTable conditional format: the pivot areas a sheet `pivot` rule follows.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PivotConditionalFormat {
+    /// The `priority` of the sheet's `pivot` conditional-formatting rule it belongs to, as that
+    /// rule's priority reads in the model.
+    pub priority: u32,
+    /// `scope`: `selection` (the default), `data` or `field`.
+    pub scope: String,
+    /// `type`: `none` (the default), `all`, `row` or `column`.
+    pub cf_type: String,
+    pub areas: Vec<PivotArea>,
+}
+
+impl Default for PivotConditionalFormat {
+    fn default() -> Self {
+        PivotConditionalFormat { priority: 0, scope: "selection".into(), cf_type: "none".into(), areas: vec![] }
+    }
 }
 
 /// One PivotTable format: a differential style applied to a pivot area.
@@ -274,6 +298,7 @@ impl Default for PivotTable {
             values_on_rows: false,
             values_position: None,
             formats: vec![],
+            conditional_formats: vec![],
         }
     }
 }

@@ -120,7 +120,7 @@ struct Pending {
     idx: usize,
     cache_id: u32,
     cache: Cache,
-    /// The `<formats>` element (empty when there are none).
+    /// The `<formats>` and `<conditionalFormats>` elements (empty when there are none).
     formats: String,
 }
 
@@ -135,6 +135,7 @@ impl PivotWriter {
     /// PivotTable parts. Pivots whose source can't be resolved are not written.
     pub fn add_sheet(&mut self, wb: &Workbook, si: usize, out: &mut Out, rels: &mut Rels) {
         let Some(sheet) = wb.sheet(si) else { return };
+        let cf_prio = pivot_rule_priorities(sheet);
         for (idx, pt) in sheet.pivots.iter().enumerate() {
             let Some(cache) = build_cache(wb, pt, si) else {
                 // A PivotTable read from a file whose source is gone keeps the parts it was read
@@ -167,7 +168,8 @@ impl PivotWriter {
             let mut tr = Rels::default();
             tr.add("pivotCacheDefinition", &format!("../pivotCache/pivotCacheDefinition{n}.xml"));
             out.part(&format!("xl/pivotTables/_rels/pivotTable{t}.xml.rels"), None, tr.xml().into_bytes());
-            let formats = formats_xml(pt, &cache, &mut out.dxfs);
+            let mut formats = formats_xml(pt, &cache, &mut out.dxfs);
+            formats.push_str(&conditional_formats_xml(pt, &cache, &cf_prio));
             self.pending.push(Pending { part: format!("xl/pivotTables/pivotTable{t}.xml"), sheet: si, idx, cache_id, cache, formats });
         }
     }
@@ -1198,4 +1200,58 @@ fn formats_xml(pt: &PivotTable, c: &Cache, dxfs: &mut Vec<gridcraft_model::Style
         return String::new();
     }
     format!("<formats count=\"{n}\">{body}</formats>")
+}
+
+/// The sheet's written `pivot` conditional-formatting rules: original priority → priority as
+/// written (the sheet writer's 1..n renumbering). The first rule wins a shared priority.
+fn pivot_rule_priorities(sheet: &gridcraft_model::Sheet) -> HashMap<u32, u32> {
+    let prio = crate::sheet_write::cf_priorities(sheet);
+    let mut map = HashMap::new();
+    for (cf, p) in sheet.cond_formats.iter().zip(prio) {
+        if cf.pivot && !cf.ranges.is_empty() {
+            map.entry(cf.priority).or_insert(p);
+        }
+    }
+    map
+}
+
+/// The `<conditionalFormats>` of a PivotTable against its rebuilt cache (§18.10.1.18/19), each
+/// priority mapped through `prio` to the written priority of the sheet's `pivot` rule; empty when
+/// none is left. One whose priority names no such rule, or with no area that still maps, is
+/// dropped.
+fn conditional_formats_xml(pt: &PivotTable, c: &Cache, prio: &HashMap<u32, u32>) -> String {
+    let value_count = value_fields(pt, c).len();
+    let mut n = 0;
+    let mut body = String::new();
+    for f in &pt.conditional_formats {
+        let Some(p) = prio.get(&f.priority) else { continue };
+        let areas: Vec<String> = f.areas.iter().filter_map(|a| pivot_area_xml(a, c, value_count)).collect();
+        if areas.is_empty() {
+            continue;
+        }
+        body.push_str("<conditionalFormat");
+        let scope = if f.scope.is_empty() { "selection" } else { f.scope.as_str() };
+        if scope != "selection" {
+            let _ = write!(body, " scope=\"{}\"", esc_attr(scope));
+        }
+        // With `data` or `selection` scope the type can only be `all` or `none`.
+        let kind = match f.cf_type.as_str() {
+            "" => "none",
+            t if matches!(scope, "data" | "selection") && t != "all" => "none",
+            t => t,
+        };
+        if kind != "none" {
+            let _ = write!(body, " type=\"{}\"", esc_attr(kind));
+        }
+        let _ = write!(body, " priority=\"{p}\"><pivotAreas count=\"{}\">", areas.len());
+        for a in &areas {
+            body.push_str(a);
+        }
+        body.push_str("</pivotAreas></conditionalFormat>");
+        n += 1;
+    }
+    if n == 0 {
+        return String::new();
+    }
+    format!("<conditionalFormats count=\"{n}\">{body}</conditionalFormats>")
 }
