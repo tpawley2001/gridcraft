@@ -106,6 +106,15 @@ impl CachesIn {
         CachesIn { by_id, parsed: HashMap::new(), next_id: 1, raw: HashMap::new(), connections: HashMap::new() }
     }
 
+    /// Cache parts reached by PivotTables, including tables that could not be imported.
+    pub(crate) fn used_parts(&self) -> impl Iterator<Item = &str> {
+        self.parsed.keys().map(String::as_str)
+    }
+
+    pub(crate) fn connection_source(&self, id: u32) -> Option<KeptSource> {
+        self.connections.get(&id).map(|model| if *model { KeptSource::DataModel } else { KeptSource::Connection })
+    }
+
     /// Reads the ids of the workbook's data connections (`xl/connections.xml`), which caches on a
     /// connection or the Data Model name by `connectionId`.
     pub fn read_connections(&mut self, cx: &mut Ctx<'_>, wb_rels: &[crate::package::Rel]) {

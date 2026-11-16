@@ -406,6 +406,8 @@ fn forecast_sheet(s: &mut Session, p: &Json) -> Result<Json> {
         }
         let range = RangeRef::new(CellRef::new(0, 0), CellRef::new(end_row - 1, width - 1));
         sheet.tables.push(Table {
+            alt_text: None,
+            alt_text_summary: None,
             query_table: None,
             id: table_id,
             name: table_name.clone(),

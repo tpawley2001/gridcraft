@@ -111,6 +111,8 @@ pub(super) fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
             filter: vec![],
             table_type: None,
             connection_id: None,
+            alt_text: None,
+            alt_text_summary: None,
             query_table: None,
         });
         cx.structural = true;

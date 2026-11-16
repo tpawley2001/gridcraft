@@ -444,8 +444,8 @@ impl Parser {
         if sheet != SheetSel::Current {
             // Sheet-scoped name `Sheet1!MyName`.
             if let SheetSel::Named(s) = sheet {
-                // `[0]!Rates`: this workbook's `Rates`.
-                if book_prefix(&s) == Some((0, "")) {
+                // `[0]!Name`: book index 0 is this workbook (ECMA-376 Part 1, 18.17), so it is the plain name.
+                if is_this_book(&s) && !w.starts_with(|c: char| c.is_ascii_digit()) {
                     return Ok(Expr::Name(w.to_string()));
                 }
                 return Ok(Expr::Name(format!("{s}!{w}")));
@@ -499,6 +499,11 @@ impl Parser {
         }
         Ok(Expr::Array(rows))
     }
+}
+
+/// `[0]` (any number of zeros): the book prefix for this workbook. `[1]` and up index linked workbooks.
+fn is_this_book(book: &str) -> bool {
+    book.strip_prefix('[').and_then(|r| r.strip_suffix(']')).is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b == b'0'))
 }
 
 /// Folds `A1:B2`-like range operations of two plain refs into a single reference.

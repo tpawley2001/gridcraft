@@ -209,6 +209,8 @@ fn calculated_table_column_keeps_formula_and_cell_value() {
     sh.cells.set(at("A2"), Cell::value(Value::Number(3.0)));
     sh.cells.set(at("B2"), formula("A2*2", 6.0));
     sh.tables.push(Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: 1,
         name: "Data".into(),
@@ -293,6 +295,8 @@ fn this_row_references_are_written_in_long_form() {
     sh.cells.set(at("A2"), Cell::value(Value::Number(3.0)));
     sh.cells.set(at("B2"), formula("Data[@Input]*2", 6.0));
     sh.tables.push(Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: 1,
         name: "Data".into(),
@@ -500,6 +504,8 @@ fn implicit_intersection_metadata_distinguishes_table_rows_and_columns() {
     let mut wb = Workbook::new();
     let sh = wb.sheet_mut(0).unwrap();
     sh.tables.push(Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: 1,
         name: "Data".into(),

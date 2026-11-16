@@ -841,6 +841,8 @@ mod table_id_tests {
 
     fn table(id: u32, range: &str) -> Table {
         Table {
+            alt_text: None,
+            alt_text_summary: None,
             query_table: None,
             id,
             name: String::new(),

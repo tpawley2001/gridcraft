@@ -345,6 +345,8 @@ fn sample() -> Workbook {
         group: Default::default(),
     });
     s.tables.push(Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: 1,
         name: "Sales Table".into(),
@@ -997,6 +999,8 @@ fn writing_repairs_invalid_models() {
     // A table whose header cells disagree with its columns, with duplicate column names.
     s.set_value(at("A1"), Value::Number(1.0));
     s.tables.push(Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: 1,
         name: "1bad name".into(),
@@ -1646,6 +1650,8 @@ fn table_newline_column_and_backslash_name_survive() {
         totals_row_cell_style: None,
     };
     s.tables.push(Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: 1,
         name: "\\_Prime.1".into(),
@@ -1694,6 +1700,8 @@ fn header_and_totals_table_without_data_row_survives() {
     let mut wb = Workbook::new();
     let s = wb.sheet_mut(0).unwrap();
     s.tables.push(Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: 1,
         name: "Table1".into(),
@@ -2017,6 +2025,8 @@ fn a_table_filter_criteria_survive_a_round_trip() {
         s.set_value(at(&format!("A{}", r + 1)), Value::text(v));
     }
     s.tables.push(Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: 1,
         name: "Sales".into(),
@@ -2104,6 +2114,8 @@ fn a_partial_sheet_filter_is_not_folded_into_a_table() {
         totals_row_cell_style: None,
     };
     s.tables.push(Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: 1,
         name: "Sales".into(),
@@ -2415,4 +2427,48 @@ fn oversize_table_comment_is_omitted_not_truncated() {
     let x = String::from_utf8(Package::open(&write_xlsx(&wb).unwrap()).unwrap().read("xl/tables/table1.xml").unwrap().unwrap()).unwrap();
     assert!(!x.contains("comment="));
     assert!(x.contains(r#"published="0""#));
+}
+
+#[test]
+fn table_alt_text_extension_selection_and_empty_values() {
+    for (uri, attrs, expected) in [
+        ("{504a1905-f514-4F6F-8877-14c23a59335a}", r#"altText="Title""#, (Some("Title"), None)),
+        ("{504A1905-F514-4f6f-8877-14C23A59335A}", r#"altText="" altTextSummary="""#, (None, None)),
+        ("unrelated", r#"altText="Ignore" altTextSummary="Ignore""#, (None, None)),
+    ] {
+        let table = format!(
+            r#"<table id="1" name="Items" ref="A1:A2"><tableColumns><tableColumn id="1" name="Item"/></tableColumns><extLst><ext uri="unrelated"><x14:table xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" altText="Wrong"/></ext><ext uri="{uri}"><x14:table xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" {attrs}/></ext></extLst></table>"#
+        );
+        let rels = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>"#;
+        let bytes = super::minimal(
+            r#"<sheetData/><tableParts count="1"><tablePart r:id="rId1"/></tableParts>"#,
+            &[("xl/worksheets/_rels/sheet1.xml.rels", rels), ("xl/tables/table1.xml", &table)],
+            "",
+            "",
+        );
+        let (wb, _) = read_xlsx(&bytes).unwrap();
+        let t = &wb.sheets[0].tables[0];
+        assert_eq!((t.alt_text.as_deref(), t.alt_text_summary.as_deref()), expected);
+        let (saved, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+        let t = &saved.sheets[0].tables[0];
+        assert_eq!((t.alt_text.as_deref(), t.alt_text_summary.as_deref()), expected);
+    }
+}
+
+#[test]
+fn table_alt_text_limits_count_characters_and_clones_keep_values() {
+    let mut wb = sample();
+    let t = &mut wb.sheet_mut(0).unwrap().tables[0];
+    t.alt_text = Some("界".repeat(25_001));
+    t.alt_text_summary = Some("🦉".repeat(50_001));
+    let original = t.clone();
+    let sheet_copy = wb.sheets[0].clone();
+    assert_eq!(sheet_copy.tables[0].alt_text, original.alt_text);
+    assert_eq!(sheet_copy.tables[0].alt_text_summary, original.alt_text_summary);
+    let (saved, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    let t = &saved.sheets[0].tables[0];
+    assert_eq!(t.alt_text.as_deref(), Some("界".repeat(25_000).as_str()));
+    assert_eq!(t.alt_text_summary.as_deref(), Some("🦉".repeat(50_000).as_str()));
+    // Saving limits the serialized values without changing the model.
+    assert_eq!(wb.sheets[0].tables[0], original);
 }

@@ -28,7 +28,7 @@
 //! their sheet, the cache definition and records parts (with the cache's link to the other
 //! workbook's path) with the workbook and its `<pivotCache>` entry, its `cacheId` unchanged; a cache
 //! on a connection only when the connections are kept, and on the Data Model only when the model is
-//! kept.
+//! kept. Caches unused by any PivotTable on import are kept with the workbook as well.
 //!
 //! On write, kept parts get fresh part names where needed and new relationship ids; the `r:id`s in
 //! kept XML are rewritten to match (the kept relationships of a sheet's drawing keep their ids: a

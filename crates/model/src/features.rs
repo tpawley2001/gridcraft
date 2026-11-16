@@ -163,6 +163,12 @@ pub struct Table {
     pub insert_row_shift: Option<bool>,
     #[serde(default)]
     pub published: Option<bool>,
+    /// Accessibility title (`x14:table` `altText`); XLSX saves at most 25,000 characters.
+    #[serde(default)]
+    pub alt_text: Option<String>,
+    /// Accessibility description (`x14:table` `altTextSummary`); XLSX saves at most 50,000 characters.
+    #[serde(default)]
+    pub alt_text_summary: Option<String>,
     /// The XML of the table's query table part (`xl/queryTables/…`), kept as read so the table
     /// stays attached to its data connection. Never refreshed.
     #[serde(default)]

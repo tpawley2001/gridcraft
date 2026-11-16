@@ -231,7 +231,8 @@ pub(crate) struct Lbl {
     pub builtin: Option<u8>,
     pub hidden: bool,
     pub macro_name: bool,
-    /// A newer function's name (`_xlfn.…`, BIFF12 only): referenced by calls, never imported.
+    /// A placeholder for a function newer than the file format (`_xlfn.…`, `_xlws.…`, or a
+    /// LAMBDA parameter `_xlpm.…`): referenced by calls, never imported, and not a macro name.
     pub future_function: bool,
     /// The zero-based sheet the name is local to; `None` for workbook scope.
     pub scope: Option<usize>,
@@ -934,7 +935,15 @@ fn lbl(flags: u16, raw: String, itab: u16, cce: usize, rest: &[u8], trailing: us
     let extra = rest.get(cce..).unwrap_or(&[]);
     let rgcb = extra.get(..extra.len().saturating_sub(trailing)).unwrap_or(&[]).to_vec();
     let scope = usize::from(itab).checked_sub(1);
-    Lbl { name, builtin, hidden: flags & 1 != 0, macro_name: flags & 0x000A != 0, future_function: false, scope, skip: false, rgce, rgcb }
+    let future_function = builtin.is_none() && is_function_placeholder(&name);
+    Lbl { name, builtin, hidden: flags & 1 != 0, macro_name: flags & 0x000A != 0, future_function, scope, skip: false, rgce, rgcb }
+}
+
+/// Whether `name` is a placeholder Excel writes for a function newer than BIFF8 (`_xlfn.IFNA`,
+/// `_xlws.SORT`) or a LAMBDA parameter (`_xlpm.x`). These hidden NAME records carry the fFunc /
+/// fProc bits but are not macros, and an `.xlsx` has no defined name for them.
+fn is_function_placeholder(name: &str) -> bool {
+    ["_xlfn.", "_xlws.", "_xlpm."].iter().any(|p| name.get(..p.len()).is_some_and(|h| h.eq_ignore_ascii_case(p)))
 }
 
 /// Whether `n` is a legal defined name in an `.xlsx` workbook: the same rule as the engine's
@@ -983,7 +992,7 @@ fn rename_invalid_names(g: &mut Globals, report: &mut ReadReport) {
         }
     }
     for lbl in g.names.iter_mut() {
-        if lbl.builtin.is_some() || lbl.macro_name || valid_name(&lbl.name) {
+        if lbl.builtin.is_some() || lbl.macro_name || lbl.future_function || valid_name(&lbl.name) {
             continue;
         }
         // An empty name has nothing to rename.
@@ -1660,6 +1669,10 @@ fn read_row(c: &mut Cursor<'_, '_>, st: &mut SheetState<'_>) -> Result<(), IoErr
     }
     info.outline = (flags & 7) as u8;
     info.collapsed = flags & 0x10 != 0;
+    // fExAsc (bit 28) and fExDes (bit 29): a medium or thick border on the row's top or bottom
+    // edge, the same flags as `<row thickTop/thickBot>` in .xlsx.
+    info.thick_top = flags & 0x1000_0000 != 0;
+    info.thick_bottom = flags & 0x2000_0000 != 0;
     if flags & 0x80 != 0 {
         let style = st.style(((flags >> 16) & 0x0FFF) as u16);
         if style != StyleId::DEFAULT {

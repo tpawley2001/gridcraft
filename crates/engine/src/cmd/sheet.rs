@@ -959,6 +959,8 @@ mod table_column_dxf_tests {
     #[test]
     fn column_dxfs_move_with_inserted_and_deleted_columns() {
         let mut t = Table {
+            alt_text: None,
+            alt_text_summary: None,
             query_table: None,
             id: 1,
             name: "T".into(),

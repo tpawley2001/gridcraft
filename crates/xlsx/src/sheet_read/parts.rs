@@ -245,10 +245,17 @@ pub fn read_table(cx: &mut Ctx<'_>, x: &El) -> Option<Table> {
                 .collect()
         })
         .unwrap_or_default();
+    let alt = x.child("extLst").and_then(|list| {
+        list.kids("ext")
+            .find(|ext| ext.attr("uri").is_some_and(|uri| uri.eq_ignore_ascii_case("{504A1905-F514-4f6f-8877-14C23A59335A}")))
+            .and_then(|ext| ext.child("table"))
+    });
     let si = x.child("tableStyleInfo");
     // A query table's definition hangs off the table part: `read_query_table` attaches it.
     let xml_table = x.attr("tableType") == Some("xml");
     Some(Table {
+        alt_text: alt.and_then(|a| a.attr("altText")).filter(|v| !v.is_empty()).map(str::to_string),
+        alt_text_summary: alt.and_then(|a| a.attr("altTextSummary")).filter(|v| !v.is_empty()).map(str::to_string),
         query_table: None,
         id: x.attr_u32("id").unwrap_or(0),
         name,

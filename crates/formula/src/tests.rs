@@ -673,6 +673,16 @@ fn names_of_a_linked_workbook_round_trip() -> Result<(), ParseError> {
 }
 
 #[test]
+fn this_book_prefix_names_the_plain_name() -> Result<(), ParseError> {
+    assert_eq!(parse("[0]!Rate")?, Expr::Name("Rate".into()));
+    assert_eq!(print(&parse("SUM([0]!Rate,1)")?), "SUM(Rate,1)");
+    // Linked workbooks keep their index.
+    assert_eq!(parse("[1]!Rate")?, Expr::Name("[1]!Rate".into()));
+    assert_eq!(parse("[10]!Rate")?, Expr::Name("[10]!Rate".into()));
+    Ok(())
+}
+
+#[test]
 fn wrappers_stacked_across_levels_are_bounded_as_a_whole() {
     // Each level adds 40 percents inside the parser's per-level bound, so no level is too deep alone.
     let stacked = |levels: usize| {
