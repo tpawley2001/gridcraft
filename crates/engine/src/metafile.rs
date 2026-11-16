@@ -9,12 +9,16 @@
 //!
 //! Covered: pens, brushes and stock objects, rectangles, ellipses, polygons, polylines and
 //! Béziers (32- and 16-bit point forms), path brackets with fill/stroke, `SAVEDC`/`RESTOREDC`,
-//! and device-independent bitmaps (1/4/8/16/24/32 bpp, uncompressed). Text, clipping, EMF+
-//! comments and raster operations other than plain copies are not drawn. Every other record is
+//! device-independent bitmaps (1/4/8/16/24/32 bpp, uncompressed), and text runs (fonts, text
+//! colour and alignment, `EXTTEXTOUTW`/`EXTTEXTOUTA`; see [`text`]). Clipping, EMF+ comments and
+//! raster operations other than plain copies are not drawn. Every other record is
 //! skipped by its size; a malformed record is skipped, and a malformed record size ends the
 //! picture (what was drawn so far is kept).
 
 use std::collections::HashMap;
+
+mod text;
+use text::{LogFont, TextState};
 
 /// A parsed metafile: what to draw, in order.
 #[derive(Debug, Clone, Default)]
@@ -155,10 +159,11 @@ struct Pen {
     cosmetic: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum Obj {
     Pen(Option<Pen>),
     Brush(Option<[u8; 3]>),
+    Font(LogFont),
 }
 
 /// The device context state that `SAVEDC` saves.
@@ -174,6 +179,8 @@ struct Dc {
     brush: Option<[u8; 3]>,
     even_odd: bool,
     pos: [f64; 2],
+    /// Selected font, text colour, alignment and background.
+    text: TextState,
 }
 
 impl Default for Dc {
@@ -189,6 +196,7 @@ impl Default for Dc {
             brush: Some([255, 255, 255]),
             even_odd: true,
             pos: [0.0; 2],
+            text: TextState::default(),
         }
     }
 }
@@ -358,6 +366,7 @@ impl Interp {
             37..=40 | 93..=95 => self.object_record(ty, r),
             59..=68 => self.path_record(ty),
             76 | 77 | 80 | 81 => self.bitmap_record(ty, r),
+            18 | 22 | 24 | 25 | 82..=84 => self.text_record(ty, r),
             _ => self.state_record(ty, r),
         }
     }
@@ -585,6 +594,8 @@ impl Interp {
                 6 => self.dc.pen = Some(Pen { color: [255, 255, 255], width: 0.0, cosmetic: true }),
                 7 => self.dc.pen = Some(Pen { color: [0, 0, 0], width: 0.0, cosmetic: true }),
                 8 => self.dc.pen = None,
+                // OEM_FIXED_FONT .. DEFAULT_GUI_FONT: the default font.
+                10..=17 => self.dc.text.font = LogFont::default(),
                 _ => {}
             }
             return;
@@ -592,6 +603,7 @@ impl Interp {
         match self.objects.get(&ih) {
             Some(Obj::Pen(p)) => self.dc.pen = *p,
             Some(Obj::Brush(b)) => self.dc.brush = *b,
+            Some(Obj::Font(f)) => self.dc.text.font = f.clone(),
             None => {}
         }
     }
