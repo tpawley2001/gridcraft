@@ -596,6 +596,30 @@ pub(super) struct TextPlacement<'a> {
     pub limits: (f32, f32),
 }
 
+/// Size and left edge of a number `tw` wide at `size` inside `room` starting at `x0`: centred
+/// when it fits, else drawn smaller to fill the room.
+fn fit_number(tw: f32, size: f32, room: f32, x0: f32) -> (f32, f32) {
+    if tw > room { ((size * room / tw).max(0.1), x0) } else { (size, x0 + (room - tw) / 2.0) }
+}
+
+/// Baseline of the first of `n` lines of height `line_h` in a cell `(y, h)` tall, placed by
+/// its vertical alignment. `extents` is the lines' measured (ascent, descent), when known.
+fn first_baseline(v: VAlign, extents: Option<(f32, f32)>, (y, h): (f32, f32), pad: f32, size: f32, n: f32, line_h: f32) -> f32 {
+    if let Some((ascent, descent)) = extents {
+        match v {
+            VAlign::Top => y + pad + ascent,
+            VAlign::Center | VAlign::Justify | VAlign::Distributed => y + (h - (n - 1.0) * line_h - ascent - descent) / 2.0 + ascent,
+            VAlign::Bottom => y + h - pad - descent - (n - 1.0) * line_h,
+        }
+    } else {
+        match v {
+            VAlign::Top => y + pad + size * 0.8,
+            VAlign::Center | VAlign::Justify | VAlign::Distributed => y + (h - n * line_h) / 2.0 + line_h * 0.5 + size * 0.33,
+            VAlign::Bottom => y + h - pad - size * 0.22 - (n - 1.0) * line_h,
+        }
+    }
+}
+
 pub(super) fn draw_text(pg: &mut Page, b: &Block, placement: TextPlacement<'_>) {
     let TextPlacement { cell: c, look: l, rect, merged, merges, limits } = placement;
     let (x, y, w, h) = rect;
@@ -664,13 +688,9 @@ pub(super) fn draw_text(pg: &mut Page, b: &Block, placement: TextPlacement<'_>) 
     // padded room stays inside its cell: centred over the padding, else drawn smaller.
     let mut fit_x = None;
     if is_num && !wrap && tw > avail + 0.01 && tw > 0.0 {
-        let room = (w - indent).max(0.0);
-        if tw > room {
-            size = (size * room / tw).max(0.1);
-            fit_x = Some(x + indent);
-        } else {
-            fit_x = Some(x + indent + (room - tw) / 2.0);
-        }
+        let (fit_size, x0) = fit_number(tw, size, (w - indent).max(0.0), x + indent);
+        size = fit_size;
+        fit_x = Some(x0);
     }
     let h_align = text_align(st.align.h, &v, direction, sh.right_to_left);
     let rot = st.align.rotation;
@@ -702,19 +722,7 @@ pub(super) fn draw_text(pg: &mut Page, b: &Block, placement: TextPlacement<'_>) 
         .map(|(ascent, descent)| (ascent.max(size * 0.8), descent.max(size * 0.22)));
     let line_h = extents.map_or(size * 1.2, |(ascent, descent)| (ascent + descent + size * 0.2).max(size * 1.2));
     let n = lines.len().max(1) as f32;
-    let first_baseline = if let Some((ascent, descent)) = extents {
-        match st.align.v {
-            VAlign::Top => y + pad + ascent,
-            VAlign::Center | VAlign::Justify | VAlign::Distributed => y + (h - (n - 1.0) * line_h - ascent - descent) / 2.0 + ascent,
-            VAlign::Bottom => y + h - pad - descent - (n - 1.0) * line_h,
-        }
-    } else {
-        match st.align.v {
-            VAlign::Top => y + pad + size * 0.8,
-            VAlign::Center | VAlign::Justify | VAlign::Distributed => y + (h - n * line_h) / 2.0 + line_h * 0.5 + size * 0.33,
-            VAlign::Bottom => y + h - pad - size * 0.22 - (n - 1.0) * line_h,
-        }
-    };
+    let first_baseline = first_baseline(st.align.v, extents, (y, h), pad, size, n, line_h);
     // Overflow into empty neighbours (single-line text, not merged).
     // Center Across Selection spans the empty Center Across cells to its right; the text stays within that run.
     let spans = st.align.h == HAlign::CenterAcross && !wrap && !merged && rot == 0;
