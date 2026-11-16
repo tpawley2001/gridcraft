@@ -134,6 +134,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-11-15 | G0437: `.xls` property sets with oversized declared sizes retain readable properties; orphaned XFExt records are ignored silently, while malformed records still warn. |
 | 2026-11-15 | XLSX PivotTables on a connection, the Data Model or another workbook survive save (from #2499): a PivotTable whose cache reads a workbook connection, the Data Model or a range in another workbook keeps its table, cache and records parts (and the Data Model) through open + save |
 | 2026-11-15 | `.xls` import reads cell notes (author, multi-line text, shown or hidden), hyperlinks (web, mailto, absolute and relative files, places in the workbook, tooltips) and frozen panes (#121, from #2496) |
 | 2026-11-14 | Whole-workbook print and PDF omit font-only and number-format-only sheets, retaining their formatting on save/reopen (G0393) |
@@ -277,6 +278,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | G0437: `.xls` property sets with oversized declared sizes retain readable properties; orphaned XFExt records are ignored silently, while malformed records still warn. |
 | 2026-11-15 | minor | Progress log: G0430 XLSX PivotTables on a connection, the Data Model or another workbook survive save (from #2499) |
 | 2026-11-15 | minor | Progress log: G0418 `.xls` import of notes, hyperlinks and frozen panes (#121, from #2496) |
 | 2026-11-14 | minor | G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. |

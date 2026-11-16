@@ -710,9 +710,9 @@ fn ext_of(r: &StyleRecords, i: usize) -> Option<&XfExt> {
     u16::try_from(i).ok().and_then(|i| r.exts.get(&i))
 }
 
-/// Whether an XFExt record was malformed or extends an XF the workbook doesn't have.
+/// Whether an XFExt record was malformed. Orphaned extensions have no style to change.
 pub(super) fn ext_ignored(r: &StyleRecords) -> bool {
-    r.bad_ext || r.exts.keys().any(|i| usize::from(*i) >= r.xfs.len())
+    r.bad_ext
 }
 
 /// The Normal style's font (name, size in points) is FONT record 0, regardless of the font

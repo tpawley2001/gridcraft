@@ -66,7 +66,9 @@ fn section(data: &[u8], offset_at: usize) -> Option<Section<'_>> {
         return None;
     }
     let size = usize::try_from(u32_at(data, offset)?).ok()?;
-    let set = data.get(offset..offset.checked_add(size)?)?;
+    // Some producers overstate Size; keep readable properties within the stream.
+    let available = data.get(offset..)?;
+    let set = available.get(..size.min(available.len()))?;
     let count = u32_at(set, 4).filter(|n| *n <= MAX_PROPERTIES)?;
     let table_end = 8 + count as usize * 8;
     let entries: Vec<(u32, &[u8])> = set
