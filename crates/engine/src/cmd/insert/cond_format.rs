@@ -274,7 +274,7 @@ pub(super) fn add_cf(s: &mut Session, p: &Json) -> Result<Json> {
         for cf in sh.cond_formats.iter_mut() {
             cf.priority += 1;
         }
-        sh.cond_formats.insert(0, CondFormat { ranges: ranges.clone(), rule, priority: 1, stop_if_true: false });
+        sh.cond_formats.insert(0, CondFormat { pivot: false, ranges: ranges.clone(), rule, priority: 1, stop_if_true: false });
         let _ = priority;
         Ok(json!({"rules": sh.cond_formats.len()}))
     })

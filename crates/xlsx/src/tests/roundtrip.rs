@@ -176,7 +176,7 @@ fn sample() -> Workbook {
         },
     ];
     for (i, rule) in cfs.into_iter().enumerate() {
-        s.cond_formats.push(CondFormat { ranges: vec![rr("B2:B10"), rr("D2")], rule, priority: i as u32 + 1, stop_if_true: i == 0 });
+        s.cond_formats.push(CondFormat { pivot: false, ranges: vec![rr("B2:B10"), rr("D2")], rule, priority: i as u32 + 1, stop_if_true: i == 0 });
     }
     s.validations.push(Validation {
         ranges: vec![rr("A2:A10")],
@@ -1169,6 +1169,7 @@ fn icon_sets_always_write_one_cfvo_per_icon() {
     .enumerate()
     {
         s.cond_formats.push(CondFormat {
+            pivot: false,
             ranges: vec![rr(&format!("A{}", i + 1))],
             rule: CfRule::IconSet { set: set.into(), thresholds, reverse: false, show_value: true },
             priority: i as u32 + 1,
@@ -1944,7 +1945,13 @@ fn solid_data_bar_survives_with_sparklines_and_gradient_neighbours() {
         |gradient: bool, max: CfValueKind| CfRule::DataBar { min: CfValueKind::Min, max, color: Color::Rgb(0x638EC6), gradient, show_value: true };
     let rules = [(true, "A1", CfValueKind::Max), (false, "B1", CfValueKind::Formula("$C$1".into())), (false, "D1:D3", CfValueKind::Number(9.0))];
     for (i, (gradient, range, max)) in rules.into_iter().enumerate() {
-        s.cond_formats.push(CondFormat { ranges: vec![rr(range)], rule: bar(gradient, max), priority: i as u32 + 1, stop_if_true: false });
+        s.cond_formats.push(CondFormat {
+            pivot: false,
+            ranges: vec![rr(range)],
+            rule: bar(gradient, max),
+            priority: i as u32 + 1,
+            stop_if_true: false,
+        });
     }
     s.sparklines.push(Sparkline {
         cell: at("F1"),
@@ -2361,6 +2368,7 @@ fn generated_rule_formulas_use_the_top_left_cell_of_every_area() {
     let mut wb = Workbook::new();
     let red = Box::new(Style::default());
     wb.sheet_mut(0).unwrap().cond_formats.push(CondFormat {
+        pivot: false,
         ranges: vec![rr("C5:C6"), rr("C2:C3")],
         rule: CfRule::ContainsText { text: "x".into(), style: red },
         priority: 1,

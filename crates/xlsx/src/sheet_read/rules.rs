@@ -54,6 +54,7 @@ pub(super) fn read_cf(cx: &mut Ctx<'_>, e: &El, sheet: &mut Sheet, kept_cells: &
         return;
     }
     let block_cells = ranges.iter().map(RangeRef::count).fold(0u64, u64::saturating_add);
+    let pivot = e.flag("pivot", false);
     for r in e.kids("cfRule") {
         let style = Box::new(r.attr_u32("dxfId").and_then(|i| cx.dxfs.get(i as usize)).cloned().unwrap_or_default());
         let formulas: Vec<String> = r.kids("formula").map(|f| from_file(f.text.trim())).collect();
@@ -129,6 +130,7 @@ pub(super) fn read_cf(cx: &mut Ctx<'_>, e: &El, sheet: &mut Sheet, kept_cells: &
             rule,
             priority: r.attr_u32("priority").unwrap_or(0),
             stop_if_true: r.flag("stopIfTrue", false),
+            pivot,
         });
     }
 }

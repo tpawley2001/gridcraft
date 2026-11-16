@@ -817,9 +817,11 @@ fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut O
         if cf.ranges.is_empty() {
             continue;
         }
+        // One rule per element, so a pivot rule never shares an element with a non-pivot rule.
         let _ = write!(
             s,
-            "<conditionalFormatting sqref=\"{}\">{}</conditionalFormatting>",
+            "<conditionalFormatting{} sqref=\"{}\">{}</conditionalFormatting>",
+            if cf.pivot { " pivot=\"1\"" } else { "" },
             sqref(&cf.ranges),
             cf_rule_xml(cf, prio.get(i).copied().unwrap_or(1), out)
         );

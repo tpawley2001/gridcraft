@@ -701,6 +701,7 @@ mod tests {
         let mut wb: Workbook = (*s.doc().unwrap().wb).clone();
         let stop = (CfValueKind::Formula("=1".into()), Color::default());
         let rule = |n: usize| CondFormat {
+            pivot: false,
             ranges: vec![RangeRef::parse("A1:A2").unwrap()],
             rule: CfRule::ColorScale { stops: vec![stop.clone(); n] },
             priority: 1,
