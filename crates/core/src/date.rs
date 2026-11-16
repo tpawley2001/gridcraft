@@ -59,6 +59,18 @@ pub fn unix_now_ms() -> Option<f64> {
     }
 }
 
+/// The local time zone's UTC offset at `unix_ms`, in milliseconds (daylight saving included).
+/// Stub for the acceptance tests: always UTC until implemented.
+pub fn local_offset_ms(_unix_ms: f64) -> f64 {
+    0.0
+}
+
+/// Date serial (1900 system) of the computer's local wall-clock time now; `None` without a clock.
+/// Stub for the acceptance tests: UTC until implemented.
+pub fn local_now_serial() -> Option<f64> {
+    unix_now_ms().map(|ms| serial_from_unix_ms(ms + local_offset_ms(ms)))
+}
+
 /// Date serial (1900 system, with fraction) for a Unix time in milliseconds.
 pub fn serial_from_unix_ms(ms: f64) -> f64 {
     25569.0 + ms / 86_400_000.0
