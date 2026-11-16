@@ -59,14 +59,26 @@ pub fn unix_now_ms() -> Option<f64> {
     }
 }
 
-/// The local time zone's UTC offset at `unix_ms`, in milliseconds (daylight saving included).
-/// Stub for the acceptance tests: always UTC until implemented.
-pub fn local_offset_ms(_unix_ms: f64) -> f64 {
-    0.0
+/// The local time zone's UTC offset at `unix_ms`, in milliseconds (daylight saving included):
+/// positive east of UTC. 0 when the offset is unavailable or `unix_ms` is out of range.
+/// Excel has no time-zone setting; NOW() and TODAY() read the computer's local wall clock.
+pub fn local_offset_ms(unix_ms: f64) -> f64 {
+    if !unix_ms.is_finite() || unix_ms.abs() > 8.64e15 {
+        return 0.0;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use chrono::{Offset, TimeZone};
+        chrono::Local.timestamp_millis_opt(unix_ms as i64).single().map_or(0.0, |t| f64::from(t.offset().fix().local_minus_utc()) * 1000.0)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let minutes = js_sys::Date::new(&unix_ms.into()).get_timezone_offset();
+        if minutes.is_finite() { -minutes * 60_000.0 } else { 0.0 }
+    }
 }
 
 /// Date serial (1900 system) of the computer's local wall-clock time now; `None` without a clock.
-/// Stub for the acceptance tests: UTC until implemented.
 pub fn local_now_serial() -> Option<f64> {
     unix_now_ms().map(|ms| serial_from_unix_ms(ms + local_offset_ms(ms)))
 }
@@ -310,6 +322,13 @@ mod tests {
         // 2026-10-10T12:00:00Z
         assert_eq!(serial_from_unix_ms(1_791_633_600_000.0), 46305.5);
         assert!(unix_now_ms().is_some_and(|ms| serial_from_unix_ms(ms) > 46305.0));
+        // Hostile instants never panic and give no offset; real offsets stay within ±26 h.
+        for ms in [f64::NAN, f64::INFINITY, -f64::INFINITY, 1e300, -1e300] {
+            assert_eq!(local_offset_ms(ms), 0.0);
+        }
+        let offset = local_offset_ms(1_791_633_600_000.0);
+        assert!(offset.abs() <= 26.0 * 3_600_000.0);
+        assert!(local_now_serial().is_some_and(|s| (s - serial_from_unix_ms(unix_now_ms().unwrap_or(0.0))).abs() <= 1.1));
     }
 
     #[test]

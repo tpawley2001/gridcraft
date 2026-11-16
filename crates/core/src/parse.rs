@@ -354,11 +354,11 @@ fn valid_ymd(sys: DateSystem, y: i64, m: i64, d: i64) -> Option<f64> {
     serial_from_ymd(sys, y, m, d)
 }
 
-/// The year used for dates typed without one, from the system clock (browser clock on wasm).
-/// Falls back to 2026 only when no clock is available.
+/// The year used for dates typed without one, from the computer's local date (browser clock on
+/// wasm). Falls back to 2026 only when no clock is available.
 pub fn current_year() -> i64 {
     if let Some(ms) = crate::date::unix_now_ms() {
-        let days = (ms / 86_400_000.0).floor() as i64;
+        let days = ((ms + crate::date::local_offset_ms(ms)) / 86_400_000.0).floor() as i64;
         return crate::date::civil_from_days(days).0 as i64;
     }
     2026
