@@ -180,6 +180,8 @@ mod xls_label_tail_tests;
 mod xls_list_control_tests;
 mod xls_long_text_tests;
 mod xls_macro_sheet_tests;
+mod xls_metafile_ole_preview_tests;
+mod xls_metafile_picture_tests;
 mod xls_missing_default_row_height_tests;
 mod xls_normal_font_tests;
 mod xls_office_art_presets_tests;

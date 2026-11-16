@@ -735,7 +735,8 @@ impl Embedded {
                 self.pending_no_print = no_print;
             }
             Some(OT_PICTURE) => {
-                if let Some(a) = anchor {
+                if let Some(mut a) = anchor {
+                    a.1.ole = has_pict_fmla(head);
                     self.pictures.push(a);
                 }
             }
@@ -946,7 +947,8 @@ impl Embedded {
     }
 
     /// Places the charts, pictures, text boxes and drawn shapes on the sheet (its column widths
-    /// and row heights are known by now). Pictures whose blip isn't a PNG or JPEG in the store are
+    /// and row heights are known by now). Pictures whose blip isn't a PNG, JPEG, EMF or WMF in the
+    /// store, and the metafile previews of embedded objects and ActiveX controls, are
     /// not shown (one warning), but keep their place as an [`EmbeddedObject`] so that they still
     /// count toward the printed range.
     pub(super) fn finish(mut self, sheet: &mut Sheet, store: &BStore, report: &mut ReadReport) {
@@ -960,7 +962,14 @@ impl Embedded {
         }
         let mut skipped = false;
         for (a, props) in self.pictures {
-            let Some(Blip::Picture { data, mime }) = props.pib.and_then(|pib| store.get(pib)) else {
+            // An embedded object's or ActiveX control's metafile preview isn't a picture.
+            let control = props.ole || props.shape_type == SPT_HOST_CONTROL;
+            let picture = match props.pib.and_then(|pib| store.get(pib)) {
+                Some(Blip::Picture { mime, .. }) if control && matches!(*mime, "image/x-emf" | "image/x-wmf") => None,
+                Some(Blip::Picture { data, mime }) => Some((data, mime)),
+                _ => None,
+            };
+            let Some((data, mime)) = picture else {
                 skipped = true;
                 // The preview of an embedded object or an ActiveX control (nearly always an EMF),
                 // or a picture whose blip can't be read: nothing is drawn, but its place counts
@@ -1018,7 +1027,7 @@ impl Embedded {
             sheet.embedded_objects.push(EmbeddedObject { anchor, print: true, kind: EmbeddedObjectKind::Ole, prog_id: String::new() });
         }
         if (skipped && !store.damaged) || biff5_skipped {
-            report.warn("Some pictures in .xls files use a format that isn't imported (only PNG and JPEG are).");
+            report.warn("Some pictures in .xls files use a format that isn't imported (only PNG, JPEG, EMF and WMF are).");
         }
         let table = self.palette.0;
         let mut rotated = false;
@@ -1125,6 +1134,7 @@ impl Embedded {
 /// Obj subrecord types ([MS-XLS] 2.4.181): FtEnd, FtSbs, the scroll bar's ObjLinkFmla, FtGboData,
 /// FtCblsData, FtLbsData and the check box's ObjLinkFmla.
 const FT_END: u16 = 0x0000;
+const FT_PICT_FMLA: u16 = 0x0009;
 const FT_SBS: u16 = 0x000C;
 const FT_SBS_FMLA: u16 = 0x000E;
 const FT_GBO_DATA: u16 = 0x000F;
@@ -1133,6 +1143,22 @@ const FT_LBS_DATA: u16 = 0x0013;
 const FT_CBLS_FMLA: u16 = 0x0014;
 /// FtSbs `fNo3d` ([MS-XLS] 2.5.163).
 const SBS_NO_3D: u16 = 0x0008;
+
+/// A BIFF8 Obj record (`data`, starting with its FtCmo) holds an FtPictFmla ([MS-XLS] 2.5.140):
+/// it belongs to an embedded or linked OLE object.
+fn has_pict_fmla(data: &[u8]) -> bool {
+    // Subrecords follow FtCmo (4 + 18 bytes): ft, cb, then cb bytes.
+    let mut at = 22usize;
+    while let (Some(ft), Some(cb)) = (u16_at(data, at), u16_at(data, at.saturating_add(2))) {
+        match ft {
+            FT_PICT_FMLA => return true,
+            // FtLbsData's cb isn't reliable, and a picture's Obj has none.
+            FT_END | FT_LBS_DATA => return false,
+            _ => at = at.saturating_add(4).saturating_add(usize::from(cb)),
+        }
+    }
+    false
+}
 
 /// A BIFF8 check box, option button, spin button, scroll bar, label, list box, group box or
 /// drop-down Obj (`data`, starting with its FtCmo) as a form control (without its anchor and

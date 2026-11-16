@@ -10,7 +10,7 @@ use crate::{read_xls, read_xlsx, write_xlsx};
 use super::xls_chart_tests::{bof, cat, cells, column_chart, eof, obj, rec, u16s};
 use super::xls_tests::compound;
 
-pub(super) const FORMAT_WARNING: &str = "Some pictures in .xls files use a format that isn't imported (only PNG and JPEG are).";
+pub(super) const FORMAT_WARNING: &str = "Some pictures in .xls files use a format that isn't imported (only PNG, JPEG, EMF and WMF are).";
 const DAMAGED_WARNING: &str = "The pictures of this .xls file are damaged and were not imported.";
 
 /// Bytes starting with the PNG signature (the reader doesn't decode them).
