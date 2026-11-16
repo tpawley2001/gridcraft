@@ -282,3 +282,54 @@ fn kept_query_table_survives_an_xlsx_round_trip() {
     assert_eq!(query_table(&parts).attr("name"), q.attr("name"));
     assert!(again.names.iter().any(|n| n.name == NAME));
 }
+
+/// `text_import` with TxtQry flags fFile | fDelimited | iCpid | iCpidNew | fUseNewiCpid ([MS-XLS] 2.4.330).
+fn text_import_with_code_page(cpid: u16, cpid_new: u16, use_new: bool) -> Vec<u8> {
+    let flags: u16 = 0x0001 | 0x0002 | (cpid << 2) | (cpid_new << 5) | if use_new { 0x8000 } else { 0 };
+    let txt = rec(
+        0x0805,
+        &cat(&[
+            &u16s(&[0x0805, 0, flags, 0]),
+            &u32s(&[2]),
+            &[0x04],
+            &u16s(&[0]),
+            &[0],
+            &u32s(&[2]),
+            b".,",
+            &u32s(&[0, 0, 1, 6]),
+            &xlstr("C:\\data\\orders.csv"),
+        ]),
+    );
+    cat(&[&qsi(), &db_query(6, 0, 0, 0), &qsi_sx_tag(), &db_query_ext(6, 0, true, 0), &txt, &qsir(&["Region", "Sales"])])
+}
+
+#[test]
+fn text_import_new_code_page_is_kept_with_default_code_page() {
+    // Windows ANSI iCpid, fUseNewiCpid set, iCpidNew 71 (as written by Excel in real files).
+    for (cpid, cpid_new) in [(1, 71), (2, 3), (0, 1023)] {
+        let (_, report, parts) = save(&book(&text_import_with_code_page(cpid, cpid_new, true)));
+        assert_eq!(dropped(&report), 0, "iCpid {cpid} iCpidNew {cpid_new}: {:?}", report.warnings);
+        let c = connection(&parts);
+        assert_eq!(c.attr("type"), Some("6"));
+        let t = c.child("textPr").expect("textPr");
+        assert_eq!(t.attr("sourceFile"), Some("C:\\data\\orders.csv"));
+        assert_eq!(t.attr("fileType"), None, "iCpid is not authoritative when iCpidNew > 2");
+        assert_eq!(t.attr("codePage"), None);
+        assert_eq!(t.attr("firstRow"), Some("2"));
+        assert!(t.flag("delimited", true));
+        let fields = t.child("textFields").expect("textFields");
+        assert_eq!(fields.attr("count"), Some("2"));
+        assert_eq!(query_table(&parts).attr("connectionId"), Some("1"));
+    }
+}
+
+#[test]
+fn text_import_new_code_page_small_values_keep_icpid() {
+    // fUseNewiCpid with iCpidNew <= 2, or fUseNewiCpid clear: iCpid decides fileType, as before.
+    for (cpid, cpid_new, use_new, want) in [(2, 1, true, Some("dos")), (0, 2, true, Some("mac")), (2, 71, false, Some("dos")), (1, 0, true, None)] {
+        let (_, report, parts) = save(&book(&text_import_with_code_page(cpid, cpid_new, use_new)));
+        assert_eq!(dropped(&report), 0, "{:?}", report.warnings);
+        let t = connection(&parts).child("textPr").cloned().expect("textPr");
+        assert_eq!(t.attr("fileType"), want, "iCpid {cpid} iCpidNew {cpid_new} use {use_new}");
+    }
+}
