@@ -469,7 +469,7 @@ pub(crate) fn connections_part<S: AsRef<str>>(connections: &[S]) -> Option<Arc<P
     let name = "xl/connections.xml".to_string();
     Some(Arc::new(Preserved {
         rels: vec![PreservedRel { id: "rIdConnections".into(), rel_type: REL_CONNECTIONS.into(), target: name.clone(), external: false }],
-        parts: vec![PreservedPart { name, content_type: CT_CONNECTIONS.into(), data: xml.into_bytes().into(), rels: vec![] }],
+        parts: vec![PreservedPart { name, content_type: CT_CONNECTIONS.into(), data: xml.into_bytes().into(), rels: vec![], ..Default::default() }],
         ..Preserved::default()
     }))
 }
@@ -479,5 +479,5 @@ pub(crate) fn connections_part<S: AsRef<str>>(connections: &[S]) -> Option<Arc<P
 pub(crate) fn add_query_table_part(p: &mut Preserved, rel_id: String, n: u32, xml: String) {
     let name = format!("xl/queryTables/queryTable{n}.xml");
     p.rels.push(PreservedRel { id: rel_id, rel_type: REL_QUERY_TABLE.into(), target: name.clone(), external: false });
-    p.parts.push(PreservedPart { name, content_type: CT_QUERY_TABLE.into(), data: xml.into_bytes().into(), rels: vec![] });
+    p.parts.push(PreservedPart { name, content_type: CT_QUERY_TABLE.into(), data: xml.into_bytes().into(), rels: vec![], ..Default::default() });
 }

@@ -20,7 +20,13 @@
 //! pictures of the headers and footers, `&G`, with their `<legacyDrawingHF>`, and the sheet's part of
 //! the Custom Views, `<customSheetViews>`). The workbook also keeps its `<fileVersion>` and the
 //! calcFeatures extension, which Excel needs to trust the saved values, and its Custom Views
-//! (`<customWorkbookViews>`): a sheet keeps only the views the workbook still lists.
+//! (`<customWorkbookViews>`): a sheet keeps only the views the workbook still lists. The workbook's
+//! Data Model (`xl/model/item.data`) is kept with its data connections. PivotTables whose source is
+//! in another workbook, a data connection or the Data Model are kept too: the PivotTable parts with
+//! their sheet, the cache definition and records parts (with the cache's link to the other
+//! workbook's path) with the workbook and its `<pivotCache>` entry, its `cacheId` unchanged; a cache
+//! on a connection only when the connections are kept, and on the Data Model only when the model is
+//! kept.
 //!
 //! On write, kept parts get fresh part names where needed and new relationship ids; the `r:id`s in
 //! kept XML are rewritten to match (the kept relationships of a sheet's drawing keep their ids: a
@@ -32,6 +38,7 @@
 //!   opened, followed or refreshed. A relative path to a linked workbook is rewritten when the
 //!   workbook is saved into another folder ([`rebase_links`]), so it still names the same file.
 //! - Sheet content lives on the sheet: deleting the sheet drops it, Copy Sheet doesn't copy it.
+//!   A kept pivot cache no kept PivotTable uses any more is dropped with it.
 //!   Cell references inside kept parts (a control's linked cell, a query table's range, a cell
 //!   mapped to an XML element) are kept as they were, not adjusted to inserted or deleted rows.
 //! - Strict Open XML files are passed through as Transitional (what is saved): relationship types
@@ -53,6 +60,7 @@ use quick_xml::{Reader, Writer};
 
 use crate::IoError;
 use crate::package::{self, normalize};
+use crate::pivot::{CT_PIVOT_CACHE_DEF, CT_PIVOT_TABLE, ExternalPivot, KeptSource};
 use crate::read::Ctx;
 use crate::write::{NS_REL, Out, Rels, XML_DECL};
 use crate::xml::{self, esc_attr};
@@ -72,8 +80,8 @@ use strict::{Untranslatable, is_xml_part, to_transitional};
 #[cfg(test)]
 pub(crate) use write::sheet_names_in;
 pub use write::{
-    KeptOut, SheetIds, WorkbookKept, custom_view_guids, custom_workbook_views, workbook_elements, write_package_rels, write_theme_relationships,
-    write_workbook,
+    KeptOut, SheetIds, WorkbookKept, custom_view_guids, custom_workbook_views, finish_style_ids, workbook_elements, write_package_rels,
+    write_theme_relationships, write_workbook,
 };
 
 /// Most bytes kept for one workbook.
@@ -178,6 +186,13 @@ const CUSTOM_WORKBOOK_VIEW_ATTRS: &[&str] = &[
 ];
 /// The content type of a worksheet custom property part (ECMA-376 Part 1 §18.3.1.23).
 const CT_CUSTOM_PROPERTY: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.customProperty";
+/// Rewritten kinds a kept PivotTable (source in another workbook) reaches: the table, from the
+/// sheet, and its cache, which the workbook keeps (several tables can share one cache).
+const PIVOT_TABLE_GRAPH: &[&str] = &["pivotTable", "pivotCacheDefinition"];
+/// Rewritten kinds a kept pivot cache reaches.
+const PIVOT_CACHE_GRAPH: &[&str] = &["pivotCacheDefinition", "pivotCacheRecords"];
+/// The workbook's Data Model part (Power Pivot), kept byte for byte when its connections are.
+const DATA_MODEL_GRAPH: &[&str] = &["powerPivotData"];
 
 /// Relationship kinds GridCraft reads and rewrites, or that depend on content it rewrites:
 /// kept content whose graph reaches one of them is dropped.
@@ -271,6 +286,7 @@ const OWN_DIRS: &[&str] = &[
     "ddp/",
     "docprops/metadata.xml",
     "docprops/hmac.xml",
+    "xl/model/",
 ];
 
 /// The package-root relationship type of the custom document properties part.
@@ -287,7 +303,13 @@ pub(crate) fn keep_package_root_part(wb: &mut Workbook, rel: PreservedRel, conte
     if p.parts.iter().any(|q| normalize(&q.name) == key) {
         return;
     }
-    p.parts.push(PreservedPart { name: rel.target.clone(), content_type: content_type.to_string(), data: Arc::from(data), rels: vec![] });
+    p.parts.push(PreservedPart {
+        name: rel.target.clone(),
+        content_type: content_type.to_string(),
+        data: Arc::from(data),
+        rels: vec![],
+        ..Default::default()
+    });
     p.package_rels.push(rel);
     wb.preserved = Some(Arc::new(p));
 }

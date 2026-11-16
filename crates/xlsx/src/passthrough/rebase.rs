@@ -14,9 +14,34 @@ impl<'a> SheetKept<'a> {
     /// sheet's part name, whose folder the relationship targets are relative to).
     pub fn write(sheet: &'a Sheet, part: &str, rels: &mut Rels, out: &mut Out) -> SheetKept<'a> {
         let Some(p) = sheet.preserved.as_deref() else { return SheetKept { p: None, names: NameMap::new(), ids: HashMap::new() } };
-        let names = write_parts(out, &p.parts);
+        // A kept PivotTable whose cache wasn't kept with the workbook is left out.
+        let (wb_names, cache_ids) = (&out.kept.wb_names, &out.kept.cache_ids);
+        let orphan: HashSet<String> = p
+            .parts
+            .iter()
+            .filter(|q| {
+                let direct = q.rels.iter().filter(|r| !r.external && is_kind(r, &["pivotCacheDefinition"]));
+                // A table with no relationship to its cache names it by `cacheId` instead.
+                let by_id = || {
+                    q.content_type == CT_PIVOT_TABLE
+                        && crate::xml::parse(&q.data).ok().and_then(|x| x.attr_u32("cacheId")).is_some_and(|id| !cache_ids.contains(&id))
+                };
+                let direct_is_orphan = direct.into_iter().any(|r| !wb_names.contains_key(&normalize(&r.target)));
+                direct_is_orphan || by_id()
+            })
+            .map(|q| normalize(&q.name))
+            .collect();
+        let (parts, sheet_rels): (Cow<'_, [PreservedPart]>, Cow<'_, [PreservedRel]>) = if orphan.is_empty() {
+            (Cow::Borrowed(&p.parts), Cow::Borrowed(&p.rels))
+        } else {
+            (
+                p.parts.iter().filter(|q| !orphan.contains(&normalize(&q.name))).cloned().collect(),
+                p.rels.iter().filter(|r| r.external || !orphan.contains(&normalize(&r.target))).cloned().collect(),
+            )
+        };
+        let names = write_parts(out, &parts);
         let (from, _) = package::split_dir(part);
-        let ids = attach(rels, &p.rels, &names, from);
+        let ids = attach(rels, &sheet_rels, &names, from);
         SheetKept { p: Some(p), names, ids }
     }
 

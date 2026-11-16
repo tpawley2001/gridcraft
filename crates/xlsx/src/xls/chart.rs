@@ -2209,12 +2209,14 @@ pub(crate) fn add_chart_sheets(wb: &mut Workbook, sheets: Vec<ChartSheet>) {
             content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml".into(),
             data: Arc::from(sheet_xml.into_bytes()),
             rels: vec![rel("drawing", &drawing_part)],
+            ..Default::default()
         });
         kept.parts.push(PreservedPart {
             name: drawing_part,
             content_type: "application/vnd.openxmlformats-officedocument.drawing+xml".into(),
             data: Arc::from(drawing.into_bytes()),
             rels: vec![rel("chart", &chart_part)],
+            ..Default::default()
         });
         let mut chart_rels = Vec::new();
         for (id, name, content_type, data, rel_type) in [
@@ -2228,7 +2230,13 @@ pub(crate) fn add_chart_sheets(wb: &mut Workbook, sheets: Vec<ChartSheet>) {
             ),
         ] {
             chart_rels.push(PreservedRel { id: id.into(), rel_type: rel_type.into(), target: name.clone(), external: false });
-            kept.parts.push(PreservedPart { name, content_type: content_type.into(), data: Arc::from(data.into_bytes()), rels: vec![] });
+            kept.parts.push(PreservedPart {
+                name,
+                content_type: content_type.into(),
+                data: Arc::from(data.into_bytes()),
+                rels: vec![],
+                ..Default::default()
+            });
         }
         if let Some(bytes) = &cs.chart.theme_override {
             let name = format!("xl/theme/chartsheet_themeOverride{n}.xml");
@@ -2238,6 +2246,7 @@ pub(crate) fn add_chart_sheets(wb: &mut Workbook, sheets: Vec<ChartSheet>) {
                 content_type: "application/vnd.openxmlformats-officedocument.themeOverride+xml".into(),
                 data: Arc::from(bytes.as_slice()),
                 rels: vec![],
+                ..Default::default()
             });
         }
         kept.parts.push(PreservedPart {
@@ -2245,6 +2254,7 @@ pub(crate) fn add_chart_sheets(wb: &mut Workbook, sheets: Vec<ChartSheet>) {
             content_type: "application/vnd.openxmlformats-officedocument.drawingml.chart+xml".into(),
             data: Arc::from(chart_xml.into_bytes()),
             rels: chart_rels,
+            ..Default::default()
         });
         let rel_id = format!("rIdXlsChartSheet{n}");
         kept.rels.push(PreservedRel { id: rel_id.clone(), rel_type: format!("{REL}/chartsheet"), target: sheet_part, external: false });
