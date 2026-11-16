@@ -387,6 +387,8 @@ fn check_inner(path: &str, bytes: &[u8], opts: &Options) -> FileReport {
 }
 
 #[cfg(test)]
+mod cf_border_none_tests;
+#[cfg(test)]
 mod core_props_tests;
 #[cfg(test)]
 mod macro_source_tests;
