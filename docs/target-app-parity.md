@@ -1,6 +1,6 @@
 # Target-app parity: GridCraft vs Microsoft Excel
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-15 · **Change:** minor (G0423: the `&F` header/footer field prints an imported workbook's own file name (`budget.xls`), not its `(imported).xlsx` title, as Excel prints; no score change; earlier: G0416: text overflowing from a cell left of a column band is drawn on that band's pages too, clipped to the band, as Excel prints; no score change; earlier: G0411: a column band leaves about 1.1 printed points free at its right edge, so a column ending closer than that to the right margin starts the next page, as Excel prints; no score change)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-11-15 · **Change:** minor (G0424: a printed number or date that fits its column at the cell font's own digit widths prints in full instead of `####`; no score change; earlier: G0416: text overflowing from a cell left of a column band is drawn on that band's pages too, clipped to the band, as Excel prints; no score change; earlier: G0411: a column band leaves about 1.1 printed points free at its right edge, so a column ending closer than that to the right margin starts the next page, as Excel prints; no score change)
 
 This is the authoritative parity assessment. [`ROADMAP.md`](../ROADMAP.md) summarizes it,
 [`gaps.md`](gaps.md) lists every shortfall, and the area checklists hold the detail:
@@ -334,6 +334,7 @@ The inventory carried over from the 2026-10-07 ROADMAP.md, updated for what land
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | G0424: page layout, print, PDF: a number or date fits its column by the cell font's own digit widths (Calibri 11: `10/29/2021` in an 11-character column, 10 General digits), as Excel prints, kept inside the cell (centred over the padding, else drawn smaller); a number that does not fit still fills the cell with `#` |
 | 2026-11-15 | minor | G0423: page layout, print, PDF: `&F` in a header or footer prints the file a workbook was opened from (`budget.xls`, `report.slk`) until it is saved, not its `budget (imported).xlsx` window title, as Excel prints; after Save As it prints the new name. No readiness score change. |
 | 2026-11-15 | minor | G0419: page layout, print, PDF: repeated title columns (Columns to repeat at left) that put something on paper make every band of columns print every row band of the printed range, as Excel prints; no readiness score change. |
 | 2026-11-15 | minor | G0416: page layout, print, PDF: single-line text overflowing from a cell left of a column band over empty cells into it is drawn on that band's pages, placed as if the earlier columns lay left of the page and clipped to the band, as Excel prints; no readiness score change. |
