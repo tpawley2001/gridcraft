@@ -350,6 +350,17 @@ impl Interp {
 
     fn try_record(&mut self, ty: u32, r: &[u8]) -> Option<()> {
         match ty {
+            2..=8 | 85..=91 => self.poly_record(ty, r),
+            37..=40 | 93..=95 => self.object_record(ty, r),
+            59..=68 => self.path_record(ty),
+            76 | 77 | 80 | 81 => self.bitmap_record(ty, r),
+            _ => self.state_record(ty, r),
+        }
+    }
+
+    /// Point-list records (polygons, polylines, Béziers).
+    fn poly_record(&mut self, ty: u32, r: &[u8]) -> Option<()> {
+        match ty {
             // EMR_POLYBEZIER, POLYGON, POLYLINE, POLYBEZIERTO, POLYLINETO and their 16-bit forms.
             2..=6 | 85..=89 => {
                 let wide = ty <= 6;
@@ -387,6 +398,14 @@ impl Interp {
                 }
                 if ty == 8 || ty == 91 { self.shape(figures) } else { self.lines(figures) }
             }
+            _ => {}
+        }
+        Some(())
+    }
+
+    /// Device-context state, simple shapes and line drawing.
+    fn state_record(&mut self, ty: u32, r: &[u8]) -> Option<()> {
+        match ty {
             9 => self.dc.win_ext = point_at(r, 8)?,
             10 => self.dc.win_org = point_at(r, 8)?,
             11 => self.dc.vp_ext = point_at(r, 8)?,
@@ -420,6 +439,23 @@ impl Interp {
                     _ => return None,
                 };
             }
+            42 => {
+                let (a, b) = (point_at(r, 8)?, point_at(r, 16)?);
+                self.shape(vec![ellipse(a, b)]);
+            }
+            43 | 44 => {
+                let (a, b) = (point_at(r, 8)?, point_at(r, 16)?);
+                self.shape(vec![vec![a, [b[0], a[1]], b, [a[0], b[1]]]]);
+            }
+            54 => self.line_to(vec![point_at(r, 8)?]),
+            _ => {}
+        }
+        Some(())
+    }
+
+    /// Pens and brushes: creation, selection, deletion.
+    fn object_record(&mut self, ty: u32, r: &[u8]) -> Option<()> {
+        match ty {
             37 => self.select(u32_at(r, 8)?),
             38 => {
                 // EMR_CREATEPEN: LogPen (style, width as a point, COLORREF).
@@ -444,15 +480,28 @@ impl Interp {
             40 => {
                 self.objects.remove(&u32_at(r, 8)?);
             }
-            42 => {
-                let (a, b) = (point_at(r, 8)?, point_at(r, 16)?);
-                self.shape(vec![ellipse(a, b)]);
+            95 => {
+                // EMR_EXTCREATEPEN: LogPenEx (style, width, brush style, COLORREF) after the DIB fields.
+                let style = u32_at(r, 28)?;
+                let width = f64::from(u32_at(r, 32)?);
+                let brush_style = u32_at(r, 36)?;
+                let color = colorref(u32_at(r, 40)?);
+                let geometric = style & 0x000F_0000 == 0x0001_0000;
+                let pen = (style & 0xF != 5 && brush_style != 1).then_some(Pen { color, width, cosmetic: !geometric || width == 0.0 });
+                self.objects.insert(u32_at(r, 8)?, Obj::Pen(pen));
             }
-            43 | 44 => {
-                let (a, b) = (point_at(r, 8)?, point_at(r, 16)?);
-                self.shape(vec![vec![a, [b[0], a[1]], b, [a[0], b[1]]]]);
+            // EMR_CREATEMONOBRUSH, EMR_CREATEDIBPATTERNBRUSHPT: a pattern, drawn as mid grey.
+            93 | 94 => {
+                self.objects.insert(u32_at(r, 8)?, Obj::Brush(Some([128, 128, 128])));
             }
-            54 => self.line_to(vec![point_at(r, 8)?]),
+            _ => {}
+        }
+        Some(())
+    }
+
+    /// Path brackets and the records that fill or stroke them.
+    fn path_record(&mut self, ty: u32) -> Option<()> {
+        match ty {
             59 => {
                 self.path = Some(PathBuf::default());
                 self.building = true;
@@ -486,6 +535,14 @@ impl Interp {
             67 | 68 => {
                 self.take_path();
             }
+            _ => {}
+        }
+        Some(())
+    }
+
+    /// Bitmap records.
+    fn bitmap_record(&mut self, ty: u32, r: &[u8]) -> Option<()> {
+        match ty {
             76 | 77 => self.blt(ty, r)?,
             80 => {
                 // EMR_SETDIBITSTODEVICE
@@ -508,25 +565,10 @@ impl Interp {
                 let size = point_at(r, 72)?;
                 self.bitmap(r, &dib, src, dest, size)?;
             }
-            95 => {
-                // EMR_EXTCREATEPEN: LogPenEx (style, width, brush style, COLORREF) after the DIB fields.
-                let style = u32_at(r, 28)?;
-                let width = f64::from(u32_at(r, 32)?);
-                let brush_style = u32_at(r, 36)?;
-                let color = colorref(u32_at(r, 40)?);
-                let geometric = style & 0x000F_0000 == 0x0001_0000;
-                let pen = (style & 0xF != 5 && brush_style != 1).then_some(Pen { color, width, cosmetic: !geometric || width == 0.0 });
-                self.objects.insert(u32_at(r, 8)?, Obj::Pen(pen));
-            }
-            // EMR_CREATEMONOBRUSH, EMR_CREATEDIBPATTERNBRUSHPT: a pattern, drawn as mid grey.
-            93 | 94 => {
-                self.objects.insert(u32_at(r, 8)?, Obj::Brush(Some([128, 128, 128])));
-            }
             _ => {}
         }
         Some(())
     }
-
     fn select(&mut self, ih: u32) {
         if ih & 0x8000_0000 != 0 {
             match ih & 0x7FFF_FFFF {
@@ -647,8 +689,8 @@ fn bezier(start: Option<[f64; 2]>, pts: &[[f64; 2]]) -> Vec<[f64; 2]> {
         return Vec::new();
     };
     let mut out = vec![p0];
-    for seg in rest.chunks_exact(3) {
-        let (Some(p1), Some(p2), Some(p3)) = (seg.first(), seg.get(1), seg.get(2)) else { continue };
+    for seg in rest.as_chunks::<3>().0 {
+        let [p1, p2, p3] = seg;
         for i in 1..=BEZIER_STEPS {
             let t = i as f64 / BEZIER_STEPS as f64;
             let u = 1.0 - t;
@@ -758,7 +800,7 @@ fn flip(rgba: Vec<u8>, w: u32, h: u32, fx: bool, fy: bool) -> Vec<u8> {
         let r = if fy { h - 1 - row } else { row };
         let line = rgba.get(r * w * 4..(r + 1) * w * 4).unwrap_or_default();
         if fx {
-            for p in line.chunks_exact(4).rev() {
+            for p in line.as_chunks::<4>().0.iter().rev() {
                 out.extend_from_slice(p);
             }
         } else {

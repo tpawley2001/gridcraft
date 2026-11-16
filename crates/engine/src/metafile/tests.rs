@@ -31,7 +31,10 @@ fn select(ih: u32) -> Vec<u8> {
 fn poly16(ty: u32, pts: &[i16]) -> Vec<u8> {
     rec(ty, &[i32s(&[0, 0, 0, 0]), u32s(&[(pts.len() / 2) as u32]), i16s(pts)].concat())
 }
-fn paths(d: &Drawing) -> Vec<(Vec<Vec<[f32; 2]>>, bool, Option<[u8; 3]>, Option<([u8; 3], f32)>, bool)> {
+/// A path's subpaths, closed flag, fill, stroke and fill rule.
+type PathView = (Vec<Vec<[f32; 2]>>, bool, Option<[u8; 3]>, Option<([u8; 3], f32)>, bool);
+
+fn paths(d: &Drawing) -> Vec<PathView> {
     d.items
         .iter()
         .filter_map(|i| match i {
