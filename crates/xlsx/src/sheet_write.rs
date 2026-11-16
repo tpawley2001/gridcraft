@@ -734,6 +734,20 @@ fn write_sheet_format(s: &mut String, sheet: &Sheet) {
     s.push_str("/>");
 }
 
+/// The written priority of each of `sheet`'s conditional formats: 1..n in priority order (a
+/// stable sort, so equal priorities keep their model order).
+pub(crate) fn cf_priorities(sheet: &Sheet) -> Vec<u32> {
+    let mut order: Vec<usize> = (0..sheet.cond_formats.len()).collect();
+    order.sort_by_key(|&i| sheet.cond_formats.get(i).map(|c| c.priority).unwrap_or(0));
+    let mut prio = vec![0u32; sheet.cond_formats.len()];
+    for (rank, &i) in order.iter().enumerate() {
+        if let Some(p) = prio.get_mut(i) {
+            *p = rank as u32 + 1;
+        }
+    }
+    prio
+}
+
 /// Writes protection, filter, merges, conditional formats, validations and links; returns the
 /// conditional formats' priorities and where `<customSheetViews>` goes (before `<mergeCells>`).
 fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut Out) -> (Vec<u32>, usize) {
@@ -805,14 +819,7 @@ fn write_sheet_rules(s: &mut String, sheet: &Sheet, rels: &mut Rels, out: &mut O
         crate::xml::push_phonetic_pr(s, pr);
     }
     // Conditional formats, priorities renumbered 1..n in priority order.
-    let mut order: Vec<usize> = (0..sheet.cond_formats.len()).collect();
-    order.sort_by_key(|&i| sheet.cond_formats.get(i).map(|c| c.priority).unwrap_or(0));
-    let mut prio = vec![0u32; sheet.cond_formats.len()];
-    for (rank, &i) in order.iter().enumerate() {
-        if let Some(p) = prio.get_mut(i) {
-            *p = rank as u32 + 1;
-        }
-    }
+    let prio = cf_priorities(sheet);
     for (i, cf) in sheet.cond_formats.iter().enumerate() {
         if cf.ranges.is_empty() {
             continue;

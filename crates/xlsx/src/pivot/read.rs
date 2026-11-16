@@ -1,8 +1,8 @@
 use super::{CT_PIVOT_CACHE_DEF, CT_PIVOT_CACHE_REC, CT_PIVOT_TABLE, NS_REL};
 use super::{
     CellRef, Ctx, DateSystem, El, HashMap, IoError, MAX_FIELDS, PivotArea, PivotAreaField, PivotAreaItem, PivotAreaReference, PivotCalcField,
-    PivotDateGroup, PivotField, PivotFilter, PivotFormat, PivotFunc, PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue, RangeRef,
-    abs_range, func_caption, func_from, number_to_text, quote_sheet, same,
+    PivotConditionalFormat, PivotDateGroup, PivotField, PivotFilter, PivotFormat, PivotFunc, PivotLayout, PivotShowAs, PivotSort, PivotTable,
+    PivotValue, RangeRef, abs_range, func_caption, func_from, number_to_text, quote_sheet, same,
 };
 use gridcraft_model::{PreservedPart, PreservedPivot, PreservedRel};
 
@@ -598,6 +598,7 @@ fn read_table(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, id: u32) -> Option<Pivo
     }
 
     pt.formats = read_formats(cx, x, cache, &pt.name);
+    pt.conditional_formats = read_conditional_formats(cx, x, cache, &pt.name);
 
     pt.anchor = loc.start;
     let above = if pages.is_empty() { 0 } else { pages.len() as u32 + 1 };
@@ -607,6 +608,8 @@ fn read_table(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, id: u32) -> Option<Pivo
 
 /// Most `format` elements read per PivotTable.
 const MAX_FORMATS: usize = 100_000;
+/// Most `pivotArea` elements read per conditional format.
+const MAX_CF_AREAS: usize = 16_384;
 /// Most references read per pivot area, and items per reference.
 const MAX_AREA_REFS: usize = 16_384;
 const MAX_AREA_ITEMS: usize = 1_048_576;
@@ -718,6 +721,44 @@ fn read_formats(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, name: &str) -> Vec<Pi
     }
     if skipped {
         cx.warn(format!("PivotTable \"{name}\": some of its formatting refers to fields or items it doesn't have; that formatting was dropped"));
+    }
+    out
+}
+
+/// The PivotTable's conditional formats (`conditionalFormats`, §18.10.1.18/19). An area that
+/// can't be mapped to the cache is skipped, and a conditional format left with no area is
+/// dropped, with one warning per PivotTable.
+fn read_conditional_formats(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, name: &str) -> Vec<PivotConditionalFormat> {
+    let pfs: Vec<&El> = x.child("pivotFields").map(|p| p.kids("pivotField").collect()).unwrap_or_default();
+    let mut out = Vec::new();
+    let mut skipped = false;
+    for f in x.child("conditionalFormats").into_iter().flat_map(|f| f.kids("conditionalFormat")).take(MAX_FORMATS) {
+        let Some(priority) = f.attr_u32("priority") else {
+            skipped = true;
+            continue;
+        };
+        let mut areas = Vec::new();
+        for a in f.child("pivotAreas").into_iter().flat_map(|a| a.kids("pivotArea")).take(MAX_CF_AREAS) {
+            match read_area(a, cache, &pfs) {
+                Some(area) => areas.push(area),
+                None => skipped = true,
+            }
+        }
+        if areas.is_empty() {
+            skipped = true;
+            continue;
+        }
+        out.push(PivotConditionalFormat {
+            priority,
+            scope: f.attr("scope").unwrap_or("selection").to_string(),
+            cf_type: f.attr("type").unwrap_or("none").to_string(),
+            areas,
+        });
+    }
+    if skipped {
+        cx.warn(format!(
+            "PivotTable \"{name}\": some of its conditional formatting refers to fields or items it doesn't have; that part was dropped"
+        ));
     }
     out
 }
