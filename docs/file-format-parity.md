@@ -246,6 +246,7 @@ Visible Excel 5 dialog sheets in XLSX have detached print views for whole-workbo
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | G0441: Save As `.xlsx` marks visible, non-custom `.xls` rows with stored heights below the Normal font's default as `customHeight="1"`, preserving their short printed heights; other rows and sheet formats keep their existing behavior (`xls_row_ht_save_tests.rs`). |
 | 2026-11-15 | trivial | G0440: `.xls` NAME records named `_xlfn.…`, `_xlws.…` or `_xlpm.…` (placeholders for functions newer than BIFF8 and LAMBDA parameters) are skipped silently, not reported as skipped macro names; they are still not imported as defined names (`xls_future_function_names_tests.rs`). |
 | 2026-11-15 | minor | G0439: BIFF8 `.xls` PtgNameX through a self SupBook without ExternName records resolves workbook and sheet-level defined names, keeping formulas through Save As `.xlsx`. |
 | 2026-11-15 | minor | G0437: `.xls` property sets with oversized declared sizes retain readable properties; orphaned XFExt records are ignored silently, while malformed records still warn. |
