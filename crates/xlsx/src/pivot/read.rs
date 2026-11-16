@@ -339,8 +339,37 @@ fn read_table(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, id: u32) -> Option<Pivo
 
     let mut filters: Vec<PivotFilter> = Vec::new();
 
+    // Reserve real database fields before walking the layout: an unsupported group may
+    // precede its base on another axis, but must not displace that base's own position.
+    let real_fields: Vec<&str> = row_x
+        .iter()
+        .chain(&col_x)
+        .copied()
+        .chain(pages.iter().filter_map(|p| p.attr_i64("fld")))
+        .filter(|i| *i >= 0)
+        .filter_map(|i| cache.fields.get(i as usize))
+        .filter(|f| f.database && f.formula.is_none())
+        .map(|f| f.name.as_str())
+        .collect();
+    let mut placed: Vec<(String, PivotDateGroup)> = Vec::new();
+    let mut place = |cx: &mut Ctx<'_>, i: usize, name: &str, group: PivotDateGroup| {
+        let Some(field) = cache.fields.get(i) else { return false };
+        // Supported date groups remain distinct cache fields. Ungrouped copies and
+        // repeated axis entries would otherwise produce XML that Excel cannot open.
+        let replaced = !field.database && group == PivotDateGroup::None && real_fields.iter().any(|n| same(n, name));
+        if replaced || placed.iter().any(|(n, g)| same(n, name) && *g == group) {
+            cx.warn(format!(
+                "PivotTable \"{}\": field \"{}\" duplicates \"{}\" after ungrouping; removed from the layout",
+                pt.name, field.name, name
+            ));
+            return false;
+        }
+        placed.push((name.to_string(), group));
+        true
+    };
+
     // (fields, position of Σ Values (`-2`) among them)
-    let axis = |cx: &mut Ctx<'_>, list: &[i64], filters: &mut Vec<PivotFilter>| -> (Vec<PivotField>, Option<usize>) {
+    let mut axis = |cx: &mut Ctx<'_>, list: &[i64], filters: &mut Vec<PivotFilter>| -> (Vec<PivotField>, Option<usize>) {
         let mut v = Vec::new();
         let mut values_at = None;
         for &i in list {
@@ -353,6 +382,9 @@ fn read_table(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, id: u32) -> Option<Pivo
             }
             let i = i as usize;
             let Some((name, group)) = field_ref(cx, cache, i) else { continue };
+            if !place(cx, i, &name, group) {
+                continue;
+            }
             let labels = cache.fields.get(i).map(|f| f.labels().to_vec()).unwrap_or_default();
             let mut f = PivotField { source_col: name.clone(), date_group: group, sort: PivotSort::None, collapsed_items: vec![] };
             if let Some(e) = pf(i) {
@@ -375,10 +407,16 @@ fn read_table(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, id: u32) -> Option<Pivo
         }
         (v, values_at)
     };
+    let mut axis_filters = Vec::new();
+    let (rows, rows_values) = axis(cx, &row_x, &mut axis_filters);
+    let (columns, cols_values) = axis(cx, &col_x, &mut axis_filters);
     let mut page_filters = Vec::new();
     for p in &pages {
         let Some(i) = p.attr_i64("fld").filter(|i| *i >= 0).map(|i| i as usize) else { continue };
-        let Some((name, _)) = field_ref(cx, cache, i) else { continue };
+        let Some((name, group)) = field_ref(cx, cache, i) else { continue };
+        if !place(cx, i, &name, group) {
+            continue;
+        }
         let labels = cache.fields.get(i).map(|f| f.labels().to_vec()).unwrap_or_default();
         let selected = if let Some(k) = p.attr_u32("item") {
             labels.get(k as usize).map(|l| vec![l.clone()])
@@ -396,9 +434,6 @@ fn read_table(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, id: u32) -> Option<Pivo
         };
         page_filters.push(PivotFilter { source_col: name, selected });
     }
-    let mut axis_filters = Vec::new();
-    let (rows, rows_values) = axis(cx, &row_x, &mut axis_filters);
-    let (columns, cols_values) = axis(cx, &col_x, &mut axis_filters);
     pt.rows = rows;
     pt.columns = columns;
     // Σ Values: where its `-2` entry is, else `dataOnRows` and `dataPosition`; after the last
