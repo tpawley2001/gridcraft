@@ -1371,6 +1371,16 @@ fn xls_split_panes_save_to_xlsx() {
     assert_eq!(back.sheets[0].freeze, None);
 }
 
+/// The "Split" sheet of `objects_sample`: an unfrozen split is kept in twips, as `.xlsx` keeps it
+/// ([MS-XLS] 2.4.189 Pane), with no warning.
+fn assert_split_sheet(s2: &gridcraft_model::Sheet, warnings: &[String]) {
+    assert!(!warnings.iter().any(|w| w.contains("Split")), "{warnings:?}");
+    let split = s2.split.as_ref().expect("the sheet's split");
+    assert_eq!((split.x, split.y), (1200.0, 900.0));
+    assert_eq!(split.top_left, Some(CellRef::parse("C4").unwrap()));
+    assert_eq!(split.active_pane.as_deref(), Some("topLeft"));
+}
+
 #[test]
 fn reads_notes_hyperlinks_and_panes() {
     let (wb, report) = read_xls(&compound("Workbook", &objects_sample(false))).unwrap();
@@ -1404,12 +1414,7 @@ fn reads_notes_hyperlinks_and_panes() {
     let s2 = &wb.sheets[1];
     assert_eq!(s2.freeze, None);
     assert!(!s2.show_gridlines && !s2.show_headings && !s2.show_zeros && s2.show_formulas && s2.right_to_left);
-    // An unfrozen split is kept in twips, as `.xlsx` keeps it ([MS-XLS] 2.4.189 Pane).
-    assert!(!report.warnings.iter().any(|w| w.contains("Split")), "{:?}", report.warnings);
-    let split = s2.split.as_ref().expect("the sheet's split");
-    assert_eq!((split.x, split.y), (1200.0, 900.0));
-    assert_eq!(split.top_left, Some(at("C4")));
-    assert_eq!(split.active_pane.as_deref(), Some("topLeft"));
+    assert_split_sheet(s2, &report.warnings);
     // Notes are drawing objects, but they are imported: no warning about pictures.
     assert!(!report.warnings.iter().any(|w| w.contains("Pictures") || w.contains("comments")), "{:?}", report.warnings);
     // A picture Obj (here without a drawing shape to place it, which this reader skips without
