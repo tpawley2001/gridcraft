@@ -1,8 +1,10 @@
-//! Repeated title rows print at the top of every page, so a later band of columns that the title
-//! rows reach is never blank: Excel prints every row band of it (measured from Excel's PDF of a
-//! workbook with title rows 1:6 reaching the second band of columns and body cells only in the
-//! first band: 12 pages of each band). Letter portrait, default widths and heights; A1:A200
-//! filled; column P is in the second band of columns.
+//! Repeated title rows: when a sheet has print title rows, Excel prints EVERY row band of every band
+//! of columns, whatever the title rows hold (even nothing) and wherever the far cell is. Measured
+//! from Excel's PDFs (Microsoft 365, Letter portrait, default widths and heights, A1:A200 filled,
+//! column P in the second band of columns, 5 row bands): no titles + P100 = 5 + 3 pages; titles 1:1 +
+//! P100, titles 2:2 + P1, titles 1:1 + P1, titles 1:1 + P5, empty title row 1 (A2:A200 filled) + P100
+//! all = 10 pages (5 + 5); titles 1:1 + Z100 (third band) = 15. Without title rows Excel still skips
+//! the blank pages of a later band (P5 alone = 5 + 1).
 use serde_json::json;
 
 use super::*;
@@ -53,27 +55,49 @@ fn without_title_rows_only_the_first_page_of_the_second_band_prints() {
 }
 
 #[test]
-fn a_cell_outside_the_title_rows_does_not_repeat() {
+fn title_rows_print_every_band_even_when_the_far_cell_is_outside_them() {
     let mut s = two_hundred_rows();
     s.execute("pageLayout.pageSetup", json!({"titleRows": "2:2"})).unwrap();
     s.execute("range.setValues", json!({"range": "P1", "values": [["x"]]})).unwrap();
     let pages = page_list(&mut s);
     let (a, b) = split(&pages);
-    assert_eq!(b, [a[0]], "{pages:?}");
+    assert!(a.len() > 1, "{pages:?}");
+    assert_eq!(a, b, "{pages:?}");
 }
 
 #[test]
-fn title_rows_that_stay_in_the_first_band_change_nothing() {
-    let mut s = two_hundred_rows();
+fn title_rows_print_every_band_when_the_far_cell_is_below_them() {
+    for far in ["P5", "P100"] {
+        let mut s = two_hundred_rows();
+        s.execute("pageLayout.pageSetup", json!({"titleRows": "1:1"})).unwrap();
+        s.execute("range.setValues", json!({"range": far, "values": [["x"]]})).unwrap();
+        let pages = page_list(&mut s);
+        let (a, b) = split(&pages);
+        assert!(a.len() > 1, "{far}: {pages:?}");
+        assert_eq!(a, b, "{far}: {pages:?}");
+        assert_eq!(pages.len(), a.len() * 2, "{far}: {pages:?}");
+    }
+}
+
+#[test]
+fn an_empty_title_row_still_prints_every_band() {
+    let mut s = Session::new();
+    s.new_workbook();
+    let rows: Vec<Vec<Json>> = (2..=200).map(|i| vec![json!(i)]).collect();
+    s.execute("range.setValues", json!({"range": "A2", "values": rows})).unwrap();
     s.execute("pageLayout.pageSetup", json!({"titleRows": "1:1"})).unwrap();
-    s.execute("range.setValues", json!({"range": "A1", "values": [["head"]]})).unwrap();
     s.execute("range.setValues", json!({"range": "P100", "values": [["x"]]})).unwrap();
     let pages = page_list(&mut s);
     let (a, b) = split(&pages);
-    let at = a.iter().position(|r| {
-        let (lo, hi) = r.split_once(':').unwrap();
-        lo.parse::<u32>().unwrap() <= 100 && 100 <= hi.parse::<u32>().unwrap()
-    });
-    // Down to the band holding P100 and no further (body rows only; title rows add nothing in P).
-    assert_eq!(b, a[..=at.unwrap()], "{pages:?}");
+    assert!(a.len() > 1, "{pages:?}");
+    assert_eq!(a, b, "{pages:?}");
+}
+
+#[test]
+fn without_title_rows_a_far_cell_near_the_top_prints_one_page_of_its_band() {
+    let mut s = two_hundred_rows();
+    s.execute("range.setValues", json!({"range": "P5", "values": [["x"]]})).unwrap();
+    let pages = page_list(&mut s);
+    let (a, b) = split(&pages);
+    assert_eq!(b, [a[0]], "{pages:?}");
 }
