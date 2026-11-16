@@ -511,7 +511,7 @@ pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out, macros: 
     let cache_of_id: HashMap<u32, String> = p
         .elements
         .iter()
-        .filter(|e| e.slot == "pivotCache")
+        .filter(|e| matches!(e.slot.as_str(), "pivotCache" | "unusedPivotCache"))
         .filter_map(|e| {
             let x = xml::parse(e.xml.as_bytes()).ok()?;
             let rel = p.rels.iter().find(|r| Some(r.id.as_str()) == x.attr("id"))?;
@@ -524,6 +524,11 @@ pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out, macros: 
             .filter_map(|part| xml::parse(&part.data).ok()?.attr_u32("cacheId"))
             .filter_map(|id| cache_of_id.get(&id).cloned()),
     );
+    // Caches already unused on import belong to the workbook, so deleting sheets keeps them.
+    used_caches.extend(p.elements.iter().filter(|e| e.slot == "unusedPivotCache").filter_map(|e| {
+        let x = xml::parse(e.xml.as_bytes()).ok()?;
+        cache_of_id.get(&x.attr_u32("cacheId")?).cloned()
+    }));
     let unused_caches: Vec<&PreservedRel> =
         p.rels.iter().filter(|r| !r.external && is_kind(r, &["pivotCacheDefinition"]) && !used_caches.contains(&normalize(&r.target))).collect();
     let dropped_roots: Vec<&PreservedRel> = dropped.iter().filter_map(|s| root_of(s)).chain(stale).chain(unused_caches.iter().copied()).collect();
@@ -549,7 +554,7 @@ pub fn write_workbook(wb: &Workbook, wb_rels: &mut Rels, out: &mut Out, macros: 
     let pivot_caches: Vec<(u32, String)> = p
         .elements
         .iter()
-        .filter(|e| e.slot == "pivotCache")
+        .filter(|e| matches!(e.slot.as_str(), "pivotCache" | "unusedPivotCache"))
         .filter_map(|e| {
             let x = xml::parse(e.xml.as_bytes()).ok()?;
             Some((x.attr_u32("cacheId")?, ids.get(x.attr("id")?)?.clone()))
