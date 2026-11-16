@@ -1,7 +1,8 @@
 use super::{CT_PIVOT_CACHE_DEF, CT_PIVOT_CACHE_REC, CT_PIVOT_TABLE, NS_REL};
 use super::{
-    CellRef, Ctx, DateSystem, El, HashMap, IoError, MAX_FIELDS, PivotCalcField, PivotDateGroup, PivotField, PivotFilter, PivotFunc, PivotLayout,
-    PivotShowAs, PivotSort, PivotTable, PivotValue, RangeRef, abs_range, func_caption, func_from, number_to_text, quote_sheet, same,
+    CellRef, Ctx, DateSystem, El, HashMap, IoError, MAX_FIELDS, PivotArea, PivotAreaField, PivotAreaItem, PivotAreaReference, PivotCalcField,
+    PivotDateGroup, PivotField, PivotFilter, PivotFormat, PivotFunc, PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue, RangeRef,
+    abs_range, func_caption, func_from, number_to_text, quote_sheet, same,
 };
 use gridcraft_model::{PreservedPart, PreservedPivot, PreservedRel};
 
@@ -255,7 +256,9 @@ fn raw_part(cx: &mut Ctx<'_>, part: &str, content_type: &str) -> Result<Option<P
     if data.windows(STRICT_NS.len()).any(|w| w == STRICT_NS) {
         return Ok(None);
     }
-    Ok(Some(PreservedPart { name: part.to_string(), content_type: content_type.to_string(), data: data.into(), rels: vec![], ..Default::default() }))
+    // The styles part's ids it uses, so they can be renumbered on save.
+    let (dxfs, num_fmts) = crate::passthrough::style_refs(cx, &data).unwrap_or_default();
+    Ok(Some(PreservedPart { name: part.to_string(), content_type: content_type.to_string(), data: data.into(), rels: vec![], dxfs, num_fmts }))
 }
 
 const STRICT_NS: &[u8] = b"http://purl.oclc.org/ooxml/";
@@ -594,8 +597,115 @@ fn read_table(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, id: u32) -> Option<Pivo
         }
     }
 
+    pt.formats = read_formats(cx, x, cache, &pt.name);
+
     pt.anchor = loc.start;
     let above = if pages.is_empty() { 0 } else { pages.len() as u32 + 1 };
     pt.last_range = Some(RangeRef::new(CellRef::new(loc.start.row.saturating_sub(above), loc.start.col), loc.end));
     Some(pt)
+}
+
+/// Most `format` elements read per PivotTable.
+const MAX_FORMATS: usize = 100_000;
+/// Most references read per pivot area, and items per reference.
+const MAX_AREA_REFS: usize = 16_384;
+const MAX_AREA_ITEMS: usize = 1_048_576;
+
+/// A `field` attribute of a pivot area or reference: the data field (`-2`, or 4294967294 as
+/// unsigned) or a cache field by name. `None` when it names no field of the cache.
+fn area_field(cache: &CacheIn, v: &str) -> Option<PivotAreaField> {
+    let i: i64 = v.trim().parse().ok()?;
+    if i == -2 || i == 4_294_967_294 {
+        return Some(PivotAreaField::Data);
+    }
+    let f = cache.fields.get(usize::try_from(i).ok()?)?;
+    Some(PivotAreaField::Name(f.name.clone()))
+}
+
+/// The subtotal flags of a pivot area reference (§18.3.1.75).
+pub(super) const SUBTOTAL_FLAGS: [&str; 13] = [
+    "defaultSubtotal",
+    "sumSubtotal",
+    "countASubtotal",
+    "avgSubtotal",
+    "maxSubtotal",
+    "minSubtotal",
+    "productSubtotal",
+    "countSubtotal",
+    "stdDevSubtotal",
+    "stdDevPSubtotal",
+    "varSubtotal",
+    "varPSubtotal",
+    "applyToAll",
+];
+
+/// A pivot area, its fields and items named rather than indexed. `None` when a field index or
+/// shared item index is out of range.
+fn read_area(a: &El, cache: &CacheIn) -> Option<PivotArea> {
+    let mut area = PivotArea {
+        field: match a.attr("field") {
+            Some(v) => Some(area_field(cache, v)?),
+            None => None,
+        },
+        kind: a.attr("type").unwrap_or("normal").to_string(),
+        data_only: a.flag("dataOnly", true),
+        label_only: a.flag("labelOnly", false),
+        grand_row: a.flag("grandRow", false),
+        grand_col: a.flag("grandCol", false),
+        cache_index: a.flag("cacheIndex", false),
+        outline: a.flag("outline", true),
+        offset: a.attr("offset").map(str::to_string),
+        collapsed_levels_are_subtotals: a.flag("collapsedLevelsAreSubtotals", false),
+        axis: a.attr("axis").map(str::to_string),
+        field_position: a.attr_u32("fieldPosition"),
+        references: vec![],
+    };
+    for r in a.child("references").into_iter().flat_map(|r| r.kids("reference")).take(MAX_AREA_REFS) {
+        let field = match r.attr("field") {
+            Some(v) => Some(area_field(cache, v)?),
+            None => None,
+        };
+        let by_position = r.flag("byPosition", false);
+        let labels = match &field {
+            Some(PivotAreaField::Name(n)) => cache.fields.iter().find(|f| f.name == *n).map(|f| f.labels()),
+            _ => None,
+        };
+        let mut items = Vec::new();
+        for x in r.kids("x").take(MAX_AREA_ITEMS) {
+            let v = x.attr_u32("v").unwrap_or(0);
+            let item = match (&field, by_position) {
+                (Some(PivotAreaField::Name(_)), false) => PivotAreaItem::Label(labels?.get(v as usize)?.clone()),
+                _ => PivotAreaItem::Index(v),
+            };
+            items.push(item);
+        }
+        area.references.push(PivotAreaReference {
+            field,
+            items,
+            selected: r.flag("selected", true),
+            by_position,
+            relative: r.flag("relative", false),
+            subtotals: SUBTOTAL_FLAGS.iter().filter(|f| r.flag(f, false)).map(|f| f.to_string()).collect(),
+        });
+    }
+    Some(area)
+}
+
+/// The PivotTable's own formatting (`formats`, §18.10.1.40/41). A format whose area can't be
+/// mapped to the cache is skipped, with one warning per PivotTable.
+fn read_formats(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, name: &str) -> Vec<PivotFormat> {
+    let mut out = Vec::new();
+    let mut skipped = false;
+    for f in x.child("formats").into_iter().flat_map(|f| f.kids("format")).take(MAX_FORMATS) {
+        let Some(area) = f.child("pivotArea").and_then(|a| read_area(a, cache)) else {
+            skipped = true;
+            continue;
+        };
+        let style = f.attr_u32("dxfId").and_then(|i| cx.dxfs.get(i as usize)).cloned();
+        out.push(PivotFormat { style, action: f.attr("action").unwrap_or("formatting").to_string(), area });
+    }
+    if skipped {
+        cx.warn(format!("PivotTable \"{name}\": some of its formatting refers to fields or items it doesn't have; that formatting was dropped"));
+    }
+    out
 }

@@ -26,8 +26,8 @@ use gridcraft_core::date::datetime_from_serial;
 use gridcraft_core::{CellRef, DateSystem, RangeRef, Value, number_to_text};
 use gridcraft_formula::quote_sheet;
 use gridcraft_model::{
-    PivotCalcField, PivotDateGroup, PivotField, PivotFilter, PivotFunc, PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue, PreservedPivot,
-    Workbook,
+    PivotArea, PivotAreaField, PivotAreaItem, PivotAreaReference, PivotCalcField, PivotDateGroup, PivotField, PivotFilter, PivotFormat, PivotFunc,
+    PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue, PreservedPivot, Workbook,
 };
 
 use crate::IoError;

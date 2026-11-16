@@ -149,6 +149,7 @@ fn workbook() -> Workbook {
         calculated_fields: vec![],
         values_on_rows: false,
         values_position: None,
+        formats: vec![],
     };
     // Pivot 2: table source, date grouping on two levels, show-values-as, multi-select page
     // filter and a hidden-items filter on a column field.
@@ -209,6 +210,7 @@ fn workbook() -> Workbook {
         calculated_fields: vec![],
         values_on_rows: false,
         values_position: None,
+        formats: vec![],
     };
     // Pivot 3: defaults, defined-name source, compact.
     let p3 = PivotTable {
@@ -879,4 +881,121 @@ fn pivot_real_field_wins_over_earlier_unsupported_group_on_another_axis() {
             assert!(report.warnings.iter().any(|w| w.contains("not supported; the field is ungrouped")));
         }
     }
+}
+
+// ---------------------------------------------------------------- PivotTable formats (edge cases)
+
+/// A workbook with one PivotTable (cache field 0 = Value summed, field 1 = Cat on rows, shared
+/// items yellow, blue) whose `<formats>` body is `formats`, over source sheet `source_sheet`; dxf
+/// 0 sets a red font, dxf 1 a blue fill.
+fn formats_book(formats: &str, source_sheet: &str) -> Vec<u8> {
+    const MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    let c = |r: &str, t: &str| format!(r#"<c r="{r}" t="inlineStr"><is><t>{t}</t></is></c>"#);
+    let data = format!(
+        r#"<sheetData><row r="1">{}{}</row><row r="2">{}<c r="B2"><v>10</v></c></row><row r="3">{}<c r="B3"><v>20</v></c></row></sheetData>"#,
+        c("A1", "Cat"),
+        c("B1", "Value"),
+        c("A2", "blue"),
+        c("A3", "yellow")
+    );
+    let sheet_rels = format!(
+        r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{REL}/pivotTable" Target="../pivotTables/pivotTable1.xml"/></Relationships>"#
+    );
+    let pt_rels = format!(
+        r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{REL}/pivotCacheDefinition" Target="../pivotCache/pivotCacheDefinition1.xml"/></Relationships>"#
+    );
+    let cache = format!(
+        r#"<pivotCacheDefinition xmlns="{MAIN}" xmlns:r="{REL}" recordCount="2"><cacheSource type="worksheet"><worksheetSource ref="A1:B3" sheet="{source_sheet}"/></cacheSource><cacheFields count="2"><cacheField name="Value" numFmtId="0"><sharedItems containsSemiMixedTypes="0" containsString="0" containsNumber="1" containsInteger="1" minValue="10" maxValue="20"/></cacheField><cacheField name="Cat" numFmtId="0"><sharedItems count="2"><s v="yellow"/><s v="blue"/></sharedItems></cacheField></cacheFields></pivotCacheDefinition>"#
+    );
+    let table = format!(
+        r#"<pivotTableDefinition xmlns="{MAIN}" name="PT" cacheId="1" dataCaption="Values"><location ref="D3:E6" firstHeaderRow="1" firstDataRow="1" firstDataCol="1"/><pivotFields count="2"><pivotField dataField="1" showAll="0"/><pivotField axis="axisRow" showAll="0"><items count="3"><item x="1"/><item x="0"/><item t="default"/></items></pivotField></pivotFields><rowFields count="1"><field x="1"/></rowFields><dataFields count="1"><dataField name="Sum of Value" fld="0"/></dataFields>{formats}<pivotTableStyleInfo name="PivotStyleLight16"/></pivotTableDefinition>"#
+    );
+    let styles = format!(
+        r#"<?xml version="1.0"?><styleSheet xmlns="{MAIN}"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs><dxfs count="2"><dxf><font><color rgb="FFC80815"/></font></dxf><dxf><fill><patternFill patternType="solid"><bgColor rgb="FF0000FF"/></patternFill></fill></dxf></dxfs></styleSheet>"#
+    );
+    let wb_rels = format!(
+        r#"<Relationship Id="rId2" Type="{REL}/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml"/><Relationship Id="rId3" Type="{REL}/styles" Target="styles.xml"/>"#
+    );
+    minimal(
+        &data,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", &sheet_rels),
+            ("xl/pivotTables/pivotTable1.xml", &table),
+            ("xl/pivotTables/_rels/pivotTable1.xml.rels", &pt_rels),
+            ("xl/pivotCache/pivotCacheDefinition1.xml", &cache),
+            ("xl/styles.xml", &styles),
+        ],
+        &wb_rels,
+        r#"<pivotCaches><pivotCache cacheId="1" r:id="rId2"/></pivotCaches>"#,
+    )
+}
+
+fn saved_part(bytes: &[u8], prefix: &str) -> String {
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let name = z.file_names().find(|n| n.starts_with(prefix) && n.ends_with(".xml")).unwrap().to_string();
+    let mut s = String::new();
+    z.by_name(&name).unwrap().read_to_string(&mut s).unwrap();
+    s
+}
+
+/// The saved dxf `id`'s body.
+fn saved_dxf(bytes: &[u8], id: usize) -> String {
+    let styles = saved_part(bytes, "xl/styles.xml");
+    styles.split("<dxf>").nth(id + 1).and_then(|d| d.split("</dxf>").next()).unwrap_or("").to_string()
+}
+
+#[test]
+fn pivot_format_button_area_and_data_field_reference_survive_save() {
+    let formats = r#"<formats count="2"><format dxfId="1"><pivotArea field="1" type="button" dataOnly="0" labelOnly="1" outline="0" axis="axisRow" fieldPosition="0"/></format><format dxfId="0" action="blank"><pivotArea outline="0" collapsedLevelsAreSubtotals="1" fieldPosition="0"><references count="1"><reference field="4294967294" count="1" selected="0"><x v="0"/></reference></references></pivotArea></format></formats>"#;
+    let (wb, _) = read_xlsx(&formats_book(formats, "Data")).unwrap();
+    let pt = &wb.sheets[0].pivots[0];
+    assert_eq!(pt.formats.len(), 2);
+    assert_eq!(pt.formats[0].area.field, Some(PivotAreaField::Name("Cat".into())));
+    assert_eq!(pt.formats[1].action, "blank");
+    assert_eq!(pt.formats[1].area.references[0].field, Some(PivotAreaField::Data));
+    assert_eq!(pt.formats[1].area.references[0].items, vec![PivotAreaItem::Index(0)]);
+
+    let saved = write_xlsx(&wb).unwrap();
+    let table = saved_part(&saved, "xl/pivotTables/pivotTable");
+    let cache = saved_part(&saved, "xl/pivotCache/pivotCacheDefinition");
+    // "Cat" is the first source column, so the rebuilt cache numbers it 0.
+    assert!(cache.find("name=\"Cat\"").unwrap() < cache.find("name=\"Value\"").unwrap(), "{cache}");
+    assert!(
+        table.contains(r#"<pivotArea field="0" type="button" dataOnly="0" labelOnly="1" outline="0" axis="axisRow" fieldPosition="0"/>"#),
+        "{table}"
+    );
+    assert!(table.contains(r#"<reference field="4294967294" count="1" selected="0"><x v="0"/></reference>"#), "{table}");
+    assert!(table.contains("action=\"blank\""), "{table}");
+    assert!(table.contains("collapsedLevelsAreSubtotals=\"1\""), "{table}");
+    let id = |head: &str| -> usize {
+        let at = table.find(head).unwrap();
+        let tag = &table[..at];
+        let tag = &tag[tag.rfind("<format ").unwrap()..];
+        tag.split("dxfId=\"").nth(1).and_then(|s| s.split('"').next()).unwrap().parse().unwrap()
+    };
+    assert!(saved_dxf(&saved, id("<pivotArea field=\"0\"")).contains("FF0000FF"));
+    assert!(saved_dxf(&saved, id("<pivotArea outline=\"0\" collapsed")).contains("FFC80815"));
+}
+
+#[test]
+fn pivot_format_with_an_unknown_field_or_item_is_skipped_with_one_warning() {
+    let formats = r#"<formats count="3"><format dxfId="0"><pivotArea field="9"/></format><format dxfId="0"><pivotArea><references count="1"><reference field="1" count="1"><x v="7"/></reference></references></pivotArea></format><format dxfId="1"><pivotArea dataOnly="0" grandRow="1"/></format></formats>"#;
+    let (wb, report) = read_xlsx(&formats_book(formats, "Data")).unwrap();
+    assert_eq!(wb.sheets[0].pivots[0].formats.len(), 1);
+    assert_eq!(report.warnings.iter().filter(|w| w.contains("formatting")).count(), 1, "{:?}", report.warnings);
+    let table = saved_part(&write_xlsx(&wb).unwrap(), "xl/pivotTables/pivotTable");
+    assert!(table.contains(r#"<formats count="1"><format dxfId="0"><pivotArea dataOnly="0" grandRow="1"/></format></formats>"#), "{table}");
+}
+
+#[test]
+fn kept_pivot_format_dxf_ids_point_at_equal_dxfs() {
+    // The source sheet is gone, so the PivotTable is saved from the parts it was read from; only
+    // dxf 1 is used, so it is renumbered to 0 in the written styles part.
+    let formats = r#"<formats count="1"><format dxfId="1"><pivotArea dataOnly="0" grandRow="1"/></format></formats>"#;
+    let (wb, _) = read_xlsx(&formats_book(formats, "Gone")).unwrap();
+    let saved = write_xlsx(&wb).unwrap();
+    let table = saved_part(&saved, "xl/pivotTables/pivotTable");
+    let id: usize = table.split("<format dxfId=\"").nth(1).and_then(|s| s.split('"').next()).unwrap().parse().unwrap();
+    assert!(saved_dxf(&saved, id).contains("FF0000FF"), "{table}");
 }

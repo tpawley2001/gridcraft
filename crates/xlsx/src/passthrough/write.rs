@@ -155,6 +155,16 @@ impl KeptOut {
     }
 }
 
+/// Registers the differential formats a kept part written as `name` refers to, and queues its
+/// `dxfId`/`numFmtId` attributes for renumbering once the styles part is written.
+pub(crate) fn keep_style_ids(out: &mut Out, name: &str, p: &PreservedPart) {
+    if p.dxfs.is_empty() && p.num_fmts.is_empty() {
+        return;
+    }
+    let dxfs = p.dxfs.iter().map(|(old, s)| (*old, crate::styles::dxf_id(&mut out.dxfs, s))).collect();
+    out.kept.patches.list.push((name.to_string(), p.data.clone(), dxfs, p.num_fmts.clone()));
+}
+
 /// Renumbers the `dxfId` and `numFmtId` attributes of kept PivotTables and pivot caches to the
 /// written styles part. `fmt_id` maps a number format code to its id there.
 pub fn finish_style_ids(out: &mut Out, fmt_id: &dyn Fn(&str) -> Option<u32>) {
@@ -256,10 +266,7 @@ fn write_parts_with_media(out: &mut Out, parts: &[PreservedPart], theme_media: b
         }
         out.kept.written.insert(key);
         out.part(&new, Some(&p.content_type), p.data.to_vec());
-        if !p.dxfs.is_empty() || !p.num_fmts.is_empty() {
-            let dxfs = p.dxfs.iter().map(|(old, s)| (*old, crate::styles::dxf_id(&mut out.dxfs, s))).collect();
-            out.kept.patches.list.push((new.clone(), p.data.clone(), dxfs, p.num_fmts.clone()));
-        }
+        keep_style_ids(out, &new, p);
         if !p.rels.is_empty() {
             out.part(&rels_part_name(&new), None, part_rels_xml(&p.rels, &names, &new).into_bytes());
         }

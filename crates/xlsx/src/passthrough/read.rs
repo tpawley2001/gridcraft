@@ -1094,8 +1094,8 @@ fn attr_values(data: &[u8], local: &[&[u8]], mut f: impl FnMut(&[u8], &str)) -> 
 
 /// The differential formats (`dxfId`) and custom number formats (`numFmtId`) of the source
 /// styles part a kept PivotTable or pivot cache refers to. `None` when its XML is damaged.
-type StyleRefs = (Vec<(u32, gridcraft_model::Style)>, Vec<(u32, String)>);
-fn style_refs(cx: &Ctx<'_>, data: &[u8]) -> Option<StyleRefs> {
+pub(crate) type StyleRefs = (Vec<(u32, gridcraft_model::Style)>, Vec<(u32, String)>);
+pub(crate) fn style_refs(cx: &Ctx<'_>, data: &[u8]) -> Option<StyleRefs> {
     let mut dxfs: Vec<(u32, gridcraft_model::Style)> = vec![];
     let mut fmts: Vec<(u32, String)> = vec![];
     // Membership sets: a crafted part can name many distinct ids, so scanning the vectors would be quadratic.
