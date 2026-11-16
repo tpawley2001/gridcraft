@@ -1,4 +1,5 @@
 use super::{CellRef, RangeRef};
+use crate::style::Style;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------- pivot tables
@@ -137,6 +138,106 @@ pub struct PivotTable {
     /// Position of Σ Values among the row fields (`None` = after the last). Only used with
     /// `values_on_rows`: in Columns Σ Values always comes after the last column field.
     pub values_position: Option<usize>,
+    /// The PivotTable's own formatting (`formats`, ECMA-376 Part 1 §18.10.1.40/41), in file order.
+    pub formats: Vec<PivotFormat>,
+}
+
+/// One PivotTable format: a differential style applied to a pivot area.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PivotFormat {
+    /// The differential format (`dxf`) it applies; `None` when the format names none.
+    pub style: Option<Style>,
+    /// `action`: `formatting` (the default) or `blank`.
+    pub action: String,
+    pub area: PivotArea,
+}
+
+impl Default for PivotFormat {
+    fn default() -> Self {
+        PivotFormat { style: None, action: "formatting".into(), area: PivotArea::default() }
+    }
+}
+
+/// A field a pivot area names, kept by name so it survives a rebuilt cache.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PivotAreaField {
+    /// The Σ Values (data) field (index `-2` in the file).
+    Data,
+    /// A cache field, by its name (the source column header for a database field).
+    Name(String),
+}
+
+/// An item of a pivot area reference (`x v`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PivotAreaItem {
+    /// A cache shared item, by its caption.
+    Label(String),
+    /// A position: into the value fields for the data field, or into the field's items for a
+    /// `byPosition` reference.
+    Index(u32),
+}
+
+/// A part of a PivotTable (`pivotArea`, ECMA-376 Part 1 §18.3.1.68).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PivotArea {
+    pub field: Option<PivotAreaField>,
+    /// `type`: `none`, `normal` (the default), `data`, `all`, `origin`, `button`, `topEnd`, `topRight`.
+    pub kind: String,
+    pub data_only: bool,
+    pub label_only: bool,
+    pub grand_row: bool,
+    pub grand_col: bool,
+    pub cache_index: bool,
+    pub outline: bool,
+    /// `offset`: a cell range relative to the area.
+    pub offset: Option<String>,
+    pub collapsed_levels_are_subtotals: bool,
+    /// `axis`: `axisRow`, `axisCol`, `axisPage` or `axisValues`.
+    pub axis: Option<String>,
+    pub field_position: Option<u32>,
+    pub references: Vec<PivotAreaReference>,
+}
+
+impl Default for PivotArea {
+    fn default() -> Self {
+        PivotArea {
+            field: None,
+            kind: "normal".into(),
+            data_only: true,
+            label_only: false,
+            grand_row: false,
+            grand_col: false,
+            cache_index: false,
+            outline: true,
+            offset: None,
+            collapsed_levels_are_subtotals: false,
+            axis: None,
+            field_position: None,
+            references: vec![],
+        }
+    }
+}
+
+/// A `reference` of a pivot area (§18.3.1.75): the items of one field it covers.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PivotAreaReference {
+    pub field: Option<PivotAreaField>,
+    pub items: Vec<PivotAreaItem>,
+    pub selected: bool,
+    pub by_position: bool,
+    pub relative: bool,
+    /// The subtotal flags set on it (`defaultSubtotal`, `sumSubtotal`, `countASubtotal`…), by
+    /// attribute name.
+    pub subtotals: Vec<String>,
+}
+
+impl Default for PivotAreaReference {
+    fn default() -> Self {
+        PivotAreaReference { field: None, items: vec![], selected: true, by_position: false, relative: false, subtotals: vec![] }
+    }
 }
 
 /// A calculated field: a formula over other fields (`=Sales*0.1`, `='Unit Price'*Units`). As in
@@ -172,6 +273,7 @@ impl Default for PivotTable {
             calculated_fields: vec![],
             values_on_rows: false,
             values_position: None,
+            formats: vec![],
         }
     }
 }

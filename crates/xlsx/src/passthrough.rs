@@ -75,10 +75,11 @@ mod strict;
 mod write;
 
 pub use read::KeptReader;
-pub(crate) use read::{map_rel_ids, raw_rels, with_decls};
+pub(crate) use read::{map_rel_ids, raw_rels, style_refs, with_decls};
 pub use rebase::{SheetKept, rebase_links};
 pub use strict::strict_rel_type_to_transitional;
 use strict::{Untranslatable, is_xml_part, to_transitional};
+pub(crate) use write::keep_style_ids;
 #[cfg(test)]
 pub(crate) use write::sheet_names_in;
 pub use write::{

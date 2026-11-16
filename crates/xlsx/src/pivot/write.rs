@@ -120,6 +120,8 @@ struct Pending {
     idx: usize,
     cache_id: u32,
     cache: Cache,
+    /// The `<formats>` element (empty when there are none).
+    formats: String,
 }
 
 impl PivotWriter {
@@ -165,7 +167,8 @@ impl PivotWriter {
             let mut tr = Rels::default();
             tr.add("pivotCacheDefinition", &format!("../pivotCache/pivotCacheDefinition{n}.xml"));
             out.part(&format!("xl/pivotTables/_rels/pivotTable{t}.xml.rels"), None, tr.xml().into_bytes());
-            self.pending.push(Pending { part: format!("xl/pivotTables/pivotTable{t}.xml"), sheet: si, idx, cache_id, cache });
+            let formats = formats_xml(pt, &cache, &mut out.dxfs);
+            self.pending.push(Pending { part: format!("xl/pivotTables/pivotTable{t}.xml"), sheet: si, idx, cache_id, cache, formats });
         }
     }
 
@@ -216,7 +219,11 @@ impl PivotWriter {
         let mut tr = Rels::default();
         tr.add("pivotCacheDefinition", &format!("../pivotCache/pivotCacheDefinition{n}.xml"));
         out.part(&format!("xl/pivotTables/_rels/pivotTable{t}.xml.rels"), None, tr.xml().into_bytes());
-        out.part(&format!("xl/pivotTables/pivotTable{t}.xml"), Some(CT_PIVOT_TABLE), table);
+        let name = format!("xl/pivotTables/pivotTable{t}.xml");
+        // Its `dxfId`s (and number format ids) are renumbered to the written styles part.
+        let part = gridcraft_model::PreservedPart { data: table.clone().into(), ..k.table.clone() };
+        out.part(&name, Some(CT_PIVOT_TABLE), table);
+        crate::passthrough::keep_style_ids(out, &name, &part);
     }
 
     /// Adds the workbook relationships to the caches; returns the `<pivotCaches>` element (empty
@@ -256,7 +263,7 @@ impl PivotWriter {
     pub fn finish(self, wb: &Workbook, out: &mut Out, fmt_id: &dyn Fn(&str) -> Option<u32>) {
         for p in self.pending {
             let Some(pt) = wb.sheet(p.sheet).and_then(|s| s.pivots.get(p.idx)) else { continue };
-            let xml = table_xml(pt, p.idx, p.cache_id, &p.cache, fmt_id);
+            let xml = table_xml(pt, p.idx, p.cache_id, &p.cache, &p.formats, fmt_id);
             out.part(&p.part, Some(CT_PIVOT_TABLE), xml.into_bytes());
         }
     }
@@ -779,7 +786,7 @@ struct PivotTableLayout<'a> {
     values: Vec<(usize, &'a PivotValue)>,
 }
 
-fn table_xml(pt: &PivotTable, idx: usize, cache_id: u32, c: &Cache, fmt_id: &dyn Fn(&str) -> Option<u32>) -> String {
+fn table_xml(pt: &PivotTable, idx: usize, cache_id: u32, c: &Cache, formats: &str, fmt_id: &dyn Fn(&str) -> Option<u32>) -> String {
     let find_db = |name: &str| c.fields.iter().position(|f| f.col.is_some() && same(&f.name, name));
     // Excel refuses a cache field placed twice across rows, columns and pages.
     // Keep the first placement; pivotField axis attributes use these same lists.
@@ -807,9 +814,7 @@ fn table_xml(pt: &PivotTable, idx: usize, cache_id: u32, c: &Cache, fmt_id: &dyn
             }
         }
     }
-    let find_calc = |name: &str| c.fields.iter().position(|f| f.formula.is_some() && same(&f.name, name));
-    let values: Vec<(usize, &PivotValue)> =
-        pt.values.iter().filter_map(|v| find_db(&v.source_col).or_else(|| find_calc(&v.source_col)).map(|i| (i, v))).collect();
+    let values = value_fields(pt, c);
     let layout = PivotTableLayout { row_fields, column_fields, hidden_fields: hidden, page_fields: pages, values };
 
     let compact = pt.layout == PivotLayout::Compact;
@@ -880,6 +885,7 @@ fn table_xml(pt: &PivotTable, idx: usize, cache_id: u32, c: &Cache, fmt_id: &dyn
     axis_fields_xml(&mut s, "colFields", &layout.column_fields, col_values);
     write_page_fields(&mut s, c, &layout);
     write_data_fields(&mut s, c, &layout, fmt_id);
+    s.push_str(formats);
     s.push_str("<pivotTableStyleInfo");
     if !pt.style.is_empty() {
         let _ = write!(s, " name=\"{}\"", esc_attr(&pt.style));
@@ -1070,4 +1076,126 @@ fn axis_fields_xml(s: &mut String, tag: &str, idx: &[usize], values_at: Option<u
         s.push_str("<field x=\"-2\"/>");
     }
     let _ = write!(s, "</{tag}>");
+}
+
+/// The value fields written, with their cache fields.
+fn value_fields<'a>(pt: &'a PivotTable, c: &Cache) -> Vec<(usize, &'a PivotValue)> {
+    let find_db = |name: &str| c.fields.iter().position(|f| f.col.is_some() && same(&f.name, name));
+    let find_calc = |name: &str| c.fields.iter().position(|f| f.formula.is_some() && same(&f.name, name));
+    pt.values.iter().filter_map(|v| find_db(&v.source_col).or_else(|| find_calc(&v.source_col)).map(|i| (i, v))).collect()
+}
+
+/// The cache field a pivot area names: its index, or `-2` for the data field. `None` when the
+/// rebuilt cache has no such field.
+fn area_field_index(c: &Cache, f: &PivotAreaField) -> Option<i64> {
+    match f {
+        PivotAreaField::Data => Some(-2),
+        PivotAreaField::Name(n) => {
+            let i = c.fields.iter().position(|x| x.name == *n).or_else(|| c.fields.iter().position(|x| same(&x.name, n)))?;
+            i64::try_from(i).ok()
+        }
+    }
+}
+
+/// The `<pivotArea>` of a format against the rebuilt cache; `None` when a field or item it names
+/// is gone.
+fn pivot_area_xml(a: &PivotArea, c: &Cache, value_count: usize) -> Option<String> {
+    let mut s = String::from("<pivotArea");
+    if let Some(f) = &a.field {
+        let _ = write!(s, " field=\"{}\"", area_field_index(c, f)?);
+    }
+    if a.kind != "normal" && !a.kind.is_empty() {
+        let _ = write!(s, " type=\"{}\"", esc_attr(&a.kind));
+    }
+    let flag = |s: &mut String, name: &str, v: bool, default: bool| {
+        if v != default {
+            let _ = write!(s, " {name}=\"{}\"", u8::from(v));
+        }
+    };
+    flag(&mut s, "dataOnly", a.data_only, true);
+    flag(&mut s, "labelOnly", a.label_only, false);
+    flag(&mut s, "grandRow", a.grand_row, false);
+    flag(&mut s, "grandCol", a.grand_col, false);
+    flag(&mut s, "cacheIndex", a.cache_index, false);
+    flag(&mut s, "outline", a.outline, true);
+    if let Some(o) = &a.offset {
+        let _ = write!(s, " offset=\"{}\"", esc_attr(o));
+    }
+    flag(&mut s, "collapsedLevelsAreSubtotals", a.collapsed_levels_are_subtotals, false);
+    if let Some(ax) = &a.axis {
+        let _ = write!(s, " axis=\"{}\"", esc_attr(ax));
+    }
+    if let Some(p) = a.field_position {
+        let _ = write!(s, " fieldPosition=\"{p}\"");
+    }
+    if a.references.is_empty() {
+        s.push_str("/>");
+        return Some(s);
+    }
+    let _ = write!(s, "><references count=\"{}\">", a.references.len());
+    for r in &a.references {
+        s.push_str("<reference");
+        let labels = match &r.field {
+            Some(f) => {
+                let i = area_field_index(c, f)?;
+                // `field` is unsigned here: the data field is 4294967294.
+                let _ = write!(s, " field=\"{}\"", if i < 0 { 4_294_967_294 } else { i });
+                usize::try_from(i).ok().and_then(|i| c.fields.get(i)).map(|f| f.item_labels())
+            }
+            None => None,
+        };
+        let _ = write!(s, " count=\"{}\"", r.items.len());
+        flag(&mut s, "selected", r.selected, true);
+        flag(&mut s, "byPosition", r.by_position, false);
+        flag(&mut s, "relative", r.relative, false);
+        for f in super::read::SUBTOTAL_FLAGS.iter().filter(|f| r.subtotals.iter().any(|x| x == *f)) {
+            let _ = write!(s, " {f}=\"1\"");
+        }
+        s.push('>');
+        for it in &r.items {
+            let v = match it {
+                PivotAreaItem::Index(i) => {
+                    if r.field == Some(PivotAreaField::Data) && !r.by_position && *i as usize >= value_count {
+                        return None;
+                    }
+                    *i as usize
+                }
+                PivotAreaItem::Label(l) => {
+                    // A shared item index. Without cacheIndex `v` is a position in the
+                    // pivotField's items; that is the same number here, because written item i
+                    // is shared item i (`<item x="i"/>`, subtotal items last).
+                    let labels = labels.as_ref()?;
+                    labels.iter().position(|x| x == l).or_else(|| labels.iter().position(|x| same(x, l)))?
+                }
+            };
+            let _ = write!(s, "<x v=\"{v}\"/>");
+        }
+        s.push_str("</reference>");
+    }
+    s.push_str("</references></pivotArea>");
+    Some(s)
+}
+
+/// The `<formats>` of a PivotTable against its rebuilt cache, registering each format's dxf in
+/// `dxfs`; empty when it has none. A format whose field or item is gone is dropped.
+fn formats_xml(pt: &PivotTable, c: &Cache, dxfs: &mut Vec<gridcraft_model::Style>) -> String {
+    let value_count = value_fields(pt, c).len();
+    let mut n = 0;
+    let mut body = String::new();
+    for f in &pt.formats {
+        let Some(area) = pivot_area_xml(&f.area, c, value_count) else { continue };
+        body.push_str("<format");
+        if !f.action.is_empty() && f.action != "formatting" {
+            let _ = write!(body, " action=\"{}\"", esc_attr(&f.action));
+        }
+        if let Some(st) = &f.style {
+            let _ = write!(body, " dxfId=\"{}\"", crate::styles::dxf_id(dxfs, st));
+        }
+        let _ = write!(body, ">{area}</format>");
+        n += 1;
+    }
+    if n == 0 {
+        return String::new();
+    }
+    format!("<formats count=\"{n}\">{body}</formats>")
 }

@@ -11,7 +11,10 @@ mod preset_geometry;
 mod print;
 mod table_sort;
 
-pub use pivot::{PivotCalcField, PivotDateGroup, PivotField, PivotFilter, PivotFunc, PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue};
+pub use pivot::{
+    PivotArea, PivotAreaField, PivotAreaItem, PivotAreaReference, PivotCalcField, PivotDateGroup, PivotField, PivotFilter, PivotFormat, PivotFunc,
+    PivotLayout, PivotShowAs, PivotSort, PivotTable, PivotValue,
+};
 pub use preset_geometry::preset_paths;
 pub use print::{
     ChartSheetPrint, DialogSheetPrint, EditRange, HfPage, LineInfo, MacroSheetPrint, Orientation, PageOrder, PrintComments, PrintErrors, PrintOutput,
