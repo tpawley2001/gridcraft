@@ -11,6 +11,9 @@ pub fn preset_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPat
     if !g.paths.is_empty() || w <= 0 || h <= 0 {
         return None;
     }
+    if let Some(paths) = bent_connector_paths(g, w, h) {
+        return Some(paths);
+    }
     let (wi, hi) = (i128::from(w), i128::from(h));
     let ss = wi.min(hi);
     let (l, t, r, b, hc, vc) = (0, 0, wi, hi, wi / 2, hi / 2);
@@ -1669,6 +1672,31 @@ fn round_points(pts: &[(f64, f64)], w: i128, h: i128) -> Vec<(i128, i128)> {
         }
     };
     pts.iter().map(|&(x, y)| (to_i(x, w), to_i(y, h))).collect()
+}
+
+/// Elbow connectors are open strokes. Their unpinned guides may place elbows outside the box.
+fn bent_connector_paths(g: &ShapeGeometry, w: i64, h: i64) -> Option<Vec<GeometryPath>> {
+    let guide = |size: i64, name: &str| {
+        let value = i128::from(size).saturating_mul(adjust(g, name, 50000)) / 100000;
+        // Preserve negative and out-of-box vertices; saturate only at the coordinate type's limits.
+        i64::try_from(value).unwrap_or(if value < 0 { i64::MIN } else { i64::MAX })
+    };
+    let mut commands = vec![PathCommand::MoveTo(0, 0)];
+    match g.preset.as_str() {
+        "bentConnector2" => commands.push(PathCommand::LineTo(w, 0)),
+        "bentConnector3" => {
+            let x1 = guide(w, "adj1");
+            commands.extend([PathCommand::LineTo(x1, 0), PathCommand::LineTo(x1, h)]);
+        }
+        "bentConnector4" => {
+            let x1 = guide(w, "adj1");
+            let y2 = guide(h, "adj2");
+            commands.extend([PathCommand::LineTo(x1, 0), PathCommand::LineTo(x1, y2), PathCommand::LineTo(w, y2)]);
+        }
+        _ => return None,
+    }
+    commands.push(PathCommand::LineTo(w, h));
+    Some(vec![GeometryPath { w, h, fill: false, stroke: true, shade: PathShade::Norm, commands }])
 }
 
 /// The adjust value `name` (`a:gd fmla="val N"`), or `default` when missing or not a plain value.
