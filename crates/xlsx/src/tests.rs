@@ -195,6 +195,7 @@ mod xls_row_height_oor;
 mod xls_row_refit_tests;
 mod xls_selection_refu_tests;
 mod xls_selection_tests;
+mod xls_shape_flips_tests;
 mod xls_shape_text_tests;
 mod xls_shapes_continue_tests;
 mod xls_shapes_tests;

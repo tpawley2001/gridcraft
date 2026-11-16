@@ -30,7 +30,7 @@ fn eof() -> Vec<u8> {
 }
 
 /// A Book stream: globals (CodePage 1252, one BoundSheet) and one worksheet with `records`.
-fn book(records: &[u8]) -> Vec<u8> {
+pub(super) fn book(records: &[u8]) -> Vec<u8> {
     let boundsheet = |pos: u32| rec(0x0085, &[&pos.to_le_bytes()[..], &[0, 0, 5], b"Sheet"].concat());
     let head = [bof(0x0500, 0x0005), rec(0x0042, &1252u16.to_le_bytes())].concat();
     let pos = (head.len() + boundsheet(0).len() + eof().len()) as u32;
@@ -42,7 +42,7 @@ fn book(records: &[u8]) -> Vec<u8> {
 /// A 42-byte BIFF5 line OBJ: the 34-byte header (cObj, ot 1, id, grbit, the anchor colL, dxL,
 /// rwT, dyT, colR, dxR, rwB, dyB, cbMacro 0, 6 reserved bytes), then icv, lns, lnw, fAuto, the
 /// arrow word, iqu and a reserved byte.
-fn line(id: u16, anchor: [u16; 8], fields: [u8; 4], arrow: u16, iqu: u8) -> Vec<u8> {
+pub(super) fn line(id: u16, anchor: [u16; 8], fields: [u8; 4], arrow: u16, iqu: u8) -> Vec<u8> {
     let mut p = [&1u32.to_le_bytes()[..], &u16s(&[1, id, 0x0616]), &u16s(&anchor), &[0; 8]].concat();
     p.extend_from_slice(&fields);
     p.extend_from_slice(&arrow.to_le_bytes());
@@ -53,9 +53,9 @@ fn line(id: u16, anchor: [u16; 8], fields: [u8; 4], arrow: u16, iqu: u8) -> Vec<
 
 /// Black (icv 8), solid, single weight, not automatic: the fields Excel 95 wrote for every line
 /// of a tree diagram.
-const BLACK: [u8; 4] = [0x08, 0x00, 0x01, 0x00];
+pub(super) const BLACK: [u8; 4] = [0x08, 0x00, 0x01, 0x00];
 /// The arrow word Excel 95 wrote for a line without arrowheads.
-const NO_ARROW: u16 = 0x0110;
+pub(super) const NO_ARROW: u16 = 0x0110;
 
 fn warned(report: &crate::ReadReport) -> bool {
     report.warnings.iter().any(|w| w.contains(SHAPES_WARNING))
