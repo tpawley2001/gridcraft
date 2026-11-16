@@ -40,6 +40,7 @@ mod drawing;
 mod external_links;
 pub(crate) mod formula;
 mod ftab;
+mod inflate;
 pub(crate) mod macro_sheet;
 mod objects;
 mod page_setup;
@@ -178,6 +179,10 @@ impl Budget {
             }
             _ => false,
         }
+    }
+    /// Picture bytes that may still be kept.
+    fn picture_room(&self) -> usize {
+        MAX_PICTURE_BYTES.saturating_sub(self.pictures)
     }
     fn cell(&mut self) -> Result<(), IoError> {
         self.cells += 1;

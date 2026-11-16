@@ -2,20 +2,22 @@
 //! the workbook globals' MsoDrawingGroup holds an OfficeArtDggContainer whose
 //! OfficeArtBStoreContainer lists the pictures (OfficeArtFBSE entries, each embedding its blip);
 //! a picture shape on a sheet names its entry by the 1-based `pib` property of its
-//! OfficeArtFOPT. PNG and JPEG blips are kept as their encoded bytes; other blip types are not
-//! imported.
+//! OfficeArtFOPT. PNG and JPEG blips are kept as their encoded bytes, EMF and WMF blips as their
+//! (inflated) metafiles; other blip types are not imported.
 
 use std::sync::Arc;
 
 use gridcraft_model::Color;
 
-use super::{Budget, MAX_PICTURE_BYTES};
+use super::{Budget, MAX_PICTURE_BYTES, inflate};
 use crate::ReadReport;
 
 /// OfficeArt record types ([MS-ODRAW] 2.1.1, 2.2).
 const DGG_CONTAINER: u16 = 0xF000;
 const BSTORE_CONTAINER: u16 = 0xF001;
 const FBSE: u16 = 0xF007;
+const BLIP_EMF: u16 = 0xF01A;
+const BLIP_WMF: u16 = 0xF01B;
 const BLIP_JPEG: u16 = 0xF01D;
 const BLIP_PNG: u16 = 0xF01E;
 pub(super) const FSP: u16 = 0xF00A;
@@ -141,9 +143,9 @@ fn entries(store: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Option
             FBSE => {
                 let name_len = usize::from(*body.get(33)?);
                 let at = 36usize.checked_add(name_len)?;
-                if at >= body.len() { Blip::Other } else { blip(body, at)? }
+                if at >= body.len() { Blip::Other } else { blip(body, at, budget.picture_room())? }
             }
-            _ => blip_record(inst, ty, body),
+            _ => blip_record(inst, ty, body, budget.picture_room()),
         };
         if let Blip::Picture { data, .. } = &blip
             && !budget.picture(data.len())
@@ -159,14 +161,17 @@ fn entries(store: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Option
 }
 
 /// The blip record at `pos` in an FBSE body.
-fn blip(data: &[u8], pos: usize) -> Option<Blip> {
+fn blip(data: &[u8], pos: usize, room: usize) -> Option<Blip> {
     let (_, inst, ty, body) = header(data, pos)?;
-    Some(blip_record(inst, ty, body))
+    Some(blip_record(inst, ty, body, room))
 }
 
-/// A blip record body: `rgbUid1`, `rgbUid2` for the two-UID instances, `tag`, then the file.
-fn blip_record(inst: u16, ty: u16, body: &[u8]) -> Blip {
+/// A blip record body: `rgbUid1`, `rgbUid2` for the two-UID instances, `tag`, then the file. A
+/// metafile is not inflated past `room` bytes (what is left of the picture allowance).
+fn blip_record(inst: u16, ty: u16, body: &[u8], room: usize) -> Blip {
     let (mime, uids) = match (ty, inst) {
+        (BLIP_EMF, 0x3D4) | (BLIP_WMF, 0x216) => return metafile(ty, body, 1, room).unwrap_or(Blip::Other),
+        (BLIP_EMF, 0x3D5) | (BLIP_WMF, 0x217) => return metafile(ty, body, 2, room).unwrap_or(Blip::Other),
         (BLIP_JPEG, 0x46A | 0x6E2) => ("image/jpeg", 1),
         (BLIP_JPEG, 0x46B | 0x6E3) => ("image/jpeg", 2),
         (BLIP_PNG, 0x6E0) => ("image/png", 1),
@@ -177,6 +182,72 @@ fn blip_record(inst: u16, ty: u16, body: &[u8]) -> Blip {
         Some(file) if !file.is_empty() => Blip::Picture { data: Arc::new(file.to_vec()), mime },
         _ => Blip::Other,
     }
+}
+
+/// An EMF or WMF blip body ([MS-ODRAW] 2.2.24, 2.2.25): `uids` UIDs, the 34-byte
+/// OfficeArtMetafileHeader (cbSize, rcBounds, ptSize, cbSave, compression, filter), then cbSave
+/// bytes of metafile, zlib-compressed when compression is 0 and stored as is when it is 0xFE. A
+/// WMF gets a placeable header in front, as a `.wmf` file has. `None` when the data is truncated,
+/// doesn't inflate to cbSize bytes, or would pass `room` bytes.
+fn metafile(ty: u16, body: &[u8], uids: usize, room: usize) -> Option<Blip> {
+    let head = 16usize.checked_mul(uids)?;
+    let field = |i: usize| u32_at(body, head.checked_add(i)?);
+    let signed = |i: usize| field(i).map(|v| i32::from_le_bytes(v.to_le_bytes()));
+    let size = usize::try_from(field(0)?).ok()?;
+    let bounds = [signed(4)?, signed(8)?, signed(12)?, signed(16)?];
+    let cx = signed(20)?;
+    let saved = usize::try_from(field(28)?).ok()?;
+    let compression = *body.get(head.checked_add(32)?)?;
+    let start = head.checked_add(34)?;
+    let stored = body.get(start..start.checked_add(saved)?)?;
+    let extra = if ty == BLIP_WMF { PLACEABLE_LEN } else { 0 };
+    let file = match compression {
+        0x00 if size.checked_add(extra)? <= room => inflate::zlib(stored, size)?,
+        0xFE if stored.len().checked_add(extra)? <= room => stored.to_vec(),
+        _ => return None,
+    };
+    if file.is_empty() {
+        return None;
+    }
+    if ty == BLIP_WMF {
+        let mut data = placeable_header(bounds, cx).to_vec();
+        data.extend_from_slice(&file);
+        Some(Blip::Picture { data: Arc::new(data), mime: "image/x-wmf" })
+    } else {
+        Some(Blip::Picture { data: Arc::new(file), mime: "image/x-emf" })
+    }
+}
+
+const PLACEABLE_LEN: usize = 22;
+
+/// The 22-byte placeable header a `.wmf` file starts with: key, hmf, bounding box (`bounds`
+/// clamped to 16 bits), logical units per inch (the box's width over `cx` EMUs; 1440 when that
+/// can't be worked out), reserved, and the XOR of the ten words before the checksum.
+fn placeable_header(bounds: [i32; 4], cx: i32) -> [u8; PLACEABLE_LEN] {
+    const EMU_PER_INCH: i64 = 914_400;
+    let width = i64::from(bounds[2]) - i64::from(bounds[0]);
+    let inch = if cx > 0 && width > 0 {
+        let cx = i64::from(cx);
+        // Rounded to the nearest unit; width and cx are 32-bit, so this can't overflow.
+        let units = (width * EMU_PER_INCH * 2 + cx) / (cx * 2);
+        u16::try_from(units).ok().filter(|&u| u != 0).unwrap_or(1440)
+    } else {
+        1440
+    };
+    let clamp = |v: i32| i16::try_from(v.clamp(i32::from(i16::MIN), i32::from(i16::MAX))).unwrap_or(0);
+    let mut words = [0u16; 10];
+    words[0] = 0xCDD7;
+    words[1] = 0x9AC6;
+    for (w, &b) in words.iter_mut().skip(3).zip(bounds.iter()) {
+        *w = u16::from_le_bytes(clamp(b).to_le_bytes());
+    }
+    words[7] = inch;
+    let checksum = words.iter().fold(0u16, |acc, w| acc ^ w);
+    let mut out = [0u8; PLACEABLE_LEN];
+    for (chunk, w) in out.as_chunks_mut::<2>().0.iter_mut().zip(words.iter().chain([checksum].iter())) {
+        *chunk = w.to_le_bytes();
+    }
+    out
 }
 
 /// What a shape's property tables say about it.
@@ -199,6 +270,9 @@ pub(super) struct ShapeProps {
     pub arrow: bool,
     /// The Obj record's FtCmo `fPrint` is clear ("Print object" off): left out of print and PDF.
     pub no_print: bool,
+    /// The Obj record holds an FtPictFmla: the picture is the preview of an embedded or linked
+    /// OLE object.
+    pub ole: bool,
 }
 
 /// An OfficeArtCOLORREF as a model colour: bytes red, green, blue, flags. With `fSchemeIndex` the
