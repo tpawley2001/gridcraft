@@ -379,7 +379,7 @@ mod tests {
         let namex = |i: u32| [&[0x39u8][..], &0u16.to_le_bytes(), &i.to_le_bytes()].concat();
         // SUM through PtgFuncVar.
         assert_eq!(text(&[&namex(1)[..], &[0x22, 1, 4, 0]].concat()).ok().as_deref(), Some("SUM([1]!Rate)"));
-        assert_eq!(text(&namex(2)).ok().as_deref(), Some("'[1]S'!Limit"));
+        assert_eq!(text(&namex(2)).ok().as_deref(), Some("[1]S!Limit"));
         assert_eq!(text(&namex(3)).ok().as_deref(), Some("[1]!_xlnm.Print_Area"));
         // Scoped past the sheet list, not a legal name, past the end: refused.
         assert!(text(&namex(4)).is_err() && text(&namex(5)).is_err() && text(&namex(6)).is_err());
