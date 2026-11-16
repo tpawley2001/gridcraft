@@ -484,7 +484,7 @@ fn keep_printer_settings(
         Err(e) => return dropped(report, &e.to_string()),
     };
     let mut p = Preserved::default();
-    p.parts.push(PreservedPart { name: rel.target.clone(), content_type, data: Arc::from(data), rels: vec![] });
+    p.parts.push(PreservedPart { name: rel.target.clone(), content_type, data: Arc::from(data), rels: vec![], ..Default::default() });
     p.rels.push(PreservedRel { id: rel.id.clone(), rel_type: format!("{REL_TYPE}printerSettings"), target: rel.target.clone(), external: false });
     p.elements.push(PreservedXml { slot: "pageSetup".into(), xml: rel.id.clone() });
     Some(Arc::new(p))

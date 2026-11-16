@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~25 points of "ready for real work" and ~160–240 h away
 
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-15 · **Change:** minor (G0421: XLSX keeps `cp:revision` (1–10 ASCII digits) without incrementing it; `gridcraft-cli check` ignores core properties without non-whitespace text and dangling relationships, while unreadable parts still count as content. Earlier: G0418: `.xls` import reads notes, hyperlinks and frozen panes. Earlier: G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. Earlier: form check boxes and option buttons; catalog 283 / 298; earlier: form controls: buttons, sliders and spin buttons; earlier: RefEdit reference boxes in dialogs: Goal Seek, Solver and Data Analysis take ranges by selection on the grid)
+> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-15 · **Change:** minor (G0430: XLSX PivotTables on a connection, the Data Model or another workbook survive save (from #2499). Earlier: G0421: XLSX keeps `cp:revision` (1–10 ASCII digits) without incrementing it; `gridcraft-cli check` ignores core properties without non-whitespace text and dangling relationships, while unreadable parts still count as content. Earlier: G0418: `.xls` import reads notes, hyperlinks and frozen panes. Earlier: G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. Earlier: form check boxes and option buttons; catalog 283 / 298; earlier: form controls: buttons, sliders and spin buttons; earlier: RefEdit reference boxes in dialogs: Goal Seek, Solver and Data Analysis take ranges by selection on the grid)
 
 GridCraft aims at full Microsoft Excel parity, and at being better in places: faster, open (XLSX
 is the native format), fully scriptable by agents (MCP, control channel, CLI), and on the web.
@@ -134,6 +134,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-11-15 | XLSX PivotTables on a connection, the Data Model or another workbook survive save (from #2499): a PivotTable whose cache reads a workbook connection, the Data Model or a range in another workbook keeps its table, cache and records parts (and the Data Model) through open + save |
 | 2026-11-15 | `.xls` import reads cell notes (author, multi-line text, shown or hidden), hyperlinks (web, mailto, absolute and relative files, places in the workbook, tooltips) and frozen panes (#121, from #2496) |
 | 2026-11-14 | Whole-workbook print and PDF omit font-only and number-format-only sheets, retaining their formatting on save/reopen (G0393) |
 | 2026-11-06 | A sheet keeps its own scroll position when sheets are inserted, deleted or moved before it: a new PivotTable or inserted sheet opens at the top instead of where its neighbour was scrolled; a closed window's positions are let go (#3485) |
@@ -183,6 +184,8 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 | 2026-10-15 | Function help follows the interface language: argument hints, autocomplete, Insert Function (search and readable categories) and the Formulas-tab menus read per-language tables of descriptions and argument names; Spanish keeps its 10 functions in the new format |
 | 2026-10-15 | Row auto-fit counts a cell's line breaks only when the cell wraps, as Excel does: a file whose unwrapped cells hold multi-line text no longer opens with tall rows (typing a break still turns wrap on and grows the row) |
 | 2026-10-14 | XLSX import warns when a pivot cache is missing, malformed or too large, naming the cache and saying its PivotTable was kept as plain cells, instead of dropping the PivotTable silently (#1039) |
+| 2026-10-15 | XLSX PivotTables on a data connection or the Data Model are kept on save (they were dropped), with the Data Model (`xl/model/item.data`) byte for byte; Excel opens the result without repair and refreshes it |
+| 2026-10-14 | XLSX PivotTables whose source is a range or name in another workbook are kept on save (they were dropped): table, cache and records parts unchanged, style references renumbered; Excel opens the result without repair and refreshes it |
 | 2026-10-14 | Set precision as displayed is applied: with the option on, formula results, spills and numbers typed or reformatted are stored as their number format shows them and formulas calculate from those values; `formulas.calculationOptions` gains `precisionAsDisplayed` (turning it on rounds existing constants; locked constants on a protected sheet keep their value; numbers written to a new sheet are rounded too) (#1343) |
 | 2026-10-14 | Lookups (MATCH, XMATCH, VLOOKUP, HLOOKUP, XLOOKUP, LOOKUP) compare numbers exactly like Excel, so a computed key such as `=0.1+0.2` no longer finds 0.3; `=` and COUNTIF/SUMIF keep their 15-digit comparison |
 | 2026-10-14 | Functions: EOMONTH, EDATE, WORKDAY, NETWORKDAYS, YEARFRAC, WEEKNUM, the bond and coupon functions, DISC, BIN2DEC, IM* and the other Analysis ToolPak functions give `#VALUE!` for a reference to more than one cell in a value argument, as Excel 365 does, instead of spilling; array constants and computed arrays still lift |
@@ -273,6 +276,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-15 | minor | Progress log: G0430 XLSX PivotTables on a connection, the Data Model or another workbook survive save (from #2499) |
 | 2026-11-15 | minor | Progress log: G0418 `.xls` import of notes, hyperlinks and frozen panes (#121, from #2496) |
 | 2026-11-14 | minor | G0395: whole-workbook printing includes visible Excel 5 dialog sheets in tab order, with VML frame captions and form buttons; detached print views leave original parts unchanged. Empty or unreadable forms add no pages. |
 | 2026-11-14 | minor | G0393: whole-workbook print and PDF omit sheets containing only nonvisual cell formatting; fills, borders, merges and explicit print ranges retain their reach. |
@@ -313,8 +317,10 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 | 2026-10-16 | trivial | Progress log: web preferences kept between visits (#1562) |
 | 2026-10-16 | minor | Progress log: interface fonts held once instead of twice |
 | 2026-10-14 | trivial | Progress log: pivot cache import warnings (#1039) |
+| 2026-10-15 | trivial | Progress log: XLSX PivotTables on a data connection or the Data Model kept on save |
 | 2026-10-14 | minor | Progress log: Set precision as displayed applied in calculation (#1343) |
 | 2026-10-14 | minor | Progress log: `.xls` import reads cell formatting |
+| 2026-10-14 | trivial | Progress log: XLSX PivotTables on another workbook kept on save |
 | 2026-10-14 | minor | Progress log: lookups compare numbers exactly |
 | 2026-10-14 | minor | Progress log: Analysis ToolPak value arguments reject multi-cell references |
 | 2026-10-14 | minor | XLSX dynamic-array `cm` metadata kept on save; progress log row |

@@ -107,6 +107,11 @@ pub struct PivotWriter {
     tables: u32,
     /// Kept caches already written: original cache definition part → (cache id, part number).
     kept_caches: HashMap<String, (u32, usize)>,
+    /// Cache ids taken by pivot caches kept by `passthrough` (PivotTables on another workbook, a
+    /// data connection or the Data Model).
+    reserved: Vec<u32>,
+    /// `<pivotCache>` entries of those kept caches.
+    kept_entries: String,
 }
 
 struct Pending {
@@ -118,6 +123,12 @@ struct Pending {
 }
 
 impl PivotWriter {
+    /// A writer whose caches don't reuse the kept caches' ids; `kept_entries` (their
+    /// `<pivotCache>` elements) are listed with the written ones.
+    pub fn new(reserved: Vec<u32>, kept_entries: String) -> PivotWriter {
+        PivotWriter { reserved, kept_entries, ..PivotWriter::default() }
+    }
+
     /// Writes the caches of a sheet's PivotTables and adds the sheet's relationships to its
     /// PivotTable parts. Pivots whose source can't be resolved are not written.
     pub fn add_sheet(&mut self, wb: &Workbook, si: usize, out: &mut Out, rels: &mut Rels) {
@@ -160,7 +171,7 @@ impl PivotWriter {
 
     /// `wanted` when no cache has it yet, else the smallest free cache id.
     fn free_cache_id(&self, wanted: u32) -> u32 {
-        let used = |id: u32| self.caches.iter().any(|(c, _)| *c == id);
+        let used = |id: u32| self.caches.iter().any(|(c, _)| *c == id) || self.reserved.contains(&id);
         if wanted != 0 && !used(wanted) {
             return wanted;
         }
@@ -211,10 +222,11 @@ impl PivotWriter {
     /// Adds the workbook relationships to the caches; returns the `<pivotCaches>` element (empty
     /// when there are none).
     pub fn workbook_xml(&self, wb_rels: &mut Rels) -> String {
-        if self.caches.is_empty() {
+        if self.caches.is_empty() && self.kept_entries.is_empty() {
             return String::new();
         }
         let mut s = String::from("<pivotCaches>");
+        s.push_str(&self.kept_entries);
         for (id, target) in &self.caches {
             let rid = wb_rels.add("pivotCacheDefinition", target);
             let _ = write!(s, "<pivotCache cacheId=\"{id}\" r:id=\"{rid}\"/>");

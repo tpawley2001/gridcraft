@@ -432,6 +432,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
     // Legacy formula cells per model sheet, rewritten once names and tables are known.
     let mut legacy_formulas: Vec<(usize, Vec<gridcraft_core::CellRef>)> = vec![];
     let mut pivot_caches = crate::pivot::CachesIn::new(&wb_xml, &wb_rels);
+    pivot_caches.read_connections(&mut cx, &wb_rels);
     let sheet_els: Vec<El> = wb_xml.child("sheets").map(|s| s.kids("sheet").cloned().collect()).unwrap_or_default();
     let mut names = SheetNames::default();
     for (i, se) in sheet_els.iter().enumerate() {
@@ -476,12 +477,17 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
         };
         legacy_formulas.push((wb.sheets.len(), std::mem::take(&mut cx.legacy_formulas)));
         let mut kept_pivots = Vec::new();
+        let mut external_pivots = vec![];
         match crate::pivot::read_pivots(&mut cx, &mut pivot_caches, &rel.target, &name) {
-            Ok((p, k)) => (sheet.pivots, kept_pivots) = (p, k),
+            Ok(p) => {
+                sheet.pivots = p.tables;
+                kept_pivots = p.kept;
+                external_pivots = p.external;
+            }
             Err(IoError::TooLarge(m)) => return Err(IoError::TooLarge(m)),
             Err(e) => cx.warn(format!("PivotTables on sheet \"{name}\" could not be read: {e}")),
         }
-        sheet.preserved = kept.sheet(&mut cx, &rel.target, &name, &read_controls);
+        sheet.preserved = kept.sheet(&mut cx, &rel.target, &name, &external_pivots, &read_controls);
         if !kept_pivots.is_empty() {
             let pivots = gridcraft_model::Preserved { pivots: kept_pivots, ..Default::default() };
             crate::passthrough::merge_preserved(&mut sheet.preserved, Some(std::sync::Arc::new(pivots)));

@@ -98,7 +98,13 @@ fn link(
         return Err(format!("{}: the linked file's relationship is missing", rel.target));
     }
     let name = format!("xl/externalLinks/externalLink{number}.xml");
-    let part = PreservedPart { name: name.clone(), content_type: CT_XML.into(), data: Arc::from(link.xml.as_bytes()), rels: part_rels };
+    let part = PreservedPart {
+        name: name.clone(),
+        content_type: CT_XML.into(),
+        data: Arc::from(link.xml.as_bytes()),
+        rels: part_rels,
+        ..Default::default()
+    };
     let kept = PreservedRel { id: id.to_string(), rel_type: format!("{REL_TYPE}externalLink"), target: name, external: false };
     Ok((link, part, kept))
 }

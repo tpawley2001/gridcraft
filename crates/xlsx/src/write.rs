@@ -227,6 +227,12 @@ impl Out {
             n = n.saturating_add(1);
         }
     }
+    /// Replaces the bytes of a part already added.
+    pub fn replace(&mut self, name: &str, data: Vec<u8>) {
+        if let Some(p) = self.parts.iter_mut().find(|(n, _)| n == name) {
+            p.1 = data;
+        }
+    }
     pub fn default_type(&mut self, ext: &str, ct: &str) {
         self.defaults.entry(ext.to_string()).or_insert_with(|| ct.to_string());
     }
@@ -531,8 +537,16 @@ pub fn write_xlsx_named_with(wb: &Workbook, kind: XlsxKind, book_name: Option<&s
     w.push_str("</workbook>");
 
     // Workbook-level parts.
-    let (styles, fmt_ids) = crate::styles::write_styles(wb, &out.dxfs, &pivots.number_formats(wb));
-    pivots.finish(wb, &mut out, &|code: &str| crate::tables::builtin_id(code).or_else(|| fmt_ids.get(code).copied()));
+    let mut extra_fmts = pivots.number_formats(wb);
+    for code in out.kept.num_fmt_codes() {
+        if !extra_fmts.contains(&code) {
+            extra_fmts.push(code);
+        }
+    }
+    let (styles, fmt_ids) = crate::styles::write_styles(wb, &out.dxfs, &extra_fmts);
+    let fmt_id = |code: &str| crate::tables::builtin_id(code).or_else(|| fmt_ids.get(code).copied());
+    pivots.finish(wb, &mut out, &fmt_id);
+    crate::passthrough::finish_style_ids(&mut out, &fmt_id);
     out.part("xl/styles.xml", Some("application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"), styles.into_bytes());
     wb_rels.add("styles", "styles.xml");
     if !out.python_scripts.is_empty() {
@@ -681,7 +695,7 @@ fn write_sheets(
 ) -> (String, crate::passthrough::WorkbookKept, crate::pivot::PivotWriter) {
     // Kept content first: the kept sheets among the worksheets need their relationship ids.
     let mut kept = crate::passthrough::write_workbook(wb, wb_rels, out, kind.is_macro_enabled());
-    let mut pivots = crate::pivot::PivotWriter::default();
+    let mut pivots = crate::pivot::PivotWriter::new(kept.pivot_cache_ids(), kept.pivot_cache_entries());
     let mut sheets_xml = String::new();
     let any_visible = wb.sheets.iter().any(|s| s.visibility == Visibility::Visible);
     let mut ids = crate::passthrough::SheetIds::new(wb, &kept);

@@ -62,7 +62,13 @@ pub(crate) fn add_macro_sheets(wb: &mut Workbook, sheets: Vec<MacroSheet>, chart
         prints.push(MacroSheetPrint::new(ms.name.clone(), ms.visibility, ms.before, charts_before, ms.sheet));
         let (content_type, rel_type) = if ms.intl { (CT_INTL_MACRO_SHEET, REL_INTL_MACRO_SHEET) } else { (CT_MACRO_SHEET, REL_MACRO_SHEET) };
         let part = format!("xl/macrosheets/sheet{n}.xml");
-        kept.parts.push(PreservedPart { name: part.clone(), content_type: content_type.into(), data: Arc::from(xml.into_bytes()), rels: vec![] });
+        kept.parts.push(PreservedPart {
+            name: part.clone(),
+            content_type: content_type.into(),
+            data: Arc::from(xml.into_bytes()),
+            rels: vec![],
+            ..Default::default()
+        });
         let rel_id = format!("rIdXlsMacroSheet{n}");
         kept.rels.push(PreservedRel { id: rel_id.clone(), rel_type: rel_type.into(), target: part, external: false });
         order.push((ms.bound, PreservedSheet { name: ms.name, visibility: ms.visibility, rel_id, before: ms.before, sheet_id: 0 }));

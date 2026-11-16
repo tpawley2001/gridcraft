@@ -198,7 +198,13 @@ impl Reader {
             let xml = link_xml("rId1", &b.sheets, Some(&b.names), &tables);
             let name = format!("xl/externalLinks/externalLink{n}.xml");
             let path = PreservedRel { id: "rId1".into(), rel_type: format!("{REL}externalLinkPath"), target, external: true };
-            let part = PreservedPart { name: name.clone(), content_type: CT_XML.into(), data: Arc::from(xml.as_bytes()), rels: vec![path] };
+            let part = PreservedPart {
+                name: name.clone(),
+                content_type: CT_XML.into(),
+                data: Arc::from(xml.as_bytes()),
+                rels: vec![path],
+                ..Default::default()
+            };
             let rel = PreservedRel { id: format!("rIdExternalLink{n}"), rel_type: format!("{REL}externalLink"), target: name, external: false };
             kept.push(Kept { book: b.book, sheets: b.sheets, names: b.names, part, rel });
         }

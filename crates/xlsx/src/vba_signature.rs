@@ -53,7 +53,13 @@ pub(crate) fn read(
         match pkg.read(&r.target) {
             Ok(Some(data)) => {
                 sig.rels.push(PreservedRel { id: r.id.clone(), rel_type: ty.to_string(), target: r.target.clone(), external: false });
-                sig.parts.push(PreservedPart { name: r.target.clone(), content_type: content_type.to_string(), data: data.into(), rels: vec![] });
+                sig.parts.push(PreservedPart {
+                    name: r.target.clone(),
+                    content_type: content_type.to_string(),
+                    data: data.into(),
+                    rels: vec![],
+                    ..Default::default()
+                });
             }
             Ok(None) => warn(format!("the VBA project's signature names a missing part {} and was dropped", r.target)),
             Err(IoError::TooLarge(m)) => return Err(IoError::TooLarge(m)),
