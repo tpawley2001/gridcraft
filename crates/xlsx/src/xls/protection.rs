@@ -125,18 +125,18 @@ fn edit_range(c: &mut Cursor<'_, '_>) -> Result<Option<(EditRange, bool)>, IoErr
     let permissions = c.u32()? & 1 != 0;
     let password = c.u32()? as u16;
     let title = c.string()?;
-    if permissions {
+    let security_descriptor = if permissions {
         let size = c.u32()? as usize;
         if size > c.remaining() {
             return Err(invalid("truncated edit range security descriptor"));
         }
-        c.skip(size)?;
-    }
+        crate::sddl::security_descriptor_to_sddl(&c.bytes(size)?)
+    } else {
+        None
+    };
+    let permissions = permissions && security_descriptor.is_none();
     if c.remaining() != 0 {
         return Err(invalid("unexpected edit range bytes"));
     }
-    Ok(Some((
-        EditRange { title, ranges, password: (password != 0).then_some(PasswordHash::Legacy(password)), security_descriptor: None },
-        permissions,
-    )))
+    Ok(Some((EditRange { title, ranges, password: (password != 0).then_some(PasswordHash::Legacy(password)), security_descriptor }, permissions)))
 }
