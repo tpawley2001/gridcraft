@@ -213,6 +213,10 @@ fn unmodelled_parts_survive_a_round_trip() {
     assert!(data.preserved.is_some(), "{:?}", rep.warnings);
     assert!(!rep.warnings.iter().any(|w| w.contains("dropped")), "{:?}", rep.warnings);
     assert_eq!(data.comments.len(), 1, "the note is modelled");
+    // The values saved with the link are read, for formulas into the linked workbook.
+    let book = &wb.external_books;
+    assert_eq!(book.len(), 1);
+    assert_eq!(book[0].sheet("sheet1").map(|s| s.value(gridcraft_core::CellRef::new(0, 0))), Some(gridcraft_core::Value::Number(7.0)));
 
     let out = write_xlsx(&wb).unwrap();
     let u = Unpacked::new(&out);
@@ -1778,4 +1782,76 @@ fn a_sheet_of_modelled_controls_keeps_nothing_for_them() {
     let sh = back.sheet(0).unwrap();
     assert_eq!(sh.controls.len(), 2);
     assert!(sh.preserved.is_none(), "{:?}", sh.preserved);
+}
+
+// Unused caches exercise the workbook path without any sheet-owned PivotTables.
+fn unused_cache_package(o: ConnPkg) -> Unpacked {
+    let mut u = Unpacked::new(&conn_pivot_package(o));
+    u.parts.retain(|name, _| !name.starts_with("xl/pivotTables/") && !name.starts_with("xl/worksheets/_rels/"));
+    u
+}
+
+fn pack_unused(u: &Unpacked) -> Vec<u8> {
+    make_zip(&u.parts.iter().map(|(name, data)| (name.as_str(), data.as_slice())).collect::<Vec<_>>())
+}
+
+#[test]
+fn unused_connection_and_model_caches_keep_records_and_survive_sheet_deletion() {
+    let src = pack_unused(&unused_cache_package(CONN_PKG));
+    let (mut wb, report) = read_xlsx(&src).unwrap();
+    assert!(!report.warnings.iter().any(|w| w.contains("dropped")), "{:?}", report.warnings);
+    wb.sheets.truncate(1);
+    for _ in 0..2 {
+        let bytes = write_xlsx(&wb).unwrap();
+        let u = Unpacked::new(&bytes);
+        u.assert_valid();
+        let caches = written_pivot_caches(&u);
+        assert_eq!(caches.len(), 2);
+        let cache = &caches.iter().find(|c| c.0 == "4").unwrap().1;
+        assert_eq!(u.text(cache), conn_cache(2));
+        let records = u.rels(cache).into_iter().find(|r| r.1.ends_with("/pivotCacheRecords")).unwrap();
+        assert_eq!(u.text(&records.2), CONN_RECORDS);
+        assert_eq!(content_type_of(&u, cache), crate::pivot::CT_PIVOT_CACHE_DEF);
+        wb = read_xlsx(&bytes).unwrap().0;
+    }
+}
+
+#[test]
+fn unused_caches_require_their_connections_and_model() {
+    for (options, expected, warning) in [
+        (ConnPkg { connections: false, ..CONN_PKG }, 0, "data connections were not kept"),
+        (ConnPkg { connections_blocked: true, ..CONN_PKG }, 0, "data connections were not kept"),
+        (ConnPkg { model_part: false, ..CONN_PKG }, 1, "Data Model was not kept"),
+        (ConnPkg { model_connection: 99, ..CONN_PKG }, 1, "data connection is not in the workbook"),
+    ] {
+        let (wb, report) = read_xlsx(&pack_unused(&unused_cache_package(options))).unwrap();
+        assert!(report.warnings.iter().any(|w| w.contains("unused pivot cache") && w.contains(warning)), "{:?}", report.warnings);
+        let u = Unpacked::new(&write_xlsx(&wb).unwrap());
+        u.assert_valid();
+        assert_eq!(written_pivot_caches(&u).len(), expected);
+    }
+}
+
+#[test]
+fn unused_worksheet_caches_deduplicate_ids_and_parts() {
+    let mut u = unused_cache_package(ConnPkg { connections: false, model_part: false, ..CONN_PKG });
+    let cache = conn_cache(2).replace(r#" r:id="rId1""#, "").replace(
+        r#"<cacheSource type="external" connectionId="2"/>"#,
+        r#"<cacheSource type="worksheet"><worksheetSource sheet="Report" ref="A1:B2"/></cacheSource>"#,
+    );
+    u.parts.insert("xl/pivotCache/pivotCacheDefinition1.xml".into(), cache.clone().into_bytes());
+    u.parts.insert("xl/pivotCache/pivotCacheDefinition2.xml".into(), cache.into_bytes());
+    let wb_xml = u
+        .text("xl/workbook.xml")
+        .replace("</pivotCaches>", r#"<pivotCache cacheId="3" r:id="rId7"/><pivotCache cacheId="5" r:id="rId3"/></pivotCaches>"#);
+    u.parts.insert("xl/workbook.xml".into(), wb_xml.into_bytes());
+    let (wb, report) = read_xlsx(&pack_unused(&u)).unwrap();
+    assert!(!report.warnings.iter().any(|w| w.contains("dropped")), "{:?}", report.warnings);
+    let u = Unpacked::new(&write_xlsx(&wb).unwrap());
+    u.assert_valid();
+    let caches = written_pivot_caches(&u);
+    assert_eq!(caches.len(), 2);
+    assert_eq!(caches.iter().filter(|c| c.0 == "3").count(), 1);
+    assert_eq!(caches.iter().filter(|c| c.0 == "4").count(), 1);
+    assert_ne!(caches[0].1, caches[1].1);
 }

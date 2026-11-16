@@ -63,8 +63,9 @@ pub(crate) struct LinkName {
     pub name: String,
     /// The index of the linked sheet the name is scoped to; `None` for a workbook-level name.
     pub sheet: Option<usize>,
-    /// The definition when it is a single error (`=#REF!`); other definitions aren't kept.
-    pub refers_to: Option<CellError>,
+    /// The definition (without `=`), in the linked workbook's own terms (`Prices!$B$2:$B$4`,
+    /// `#REF!`); `None` when it wasn't saved or can't be read.
+    pub refers_to: Option<String>,
 }
 
 /// The `externalLink` part: the linked file is relationship `rel_id`, then its sheet names, its
@@ -84,8 +85,8 @@ pub(crate) fn link_xml(rel_id: &str, sheets: &[String], names: Option<&[Option<L
         xml.push_str("<definedNames>");
         for n in names {
             let _ = write!(xml, "<definedName name=\"{}\"", esc_attr(&n.name));
-            if let Some(e) = n.refers_to {
-                let _ = write!(xml, " refersTo=\"={}\"", esc_attr(e.as_str()));
+            if let Some(f) = &n.refers_to {
+                let _ = write!(xml, " refersTo=\"={}\"", esc_attr(f));
             }
             if let Some(s) = n.sheet {
                 let _ = write!(xml, " sheetId=\"{s}\"");
@@ -117,7 +118,9 @@ pub(crate) struct Kept {
 }
 
 /// Keeps every link (in order: link `n` is the `n`th) with the workbook's `<externalReferences>`,
-/// lets formulas name the linked workbooks, and says so once.
+/// lets formulas name the linked workbooks, and says so once. The values saved with each link are
+/// read back from its part, as the `.xlsx` reader reads them ([`crate::external`]), so formulas
+/// into it calculate from them.
 pub(crate) fn keep(kept: Vec<Kept>, links: &mut Links, wb: &mut Workbook, report: &mut ReadReport) {
     if kept.is_empty() {
         return;
@@ -129,7 +132,9 @@ pub(crate) fn keep(kept: Vec<Kept>, links: &mut Links, wb: &mut Workbook, report
     }
     x.push_str("</externalReferences>");
     p.elements.push(PreservedXml { slot: "externalReferences".into(), xml: x });
+    let mut books = Vec::with_capacity(kept.len());
     for (n, k) in kept.into_iter().enumerate() {
+        books.push(crate::external::book_of_part(&k.part.data));
         p.parts.push(k.part);
         p.rels.push(k.rel);
         if let Some(b) = links.books.get_mut(k.book) {
@@ -137,5 +142,6 @@ pub(crate) fn keep(kept: Vec<Kept>, links: &mut Links, wb: &mut Workbook, report
         }
     }
     merge_preserved(&mut wb.preserved, Some(Arc::new(p)));
+    wb.external_books = Arc::new(books);
     report.warn("links to external workbooks were kept; they are not followed or refreshed");
 }

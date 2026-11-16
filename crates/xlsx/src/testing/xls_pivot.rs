@@ -38,19 +38,19 @@ pub enum Cache {
     Bytes(Vec<u8>),
 }
 
-fn rec(id: u16, payload: &[u8]) -> Vec<u8> {
+pub(super) fn rec(id: u16, payload: &[u8]) -> Vec<u8> {
     let mut v = id.to_le_bytes().to_vec();
     v.extend_from_slice(&(payload.len() as u16).to_le_bytes());
     v.extend_from_slice(payload);
     v
 }
 
-fn u16s(v: &[u16]) -> Vec<u8> {
+pub(super) fn u16s(v: &[u16]) -> Vec<u8> {
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 
 /// XLUnicodeString, compressed characters.
-fn xlstr(s: &str) -> Vec<u8> {
+pub(super) fn xlstr(s: &str) -> Vec<u8> {
     [&(s.len() as u16).to_le_bytes()[..], &[0], s.as_bytes()].concat()
 }
 
@@ -59,11 +59,11 @@ fn nocch(s: &str) -> Vec<u8> {
     [&[0u8][..], s.as_bytes()].concat()
 }
 
-fn bof(dt: u16) -> Vec<u8> {
+pub(super) fn bof(dt: u16) -> Vec<u8> {
     rec(0x0809, &[&u16s(&[0x0600, dt, 0x0DBB, 0x07CC])[..], &[0; 8]].concat())
 }
 
-fn eof() -> Vec<u8> {
+pub(super) fn eof() -> Vec<u8> {
     rec(0x000A, &[])
 }
 

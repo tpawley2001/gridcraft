@@ -60,7 +60,7 @@ impl NameGraph {
         let none = HashSet::new();
         for n in &wb.names {
             let name = n.name.to_ascii_uppercase();
-            let Ok(e) = gridcraft_engine::formula::parse(&n.formula) else { continue };
+            let Ok(e) = gridcraft_engine::formula::parse_name(&n.formula) else { continue };
             if is_volatile(&e, &none) {
                 g.seeds.push(name);
                 continue;

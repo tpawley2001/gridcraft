@@ -503,6 +503,8 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
     }
     wb.set_active_sheet(file_to_model.get(active_tab).copied().flatten().unwrap_or(0));
 
+    wb.external_books = Arc::new(crate::external::read(&mut cx, &wb_xml, &wb_rels)?);
+
     // Defined names. Chartex parts refer to their data through hidden `_xlchart.*` names.
     let mut chart_names: Vec<(String, String)> = vec![];
     if let Some(dn) = wb_xml.child("definedNames") {
@@ -587,7 +589,7 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
             Err(e) => cx.warn(format!("macros (VBA project) could not be read and were dropped: {e}")),
         }
     }
-    wb.preserved = kept.workbook(&mut cx, &wb_part, &wb_xml, &file_to_model);
+    wb.preserved = kept.workbook(&mut cx, &wb_part, &wb_xml, &file_to_model, &pivot_caches);
     if let Some(sig) = vba_signature {
         let mut p = wb.preserved.as_deref().cloned().unwrap_or_default();
         p.vba_signature = Some(sig);

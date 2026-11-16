@@ -16,7 +16,7 @@ use std::sync::Arc;
 use gridcraft_core::CellRef;
 use gridcraft_model::{PreservedPart, PreservedRel, Workbook};
 
-use super::formula::{Links, error_code};
+use super::formula::{ExternalBook, Links, decode_name, error_code};
 use super::records::Cursor;
 use super::{BUILTIN_NAMES, MAX_NAMES, valid_name};
 use crate::external_link::{CT_XML, Cached, Kept, LinkName, MAX_CACHED_CELLS, keep, link_xml, push_cell};
@@ -33,6 +33,9 @@ struct Book {
     sheets: Vec<String>,
     /// Its defined names in record order (PtgNameX indexes them); `None` when one can't be used.
     names: Vec<Option<LinkName>>,
+    /// Each name's definition as saved (`rgce`), index-aligned with `names`: decoded once the
+    /// links are known ([`Reader::finish`]).
+    defs: Vec<Vec<u8>>,
     /// Cached cells: sheet index → row → column → value.
     cache: BTreeMap<u16, BTreeMap<u16, BTreeMap<u8, Cached>>>,
     cells: usize,
@@ -102,7 +105,7 @@ impl Reader {
             }
             Err(e) => (Err(format!("a link can't be read ({e})")), vec![]),
         };
-        self.books.push(Book { book, target, sheets, names: Vec::new(), cache: BTreeMap::new(), cells: 0 });
+        self.books.push(Book { book, target, sheets, names: Vec::new(), defs: Vec::new(), cache: BTreeMap::new(), cells: 0 });
         self.latest = true;
     }
 
@@ -115,8 +118,9 @@ impl Reader {
         }
         let Some(b) = self.books.last_mut() else { return false };
         if b.names.len() < MAX_NAMES {
-            let name = doc_name(c, b.sheets.len());
+            let (name, def) = doc_name(c, b.sheets.len()).map_or((None, vec![]), |(n, d)| (Some(n), d));
             b.names.push(name);
+            b.defs.push(def);
         }
         true
     }
@@ -195,8 +199,23 @@ impl Reader {
             report.warn(format!("links to external workbooks were dropped: {why}"));
             return;
         }
-        let mut kept = Vec::with_capacity(self.books.len());
-        for (i, b) in self.books.into_iter().enumerate() {
+        // Formulas name the linked workbooks from here on (`keep` adds their names): the names'
+        // definitions decode through them.
+        for (i, b) in self.books.iter().enumerate() {
+            if let Some(s) = links.books.get_mut(b.book) {
+                s.external = Some(ExternalBook { number: i + 1, sheets: b.sheets.clone(), names: vec![] });
+            }
+        }
+        let mut books = self.books;
+        for (i, b) in books.iter_mut().enumerate() {
+            for (name, def) in b.names.iter_mut().zip(&b.defs) {
+                if let Some(n) = name.as_mut().filter(|n| n.refers_to.is_none()) {
+                    n.refers_to = definition(def, links, i + 1);
+                }
+            }
+        }
+        let mut kept = Vec::with_capacity(books.len());
+        for (i, b) in books.into_iter().enumerate() {
             let Ok(target) = b.target else { return };
             let n = i + 1;
             let mut tables = String::new();
@@ -232,7 +251,7 @@ impl Reader {
 /// workbook-level name, else 1 + the index of its sheet among the link's `sheets`), two reserved
 /// bytes, the name, then its definition (`cce` and tokens). `None` when the name is empty,
 /// truncated, not a legal name, or scoped to a sheet the link doesn't have.
-fn doc_name(c: &mut Cursor<'_, '_>, sheets: usize) -> Option<LinkName> {
+fn doc_name(c: &mut Cursor<'_, '_>, sheets: usize) -> Option<(LinkName, Vec<u8>)> {
     let flags = c.u16().ok()?;
     let ixals = usize::from(c.u16().ok()?);
     c.skip(2).ok()?;
@@ -251,16 +270,53 @@ fn doc_name(c: &mut Cursor<'_, '_>, sheets: usize) -> Option<LinkName> {
         Some(s) if s >= sheets => return None,
         s => s,
     };
-    // The definition is kept only when it is one PtgErr (`=#REF!`); a missing or truncated
-    // definition leaves the name without one.
-    let refers_to = (|| {
+    // A missing or truncated definition leaves the name without one. One PtgErr (`=#REF!`) is
+    // read here; references into the linked workbook once its sheets are known (`definition`).
+    let def = (|| {
         let cce = usize::from(c.u16().ok()?);
-        match c.bytes(cce).ok()?.as_slice() {
-            [0x1C, code] => error_code(*code),
-            _ => None,
+        c.bytes(cce).ok()
+    })()
+    .unwrap_or_default();
+    let refers_to = match def.as_slice() {
+        [0x1C, code] => error_code(*code).map(|e| e.as_str().to_string()),
+        _ => None,
+    };
+    Some((LinkName { name, sheet, refers_to }, def))
+}
+
+/// The definition `rgce` of a name of linked workbook `number`, in that workbook's own terms
+/// (`Costs!$A$1:$B$9`): its references (PtgRef3d, PtgArea3d) name the link's sheets through
+/// EXTERNSHEET. `None` when it is empty, can't be decoded, or reads anything but that workbook.
+fn definition(rgce: &[u8], links: &Links, number: usize) -> Option<String> {
+    use gridcraft_formula::{Expr, SheetSel};
+    if rgce.is_empty() {
+        return None;
+    }
+    let expr = decode_name(rgce, &[], links, None).ok()?;
+    let prefix = format!("[{number}]");
+    let own = |s: &mut String| match s.strip_prefix(&prefix) {
+        Some(rest) if !rest.is_empty() => {
+            *s = rest.to_string();
+            true
         }
-    })();
-    Some(LinkName { name, sheet, refers_to })
+        _ => false,
+    };
+    let mut foreign = false;
+    let expr = expr.map(&mut |e| match e {
+        Expr::Ref(mut r) => {
+            foreign |= match &mut r.sheet {
+                SheetSel::Named(a) | SheetSel::Span(a, _) => !own(a),
+                SheetSel::Current => true,
+            };
+            Expr::Ref(r)
+        }
+        Expr::Name(n) => {
+            foreign = true;
+            Expr::Name(n)
+        }
+        other => other,
+    });
+    (!foreign).then(|| gridcraft_formula::print(&expr))
 }
 
 /// SerAr ([MS-XLS] 2.5.192): one cached value; `None` when truncated or of an unknown type.
@@ -395,7 +451,7 @@ mod tests {
         let namex = |i: u32| [&[0x39u8][..], &0u16.to_le_bytes(), &i.to_le_bytes()].concat();
         // SUM through PtgFuncVar.
         assert_eq!(text(&[&namex(1)[..], &[0x22, 1, 4, 0]].concat()).ok().as_deref(), Some("SUM([1]!Rate)"));
-        assert_eq!(text(&namex(2)).ok().as_deref(), Some("'[1]S'!Limit"));
+        assert_eq!(text(&namex(2)).ok().as_deref(), Some("[1]S!Limit"));
         assert_eq!(text(&namex(3)).ok().as_deref(), Some("[1]!_xlnm.Print_Area"));
         // Scoped past the sheet list, not a legal name, past the end: refused.
         assert!(text(&namex(4)).is_err() && text(&namex(5)).is_err() && text(&namex(6)).is_err());

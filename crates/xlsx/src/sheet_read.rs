@@ -702,7 +702,11 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
     if let Some(f) = f.filter(|f| f.attr("t") == Some("dataTable")) {
         read_data_table(sheet, f, pos);
     }
-    let formula = f.and_then(|f| read_formula(cx, st, f, pos, dynamic));
+    // A legacy formula over a linked workbook is marked legacy: it is calculated with implicit
+    // intersection and saved as it was read (`external::saved_as_read`).
+    let formula = f
+        .and_then(|f| read_formula(cx, st, f, pos, dynamic))
+        .map(|f| if !f.dynamic && f.array.is_none() && crate::external::reads_linked_book(&f) { Formula { legacy: true, ..f } } else { f });
     // A `PY(index,0|1)` formula is a Python cell whose code is a script of the Python part. The
     // older `PY("…",0|1)` form is read from the formula's own text: the formula parser would fold
     // line breaks in the code. A formula naming a script the part lacks keeps only its cached
@@ -724,7 +728,7 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
     }
     // A formula without dynamic-array metadata is a legacy formula, unless entered as a
     // Ctrl+Shift+Enter array or unwrapped from Google Sheets' export (#2871).
-    if formula.as_ref().is_some_and(|f| !f.dynamic && f.array.is_none() && f.expr_arc().is_some()) {
+    if formula.as_ref().is_some_and(|f| !f.dynamic && !f.legacy && f.array.is_none() && f.expr_arc().is_some()) {
         cx.legacy_formulas.push(pos);
     }
     let spilled_from = if formula.is_none() && py.is_none() && !st.shared_copy_refused { dynamic_range(st, pos) } else { None };

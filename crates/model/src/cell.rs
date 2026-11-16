@@ -40,12 +40,16 @@ impl Formula {
     pub fn new(text: &str) -> Formula {
         let body = text.strip_prefix('=').unwrap_or(text);
         match gridcraft_formula::parse(body) {
-            Ok(e) => Formula { text: gridcraft_formula::print(&e), expr: Some(Arc::new(e)), array: None, dynamic: false, legacy: false },
-            Err(_) => Formula { text: body.to_string(), expr: None, array: None, dynamic: false, legacy: false },
+            Ok(e) => Formula::from_expr(e),
+            Err(_) => Formula { text: body.to_string(), expr: None, array: None, legacy: false, dynamic: false },
         }
     }
     pub fn from_expr(e: Expr) -> Formula {
-        Formula { text: gridcraft_formula::print(&e), expr: Some(Arc::new(e)), array: None, dynamic: false, legacy: false }
+        Formula { text: gridcraft_formula::print(&e), expr: Some(Arc::new(e)), array: None, legacy: false, dynamic: false }
+    }
+    /// This formula with `e` as its expression (moved, copied or adjusted). It stays legacy/dynamic if it was; `array` is the caller's to set.
+    pub fn rewritten(&self, e: Expr) -> Formula {
+        Formula { legacy: self.legacy, dynamic: self.dynamic, ..Formula::from_expr(e) }
     }
     /// The parsed expression, re-parsing when no tree is cached.
     pub fn expr(&self) -> Option<Expr> {
@@ -84,7 +88,7 @@ struct SavedFormula {
 impl From<SavedFormula> for Formula {
     fn from(f: SavedFormula) -> Formula {
         let expr = gridcraft_formula::parse(&f.text).ok().map(Arc::new);
-        Formula { text: f.text, expr, array: f.array, dynamic: f.dynamic, legacy: f.legacy }
+        Formula { text: f.text, expr, array: f.array, legacy: f.legacy, dynamic: f.dynamic }
     }
 }
 

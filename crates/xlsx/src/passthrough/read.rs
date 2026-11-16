@@ -295,7 +295,14 @@ impl KeptReader {
     }
 
     /// Package-root and workbook-level content.
-    pub fn workbook(&mut self, cx: &mut Ctx<'_>, wb_part: &str, wb_xml: &xml::El, file_to_model: &[Option<usize>]) -> Option<Arc<Preserved>> {
+    pub fn workbook(
+        &mut self,
+        cx: &mut Ctx<'_>,
+        wb_part: &str,
+        wb_xml: &xml::El,
+        file_to_model: &[Option<usize>],
+        caches: &crate::pivot::CachesIn,
+    ) -> Option<Arc<Preserved>> {
         if !self.on {
             let wb_rels = raw_rels(cx, wb_part).unwrap_or_default();
             for (_, se) in kept_sheet_entries(wb_xml, &wb_rels, file_to_model) {
@@ -387,7 +394,7 @@ impl KeptReader {
                     }
                     x.push_str("</externalReferences>");
                     p.elements.push(PreservedXml { slot: "externalReferences".into(), xml: x });
-                    cx.warn("links to external workbooks were kept; they are not followed or refreshed");
+                    cx.warn("links to external workbooks were kept; they are not followed or refreshed (formulas use the values saved with them)");
                 }
                 Err(why) => cx.warn(format!("links to external workbooks were dropped: {why}")),
             }
@@ -396,6 +403,7 @@ impl KeptReader {
         // metadata): kept byte for byte, as Excel keeps them. Unknown OOXML and Microsoft types are not.
         self.third_party(cx, &mut p, &wb_rels, &mut seen);
         self.keep_pivot_caches(cx, wb_xml, &wb_rels, &mut p, &mut seen);
+        self.keep_unused_pivot_caches(cx, wb_xml, &wb_rels, &mut p, &mut seen, caches);
         // Excel trusts the saved cell values only when both are present; without them it
         // recalculates everything on open, and links into closed workbooks come back as errors.
         // Custom Views (View > Custom Views); each sheet keeps its part of them.
@@ -475,6 +483,7 @@ impl KeptReader {
         let connections = p.rels.iter().any(|r| is_kind(r, &["connections"]));
         let model = p.rels.iter().any(|r| is_kind(r, DATA_MODEL_GRAPH));
         let (mut no_connections, mut no_model) = (0usize, 0usize);
+        let mut ids = HashSet::new();
         for (cache, source) in &caches {
             match source {
                 KeptSource::Connection | KeptSource::DataModel if !connections => {
@@ -499,6 +508,9 @@ impl KeptReader {
                 ));
                 continue;
             };
+            if !ids.insert(id) {
+                continue;
+            }
             match self.keep_through(cx, p, std::slice::from_ref(&r), seen, PIVOT_CACHE_GRAPH) {
                 Ok(()) => p.elements.push(PreservedXml {
                     slot: "pivotCache".into(),
@@ -516,6 +528,69 @@ impl KeptReader {
             cx.warn(format!(
                 "{no_model} PivotTable cache(s) on the workbook's Data Model were dropped with their PivotTables (kept as plain cells): the Data Model was not kept"
             ));
+        }
+    }
+
+    /// Caches unused when opened have workbook lifetime, independent of sheet deletion.
+    fn keep_unused_pivot_caches(
+        &mut self,
+        cx: &mut Ctx<'_>,
+        wb_xml: &xml::El,
+        wb_rels: &[PreservedRel],
+        p: &mut Preserved,
+        seen: &mut HashSet<String>,
+        caches: &crate::pivot::CachesIn,
+    ) {
+        let used: HashSet<String> = caches.used_parts().map(normalize).collect();
+        let mut ids: HashSet<u32> = wb_xml
+            .child("pivotCaches")
+            .into_iter()
+            .flat_map(|c| c.kids("pivotCache"))
+            .filter_map(|c| {
+                let r = wb_rels.iter().find(|r| Some(r.id.as_str()) == c.attr("id"))?;
+                used.contains(&normalize(&r.target)).then(|| c.attr_u32("cacheId")).flatten()
+            })
+            .collect();
+        let connections = p.rels.iter().any(|r| is_kind(r, &["connections"]));
+        let model = p.rels.iter().any(|r| is_kind(r, DATA_MODEL_GRAPH));
+        let mut parts = used;
+        for entry in wb_xml.child("pivotCaches").into_iter().flat_map(|c| c.kids("pivotCache")) {
+            let Some(id) = entry.attr_u32("cacheId") else { continue };
+            let Some(r) = wb_rels.iter().find(|r| Some(r.id.as_str()) == entry.attr("id") && !r.external && is_kind(r, &["pivotCacheDefinition"]))
+            else {
+                continue;
+            };
+            if ids.contains(&id) || parts.contains(&normalize(&r.target)) {
+                continue;
+            }
+            let kept = (|| {
+                let root = cx.pkg.read_xml(&r.target).map_err(|e| e.to_string())?.ok_or("its cache part is missing")?;
+                if root.name != "pivotCacheDefinition" {
+                    return Err("its part is not a pivot cache definition".into());
+                }
+                if let Some(source) = root.child("cacheSource").filter(|s| s.attr("type") == Some("external")) {
+                    let source = source.attr_u32("connectionId").and_then(|id| caches.connection_source(id));
+                    if !connections {
+                        return Err("the workbook's data connections were not kept".into());
+                    }
+                    let source = source.ok_or("its data connection is not in the workbook")?;
+                    if source == KeptSource::DataModel && !model {
+                        return Err("the Data Model was not kept".into());
+                    }
+                }
+                self.keep_through(cx, p, std::slice::from_ref(r), seen, PIVOT_CACHE_GRAPH)
+            })();
+            match kept {
+                Ok(()) => {
+                    ids.insert(id);
+                    parts.insert(normalize(&r.target));
+                    p.elements.push(PreservedXml {
+                        slot: "unusedPivotCache".into(),
+                        xml: format!("<pivotCache xmlns:r=\"{NS_REL}\" cacheId=\"{id}\" r:id=\"{}\"/>", esc_attr(&r.id)),
+                    });
+                }
+                Err(why) => cx.warn(format!("unused pivot cache {} was dropped: {why}", r.target)),
+            }
         }
     }
 

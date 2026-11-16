@@ -4,6 +4,7 @@
 //! The encryption is `craft-offcrypto`'s; the compound file is laid out here (storages included).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+pub mod xls_links;
 pub mod xls_pivot;
 pub mod xlsb_pivot;
 
