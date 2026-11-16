@@ -354,6 +354,8 @@ fn table(bytes: &[u8], ctx: Context<'_>, dxfs: &[Style], report: &mut ReadReport
     let display = b.string(255, true)?;
     let xml_table = list_type == 2;
     let mut t = Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: 0,
         name: display.or(name).unwrap_or_default(),

@@ -184,6 +184,8 @@ fn table(raw: Raw, sheet: &Sheet, budget: &mut Budget) -> Result<Option<Table>, 
     budget.text(name.len())?;
     let style = raw.style;
     let mut t = Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: raw.id,
         name,

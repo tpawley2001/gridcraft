@@ -387,6 +387,8 @@ fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
             names.push(n);
         }
         sh.tables.push(Table {
+            alt_text: None,
+            alt_text_summary: None,
             query_table: None,
             id,
             name: name.clone(),

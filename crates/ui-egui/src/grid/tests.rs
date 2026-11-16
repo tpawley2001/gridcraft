@@ -156,6 +156,8 @@ fn conditional_number_format_reaches_the_cell_text() {
 fn filter_menu_uses_the_table_whose_header_was_clicked() {
     use gridcraft_engine::model::Table;
     let table = |id: u32, r0: u32, r1: u32| Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id,
         name: format!("T{id}"),

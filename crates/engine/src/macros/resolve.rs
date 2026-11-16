@@ -889,6 +889,8 @@ mod tests {
         let mut wb = wb();
         let sh = wb.sheet_mut(0).unwrap();
         sh.tables.push(gridcraft_model::Table {
+            alt_text: None,
+            alt_text_summary: None,
             query_table: None,
             id: 1,
             name: "Empty".into(),
