@@ -39,6 +39,7 @@ mod pivot;
 mod python_part;
 mod read;
 mod richdata;
+mod sddl;
 mod sheet_read;
 mod sheet_write;
 mod spreadsheetml;
