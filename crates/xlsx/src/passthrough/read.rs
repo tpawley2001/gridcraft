@@ -342,20 +342,7 @@ impl KeptReader {
                 Err(why) => cx.warn(format!("Office add-in task panes were dropped: {why}")),
             }
         }
-        // The Data Model: its tables are loaded through the workbook's connections, so it is kept
-        // only with them.
-        let connections = p.rels.iter().any(|r| is_kind(r, &["connections"]));
-        for r in wb_rels.iter().filter(|r| !r.external && is_kind(r, DATA_MODEL_GRAPH)).take(1) {
-            let kept = if connections {
-                self.keep_through(cx, &mut p, std::slice::from_ref(r), &mut seen, DATA_MODEL_GRAPH)
-            } else {
-                Err("the workbook's data connections were not kept".into())
-            };
-            match kept {
-                Ok(()) => cx.warn("the workbook's Data Model is kept for saving as it is; it can't be viewed, edited or refreshed here"),
-                Err(why) => cx.warn(format!("the workbook's Data Model was dropped: {why}")),
-            }
-        }
+        self.data_model(cx, &mut p, &wb_rels, &mut seen);
         // Chart, dialog and macro sheets: the sheet entry (name, state, position) plus the sheet
         // part and the drawing, chart, style, colour, VML and control parts behind it.
         for (worksheets, se) in kept_sheet_entries(wb_xml, &wb_rels, file_to_model) {
@@ -459,6 +446,24 @@ impl KeptReader {
     /// Notes whether the workbook part `wb_xml` lists Custom Views, before its sheets are read.
     pub fn note_custom_views(&mut self, wb_xml: &xml::El) {
         self.custom_views = wb_xml.child("customWorkbookViews").is_some();
+    }
+
+    /// The workbook's Data Model part, kept only with the data connections.
+    fn data_model(&mut self, cx: &mut Ctx<'_>, p: &mut Preserved, wb_rels: &[PreservedRel], seen: &mut HashSet<String>) {
+        // The Data Model: its tables are loaded through the workbook's connections, so it is kept
+        // only with them.
+        let connections = p.rels.iter().any(|r| is_kind(r, &["connections"]));
+        for r in wb_rels.iter().filter(|r| !r.external && is_kind(r, DATA_MODEL_GRAPH)).take(1) {
+            let kept = if connections {
+                self.keep_through(cx, p, std::slice::from_ref(r), seen, DATA_MODEL_GRAPH)
+            } else {
+                Err("the workbook's data connections were not kept".into())
+            };
+            match kept {
+                Ok(()) => cx.warn("the workbook's Data Model is kept for saving as it is; it can't be viewed, edited or refreshed here"),
+                Err(why) => cx.warn(format!("the workbook's Data Model was dropped: {why}")),
+            }
+        }
     }
 
     /// The caches of the kept PivotTables, each with its `<pivotCache>` entry (original `cacheId`

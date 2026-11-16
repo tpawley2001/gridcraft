@@ -428,6 +428,18 @@ fn workbook_pr(wb: &Workbook) -> String {
     w
 }
 
+/// Number formats the styles part must hold besides the cells': those of written PivotTables'
+/// value fields and those kept PivotTables and pivot caches refer to.
+fn extra_number_formats(wb: &Workbook, pivots: &crate::pivot::PivotWriter, out: &Out) -> Vec<String> {
+    let mut extra = pivots.number_formats(wb);
+    for code in out.kept.num_fmt_codes() {
+        if !extra.contains(&code) {
+            extra.push(code);
+        }
+    }
+    extra
+}
+
 /// Writes the workbook for the file `book_name` (a bare file name). A PivotChart is bound to its
 /// PivotTable in Excel only when its link starts with the workbook in brackets.
 pub fn write_xlsx_named_with(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>, functions: FunctionInfo) -> Result<Vec<u8>, IoError> {
@@ -537,13 +549,7 @@ pub fn write_xlsx_named_with(wb: &Workbook, kind: XlsxKind, book_name: Option<&s
     w.push_str("</workbook>");
 
     // Workbook-level parts.
-    let mut extra_fmts = pivots.number_formats(wb);
-    for code in out.kept.num_fmt_codes() {
-        if !extra_fmts.contains(&code) {
-            extra_fmts.push(code);
-        }
-    }
-    let (styles, fmt_ids) = crate::styles::write_styles(wb, &out.dxfs, &extra_fmts);
+    let (styles, fmt_ids) = crate::styles::write_styles(wb, &out.dxfs, &extra_number_formats(wb, &pivots, &out));
     let fmt_id = |code: &str| crate::tables::builtin_id(code).or_else(|| fmt_ids.get(code).copied());
     pivots.finish(wb, &mut out, &fmt_id);
     crate::passthrough::finish_style_ids(&mut out, &fmt_id);
