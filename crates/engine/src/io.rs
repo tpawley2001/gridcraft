@@ -86,17 +86,29 @@ pub fn open_bytes_with(name: &str, bytes: &[u8], password: Option<&str>, csv_as_
     }
     // A scheme no password opens is said straight away, rather than after asking for one.
     let decrypt_error = |e: gridcraft_xlsx::DecryptError| EngineError::Other(decrypt_message(name, e));
+    // Excel opens a package encrypted with its default password without asking, and says nothing,
+    // as for `.xls`. Any other outcome (another password, an unsupported or damaged file) is
+    // handled below exactly as before.
+    if let Ok(plain) = gridcraft_xlsx::decrypt(bytes, gridcraft_xlsx::DEFAULT_PASSWORD) {
+        return open_decrypted(name, &plain, csv_as_text);
+    }
     let Some(password) = password else {
         gridcraft_xlsx::check_encryption(bytes).map_err(decrypt_error)?;
         return Err(EngineError::Other(format!("'{name}' {PASSWORD_REQUIRED}")));
     };
     let plain = gridcraft_xlsx::decrypt(bytes, password).map_err(decrypt_error)?;
-    if gridcraft_xlsx::sniff(&plain) == gridcraft_xlsx::Format::Encrypted {
+    let (wb, mut warnings) = open_decrypted(name, &plain, csv_as_text)?;
+    warnings.insert(0, DECRYPTED_NOTICE.into());
+    Ok((wb, warnings))
+}
+
+/// Opens the plain package taken out of an encrypted workbook.
+fn open_decrypted(name: &str, plain: &[u8], csv_as_text: bool) -> Result<(Workbook, Vec<String>)> {
+    if gridcraft_xlsx::sniff(plain) == gridcraft_xlsx::Format::Encrypted {
         return Err(EngineError::Other(format!("We can't open '{name}': the encrypted file is damaged (it holds another encrypted file).")));
     }
-    let (mut wb, mut warnings) = open_plain(name, &plain, None, csv_as_text)?;
+    let (mut wb, warnings) = open_plain(name, plain, None, csv_as_text)?;
     fit_imported_rows(&mut wb);
-    warnings.insert(0, DECRYPTED_NOTICE.into());
     Ok((wb, warnings))
 }
 
