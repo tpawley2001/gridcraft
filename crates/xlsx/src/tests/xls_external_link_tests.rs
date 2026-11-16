@@ -206,3 +206,21 @@ fn workbook_without_links_saves_no_link_part() {
     assert!(!text.contains("externalLink"), "{text}");
     assert!(!report.warnings.iter().any(|w| w.contains("external workbooks")), "{:?}", report.warnings);
 }
+
+#[test]
+fn a_links_cached_cells_and_names_feed_the_workbook_model() {
+    // Calculation (`[1]Data!B2*2` = 84, `SUM([1]!Pair)` = 50) is tested in the engine.
+    let (wb, report) = read_xls(&crate::testing::xls_links::workbook()).unwrap();
+    assert_eq!(ftext(&wb, "A1").as_deref(), Some("[1]Data!B2*2"), "{:?}", report.warnings);
+    assert_eq!(ftext(&wb, "B1").as_deref(), Some("SUM([1]!Pair)"), "{:?}", report.warnings);
+    let [book] = wb.external_books.as_slice() else { panic!("one linked workbook: {:?}", wb.external_books) };
+    let data = book.sheet("Data").expect("the link's sheet");
+    assert_eq!((data.value(at("B2")), data.value(at("B3")), data.value(at("B4"))), (Value::Number(42.0), Value::Number(8.0), Value::Empty));
+    assert_eq!(book.name("Pair", None).map(|n| n.refers_to.as_str()), Some("Data!$B$2:$B$3"));
+    // The definition is kept in the link part saved as .xlsx, which reads back the same model.
+    let saved = write_xlsx(&wb).unwrap();
+    let link = saved_part(&saved, "xl/externalLinks/externalLink1.xml");
+    assert!(link.contains(r#"<definedName name="Pair" refersTo="=Data!$B$2:$B$3"/>"#), "{link}");
+    let (back, _) = read_xlsx(&saved).unwrap();
+    assert_eq!(back.external_books, wb.external_books);
+}

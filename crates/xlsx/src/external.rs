@@ -99,6 +99,15 @@ fn dde_value(v: &El) -> Value {
     }
 }
 
+/// The linked workbook an `externalLink` part holds (one this crate wrote for a binary file's
+/// link); opaque when it isn't a workbook link or can't be read.
+pub(crate) fn book_of_part(data: &[u8]) -> ExternalBook {
+    match xml::parse(data).ok().as_ref().and_then(|x| x.child("externalBook").map(book)) {
+        Some(b) => b,
+        None => ExternalBook { opaque: true, ..Default::default() },
+    }
+}
+
 fn book(x: &El) -> ExternalBook {
     let mut sheets: Vec<ExternalSheet> = x
         .child("sheetNames")

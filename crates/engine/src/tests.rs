@@ -6949,6 +6949,21 @@ fn a_script_cannot_switch_windows() {
     assert_eq!(v(&s, "A1"), Value::number(2.0));
 }
 
+/// `.xls` formulas into a linked workbook calculate from the cells saved with the link (SupBook,
+/// XCT and CRN records), a range named in the linked workbook (EXTERNNAME) included, and still do
+/// after saving as .xlsx and reopening. The file saved 0 for each formula's result.
+#[test]
+fn xls_formulas_into_a_linked_workbook_recalculate_from_its_cached_cells() {
+    let (mut wb, _) = gridcraft_xlsx::read_xls(&gridcraft_xlsx::testing::xls_links::workbook()).unwrap();
+    let values = |wb: &mut gridcraft_model::Workbook| {
+        gridcraft_calc::Calc::new().recalc_all(wb);
+        ["A1", "B1"].map(|a| wb.sheets[0].value(CellRef::parse(a).unwrap()))
+    };
+    assert_eq!(values(&mut wb), [Value::number(84.0), Value::number(50.0)]);
+    let (mut back, _) = gridcraft_xlsx::read_xlsx(&gridcraft_xlsx::write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(values(&mut back), [Value::number(84.0), Value::number(50.0)]);
+}
+
 mod controls;
 mod cube_links;
 mod equation;
