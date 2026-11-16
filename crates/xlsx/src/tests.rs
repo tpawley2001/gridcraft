@@ -175,6 +175,7 @@ mod xls_external_name_ref_tests;
 mod xls_font_family_range_tests;
 mod xls_form_control_tests;
 mod xls_freeform_wordart_tests;
+mod xls_future_function_names_tests;
 mod xls_group_shapes_tests;
 mod xls_internal_namex_tests;
 mod xls_invalid_names_tests;
