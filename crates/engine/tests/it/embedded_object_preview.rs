@@ -26,9 +26,7 @@ fn rels(items: &[(&str, &str, &str)]) -> String {
 /// Sheet1: objectPr preview (rId3 -> image1.png). Sheet2: VML-only preview (image2.png).
 /// Sheet3: objectPr whose image relationship is missing.
 fn xlsx() -> Vec<u8> {
-    let anchor = format!(
-        r#"<anchor moveWithCells="1"><from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></from><to><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>8</xdr:row><xdr:rowOff>0</xdr:rowOff></to></anchor>"#
-    );
+    let anchor = r#"<anchor moveWithCells="1"><from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></from><to><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>8</xdr:row><xdr:rowOff>0</xdr:rowOff></to></anchor>"#;
     let ole_pr = |img: &str| {
         format!(
             r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="{MAIN}" xmlns:r="{R}" xmlns:xdr="{XDR}" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac" mc:Ignorable="x14ac"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData><legacyDrawing r:id="rId1"/><oleObjects><mc:AlternateContent><mc:Choice Requires="x14"><oleObject progId="Package" shapeId="1025" r:id="rId2"><objectPr defaultSize="0" autoPict="0" r:id="{img}">{anchor}</objectPr></oleObject></mc:Choice><mc:Fallback><oleObject progId="Package" shapeId="1025" r:id="rId2"/></mc:Fallback></mc:AlternateContent></oleObjects></worksheet>"#
