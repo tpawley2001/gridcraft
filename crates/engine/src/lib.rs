@@ -17,6 +17,7 @@ pub mod fill;
 pub mod io;
 pub mod links;
 pub mod macros;
+pub mod metafile;
 pub mod outline;
 pub mod paper;
 pub mod pivot;

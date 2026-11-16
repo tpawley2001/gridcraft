@@ -730,6 +730,17 @@ impl Page {
     /// a ring inside another is a hole. Rings with fewer than 2 points or a non-finite point are
     /// skipped.
     pub fn polygons_even_odd(&mut self, rings: &[Vec<[f32; 2]>], fill: Option<Rgb>, stroke: Option<(Rgb, f32)>) {
+        self.rings(rings, fill, stroke, true);
+    }
+
+    /// Closed rings painted by one path with the nonzero winding rule (`f`, or `B` when stroked
+    /// too), so a ring wound against its container is a hole. Rings with fewer than 2 points or a
+    /// non-finite point are skipped.
+    pub fn polygons_nonzero(&mut self, rings: &[Vec<[f32; 2]>], fill: Option<Rgb>, stroke: Option<(Rgb, f32)>) {
+        self.rings(rings, fill, stroke, false);
+    }
+
+    fn rings(&mut self, rings: &[Vec<[f32; 2]>], fill: Option<Rgb>, stroke: Option<(Rgb, f32)>, even_odd: bool) {
         let rings: Vec<&Vec<[f32; 2]>> = rings.iter().filter(|r| r.len() >= 2 && r.iter().all(|p| finite(p))).collect();
         if rings.is_empty() || (fill.is_none() && stroke.is_none()) || self.full() {
             return;
@@ -747,9 +758,11 @@ impl Page {
             }
             self.path(&mut s, ring, true);
         }
-        s.push_str(match (fill.is_some(), stroke.is_some()) {
-            (true, true) => " B*",
-            (true, false) => " f*",
+        s.push_str(match (fill.is_some(), stroke.is_some(), even_odd) {
+            (true, true, true) => " B*",
+            (true, false, true) => " f*",
+            (true, true, false) => " B",
+            (true, false, false) => " f",
             _ => " S",
         });
         self.op(&s);

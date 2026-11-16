@@ -54,6 +54,8 @@ struct PicCache {
     /// of pages would multiply them without bound.
     image_bytes: usize,
     chart_prims: usize,
+    /// Parsed EMF pictures keyed by (sheet, picture); `None` = not a usable EMF.
+    metafiles: std::collections::HashMap<(usize, usize), Option<crate::metafile::Drawing>>,
 }
 
 impl PicCache {
