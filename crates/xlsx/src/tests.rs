@@ -191,6 +191,7 @@ mod xls_pivot_tests;
 mod xls_print_defaults;
 mod xls_print_object_tests;
 mod xls_print_tests;
+mod xls_props_xfext_tests;
 mod xls_protection_tests;
 mod xls_radar_area_tests;
 mod xls_relative_name_tests;
