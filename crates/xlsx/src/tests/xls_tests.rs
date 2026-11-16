@@ -1323,6 +1323,54 @@ fn objects_sample(picture: bool) -> Vec<u8> {
     cat(&[&globals(p1, p2), &sheet1, &sheet2])
 }
 
+/// A one-sheet workbook whose sheet has an unfrozen Window2 and the Pane `(x, y, rwTop, colLeft, pnnAcct)`.
+fn split_sample(x: u16, y: u16, top: u16, left: u16, acct: u8) -> Vec<u8> {
+    let sheet = cat(&[
+        &bof(0x0010),
+        &rec(0x0203, &cat(&[&cell(0, 0, 0), &1.0f64.to_le_bytes()])),
+        &window2(0x06B6),
+        &rec(0x0041, &cat(&[&u16s(&[x, y, top, left]), &[acct, 0]])),
+        &eof(),
+    ]);
+    let boundsheet = |pos: u32| rec(0x0085, &cat(&[&pos.to_le_bytes(), &[0, 0, 5, 0], b"Panes"]));
+    let globals = |p: u32| cat(&[&bof(0x0005), &boundsheet(p), &eof()]);
+    let p = globals(0).len() as u32;
+    compound("Workbook", &cat(&[&globals(p), &sheet]))
+}
+
+#[test]
+fn xls_split_panes_are_kept() {
+    let cases: [((u16, u16, u16, u16, u8), Option<(f64, f64, &str, Option<&str>)>); 4] = [
+        ((1200, 900, 3, 2, 3), Some((1200.0, 900.0, "C4", Some("topLeft")))),
+        ((2400, 0, 0, 5, 1), Some((2400.0, 0.0, "F1", Some("topRight")))),
+        ((0, 1500, 7, 0, 2), Some((0.0, 1500.0, "A8", Some("bottomLeft")))),
+        ((0, 0, 4, 4, 0), None),
+    ];
+    for ((x, y, top, left, acct), want) in cases {
+        let (wb, report) = read_xls(&split_sample(x, y, top, left, acct)).unwrap();
+        let s = &wb.sheets[0];
+        assert_eq!(s.freeze, None);
+        assert!(!report.warnings.iter().any(|w| w.contains("Split")), "{:?}", report.warnings);
+        let got = s.split.as_ref().map(|p| (p.x, p.y, p.top_left, p.active_pane.clone()));
+        let want = want.map(|(x, y, a1, act)| (x, y, Some(CellRef::parse(a1).unwrap()), act.map(str::to_string)));
+        assert_eq!(got, want, "pane {x} {y} {top} {left} {acct}");
+    }
+    let (wb, _) = read_xls(&split_sample(1200, 900, 3, 2, 0)).unwrap();
+    assert_eq!(wb.sheets[0].split.as_ref().and_then(|p| p.active_pane.as_deref()), Some("bottomRight"));
+}
+
+#[test]
+fn xls_split_panes_save_to_xlsx() {
+    let (wb, _) = read_xls(&split_sample(2400, 600, 2, 5, 0)).unwrap();
+    let before = wb.sheets[0].split.clone();
+    assert!(before.is_some());
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    let after = back.sheets[0].split.clone().expect("split after save");
+    let before = before.unwrap();
+    assert_eq!((after.x, after.y, after.top_left), (before.x, before.y, before.top_left));
+    assert_eq!(back.sheets[0].freeze, None);
+}
+
 #[test]
 fn reads_notes_hyperlinks_and_panes() {
     let (wb, report) = read_xls(&compound("Workbook", &objects_sample(false))).unwrap();
@@ -1356,7 +1404,12 @@ fn reads_notes_hyperlinks_and_panes() {
     let s2 = &wb.sheets[1];
     assert_eq!(s2.freeze, None);
     assert!(!s2.show_gridlines && !s2.show_headings && !s2.show_zeros && s2.show_formulas && s2.right_to_left);
-    assert!(report.warnings.iter().any(|w| w.contains("Split")), "{:?}", report.warnings);
+    // An unfrozen split is kept in twips, as `.xlsx` keeps it ([MS-XLS] 2.4.189 Pane).
+    assert!(!report.warnings.iter().any(|w| w.contains("Split")), "{:?}", report.warnings);
+    let split = s2.split.as_ref().expect("the sheet's split");
+    assert_eq!((split.x, split.y), (1200.0, 900.0));
+    assert_eq!(split.top_left, Some(at("C4")));
+    assert_eq!(split.active_pane.as_deref(), Some("topLeft"));
     // Notes are drawing objects, but they are imported: no warning about pictures.
     assert!(!report.warnings.iter().any(|w| w.contains("Pictures") || w.contains("comments")), "{:?}", report.warnings);
     // A picture Obj (here without a drawing shape to place it, which this reader skips without
