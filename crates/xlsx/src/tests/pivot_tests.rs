@@ -58,6 +58,7 @@ fn workbook() -> Workbook {
         data.cells.set(CellRef::new(r, 5), Cell::value(Value::text(*ch)));
     }
     data.tables.push(Table {
+        query_table: None,
         id: 1,
         name: "SalesTbl".into(),
         range: rr("A1:F9"),
@@ -66,6 +67,7 @@ fn workbook() -> Workbook {
         columns: headers
             .iter()
             .map(|h| TableColumn {
+                query_field_id: None,
                 name: (*h).into(),
                 totals: TotalsFn::None,
                 totals_label: None,

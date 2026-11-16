@@ -18,7 +18,9 @@
 //! add-ins, with their web extension part, its own rels and the add-in's snapshot picture) and its SmartArt
 //! graphics with their diagram parts, and the
 //! pictures of the headers and footers, `&G`, with their `<legacyDrawingHF>`, and the sheet's part of
-//! the Custom Views, `<customSheetViews>`). The workbook also keeps its `<fileVersion>` and the
+//! the Custom Views, `<customSheetViews>`). A table's query table is not kept here: the table model
+//! holds its part (`Table::query_table`), since the table part is rewritten. The workbook also keeps its
+//! `<fileVersion>` and the
 //! calcFeatures extension, which Excel needs to trust the saved values, and its Custom Views
 //! (`<customWorkbookViews>`): a sheet keeps only the views the workbook still lists. The workbook's
 //! Data Model (`xl/model/item.data`) is kept with its data connections. PivotTables whose source is

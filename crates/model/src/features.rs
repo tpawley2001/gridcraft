@@ -64,6 +64,10 @@ pub struct TableColumn {
     /// `uniqueName`: the name XML maps know the column by.
     #[serde(default)]
     pub unique_name: Option<String>,
+    /// `queryTableFieldId`: the field of the table's query table this column shows. It moves with
+    /// the column; inserted columns have none.
+    #[serde(default)]
+    pub query_field_id: Option<u32>,
     /// Binding to an element of an XML map. It moves with the column and goes when the column is
     /// deleted; inserted columns are unmapped.
     #[serde(default)]
@@ -159,6 +163,10 @@ pub struct Table {
     pub insert_row_shift: Option<bool>,
     #[serde(default)]
     pub published: Option<bool>,
+    /// The XML of the table's query table part (`xl/queryTables/…`), kept as read so the table
+    /// stays attached to its data connection. Never refreshed.
+    #[serde(default)]
+    pub query_table: Option<String>,
 }
 
 impl Table {

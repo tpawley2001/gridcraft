@@ -387,6 +387,7 @@ fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
             names.push(n);
         }
         sh.tables.push(Table {
+            query_table: None,
             id,
             name: name.clone(),
             range: r,
@@ -395,6 +396,7 @@ fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
             columns: names
                 .into_iter()
                 .map(|n| TableColumn {
+                    query_field_id: None,
                     name: n,
                     totals: TotalsFn::None,
                     totals_label: None,

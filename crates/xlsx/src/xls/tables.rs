@@ -184,6 +184,7 @@ fn table(raw: Raw, sheet: &Sheet, budget: &mut Budget) -> Result<Option<Table>, 
     budget.text(name.len())?;
     let style = raw.style;
     let mut t = Table {
+        query_table: None,
         id: raw.id,
         name,
         range,
@@ -257,6 +258,7 @@ pub(super) fn finish_workbook(wb: &mut Workbook) {
 
 fn column(name: String) -> TableColumn {
     TableColumn {
+        query_field_id: None,
         name,
         totals: TotalsFn::None,
         totals_label: None,

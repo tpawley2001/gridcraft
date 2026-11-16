@@ -889,6 +889,7 @@ mod tests {
         let mut wb = wb();
         let sh = wb.sheet_mut(0).unwrap();
         sh.tables.push(gridcraft_model::Table {
+            query_table: None,
             id: 1,
             name: "Empty".into(),
             range: RangeRef::parse("H1:J1").unwrap(),

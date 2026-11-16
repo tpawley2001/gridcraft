@@ -814,6 +814,7 @@ fn shift_table_columns(t: &mut gridcraft_model::Table, at: u32, count: u32, inse
                     }
                 };
                 let col = gridcraft_model::TableColumn {
+                    query_field_id: None,
                     name,
                     totals: Default::default(),
                     totals_label: None,
@@ -879,6 +880,7 @@ mod table_column_dxf_tests {
 
     fn col(name: &str, bold: bool) -> TableColumn {
         TableColumn {
+            query_field_id: None,
             name: name.into(),
             totals: Default::default(),
             totals_label: None,
@@ -901,6 +903,7 @@ mod table_column_dxf_tests {
     #[test]
     fn column_dxfs_move_with_inserted_and_deleted_columns() {
         let mut t = Table {
+            query_table: None,
             id: 1,
             name: "T".into(),
             range: RangeRef::parse("A1:C4").unwrap(),
