@@ -58,6 +58,8 @@ fn workbook() -> Workbook {
         data.cells.set(CellRef::new(r, 5), Cell::value(Value::text(*ch)));
     }
     data.tables.push(Table {
+        alt_text: None,
+        alt_text_summary: None,
         query_table: None,
         id: 1,
         name: "SalesTbl".into(),
