@@ -1,5 +1,6 @@
 //! `.xls` metafile previews of embedded OLE objects (an Obj with an FtPictFmla, [MS-XLS] 2.5.140)
-//! and ActiveX controls (shape type 201) stay embedded-object placeholders, not pictures.
+//! and ActiveX controls (shape type 201) stay embedded objects, not pictures, and keep the blip as
+//! their saved preview ([MS-ODRAW] 2.3.23.1 pib), without a "format isn't imported" warning.
 
 use gridcraft_model::EmbeddedObjectKind;
 
@@ -41,7 +42,10 @@ fn xls_ole_object_emf_preview_stays_an_embedded_object() {
     assert!(sheet.images.is_empty(), "{warnings:?}");
     assert_eq!(sheet.embedded_objects.len(), 1);
     assert_eq!(sheet.embedded_objects[0].kind, EmbeddedObjectKind::Ole);
-    assert_eq!(warnings.iter().filter(|w| w.contains("use a format that isn't imported")).count(), 1, "{warnings:?}");
+    let preview = sheet.embedded_objects[0].preview.as_ref().expect("EMF preview");
+    assert_eq!(preview.mime, "image/x-emf");
+    assert!(!preview.data.is_empty());
+    assert_eq!(warnings.iter().filter(|w| w.contains("use a format that isn't imported")).count(), 0, "{warnings:?}");
 }
 
 #[test]
@@ -51,6 +55,8 @@ fn xls_activex_emf_preview_stays_an_embedded_object() {
     assert!(sheet.images.is_empty(), "{warnings:?}");
     assert_eq!(sheet.embedded_objects.len(), 1);
     assert_eq!(sheet.embedded_objects[0].kind, EmbeddedObjectKind::ActiveX);
+    assert_eq!(sheet.embedded_objects[0].preview.as_ref().map(|p| p.mime.as_str()), Some("image/x-emf"));
+    assert!(!warnings.iter().any(|w| w.contains("use a format that isn't imported")), "{warnings:?}");
 }
 
 #[test]

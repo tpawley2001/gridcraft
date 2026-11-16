@@ -310,7 +310,7 @@ fn linear_to_srgb(l: f64) -> u8 {
     (c * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
-fn mime_for(name: &str) -> &'static str {
+pub(crate) fn mime_for(name: &str) -> &'static str {
     let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     match ext.as_str() {
         "png" => "image/png",

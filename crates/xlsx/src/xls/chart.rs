@@ -22,8 +22,8 @@ use gridcraft_core::color::INDEXED;
 use gridcraft_formula::{Expr, RefKind, Reference, SheetSel};
 use gridcraft_model::{
     Anchor, AnchorMode, AxisScale, Chart, ChartKind, ChartScale, ChartSheetPrint, Color, ControlKind, EmbeddedObject, EmbeddedObjectKind,
-    FormControl, GeometryPath, Image, LegendPos, ListSelection, Orientation, PathCommand, PreservedPart, PreservedRel, PreservedSheet, PrintSettings,
-    Series, Shape, ShapeFormat, ShapeGeometry, ShapeKind, Sheet, Visibility, Workbook,
+    FormControl, GeometryPath, Image, LegendPos, ListSelection, ObjectPreview, Orientation, PathCommand, PreservedPart, PreservedRel, PreservedSheet,
+    PrintSettings, Series, Shape, ShapeFormat, ShapeGeometry, ShapeKind, Sheet, Visibility, Workbook,
 };
 
 use super::drawing::{self, BStore, Blip, ShapeProps};
@@ -959,9 +959,9 @@ impl Embedded {
 
     /// Places the charts, pictures, text boxes and drawn shapes on the sheet (its column widths
     /// and row heights are known by now). Pictures whose blip isn't a PNG, JPEG, EMF or WMF in the
-    /// store, and the metafile previews of embedded objects and ActiveX controls, are
-    /// not shown (one warning), but keep their place as an [`EmbeddedObject`] so that they still
-    /// count toward the printed range.
+    /// store are not shown (one warning), but keep their place as an [`EmbeddedObject`] so that
+    /// they still count toward the printed range. Embedded objects and ActiveX controls with a
+    /// metafile blip are kept the same way, with the blip as their saved preview (no warning).
     pub(super) fn finish(mut self, sheet: &mut Sheet, store: &BStore, report: &mut ReadReport) {
         self.flush_shape();
         self.next_record(EOF, report);
@@ -973,22 +973,26 @@ impl Embedded {
         }
         let mut skipped = false;
         for (a, props) in self.pictures {
-            // An embedded object's or ActiveX control's metafile preview isn't a picture.
+            // An embedded object's or ActiveX control's metafile is its saved preview, not a picture.
             let control = props.ole || props.shape_type == SPT_HOST_CONTROL;
-            let picture = match props.pib.and_then(|pib| store.get(pib)) {
-                Some(Blip::Picture { mime, .. }) if control && matches!(*mime, "image/x-emf" | "image/x-wmf") => None,
-                Some(Blip::Picture { data, mime }) => Some((data, mime)),
-                _ => None,
+            let (picture, preview) = match props.pib.and_then(|pib| store.get(pib)) {
+                Some(Blip::Picture { data, mime }) if control && matches!(*mime, "image/x-emf" | "image/x-wmf") => {
+                    (None, Some(ObjectPreview { data: Arc::clone(data), mime: (*mime).to_string() }))
+                }
+                Some(Blip::Picture { data, mime }) => (Some((data, mime)), None),
+                _ => (None, None),
             };
             let Some((data, mime)) = picture else {
-                skipped = true;
-                // The preview of an embedded object or an ActiveX control (nearly always an EMF),
-                // or a picture whose blip can't be read: nothing is drawn, but its place counts
-                // when the sheet is printed. A hidden shape counts for nothing.
+                // Nothing is drawn as a picture, but the object's place counts when the sheet is
+                // printed, and its preview is drawn there. Only a blip that can't be read is
+                // reported. A hidden shape counts for nothing.
+                if preview.is_none() {
+                    skipped = true;
+                }
                 if !props.hidden && sheet.embedded_objects.len() < MAX_EMBEDDED {
                     let kind = if props.shape_type == SPT_HOST_CONTROL { EmbeddedObjectKind::ActiveX } else { EmbeddedObjectKind::Ole };
                     let anchor = place_at(sheet, &a);
-                    sheet.embedded_objects.push(EmbeddedObject { anchor, print: !props.no_print, kind, prog_id: String::new(), preview: None });
+                    sheet.embedded_objects.push(EmbeddedObject { anchor, print: !props.no_print, kind, prog_id: String::new(), preview });
                 }
                 continue;
             };
