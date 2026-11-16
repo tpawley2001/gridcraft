@@ -1,4 +1,5 @@
 use gridcraft_engine::io::has_macro_only_names;
+use gridcraft_engine::model::{BorderLine, BorderStyle, CfRule};
 
 use super::calc::formula_text;
 use super::package::{REBUILT_KINDS, relationship_kinds, validate_package};
@@ -92,7 +93,41 @@ fn diff_sets(d: &mut Diffs, sheet: &str, a: &BTreeSet<String>, b: &BTreeSet<Stri
 fn cond_format_list(s: &Sheet) -> Vec<String> {
     let mut cfs: Vec<_> = s.cond_formats.iter().collect();
     cfs.sort_by_key(|c| c.priority);
-    cfs.iter().map(|c| format!("{:?} {:?} stopIfTrue={}", c.ranges, c.rule, c.stop_if_true)).collect()
+    cfs.iter().map(|c| format!("{:?} {:?} stopIfTrue={}", c.ranges, comparable_rule(&c.rule), c.stop_if_true)).collect()
+}
+
+/// A copy of `rule` for comparison only: every border side of its differential style that has no
+/// line is reset to the default (no line, automatic colour). A side with no line draws nothing
+/// whatever colour it names (ECMA-376 Part 1 §18.8.4), and a writer emits no colour for it, so the
+/// colour is not a round-trip loss. Sides that have a line keep their colour.
+fn comparable_rule(rule: &CfRule) -> CfRule {
+    let mut rule = rule.clone();
+    match &mut rule {
+        CfRule::CellIs { style, .. }
+        | CfRule::Expression { style, .. }
+        | CfRule::ContainsText { style, .. }
+        | CfRule::NotContainsText { style, .. }
+        | CfRule::BeginsWith { style, .. }
+        | CfRule::EndsWith { style, .. }
+        | CfRule::Blanks { style }
+        | CfRule::NoBlanks { style }
+        | CfRule::Errors { style }
+        | CfRule::NoErrors { style }
+        | CfRule::Duplicate { style }
+        | CfRule::Unique { style }
+        | CfRule::Top10 { style, .. }
+        | CfRule::AboveAverage { style, .. }
+        | CfRule::TimePeriod { style, .. } => {
+            let b = &mut style.borders;
+            for side in [&mut b.left, &mut b.right, &mut b.top, &mut b.bottom, &mut b.diag_down, &mut b.diag_up, &mut b.horizontal, &mut b.vertical] {
+                if side.style == BorderStyle::None {
+                    *side = BorderLine::default();
+                }
+            }
+        }
+        CfRule::ColorScale { .. } | CfRule::DataBar { .. } | CfRule::IconSet { .. } => {}
+    }
+    rule
 }
 
 fn diff_count(d: &mut Diffs, sheet: &str, a: usize, b: usize) {
