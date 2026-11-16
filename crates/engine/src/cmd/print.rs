@@ -56,6 +56,8 @@ struct PicCache {
     chart_prims: usize,
     /// Parsed EMF pictures keyed by (sheet, picture); `None` = not a usable EMF.
     metafiles: std::collections::HashMap<(usize, usize), Option<crate::metafile::Drawing>>,
+    /// Parsed EMF preview pictures of embedded objects keyed by (sheet, object), as for `metafiles`.
+    preview_metafiles: std::collections::HashMap<(usize, usize), Option<crate::metafile::Drawing>>,
 }
 
 impl PicCache {

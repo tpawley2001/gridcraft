@@ -39,7 +39,7 @@ fn paths(d: &Drawing) -> Vec<PathView> {
         .iter()
         .filter_map(|i| match i {
             Item::Path { subpaths, closed, fill, stroke, even_odd } => Some((subpaths.clone(), *closed, *fill, *stroke, *even_odd)),
-            Item::Image { .. } => None,
+            _ => None,
         })
         .collect()
 }

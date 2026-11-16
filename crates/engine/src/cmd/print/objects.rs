@@ -75,7 +75,8 @@ fn decode_image(data: &[u8], max_w: u32, max_h: u32) -> Option<(Vec<u8>, u32, u3
     Some((rgba.into_raw(), pw, ph))
 }
 
-/// Draws a parsed EMF picture into the frame `(x, y, w, h)`. Its bitmaps count towards
+/// Draws a parsed EMF picture into the frame `(x, y, w, h)`, in record order (text over the
+/// shapes before it). Its bitmaps count towards
 /// `image_bytes` and are left out past [`super::MAX_EMBEDDED_IMAGE_BYTES`].
 pub(super) fn draw_metafile(pg: &mut Page, d: &crate::metafile::Drawing, frame: (f32, f32, f32, f32), image_bytes: &mut usize) {
     use crate::metafile::Item;
@@ -105,6 +106,21 @@ pub(super) fn draw_metafile(pg: &mut Page, d: &crate::metafile::Drawing, frame: 
                 if image_bytes.saturating_add(bytes) <= super::MAX_EMBEDDED_IMAGE_BYTES {
                     *image_bytes += bytes;
                     pg.image_rgba(Rect::new(x + rect[0] * w, y + rect[1] * h, rect[2] * w, rect[3] * h), rgba, *size);
+                }
+            }
+            Item::Text { origin, size, angle, text, face, bold, italic, color } => {
+                // `size` is the em height as a fraction of the frame height.
+                let size_pt = size * h;
+                if !size_pt.is_finite() || size_pt < 0.5 {
+                    continue;
+                }
+                let font = Font::styled(Font::family_for(face), *bold, *italic);
+                let [px, py] = map(origin);
+                if *angle == 0.0 {
+                    pg.text(px, py, size_pt, font, *color, text);
+                } else {
+                    // `text_rotated` turns clockwise (radians); the run's angle is counter-clockwise.
+                    pg.text_rotated(Point::new(px, py), size_pt, font, *color, text, -angle.to_radians());
                 }
             }
         }
@@ -170,6 +186,13 @@ pub(super) fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, 
             continue;
         }
         let (x, y, w, h) = place(&o.anchor, r);
+        if preview.data.get(40..44) == Some(b" EMF") {
+            let drawing = pics.preview_metafiles.entry((si, oi)).or_insert_with(|| crate::metafile::parse_emf(&preview.data));
+            if let Some(d) = drawing.as_ref() {
+                draw_metafile(pg, d, (x, y, w, h), &mut pics.image_bytes);
+            }
+            continue;
+        }
         let (mw, mh) = (((w / 72.0) * 150.0).ceil().clamp(1.0, 4000.0) as u32, ((h / 72.0) * 150.0).ceil().clamp(1.0, 4000.0) as u32);
         let decoded = pics.previews.entry((si, oi)).or_insert_with(|| decode_image(&preview.data, mw, mh));
         if let Some((px, pw, ph)) = decoded.as_ref() {

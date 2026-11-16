@@ -1719,3 +1719,75 @@ fn emf_pictures_print_their_vector_shapes() {
     let scale = 0.75; // anchors are in pixels, pages in points
     assert!((width - 40.0 * scale).abs() < 1.0, "the left half of an 80-pixel-wide picture: {width} pt ({})", red[0].path);
 }
+
+/// An EMF (frame 100 x 50 device pixels) that draws `text` in 20-pixel Arial at (10, 30),
+/// baseline-aligned and transparent.
+fn emf_with_text(text: &str) -> Vec<u8> {
+    fn rec(ty: u32, body: &[u8]) -> Vec<u8> {
+        [&ty.to_le_bytes()[..], &((body.len() + 8) as u32).to_le_bytes(), body].concat()
+    }
+    let words = |v: &[u32]| -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() };
+    let header = words(&[0, 0, 99, 49, 0, 0, 1000, 500, 0x464D_4520, 0x0001_0000, 0, 0, 0, 0, 0, 0, 1000, 1000, 100, 100]);
+    let mut font = words(&[1, (-20i32) as u32, 0, 0, 0, 400, 0, 0]);
+    let mut face = [0u16; 32];
+    for (i, u) in "Arial".encode_utf16().enumerate() {
+        face[i] = u;
+    }
+    font.extend(face.iter().flat_map(|u| u.to_le_bytes()));
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let mut out = words(&[0, 0, 99, 49, 1, 1.0f32.to_bits(), 1.0f32.to_bits(), 10, 30, units.len() as u32, 76, 0, 0, 0, 0, 0, 0]);
+    out.extend(units.iter().flat_map(|u| u.to_le_bytes()));
+    out.resize(out.len().next_multiple_of(4), 0);
+    [
+        rec(1, &header),
+        rec(82, &font),
+        rec(37, &words(&[1])),
+        rec(18, &words(&[1])),
+        rec(22, &words(&[24])),
+        rec(84, &out),
+        rec(14, &words(&[0, 16, 20])),
+    ]
+    .concat()
+}
+
+#[test]
+fn emf_picture_text_prints() {
+    let mut s = s();
+    let d = s.doc_mut().unwrap();
+    let wb = std::sync::Arc::make_mut(&mut d.wb);
+    let id = wb.next_object_id();
+    wb.sheet_mut(0).unwrap().images.push(Image {
+        camera: None,
+        locks: None,
+        hidden: false,
+        no_print: false,
+        hyperlink: None,
+        name: None,
+        id,
+        anchor: Anchor { cell: CellRef::new(2, 2), dx: 0.0, dy: 0.0, width: 80.0, height: 40.0, mode: gridcraft_model::AnchorMode::MoveAndSize },
+        data: emf_with_text("Quarterly").into(),
+        mime: "image/x-emf".into(),
+        alt: String::new(),
+        blip_ext: Vec::new(),
+        border: None,
+        link: None,
+    });
+    let (pdf, _) = pdf_of(&mut s, json!({}));
+    assert!(contains(&pdf, "(Quarterly) Tj"), "the EMF's text run reaches the page");
+}
+
+#[test]
+fn emf_object_preview_prints_through_the_metafile_renderer() {
+    let mut s = s();
+    let d = s.doc_mut().unwrap();
+    let wb = std::sync::Arc::make_mut(&mut d.wb);
+    wb.sheet_mut(0).unwrap().embedded_objects.push(gridcraft_model::EmbeddedObject {
+        anchor: Anchor { cell: CellRef::new(2, 2), dx: 0.0, dy: 0.0, width: 80.0, height: 40.0, mode: gridcraft_model::AnchorMode::MoveAndSize },
+        print: true,
+        kind: gridcraft_model::EmbeddedObjectKind::Ole,
+        prog_id: "Word.Document.12".into(),
+        preview: Some(gridcraft_model::ObjectPreview { data: std::sync::Arc::new(emf_with_text("Preview")), mime: "image/x-emf".into() }),
+    });
+    let (pdf, _) = pdf_of(&mut s, json!({}));
+    assert!(contains(&pdf, "(Preview) Tj"), "the object's EMF preview draws its text");
+}
