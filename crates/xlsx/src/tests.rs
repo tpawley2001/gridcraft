@@ -172,6 +172,7 @@ mod xls_dv_tests;
 mod xls_edit_range_sddl_tests;
 mod xls_edit_ranges_tests;
 mod xls_extern_name_tests;
+mod xls_external_link_sheet_names_tests;
 mod xls_external_link_tests;
 mod xls_external_name_ref_tests;
 mod xls_font_family_range_tests;

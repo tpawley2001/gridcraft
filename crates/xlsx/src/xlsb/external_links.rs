@@ -21,7 +21,7 @@ use gridcraft_core::CellRef;
 use gridcraft_model::{PreservedPart, PreservedRel, Workbook};
 
 use super::{Bytes, MAX_REL_ID, REL_TYPE, Records, check_type, error};
-use crate::external_link::{CT_XML, Cached, Kept, MAX_CACHED_CELLS, keep, link_xml, push_cell};
+use crate::external_link::{CT_XML, Cached, Kept, MAX_CACHED_CELLS, keep, link_xml, push_cell, sheet_stand_ins};
 use crate::package::{Package, Rel};
 use crate::passthrough::{MAX_KEPT_PART, raw_rels};
 use crate::read::Ctx;
@@ -230,6 +230,7 @@ fn part(data: &[u8], report: &mut ReadReport) -> Result<Link, IoError> {
     }
     let rel_id = rel_id.ok_or_else(|| invalid("missing BrtBeginSupBook"))?;
     let sheets = sheets.ok_or_else(|| invalid("missing BrtSupTabs"))?;
+    let sheets = sheet_stand_ins(&sheets);
     let xml = link_xml(&rel_id, &sheets, None, &tables);
     Ok(Link { rel_id, sheets, xml })
 }
