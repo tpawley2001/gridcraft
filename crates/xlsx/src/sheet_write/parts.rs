@@ -386,6 +386,13 @@ pub(super) fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, cell_st
         t.banded_rows as u8,
         t.banded_cols as u8
     );
+    write_table_alt_text(&mut s, t);
+    s.push_str("</table>");
+    s
+}
+
+/// Appends the accessibility extension as the table's last child.
+fn write_table_alt_text(s: &mut String, t: &Table) {
     if t.alt_text.is_some() || t.alt_text_summary.is_some() {
         s.push_str(concat!(
             "<extLst><ext uri=\"{504A1905-F514-4f6f-8877-14C23A59335A}\" ",
@@ -400,8 +407,6 @@ pub(super) fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, cell_st
         }
         s.push_str("/></ext></extLst>");
     }
-    s.push_str("</table>");
-    s
 }
 
 /// Ids of the threaded comments of sheet `si`: the thread's id, then one per reply. GUID-shaped
