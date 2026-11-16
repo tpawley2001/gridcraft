@@ -15,7 +15,8 @@ pub(crate) const DOT_PT: f32 = 0.12;
 const PAGE_SLACK_DOTS: u32 = 8;
 
 /// (font name, size in points, P = default row height in screen pixels, D = its printed dots).
-/// One line per font; a font not listed prints with Calibri 11's pair.
+/// One line per font; a font not listed prints with Calibri 11's pair, except the names Excel
+/// prints in Arial, which use Arial's pair at that size when measured here.
 const FONTS: &[(&str, f32, u32, u32)] = &[
     ("Calibri", 11.0, 20, 121),
     ("Calibri", 10.0, 17, 109),
@@ -66,6 +67,24 @@ fn english_name(font_name: &str) -> &str {
     ALIASES.iter().find(|(local, _)| *local == name).map_or(name, |&(_, english)| english)
 }
 
+/// Resolve row metrics for the sans-serif names Excel prints in Arial, using the same name
+/// normalization and substitution group as `layout::digit_em`. Cambria only shares Arial's
+/// digit width: it has its own measured row metrics and must keep them.
+fn row_font_name(font_name: &str) -> &str {
+    let name = english_name(font_name);
+    let normalized = name.to_lowercase();
+    let normalized = normalized
+        .strip_prefix('\'')
+        .and_then(|s| s.strip_suffix('\''))
+        .or_else(|| normalized.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
+        .unwrap_or(&normalized);
+    match normalized {
+        "liberation sans" | "sans" | "sans-serif" | "sans serif" | "geneva" | "clear sans" | "droid sans fallback" => "Arial",
+        n if n.starts_with("helvetica") => "Arial",
+        _ => name,
+    }
+}
+
 /// Calibri 11's pair, for fonts outside [`FONTS`].
 const FALLBACK: (u32, u32) = (20, 121);
 
@@ -105,16 +124,19 @@ const THICK_BOTTOM_EXTRA_PX: f32 = 1.0;
 const THICK_TOP_EXTRA_PX: f32 = 1.0;
 
 /// The default row height in screen pixels of a cell font (P), from [`FONTS`] or [`ROW_PX`];
-/// `None` when neither lists it.
+/// names Excel prints in Arial use Arial's entry at that size. Returns `None` when neither
+/// table lists the resolved font and size.
 pub(crate) fn cell_font_px(font_name: &str, font_size: f32) -> Option<u32> {
-    let name = english_name(font_name);
+    let name = row_font_name(font_name);
     let same = |n: &str, s: f32| n.eq_ignore_ascii_case(name) && (s - font_size).abs() < 0.01;
     FONTS.iter().find(|(n, s, ..)| same(n, *s)).map(|&(_, _, p, _)| p).or_else(|| ROW_PX.iter().find(|(n, s, _)| same(n, *s)).map(|&(_, _, p)| p))
 }
 
 /// The Normal font's (P, D): default row height in screen pixels and its printed dots.
+/// Names Excel prints in Arial use Arial's pair at that size; a font and size not listed in
+/// [`FONTS`] use Calibri 11's pair.
 fn font_pair(font_name: &str, font_size: f32) -> (u32, u32) {
-    let name = english_name(font_name);
+    let name = row_font_name(font_name);
     FONTS.iter().find(|(n, s, ..)| n.eq_ignore_ascii_case(name) && (s - font_size).abs() < 0.01).map_or(FALLBACK, |&(_, _, p, d)| (p, d))
 }
 
@@ -133,7 +155,8 @@ fn dots_of_px(px: f64, (p, d): (u32, u32)) -> u32 {
 }
 
 /// Printed dots of a row `height_pt` points tall at 100 % under the Normal font `font_name` at
-/// `font_size` (name compared without case; an unknown font uses Calibri 11's pair).
+/// `font_size` (name compared without case, with Arial substitutions as in [`font_pair`];
+/// an unlisted font and size uses Calibri 11's pair).
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn printed_row_dots(height_pt: f64, font_name: &str, font_size: f32) -> u32 {
     dots_of_px(height_pt * 96.0 / 72.0, font_pair(font_name, font_size))
@@ -406,6 +429,40 @@ impl<'a> RowPitch<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arial_substitutions_match_column_names_and_keep_other_metrics() {
+        for name in [
+            "Liberation Sans",
+            "Sans",
+            "sans-serif",
+            "Sans Serif",
+            "Geneva",
+            "Clear Sans",
+            "Droid Sans Fallback",
+            "Helvetica",
+            "Helvetica Neue",
+            "HelveticaNeue LightExt",
+        ] {
+            for stored in [name.to_string(), format!("  '{}'  ", name.to_uppercase()), format!("\"{name}\"")] {
+                for &(_, size, p, d) in FONTS.iter().filter(|(font, ..)| *font == "Arial") {
+                    assert_eq!(font_pair(&stored, size), (p, d), "{stored:?} {size}");
+                    assert_eq!(cell_font_px(&stored, size), Some(p), "{stored:?} {size}");
+                }
+                assert_eq!(cell_font_px(&stored, 14.0), Some(24), "{stored:?}");
+                assert_eq!(font_pair(&stored, 7.0), FALLBACK, "{stored:?}");
+                assert_eq!(cell_font_px(&stored, 7.0), None, "{stored:?}");
+            }
+        }
+        for &(font, size, p, d) in FONTS {
+            assert_eq!(font_pair(font, size), (p, d), "{font} {size}");
+            assert_eq!(cell_font_px(font, size), Some(p), "{font} {size}");
+        }
+        for name in ["No Such Font", "Foo Sans", "Sansation", "'Sans\"", "''Sans''", "' Sans '", "\"Arial\""] {
+            assert_eq!(font_pair(name, 8.0), FALLBACK, "{name:?}");
+            assert_eq!(cell_font_px(name, 8.0), None, "{name:?}");
+        }
+    }
 
     #[test]
     fn smaller_default_layout_matches_custom_control_without_changing_imported_metrics() {
