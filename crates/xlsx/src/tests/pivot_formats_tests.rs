@@ -46,9 +46,9 @@ fn book() -> Vec<u8> {
         r#"<pivotCacheDefinition xmlns="{MAIN}" xmlns:r="{REL}" recordCount="3"><cacheSource type="worksheet"><worksheetSource ref="A1:B4" sheet="Data"/></cacheSource><cacheFields count="2"><cacheField name="Value" numFmtId="0"><sharedItems containsSemiMixedTypes="0" containsString="0" containsNumber="1" containsInteger="1" minValue="5" maxValue="20"/></cacheField><cacheField name="Cat" numFmtId="0"><sharedItems count="2"><s v="yellow"/><s v="blue"/></sharedItems></cacheField></cacheFields></pivotCacheDefinition>"#
     );
     // Cache field 1 = Cat on rows; field 0 = Value summed. Format 0: grand total row (red font).
-    // Format 1: the label of item 0 of field 1 (= "yellow") (blue fill).
+    // Format 1: the label of view item 1 of field 1 (pivotField items x=1, x=0: view item 1 = shared item 0 = "yellow") (blue fill).
     let table = format!(
-        r#"<pivotTableDefinition xmlns="{MAIN}" name="PT" cacheId="1" applyNumberFormats="0" applyBorderFormats="0" applyFontFormats="0" applyPatternFormats="0" applyAlignmentFormats="0" applyWidthHeightFormats="1" dataCaption="Values" updatedVersion="6" minRefreshableVersion="3" createdVersion="6" outline="1" outlineData="1"><location ref="D3:E6" firstHeaderRow="1" firstDataRow="1" firstDataCol="1"/><pivotFields count="2"><pivotField dataField="1" showAll="0"/><pivotField axis="axisRow" showAll="0"><items count="3"><item x="1"/><item x="0"/><item t="default"/></items></pivotField></pivotFields><rowFields count="1"><field x="1"/></rowFields><rowItems count="3"><i><x/></i><i><x v="1"/></i><i t="grand"><x/></i></rowItems><colItems count="1"><i/></colItems><dataFields count="1"><dataField name="Sum of Value" fld="0" baseField="0" baseItem="0"/></dataFields><formats count="2"><format dxfId="0"><pivotArea dataOnly="0" grandRow="1" outline="0" fieldPosition="0"/></format><format dxfId="1"><pivotArea dataOnly="0" labelOnly="1" outline="0" fieldPosition="0"><references count="1"><reference field="1" count="1"><x v="0"/></reference></references></pivotArea></format></formats><pivotTableStyleInfo name="PivotStyleLight16" showRowHeaders="1" showColHeaders="1" showRowStripes="0" showColStripes="0" showLastColumn="1"/></pivotTableDefinition>"#
+        r#"<pivotTableDefinition xmlns="{MAIN}" name="PT" cacheId="1" applyNumberFormats="0" applyBorderFormats="0" applyFontFormats="0" applyPatternFormats="0" applyAlignmentFormats="0" applyWidthHeightFormats="1" dataCaption="Values" updatedVersion="6" minRefreshableVersion="3" createdVersion="6" outline="1" outlineData="1"><location ref="D3:E6" firstHeaderRow="1" firstDataRow="1" firstDataCol="1"/><pivotFields count="2"><pivotField dataField="1" showAll="0"/><pivotField axis="axisRow" showAll="0"><items count="3"><item x="1"/><item x="0"/><item t="default"/></items></pivotField></pivotFields><rowFields count="1"><field x="1"/></rowFields><rowItems count="3"><i><x/></i><i><x v="1"/></i><i t="grand"><x/></i></rowItems><colItems count="1"><i/></colItems><dataFields count="1"><dataField name="Sum of Value" fld="0" baseField="0" baseItem="0"/></dataFields><formats count="2"><format dxfId="0"><pivotArea dataOnly="0" grandRow="1" outline="0" fieldPosition="0"/></format><format dxfId="1"><pivotArea dataOnly="0" labelOnly="1" outline="0" fieldPosition="0"><references count="1"><reference field="1" count="1"><x v="1"/></reference></references></pivotArea></format></formats><pivotTableStyleInfo name="PivotStyleLight16" showRowHeaders="1" showColHeaders="1" showRowStripes="0" showColStripes="0" showLastColumn="1"/></pivotTableDefinition>"#
     );
     let styles = format!(
         r#"<?xml version="1.0"?><styleSheet xmlns="{MAIN}"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs><dxfs count="2"><dxf><font><color rgb="{RED}"/></font></dxf><dxf><fill><patternFill patternType="solid"><bgColor rgb="{BLUE}"/></patternFill></fill></dxf></dxfs></styleSheet>"#
@@ -164,4 +164,76 @@ fn pivot_formats_survive_a_second_save() {
     let (wb, _) = read_xlsx(&book()).unwrap();
     let (wb2, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
     check(&write_xlsx(&wb2).unwrap());
+}
+
+/// A one-field PivotTable whose row field's shared items are [A, B, C] but whose pivotField
+/// lists them in view order C, A, B, with one format whose reference is `<x v="0"/>`.
+fn view_order_book(cache_index: bool) -> Vec<u8> {
+    let data = format!(
+        r#"<sheetData><row r="1">{}{}</row><row r="2">{}{}</row><row r="3">{}{}</row><row r="4">{}{}</row></sheetData>"#,
+        s("A1", "Cat"),
+        s("B1", "Value"),
+        s("A2", "A"),
+        n("B2", 1.0),
+        s("A3", "B"),
+        n("B3", 2.0),
+        s("A4", "C"),
+        n("B4", 3.0)
+    );
+    let sheet_rels = format!(
+        r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{REL}/pivotTable" Target="../pivotTables/pivotTable1.xml"/></Relationships>"#
+    );
+    let pt_rels = format!(
+        r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{REL}/pivotCacheDefinition" Target="../pivotCache/pivotCacheDefinition1.xml"/></Relationships>"#
+    );
+    let cache = format!(
+        r#"<pivotCacheDefinition xmlns="{MAIN}" xmlns:r="{REL}" recordCount="3"><cacheSource type="worksheet"><worksheetSource ref="A1:B4" sheet="Data"/></cacheSource><cacheFields count="2"><cacheField name="Cat" numFmtId="0"><sharedItems count="3"><s v="A"/><s v="B"/><s v="C"/></sharedItems></cacheField><cacheField name="Value" numFmtId="0"><sharedItems containsSemiMixedTypes="0" containsString="0" containsNumber="1" minValue="1" maxValue="3"/></cacheField></cacheFields></pivotCacheDefinition>"#
+    );
+    let ci = if cache_index { r#" cacheIndex="1""# } else { "" };
+    let table = format!(
+        r#"<pivotTableDefinition xmlns="{MAIN}" name="PT" cacheId="1" dataCaption="Values" outline="1" outlineData="1"><location ref="D3:E7" firstHeaderRow="1" firstDataRow="1" firstDataCol="1"/><pivotFields count="2"><pivotField axis="axisRow" showAll="0"><items count="4"><item x="2"/><item x="0"/><item x="1"/><item t="default"/></items></pivotField><pivotField dataField="1" showAll="0"/></pivotFields><rowFields count="1"><field x="0"/></rowFields><dataFields count="1"><dataField name="Sum of Value" fld="1"/></dataFields><formats count="1"><format dxfId="0"><pivotArea dataOnly="0" labelOnly="1"{ci}><references count="1"><reference field="0" count="1"><x v="0"/></reference></references></pivotArea></format></formats></pivotTableDefinition>"#
+    );
+    let styles = format!(
+        r#"<?xml version="1.0"?><styleSheet xmlns="{MAIN}"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs><dxfs count="1"><dxf><font><color rgb="{RED}"/></font></dxf></dxfs></styleSheet>"#
+    );
+    let wb_rels = format!(
+        r#"<Relationship Id="rId2" Type="{REL}/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml"/><Relationship Id="rId3" Type="{REL}/styles" Target="styles.xml"/>"#
+    );
+    minimal(
+        &data,
+        &[
+            ("xl/worksheets/_rels/sheet1.xml.rels", &sheet_rels),
+            ("xl/pivotTables/pivotTable1.xml", &table),
+            ("xl/pivotTables/_rels/pivotTable1.xml.rels", &pt_rels),
+            ("xl/pivotCache/pivotCacheDefinition1.xml", &cache),
+            ("xl/styles.xml", &styles),
+        ],
+        &wb_rels,
+        r#"<pivotCaches><pivotCache cacheId="1" r:id="rId2"/></pivotCaches>"#,
+    )
+}
+
+/// The item of the one reference of the one format of the one PivotTable.
+fn format_item(wb: &gridcraft_model::Workbook) -> gridcraft_model::PivotAreaItem {
+    let pt = &wb.sheet(0).unwrap().pivots[0];
+    assert_eq!(pt.formats.len(), 1, "format kept: {:?}", pt.formats);
+    pt.formats[0].area.references[0].items[0].clone()
+}
+
+#[test]
+fn pivot_format_item_without_cache_index_is_a_view_position() {
+    use gridcraft_model::PivotAreaItem::Label;
+    let (wb, _) = read_xlsx(&view_order_book(false)).unwrap();
+    assert_eq!(format_item(&wb), Label("C".into()), "v=0 is the pivotField's first item (x=2 = C)");
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(format_item(&back), Label("C".into()));
+}
+
+#[test]
+fn pivot_format_item_with_cache_index_is_a_shared_item() {
+    use gridcraft_model::PivotAreaItem::Label;
+    let (wb, _) = read_xlsx(&view_order_book(true)).unwrap();
+    assert_eq!(format_item(&wb), Label("A".into()), "cacheIndex=1: v=0 is shared item 0 (A)");
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(format_item(&back), Label("A".into()));
 }
