@@ -30,6 +30,7 @@ fn book_with(style: Style) -> Workbook {
     let sh = wb.sheet_mut(0).unwrap();
     sh.set_cell(CellRef::parse("A1").unwrap(), Cell::value(Value::text("green")));
     sh.cond_formats.push(CondFormat {
+        pivot: false,
         ranges: vec![RangeRef::parse("A1:A5").unwrap()],
         rule: CfRule::CellIs { op: CfOperator::Equal, a: "\"green\"".into(), b: None, style: Box::new(style) },
         priority: 1,

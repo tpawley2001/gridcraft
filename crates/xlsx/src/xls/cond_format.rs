@@ -80,7 +80,7 @@ impl CondState {
         }
         self.kept_ranges += ranges.len();
         let priority = priority.unwrap_or_else(|| u32::try_from(sheet.cond_formats.len()).unwrap_or(u32::MAX).saturating_add(1));
-        sheet.cond_formats.push(CondFormat { ranges: ranges.to_vec(), rule, priority, stop_if_true });
+        sheet.cond_formats.push(CondFormat { pivot: false, ranges: ranges.to_vec(), rule, priority, stop_if_true });
         Some(sheet.cond_formats.len() - 1)
     }
 

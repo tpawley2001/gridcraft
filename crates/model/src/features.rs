@@ -346,6 +346,10 @@ pub struct CondFormat {
     pub rule: CfRule,
     pub priority: u32,
     pub stop_if_true: bool,
+    /// The rule belongs to a PivotTable (`<conditionalFormatting pivot="1">`, ECMA-376 Part 1,
+    /// 18.3.1.18); the PivotTable part links to it by `priority`.
+    #[serde(default)]
+    pub pivot: bool,
 }
 
 // ---------------------------------------------------------------- data validation

@@ -521,5 +521,5 @@ fn build(p: Pending, dxfs: &[Style], links: &Links) -> Result<CondFormat, String
         }
         _ => return Err("unsupported rule type".into()),
     };
-    Ok(CondFormat { ranges: p.ranges, rule, priority: p.priority, stop_if_true: p.stop })
+    Ok(CondFormat { pivot: false, ranges: p.ranges, rule, priority: p.priority, stop_if_true: p.stop })
 }

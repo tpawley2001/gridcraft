@@ -5339,6 +5339,7 @@ fn icon_set_thresholds_from_files_pick_the_icon() {
     assert_eq!([icon(&s, "A1"), icon(&s, "A4"), icon(&s, "A5")], [Some(0), Some(0), Some(2)]);
     let sh = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(0).unwrap();
     sh.cond_formats = vec![CondFormat {
+        pivot: false,
         ranges: vec![gridcraft_core::RangeRef::parse("A1:A5").unwrap()],
         rule: CfRule::IconSet {
             set: "3Arrows".into(),
