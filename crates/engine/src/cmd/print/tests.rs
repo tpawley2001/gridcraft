@@ -1670,3 +1670,52 @@ pub(super) fn pdf_paints(text: &str) -> Vec<PdfPaint> {
     }
     out
 }
+
+#[test]
+fn emf_pictures_print_their_vector_shapes() {
+    // An EMF (frame 100 x 50 device pixels) whose only shape is a red rectangle with no outline
+    // over the left half: it prints as a red fill inside the picture's anchor, not as a blank box.
+    fn rec(ty: u32, body: &[u8]) -> Vec<u8> {
+        [&ty.to_le_bytes()[..], &((body.len() + 8) as u32).to_le_bytes(), body].concat()
+    }
+    let words = |v: &[u32]| -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() };
+    let header = words(&[0, 0, 99, 49, 0, 0, 1000, 500, 0x464D_4520, 0x0001_0000, 0, 0, 0, 0, 0, 0, 1000, 1000, 100, 100]);
+    let emf = [
+        rec(1, &header),
+        rec(39, &words(&[1, 0, 0x0000_00FF, 0])),
+        rec(37, &words(&[1])),
+        rec(37, &words(&[0x8000_0008])),
+        rec(43, &words(&[0, 0, 50, 50])),
+        rec(14, &words(&[0, 16, 20])),
+    ]
+    .concat();
+    let mut s = s();
+    let d = s.doc_mut().unwrap();
+    let wb = std::sync::Arc::make_mut(&mut d.wb);
+    let id = wb.next_object_id();
+    wb.sheet_mut(0).unwrap().images.push(Image {
+        camera: None,
+        locks: None,
+        hidden: false,
+        no_print: false,
+        hyperlink: None,
+        name: None,
+        id,
+        anchor: Anchor { cell: CellRef::new(2, 2), dx: 0.0, dy: 0.0, width: 80.0, height: 40.0, mode: gridcraft_model::AnchorMode::MoveAndSize },
+        data: emf.into(),
+        mime: "image/x-emf".into(),
+        alt: String::new(),
+        blip_ext: Vec::new(),
+        border: None,
+        link: None,
+    });
+    let (pdf, _) = pdf_of(&mut s, json!({}));
+    let text = String::from_utf8_lossy(&pdf);
+    let red: Vec<PdfPaint> = pdf_paints(&text).into_iter().filter(|p| p.fills() && p.fill == Some([1.0, 0.0, 0.0])).collect();
+    assert_eq!(red.len(), 1, "one red fill");
+    let nums: Vec<f32> = red[0].path.split(' ').filter_map(|t| t.parse().ok()).collect();
+    let xs: Vec<f32> = nums.iter().step_by(2).copied().collect();
+    let width = xs.iter().copied().fold(f32::MIN, f32::max) - xs.iter().copied().fold(f32::MAX, f32::min);
+    let scale = 0.75; // anchors are in pixels, pages in points
+    assert!((width - 40.0 * scale).abs() < 1.0, "the left half of an 80-pixel-wide picture: {width} pt ({})", red[0].path);
+}
